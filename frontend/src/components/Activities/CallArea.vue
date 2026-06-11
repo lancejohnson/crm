@@ -75,6 +75,19 @@
             <PlayIcon class="size-3" />
           </template>
         </Badge>
+        <a
+          v-if="call.recording_url"
+          :href="call.recording_url"
+          target="_blank"
+          rel="noopener"
+          @click.stop
+        >
+          <Badge :label="__('Recording')" class="cursor-pointer">
+            <template #prefix>
+              <ExternalLinkIcon class="size-3" />
+            </template>
+          </Badge>
+        </a>
         <Badge
           :label="statusLabelMap[call.status]"
           :theme="statusColorMap[call.status]"
@@ -90,6 +103,21 @@
         @click.stop
       >
         <AudioPlayer :src="callLog.data.recording_url_path" />
+      </div>
+      <div
+        v-if="callLog?.data?.custom_ai_summary"
+        class="flex flex-col gap-1 border-t border-outline-gray-modals pt-2"
+        @click.stop
+      >
+        <div class="flex items-center gap-1 text-sm font-medium text-ink-gray-5">
+          <SparkleIcon class="size-3.5" />
+          {{ __('AI Summary') }}
+        </div>
+        <FadedScrollableDiv class="max-h-40 overflow-y-auto">
+          <div class="whitespace-pre-line text-p-sm text-ink-gray-7">
+            {{ callLog.data.custom_ai_summary }}
+          </div>
+        </FadedScrollableDiv>
       </div>
     </div>
     <CallLogDetailModal
@@ -108,8 +136,11 @@
 import PlayIcon from '@/components/Icons/PlayIcon.vue'
 import CalendarIcon from '@/components/Icons/CalendarIcon.vue'
 import DurationIcon from '@/components/Icons/DurationIcon.vue'
+import ExternalLinkIcon from '@/components/Icons/ExternalLinkIcon.vue'
+import SparkleIcon from '@/components/Icons/SparkleIcon.vue'
 import MultipleAvatar from '@/components/MultipleAvatar.vue'
 import AudioPlayer from '@/components/Activities/AudioPlayer.vue'
+import FadedScrollableDiv from '@/components/FadedScrollableDiv.vue'
 import CallLogDetailModal from '@/components/Modals/CallLogDetailModal.vue'
 import CallLogModal from '@/components/Modals/CallLogModal.vue'
 import { statusLabelMap, statusColorMap } from '@/utils/callLog.js'

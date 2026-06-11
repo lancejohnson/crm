@@ -99,6 +99,14 @@
                 ></audio>
               </div>
               <div
+                v-else-if="field.name == 'custom_ai_summary'"
+                class="w-full rounded border px-2 py-1.5 text-base text-ink-gray-7"
+              >
+                <FadedScrollableDiv class="max-h-40 overflow-y-auto">
+                  <div class="whitespace-pre-line">{{ field.value }}</div>
+                </FadedScrollableDiv>
+              </div>
+              <div
                 v-else-if="field.name == 'note'"
                 class="w-full cursor-pointer rounded border px-2 pt-1.5 text-base text-ink-gray-7"
                 @click="() => (showNoteModal = true)"
@@ -171,6 +179,7 @@ import LeadsIcon from '@/components/Icons/LeadsIcon.vue'
 import Dealsicon from '@/components/Icons/DealsIcon.vue'
 import CalendarIcon from '@/components/Icons/CalendarIcon.vue'
 import NoteIcon from '@/components/Icons/NoteIcon.vue'
+import SparkleIcon from '@/components/Icons/SparkleIcon.vue'
 import TaskIcon from '@/components/Icons/TaskIcon.vue'
 import CheckCircleIcon from '@/components/Icons/CheckCircleIcon.vue'
 import NoteModal from '@/components/Modals/NoteModal.vue'
@@ -274,6 +283,12 @@ const detailFields = computed(() => {
       }),
       name: 'recording_url_path',
       value: data.recording_url_path,
+      link: () => window.open(data.recording_url, '_blank'),
+    },
+    {
+      icon: SparkleIcon,
+      name: 'custom_ai_summary',
+      value: data.custom_ai_summary,
     },
     {
       icon: NoteIcon,
