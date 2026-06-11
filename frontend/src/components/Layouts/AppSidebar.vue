@@ -253,6 +253,11 @@ const links = [
     icon: PhoneIcon,
     to: 'Call Logs',
   },
+  {
+    label: 'Sequences',
+    icon: StepsIcon,
+    to: 'Sequences',
+  },
 ]
 
 const allViews = computed(() => {

@@ -1,0 +1,270 @@
+<template>
+  <LayoutHeader>
+    <template #left-header>
+      <Breadcrumbs
+        :items="[
+          { label: 'Sequences', route: { name: 'Sequences' } },
+          { label: sequenceId, route: { name: 'Sequence', params: { sequenceId } } },
+        ]"
+      />
+    </template>
+    <template #right-header>
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2 text-sm text-ink-gray-7">
+          <span>Enabled</span>
+          <Switch v-model="enabled" />
+        </div>
+        <Button variant="solid" label="Save" :loading="saving" @click="save" />
+      </div>
+    </template>
+  </LayoutHeader>
+
+  <div class="flex-1 overflow-y-auto px-3 pb-6 sm:px-5">
+    <div class="mx-auto mt-4 flex max-w-3xl flex-col gap-4">
+      <!-- Steps -->
+      <div class="text-lg font-medium text-ink-gray-9">Steps</div>
+      <div
+        v-for="(step, i) in steps"
+        :key="i"
+        class="flex flex-col gap-3 rounded-lg border px-5 py-4 shadow-sm"
+      >
+        <div class="flex items-center justify-between">
+          <div class="text-sm font-medium text-ink-gray-7">Step {{ i + 1 }}</div>
+          <div class="flex items-center gap-1">
+            <Button icon="arrow-up" variant="ghosted" :disabled="i === 0" @click="move(i, -1)" />
+            <Button icon="arrow-down" variant="ghosted" :disabled="i === steps.length - 1" @click="move(i, 1)" />
+            <Button icon="trash-2" variant="ghosted" :disabled="steps.length === 1" @click="steps.splice(i, 1)" />
+          </div>
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+          <FormControl
+            v-model="step.step_type"
+            type="select"
+            label="Type"
+            :options="['Email', 'Call', 'Text']"
+          />
+          <FormControl
+            v-model="step.wait_value"
+            type="number"
+            label="Wait (after previous step)"
+            :min="0"
+          />
+          <FormControl
+            v-model="step.wait_unit"
+            type="select"
+            label="Unit"
+            :options="['Seconds', 'Minutes', 'Hours', 'Days', 'Weeks', 'Months']"
+          />
+        </div>
+        <FormControl
+          v-if="step.step_type === 'Email'"
+          v-model="step.subject"
+          type="text"
+          label="Email Subject"
+          placeholder="Your property at {{ property_address }}"
+        />
+        <FormControl
+          v-model="step.message"
+          type="textarea"
+          :label="messageLabel(step.step_type)"
+          :rows="4"
+        />
+      </div>
+      <Button variant="subtle" label="Add Step" iconLeft="plus" @click="addStep" />
+      <div class="text-xs text-ink-gray-5">
+        Templating: use <span v-pre>{{ first_name }}, {{ last_name }}, {{ lead_name }}, {{ property_address }}, {{ property_city }}</span>
+        or any lead field via <span v-pre>{{ lead.field_name }}</span>. Emails send automatically, Calls create a task
+        for the lead owner, Texts send from the lead owner's Quo number.
+      </div>
+
+      <!-- Enrollments -->
+      <div class="mt-6 flex items-center justify-between">
+        <div class="text-lg font-medium text-ink-gray-9">Enrollments</div>
+        <Button variant="subtle" label="Enroll Lead" iconLeft="plus" @click="showEnroll = true" />
+      </div>
+      <div v-if="enrollments.data?.length" class="overflow-hidden rounded-lg border">
+        <table class="w-full text-sm">
+          <thead class="bg-surface-gray-2 text-left text-ink-gray-5">
+            <tr>
+              <th class="px-4 py-2 font-medium">Lead</th>
+              <th class="px-4 py-2 font-medium">Status</th>
+              <th class="px-4 py-2 font-medium">Step</th>
+              <th class="px-4 py-2 font-medium">Next Run</th>
+              <th class="px-4 py-2"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="enr in enrollments.data" :key="enr.name" class="border-t">
+              <td class="px-4 py-2">
+                <router-link class="text-ink-gray-8 hover:underline" :to="{ name: 'Lead', params: { leadId: enr.lead } }">
+                  {{ enr.lead_name || enr.lead }}
+                </router-link>
+              </td>
+              <td class="px-4 py-2">
+                <Badge :theme="statusTheme(enr.status)" :label="enr.status" />
+              </td>
+              <td class="px-4 py-2 text-ink-gray-7">{{ enr.current_step }}</td>
+              <td class="px-4 py-2 text-ink-gray-7">{{ enr.next_run ? dateFormat(enr.next_run) : '—' }}</td>
+              <td class="px-4 py-2 text-right">
+                <Dropdown :options="enrollmentActions(enr)">
+                  <Button icon="more-horizontal" variant="ghosted" />
+                </Dropdown>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div v-else class="text-sm text-ink-gray-5">No leads enrolled yet.</div>
+    </div>
+  </div>
+
+  <Dialog v-model="showEnroll" :options="{ title: 'Enroll Lead' }">
+    <template #body-content>
+      <div class="flex flex-col gap-1.5">
+        <label class="block text-xs text-ink-gray-5">Lead</label>
+        <Link v-model="enrollLead" doctype="CRM Lead" placeholder="Select a lead" />
+      </div>
+    </template>
+    <template #actions>
+      <Button class="w-full" variant="solid" label="Enroll" :loading="enrolling" @click="enroll" />
+    </template>
+  </Dialog>
+</template>
+
+<script setup>
+import LayoutHeader from '@/components/LayoutHeader.vue'
+import Link from '@/components/Controls/Link.vue'
+
+function dateFormat(d) {
+  return new Date(d).toLocaleString('en-US', {
+    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+  })
+}
+import {
+  Breadcrumbs,
+  Button,
+  Badge,
+  Dialog,
+  Dropdown,
+  FormControl,
+  Switch,
+  createListResource,
+  call,
+  toast,
+} from 'frappe-ui'
+import { ref, onMounted } from 'vue'
+
+const props = defineProps({ sequenceId: { type: String, required: true } })
+const { sequenceId } = props
+
+const enabled = ref(true)
+const steps = ref([])
+const saving = ref(false)
+const showEnroll = ref(false)
+const enrollLead = ref('')
+const enrolling = ref(false)
+
+onMounted(loadDoc)
+
+async function loadDoc() {
+  const doc = await call('frappe.client.get', { doctype: 'CRM Sequence', name: sequenceId })
+  enabled.value = !!doc.enabled
+  steps.value = doc.steps.map((s) => ({
+    step_type: s.step_type,
+    wait_value: s.wait_value || 0,
+    wait_unit: s.wait_unit || 'Days',
+    subject: s.subject || '',
+    message: s.message || '',
+  }))
+}
+
+function addStep() {
+  steps.value.push({ step_type: 'Email', wait_value: 1, wait_unit: 'Days', subject: '', message: '' })
+}
+
+function move(i, dir) {
+  const j = i + dir
+  const arr = steps.value
+  ;[arr[i], arr[j]] = [arr[j], arr[i]]
+}
+
+function messageLabel(type) {
+  if (type === 'Email') return 'Email Body'
+  if (type === 'Call') return 'Call Notes (shown in the task)'
+  return 'Text Message'
+}
+
+async function save() {
+  saving.value = true
+  try {
+    const doc = await call('frappe.client.get', { doctype: 'CRM Sequence', name: sequenceId })
+    doc.enabled = enabled.value ? 1 : 0
+    doc.steps = steps.value.map((s, i) => ({
+      doctype: 'CRM Sequence Step',
+      parentfield: 'steps',
+      parenttype: 'CRM Sequence',
+      idx: i + 1,
+      ...s,
+    }))
+    await call('frappe.client.save', { doc })
+    toast.success('Sequence saved')
+  } catch (e) {
+    toast.error(e.messages?.[0] || 'Failed to save')
+  } finally {
+    saving.value = false
+  }
+}
+
+const enrollments = createListResource({
+  doctype: 'CRM Sequence Enrollment',
+  fields: ['name', 'lead', 'status', 'current_step', 'next_run'],
+  filters: { sequence: sequenceId },
+  orderBy: 'modified desc',
+  pageLength: 99,
+  auto: true,
+})
+
+function statusTheme(status) {
+  return { Active: 'green', Paused: 'orange', Completed: 'blue', Stopped: 'gray' }[status] || 'gray'
+}
+
+function enrollmentActions(enr) {
+  const actions = []
+  if (enr.status === 'Active') {
+    actions.push({ label: 'Pause', onClick: () => setStatus(enr.name, 'Paused') })
+    actions.push({ label: 'Stop', onClick: () => setStatus(enr.name, 'Stopped') })
+  } else if (enr.status === 'Paused') {
+    actions.push({ label: 'Resume', onClick: () => setStatus(enr.name, 'Active') })
+    actions.push({ label: 'Stop', onClick: () => setStatus(enr.name, 'Stopped') })
+  }
+  actions.push({ label: 'Delete', icon: 'trash-2', onClick: () => deleteEnrollment(enr.name) })
+  return actions
+}
+
+async function setStatus(name, status) {
+  await call('frappe.client.set_value', { doctype: 'CRM Sequence Enrollment', name, fieldname: 'status', value: status })
+  enrollments.reload()
+}
+
+async function deleteEnrollment(name) {
+  await call('frappe.client.delete', { doctype: 'CRM Sequence Enrollment', name })
+  enrollments.reload()
+}
+
+async function enroll() {
+  if (!enrollLead.value) return
+  enrolling.value = true
+  try {
+    await call('frappe.client.insert', {
+      doc: { doctype: 'CRM Sequence Enrollment', lead: enrollLead.value, sequence: sequenceId, status: 'Active' },
+    })
+    showEnroll.value = false
+    enrollLead.value = ''
+    enrollments.reload()
+  } catch (e) {
+    toast.error(e.messages?.[0] || 'Failed to enroll')
+  } finally {
+    enrolling.value = false
+  }
+}
+</script>

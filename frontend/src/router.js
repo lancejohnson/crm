@@ -102,6 +102,17 @@ const routes = [
     props: true,
   },
   {
+    path: '/sequences',
+    name: 'Sequences',
+    component: () => import('@/pages/Sequences.vue'),
+  },
+  {
+    path: '/sequences/:sequenceId',
+    name: 'Sequence',
+    component: () => import('@/pages/Sequence.vue'),
+    props: true,
+  },
+  {
     path: '/welcome',
     name: 'Welcome',
     component: () => import('@/pages/Welcome.vue'),

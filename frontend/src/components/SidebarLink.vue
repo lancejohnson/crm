@@ -61,6 +61,10 @@ const props = defineProps({
 
 function handleClick() {
   if (!props.to) return
+  if (typeof props.to === 'string' && props.to.startsWith('/')) {
+    window.location.href = props.to
+    return
+  }
   if (typeof props.to === 'object') {
     router.push(props.to)
   } else {
