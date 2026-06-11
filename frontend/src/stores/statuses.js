@@ -20,6 +20,8 @@ export const statusesStore = defineStore('crm-statuses', () => {
     initialData: [],
     auto: true,
     transform(statuses) {
+      // statuses can be renamed/deleted in settings - drop stale keys
+      Object.keys(leadStatusesByName).forEach((k) => delete leadStatusesByName[k])
       for (let status of statuses) {
         status.color = parseColor(status.color)
         leadStatusesByName[status.name] = status
@@ -36,6 +38,7 @@ export const statusesStore = defineStore('crm-statuses', () => {
     initialData: [],
     auto: true,
     transform(statuses) {
+      Object.keys(dealStatusesByName).forEach((k) => delete dealStatusesByName[k])
       for (let status of statuses) {
         status.color = parseColor(status.color)
         dealStatusesByName[status.name] = status
