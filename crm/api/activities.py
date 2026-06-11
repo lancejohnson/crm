@@ -458,6 +458,7 @@ def get_linked_calls(name: str):
 				"due_date",
 				"priority",
 				"status",
+				"call_outcome",
 				"modified",
 			],
 		)
@@ -488,6 +489,7 @@ def get_linked_tasks(name: str):
 			"due_date",
 			"priority",
 			"status",
+			"call_outcome",
 			"modified",
 			"creation",
 		],

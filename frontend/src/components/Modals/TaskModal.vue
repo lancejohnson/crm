@@ -96,6 +96,9 @@
               </template>
             </Button>
           </Dropdown>
+          <Dropdown :options="taskOutcomeOptions(updateTaskOutcome)">
+            <Button :label="_task.call_outcome || __('Call Outcome')" />
+          </Dropdown>
         </div>
       </div>
     </template>
@@ -160,6 +163,7 @@ const _task = ref({
   due_date: '',
   status: 'Backlog',
   priority: 'Low',
+  call_outcome: '',
   reference_doctype: props.doctype,
   reference_docname: null,
 })
@@ -222,6 +226,14 @@ function updateTaskStatus(status) {
 
 function updateTaskPriority(priority) {
   _task.value.priority = priority
+}
+
+const CALL_OUTCOMES = ['Connected', 'Left Voicemail', 'No Answer', 'Wrong Number', 'Do Not Call']
+function taskOutcomeOptions(action) {
+  return CALL_OUTCOMES.map((o) => ({ label: o, onClick: () => action(o) }))
+}
+function updateTaskOutcome(outcome) {
+  _task.value.call_outcome = outcome
 }
 
 function redirect() {
