@@ -72,8 +72,11 @@
       </div>
       <Button variant="subtle" label="Add Step" iconLeft="plus" @click="addStep" />
       <div class="text-xs text-ink-gray-5">
-        Templating: use <span v-pre>{{ first_name }}, {{ last_name }}, {{ lead_name }}, {{ property_address }}, {{ property_city }}</span>
-        or any lead field via <span v-pre>{{ lead.field_name }}</span>. Emails send automatically, Calls create a task
+        Lead variables: <span v-pre>{{ first_name }}, {{ last_name }}, {{ lead_name }}, {{ property_address }}, {{ property_city }}</span>
+        — or any lead field via <span v-pre>{{ lead.field_name }}</span>.<br />
+        Sender (lead owner) variables: <span v-pre>{{ owner_first_name }}, {{ owner_last_name }}, {{ owner_name }}, {{ owner_email }}, {{ owner_quo_number }}</span>
+        — or any user field via <span v-pre>{{ user.field_name }}</span>.<br />
+        Full Jinja works too (conditionals, filters). Emails send automatically, Calls create a task
         for the lead owner, Texts send from the lead owner's Quo number.
       </div>
 
