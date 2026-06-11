@@ -64,6 +64,8 @@ import LeadSyncSourcePage from '@/components/Settings/LeadSyncing/LeadSyncSource
 import DefaultsSettings from '@/components/Settings/DefaultsSettings.vue'
 import BrandSettings from '@/components/Settings/BrandSettings.vue'
 import HomeActions from '@/components/Settings/HomeActions.vue'
+import LeadStatusesSettings from '@/components/Settings/LeadStatusesSettings.vue'
+import IndicatorIcon from '@/components/Icons/IndicatorIcon.vue'
 import GeneralSettings from '@/components/Settings/GeneralSettings.vue'
 import DashboardSettings from '@/components/Settings/DashboardSettings.vue'
 import EmailTemplatePage from '@/components/Settings/EmailTemplate/EmailTemplatePage.vue'
@@ -185,6 +187,11 @@ const tabs = computed(() => {
           label: __('Home Actions'),
           component: markRaw(HomeActions),
           icon: 'home',
+        },
+        {
+          label: __('Lead Statuses'),
+          component: markRaw(LeadStatusesSettings),
+          icon: markRaw(IndicatorIcon),
         },
       ],
       condition: () => isManager(),
