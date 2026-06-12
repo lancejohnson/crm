@@ -63,7 +63,7 @@
             <span class="text-p-base text-ink-gray-6">
               {{
                 __(
-                  'Appears in the left sidebar. Recommended size is 32x32 px in PNG or SVG',
+                  'Appears in the left sidebar (light mode). Recommended size is 32x32 px in PNG or SVG',
                 )
               }}
             </span>
@@ -74,6 +74,41 @@
               :image_url="settings.doc?.brand_logo"
               @upload="(url) => (settings.doc.brand_logo = url)"
               @remove="() => (settings.doc.brand_logo = '')"
+            />
+          </div>
+        </div>
+      </div>
+
+      <!-- dark mode logo -->
+      <div class="flex flex-col justify-between gap-4">
+        <div class="flex items-center flex-1 gap-5">
+          <div
+            class="flex items-center justify-center rounded border border-outline-gray-modals size-20 bg-gray-900"
+          >
+            <img
+              v-if="settings.doc?.custom_brand_logo_dark"
+              :src="settings.doc?.custom_brand_logo_dark"
+              alt="Dark Mode Logo"
+              class="size-8 rounded"
+            />
+            <ImageIcon v-else class="size-5 text-ink-gray-4" />
+          </div>
+          <div class="flex flex-1 flex-col gap-1">
+            <span class="text-base font-medium">{{ __('Brand Logo (Dark Mode)') }}</span>
+            <span class="text-p-base text-ink-gray-6">
+              {{
+                __(
+                  'Shown instead of the logo above when the theme is dark. Falls back to the light logo if unset.',
+                )
+              }}
+            </span>
+          </div>
+          <div>
+            <ImageUploader
+              image_type="image/ico"
+              :image_url="settings.doc?.custom_brand_logo_dark"
+              @upload="(url) => (settings.doc.custom_brand_logo_dark = url)"
+              @remove="() => (settings.doc.custom_brand_logo_dark = '')"
             />
           </div>
         </div>

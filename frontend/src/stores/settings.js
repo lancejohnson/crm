@@ -18,6 +18,8 @@ export function getSettings() {
   function setupBrand() {
     brand.name = settings.value?.brand_name
     brand.logo = settings.value?.brand_logo
+    // site-level custom field (no app migration on this deployment)
+    brand.logoDark = settings.value?.custom_brand_logo_dark
     brand.favicon = settings.value?.favicon
   }
 
