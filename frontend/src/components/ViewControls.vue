@@ -242,6 +242,14 @@
       </div>
     </div>
   </div>
+  <LostReasonModal
+    v-if="showLostReasonModal"
+    v-model="showLostReasonModal"
+    :doctype="doctype"
+    :status="pendingLostDrag?.to"
+    :onConfirm="confirmLostDrag"
+    :onCancel="cancelLostDrag"
+  />
   <ViewModal
     v-model="showViewModal"
     v-model:view="viewModalObj"
@@ -325,6 +333,8 @@ import GroupBy from '@/components/GroupBy.vue'
 import FadedScrollableDiv from '@/components/FadedScrollableDiv.vue'
 import ColumnSettings from '@/components/ColumnSettings.vue'
 import KanbanSettings from '@/components/Kanban/KanbanSettings.vue'
+import LostReasonModal from '@/components/Modals/LostReasonModal.vue'
+import { statusesStore } from '@/stores/statuses'
 import { getSettings } from '@/stores/settings'
 import { globalStore } from '@/stores/global'
 import { viewsStore } from '@/stores/views'
@@ -370,6 +380,7 @@ const { brand } = getSettings()
 const { $dialog } = globalStore()
 const { reload: reloadView, getDefaultView, getView } = viewsStore()
 const { isManager } = usersStore()
+const { getLeadStatus, getDealStatus } = statusesStore()
 
 function openStatusSettings() {
   activeSettingsPage.value = 'Lead Statuses'
@@ -388,6 +399,8 @@ const defaultParams = ref('')
 
 const viewUpdated = ref(false)
 const showViewModal = ref(false)
+const showLostReasonModal = ref(false)
+const pendingLostDrag = ref(null)
 
 function getViewType() {
   let viewType = route.params.viewType || 'list'
@@ -945,12 +958,12 @@ function updateColumns(obj) {
 
 function updateKanbanSettings(data) {
   if (data.item && data.to) {
-    call('frappe.client.set_value', {
-      doctype: props.doctype,
-      name: data.item,
-      fieldname: view.value.column_field,
-      value: data.to,
-    })
+    if (columnStatusType(data.to) === 'Lost') {
+      pendingLostDrag.value = data
+      showLostReasonModal.value = true
+      return
+    }
+    applyKanbanDrag(data)
     return
   }
 
@@ -959,6 +972,40 @@ function updateKanbanSettings(data) {
     return
   }
 
+  applyKanbanViewUpdate(data)
+}
+
+// status type ('Lost', 'Won', ...) of a kanban column, when columns are statuses
+function columnStatusType(statusName) {
+  if (view.value.column_field !== 'status') return ''
+  if (props.doctype === 'CRM Lead') return getLeadStatus(statusName)?.type
+  if (props.doctype === 'CRM Deal') return getDealStatus(statusName)?.type
+  return ''
+}
+
+function applyKanbanDrag(data, extraValues = {}) {
+  call('frappe.client.set_value', {
+    doctype: props.doctype,
+    name: data.item,
+    fieldname: { [view.value.column_field]: data.to, ...extraValues },
+  }).catch((e) => {
+    toast.error(e.messages?.[0] || __('Failed to update'))
+    list.value.reload()
+  })
+}
+
+function confirmLostDrag(values) {
+  if (!pendingLostDrag.value) return
+  applyKanbanDrag(pendingLostDrag.value, values)
+  pendingLostDrag.value = null
+}
+
+function cancelLostDrag() {
+  pendingLostDrag.value = null
+  list.value.reload() // snap the card back to its original column
+}
+
+function applyKanbanViewUpdate(data) {
   viewUpdated.value = true
 
   if (!defaultParams.value) {
