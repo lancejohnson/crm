@@ -10,6 +10,7 @@
               class="flex max-w-fit cursor-pointer items-center gap-2 text-base leading-4 text-ink-gray-9"
               @click="section.opened = !section.opened"
             >
+              <DragVerticalIcon class="h-3.5 cursor-grab text-ink-gray-6" />
               <FeatherIcon
                 name="chevron-right"
                 class="h-4 transition-all duration-300 ease-in-out"

@@ -457,18 +457,13 @@ function displayValue(field) {
 
 const _sections = computed(() => {
   if (!props.sections?.length) return []
-  let editButtonAdded = false
   return props.sections.map((section) => {
     if (section.columns?.length) {
       section.columns[0].fields = section.columns[0].fields.map((field) => {
         return parsedField(field)
       })
     }
-    let _section = parsedSection(section, editButtonAdded)
-    if (_section.showEditButton) {
-      editButtonAdded = true
-    }
-    return _section
+    return parsedSection(section)
   })
 })
 
@@ -534,13 +529,14 @@ async function fieldChange(value, df) {
   }
 }
 
-function parsedSection(section, editButtonAdded) {
+function parsedSection(section) {
   let isContactSection = section.name == 'contacts_section'
+  // every section gets the edit pencil (was first-section-only, which made
+  // the layout editor - where sections can be drag-reordered - hard to find)
   section.showEditButton = !(
     isMobileView.value ||
     !isManager() ||
-    isContactSection ||
-    editButtonAdded
+    isContactSection
   )
 
   section.visible =
