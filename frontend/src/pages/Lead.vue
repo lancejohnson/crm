@@ -61,12 +61,6 @@
       </template>
     </Tabs>
     <Resizer class="flex flex-col justify-between border-l" side="right">
-      <div
-        class="flex h-[45px] cursor-copy items-center border-b px-5 py-2.5 text-lg font-medium text-ink-gray-9"
-        @click="copyToClipboard(leadId)"
-      >
-        {{ __(leadId) }}
-      </div>
       <FileUploader
         :validateFile="validateIsImageFile"
         @success="(file) => updateField('image', file.file_url)"
@@ -194,6 +188,12 @@
           @beforeFieldChange="beforeStatusChange"
           @afterFieldChange="reloadResources"
         />
+      </div>
+      <div
+        class="flex cursor-copy items-center border-t px-5 py-2.5 text-sm text-ink-gray-5"
+        @click="copyToClipboard(leadId)"
+      >
+        {{ __(leadId) }}
       </div>
     </Resizer>
   </div>
