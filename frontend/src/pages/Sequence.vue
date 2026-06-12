@@ -15,12 +15,43 @@
           <Switch v-model="enabled" />
         </div>
         <Button variant="solid" label="Save" :loading="saving" @click="save" />
+        <Dropdown
+          :options="[
+            { label: 'Duplicate', icon: 'copy', onClick: duplicateSequence },
+            { label: 'Delete', icon: 'trash-2', onClick: () => (showDelete = true) },
+          ]"
+        >
+          <Button icon="more-horizontal" variant="ghosted" />
+        </Dropdown>
       </div>
     </template>
   </LayoutHeader>
 
+  <Dialog v-model="showDelete" :options="{ title: 'Delete Sequence' }">
+    <template #body-content>
+      <div class="text-sm text-ink-gray-7">
+        Delete "{{ sequenceId }}"?
+        <template v-if="enrollments.data?.length">
+          This also deletes its {{ enrollments.data.length }} enrollment(s) — enrolled leads stop
+          receiving steps.
+        </template>
+      </div>
+    </template>
+    <template #actions>
+      <Button class="w-full" variant="solid" theme="red" label="Delete" :loading="deletingSeq" @click="deleteSequence" />
+    </template>
+  </Dialog>
+
   <div class="flex-1 overflow-y-auto px-3 pb-6 sm:px-5">
     <div class="mx-auto mt-4 flex max-w-3xl flex-col gap-4">
+      <!-- Auto-enroll -->
+      <FormControl
+        v-model="autoEnrollSources"
+        type="textarea"
+        label="Auto-enroll lead sources (one per line — a lead whose source is set to a match enrolls instantly)"
+        :rows="2"
+      />
+
       <!-- Steps -->
       <div class="text-lg font-medium text-ink-gray-9">Steps</div>
       <div
@@ -41,7 +72,7 @@
             v-model="step.step_type"
             type="select"
             label="Type"
-            :options="['Email', 'Call', 'Text']"
+            :options="['Email', 'Call', 'Text', 'Pushover']"
           />
           <FormControl
             v-model="step.wait_value"
@@ -57,10 +88,10 @@
           />
         </div>
         <FormControl
-          v-if="step.step_type === 'Email'"
+          v-if="step.step_type === 'Email' || step.step_type === 'Pushover'"
           v-model="step.subject"
           type="text"
-          label="Email Subject"
+          :label="step.step_type === 'Email' ? 'Email Subject' : 'Notification Title (optional — defaults to lead name)'"
           placeholder="Your property at {{ property_address }}"
         />
         <FormControl
@@ -68,6 +99,12 @@
           type="textarea"
           :label="messageLabel(step.step_type)"
           :rows="4"
+        />
+        <FormControl
+          v-model="step.condition"
+          type="text"
+          label="Condition (Jinja expression — blank = always run; the wait still elapses when a step is skipped)"
+          placeholder="lead.source == 'PropertyLeads'"
         />
       </div>
       <Button variant="subtle" label="Add Step" iconLeft="plus" @click="addStep" />
@@ -77,7 +114,10 @@
         Sender (lead owner) variables: <span v-pre>{{ owner_first_name }}, {{ owner_last_name }}, {{ owner_name }}, {{ owner_email }}, {{ owner_quo_number }}</span>
         — or any user field via <span v-pre>{{ user.field_name }}</span>.<br />
         Full Jinja works too (conditionals, filters). Emails send automatically, Calls create a task
-        for the lead owner, Texts send from the lead owner's Quo number.
+        for the lead owner, Texts send from the lead owner's Quo number, Pushover rings the lead
+        owner's phone (emergency push, re-rings until acknowledged or a Quo call touches the lead).
+        Step conditions let one sequence branch on lead fields — e.g. two Pushover steps with
+        different waits and mutually exclusive <span v-pre>lead.source</span> conditions.
       </div>
 
       <!-- Enrollments -->
@@ -156,11 +196,14 @@ import {
   toast,
 } from 'frappe-ui'
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 
+const router = useRouter()
 const props = defineProps({ sequenceId: { type: String, required: true } })
 const { sequenceId } = props
 
 const enabled = ref(true)
+const autoEnrollSources = ref('')
 const steps = ref([])
 const saving = ref(false)
 const showEnroll = ref(false)
@@ -172,17 +215,19 @@ onMounted(loadDoc)
 async function loadDoc() {
   const doc = await call('frappe.client.get', { doctype: 'CRM Sequence', name: sequenceId })
   enabled.value = !!doc.enabled
+  autoEnrollSources.value = doc.auto_enroll_sources || ''
   steps.value = doc.steps.map((s) => ({
     step_type: s.step_type,
     wait_value: s.wait_value || 0,
     wait_unit: s.wait_unit || 'Days',
     subject: s.subject || '',
     message: s.message || '',
+    condition: s.condition || '',
   }))
 }
 
 function addStep() {
-  steps.value.push({ step_type: 'Email', wait_value: 1, wait_unit: 'Days', subject: '', message: '' })
+  steps.value.push({ step_type: 'Email', wait_value: 1, wait_unit: 'Days', subject: '', message: '', condition: '' })
 }
 
 function move(i, dir) {
@@ -194,6 +239,7 @@ function move(i, dir) {
 function messageLabel(type) {
   if (type === 'Email') return 'Email Body'
   if (type === 'Call') return 'Call Notes (shown in the task)'
+  if (type === 'Pushover') return 'Notification Body (blank = standard lead details: phone, address, condition, reason, source)'
   return 'Text Message'
 }
 
@@ -202,6 +248,7 @@ async function save() {
   try {
     const doc = await call('frappe.client.get', { doctype: 'CRM Sequence', name: sequenceId })
     doc.enabled = enabled.value ? 1 : 0
+    doc.auto_enroll_sources = autoEnrollSources.value
     doc.steps = steps.value.map((s, i) => ({
       doctype: 'CRM Sequence Step',
       parentfield: 'steps',
@@ -252,6 +299,57 @@ async function setStatus(name, status) {
 async function deleteEnrollment(name) {
   await call('frappe.client.delete', { doctype: 'CRM Sequence Enrollment', name })
   enrollments.reload()
+}
+
+const showDelete = ref(false)
+const deletingSeq = ref(false)
+
+async function deleteSequence() {
+  deletingSeq.value = true
+  try {
+    // enrollments link to the sequence and block its deletion — remove them first
+    for (const enr of enrollments.data || []) {
+      await call('frappe.client.delete', { doctype: 'CRM Sequence Enrollment', name: enr.name })
+    }
+    await call('frappe.client.delete', { doctype: 'CRM Sequence', name: sequenceId })
+    toast.success('Sequence deleted')
+    router.push({ name: 'Sequences' })
+  } catch (e) {
+    toast.error(e.messages?.[0] || 'Failed to delete')
+  } finally {
+    deletingSeq.value = false
+  }
+}
+
+async function duplicateSequence() {
+  try {
+    const doc = await call('frappe.client.get', { doctype: 'CRM Sequence', name: sequenceId })
+    const copy = await call('frappe.client.insert', {
+      doc: {
+        doctype: 'CRM Sequence',
+        sequence_name: sequenceId + ' (Copy)',
+        // disabled + no auto-enroll: a live copy would double-send alongside the original
+        enabled: 0,
+        auto_enroll_sources: '',
+        steps: (doc.steps || []).map((s, i) => ({
+          doctype: 'CRM Sequence Step',
+          parentfield: 'steps',
+          parenttype: 'CRM Sequence',
+          idx: i + 1,
+          step_type: s.step_type,
+          wait_value: s.wait_value,
+          wait_unit: s.wait_unit,
+          subject: s.subject,
+          message: s.message,
+          condition: s.condition,
+        })),
+      },
+    })
+    toast.success('Duplicated — copy is disabled with auto-enroll cleared')
+    router.push({ name: 'Sequence', params: { sequenceId: copy.name } })
+  } catch (e) {
+    toast.error(e.messages?.[0] || 'Failed to duplicate (name may already exist)')
+  }
 }
 
 async function enroll() {
