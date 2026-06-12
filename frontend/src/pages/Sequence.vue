@@ -55,7 +55,7 @@
       <!-- Steps -->
       <div class="text-lg font-medium text-ink-gray-9">Steps</div>
       <div
-        v-for="(step, i) in steps"
+        v-for="(group, i) in groups"
         :key="i"
         class="flex flex-col gap-3 rounded-lg border px-5 py-4 shadow-sm"
       >
@@ -63,49 +63,76 @@
           <div class="text-sm font-medium text-ink-gray-7">Step {{ i + 1 }}</div>
           <div class="flex items-center gap-1">
             <Button icon="arrow-up" variant="ghosted" :disabled="i === 0" @click="move(i, -1)" />
-            <Button icon="arrow-down" variant="ghosted" :disabled="i === steps.length - 1" @click="move(i, 1)" />
-            <Button icon="trash-2" variant="ghosted" :disabled="steps.length === 1" @click="steps.splice(i, 1)" />
+            <Button icon="arrow-down" variant="ghosted" :disabled="i === groups.length - 1" @click="move(i, 1)" />
+            <Button icon="trash-2" variant="ghosted" :disabled="groups.length === 1" @click="groups.splice(i, 1)" />
           </div>
         </div>
-        <div class="grid grid-cols-3 gap-3">
-          <FormControl
-            v-model="step.step_type"
-            type="select"
-            label="Type"
-            :options="['Email', 'Call', 'Text', 'Pushover']"
-          />
-          <FormControl
-            v-model="step.wait_value"
-            type="number"
-            label="Wait (after previous step)"
-            :min="0"
-          />
-          <FormControl
-            v-model="step.wait_unit"
-            type="select"
-            label="Unit"
-            :options="['Seconds', 'Minutes', 'Hours', 'Days', 'Weeks', 'Months']"
-          />
-        </div>
         <FormControl
-          v-if="step.step_type === 'Email' || step.step_type === 'Pushover'"
-          v-model="step.subject"
+          v-model="group.step_type"
+          type="select"
+          label="Type"
+          :options="['Email', 'Call', 'Text', 'Pushover']"
+        />
+        <FormControl
+          v-if="group.step_type === 'Email' || group.step_type === 'Pushover'"
+          v-model="group.subject"
           type="text"
-          :label="step.step_type === 'Email' ? 'Email Subject' : 'Notification Title (optional — defaults to lead name)'"
+          :label="group.step_type === 'Email' ? 'Email Subject' : 'Notification Title (optional — defaults to lead name)'"
           placeholder="Your property at {{ property_address }}"
         />
         <FormControl
-          v-model="step.message"
+          v-model="group.message"
           type="textarea"
-          :label="messageLabel(step.step_type)"
+          :label="messageLabel(group.step_type)"
           :rows="4"
         />
-        <FormControl
-          v-model="step.condition"
-          type="text"
-          label="Condition (Jinja expression — blank = always run; the wait still elapses when a step is skipped)"
-          placeholder="lead.source == 'PropertyLeads'"
-        />
+        <!-- Trigger paths: one action, fired on different timing/conditions -->
+        <div class="flex flex-col gap-2">
+          <div class="text-xs text-ink-gray-5">
+            Trigger paths — each path fires this step on its own timing and condition. The first
+            path waits after the previous step; each later path waits after the path above it.
+          </div>
+          <div
+            v-for="(path, j) in group.paths"
+            :key="j"
+            class="flex items-end gap-2 rounded-md bg-surface-gray-1 px-3 py-2"
+          >
+            <FormControl
+              v-model="path.wait_value"
+              type="number"
+              class="w-24 shrink-0"
+              :label="j === 0 ? 'Wait' : 'Then wait'"
+              :min="0"
+            />
+            <FormControl
+              v-model="path.wait_unit"
+              type="select"
+              class="w-32 shrink-0"
+              label="Unit"
+              :options="['Seconds', 'Minutes', 'Hours', 'Days', 'Weeks', 'Months']"
+            />
+            <FormControl
+              v-model="path.condition"
+              type="text"
+              class="grow"
+              label="Condition (Jinja — blank = always fire)"
+              placeholder="lead.source == 'PropertyLeads'"
+            />
+            <Button
+              icon="x"
+              variant="ghosted"
+              :disabled="group.paths.length === 1"
+              @click="group.paths.splice(j, 1)"
+            />
+          </div>
+          <Button
+            class="self-start"
+            variant="ghosted"
+            label="Add Trigger Path"
+            iconLeft="plus"
+            @click="group.paths.push({ wait_value: 0, wait_unit: 'Minutes', condition: '' })"
+          />
+        </div>
       </div>
       <Button variant="subtle" label="Add Step" iconLeft="plus" @click="addStep" />
       <div class="text-xs text-ink-gray-5">
@@ -116,8 +143,9 @@
         Full Jinja works too (conditionals, filters). Emails send automatically, Calls create a task
         for the lead owner, Texts send from the lead owner's Quo number, Pushover rings the lead
         owner's phone (emergency push, re-rings until acknowledged or a Quo call touches the lead).
-        Step conditions let one sequence branch on lead fields — e.g. two Pushover steps with
-        different waits and mutually exclusive <span v-pre>lead.source</span> conditions.
+        Trigger paths let one step fire at different times per lead — e.g. ring immediately for
+        <span v-pre>lead.source == 'Red Panda Leads'</span> but 3 minutes in for PropertyLeads.
+        A path's wait always elapses even when its condition skips it, so later paths keep their timing.
       </div>
 
       <!-- Enrollments -->
@@ -146,7 +174,7 @@
               <td class="px-4 py-2">
                 <Badge :theme="statusTheme(enr.status)" :label="enr.status" />
               </td>
-              <td class="px-4 py-2 text-ink-gray-7">{{ enr.current_step }}</td>
+              <td class="px-4 py-2 text-ink-gray-7">{{ stepLabel(enr.current_step) }}</td>
               <td class="px-4 py-2 text-ink-gray-7">{{ enr.next_run ? dateFormat(enr.next_run) : '—' }}</td>
               <td class="px-4 py-2 text-right">
                 <Dropdown :options="enrollmentActions(enr)">
@@ -204,7 +232,10 @@ const { sequenceId } = props
 
 const enabled = ref(true)
 const autoEnrollSources = ref('')
-const steps = ref([])
+// editor model: consecutive saved steps with identical type+subject+message
+// collapse into one "step" card holding multiple trigger paths (wait + unit +
+// condition each); flat CRM Sequence Step rows exist only at load/save
+const groups = ref([])
 const saving = ref(false)
 const showEnroll = ref(false)
 const enrollLead = ref('')
@@ -216,23 +247,74 @@ async function loadDoc() {
   const doc = await call('frappe.client.get', { doctype: 'CRM Sequence', name: sequenceId })
   enabled.value = !!doc.enabled
   autoEnrollSources.value = doc.auto_enroll_sources || ''
-  steps.value = doc.steps.map((s) => ({
-    step_type: s.step_type,
-    wait_value: s.wait_value || 0,
-    wait_unit: s.wait_unit || 'Days',
-    subject: s.subject || '',
-    message: s.message || '',
-    condition: s.condition || '',
-  }))
+  const out = []
+  for (const s of doc.steps) {
+    const last = out[out.length - 1]
+    const path = {
+      wait_value: s.wait_value || 0,
+      wait_unit: s.wait_unit || 'Days',
+      condition: s.condition || '',
+    }
+    if (
+      last &&
+      last.step_type === s.step_type &&
+      last.subject === (s.subject || '') &&
+      last.message === (s.message || '')
+    ) {
+      last.paths.push(path)
+    } else {
+      out.push({
+        step_type: s.step_type,
+        subject: s.subject || '',
+        message: s.message || '',
+        paths: [path],
+      })
+    }
+  }
+  groups.value = out
+}
+
+function flatSteps() {
+  return groups.value.flatMap((g) =>
+    g.paths.map((p) => ({
+      step_type: g.step_type,
+      subject: g.subject,
+      message: g.message,
+      wait_value: p.wait_value,
+      wait_unit: p.wait_unit,
+      condition: p.condition,
+    })),
+  )
+}
+
+// enrollments store the flat completed-step count — map it back to the
+// grouped display ("2" for a single-path step, "2.1" for path 1 of step 2)
+function stepLabel(currentStep) {
+  if (!currentStep) return 0
+  let flat = 0
+  for (const [i, g] of groups.value.entries()) {
+    for (let j = 0; j < g.paths.length; j++) {
+      flat++
+      if (flat === currentStep) {
+        return g.paths.length === 1 ? String(i + 1) : `${i + 1}.${j + 1}`
+      }
+    }
+  }
+  return currentStep
 }
 
 function addStep() {
-  steps.value.push({ step_type: 'Email', wait_value: 1, wait_unit: 'Days', subject: '', message: '', condition: '' })
+  groups.value.push({
+    step_type: 'Email',
+    subject: '',
+    message: '',
+    paths: [{ wait_value: 1, wait_unit: 'Days', condition: '' }],
+  })
 }
 
 function move(i, dir) {
   const j = i + dir
-  const arr = steps.value
+  const arr = groups.value
   ;[arr[i], arr[j]] = [arr[j], arr[i]]
 }
 
@@ -249,7 +331,7 @@ async function save() {
     const doc = await call('frappe.client.get', { doctype: 'CRM Sequence', name: sequenceId })
     doc.enabled = enabled.value ? 1 : 0
     doc.auto_enroll_sources = autoEnrollSources.value
-    doc.steps = steps.value.map((s, i) => ({
+    doc.steps = flatSteps().map((s, i) => ({
       doctype: 'CRM Sequence Step',
       parentfield: 'steps',
       parenttype: 'CRM Sequence',
