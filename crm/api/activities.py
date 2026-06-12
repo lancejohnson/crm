@@ -342,6 +342,20 @@ def handle_multiple_versions(versions: list):
 	old_version = None
 	for version in versions:
 		is_version = version["activity_type"] in ["changed", "added", "removed"]
+		# status changes stay standalone on the timeline (never collapsed
+		# into "+N changes") so they're visible while scrolling
+		is_status_change = (
+			is_version
+			and isinstance(version.get("data"), dict)
+			and version["data"].get("field") == "status"
+		)
+		if is_status_change:
+			if grouped_versions:
+				activities.append(parse_grouped_versions(grouped_versions))
+				grouped_versions = []
+			activities.append(version)
+			old_version = version
+			continue
 		if not is_version:
 			activities.append(version)
 		if not old_version:
