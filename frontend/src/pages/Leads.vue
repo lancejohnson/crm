@@ -167,6 +167,7 @@
               'first_response_time',
               'first_responded_on',
               'response_by',
+              '_last_comm',
             ].includes(fieldName)
           "
           class="truncate text-base"
@@ -200,26 +201,30 @@
     </template>
     <template #actions="{ itemName }">
       <div class="flex gap-2 items-center justify-between">
-        <div class="text-ink-gray-5 flex items-center gap-1.5">
-          <EmailAtIcon class="h-4 w-4" />
-          <span v-if="getRow(itemName, '_email_count').label">
-            {{ getRow(itemName, '_email_count').label }}
-          </span>
+        <div class="text-ink-gray-7 flex items-center gap-1.5">
+          <Tooltip :text="__('Calls out / in')">
+            <div class="flex items-center gap-1">
+              <PhoneIcon class="h-4 w-4" />
+              <span>{{ getRow(itemName, '_call_out_count').label ?? 0 }}&#8593;</span>
+              <span>{{ getRow(itemName, '_call_in_count').label ?? 0 }}&#8595;</span>
+            </div>
+          </Tooltip>
           <span class="text-3xl leading-[0]"> &middot; </span>
-          <NoteIcon class="h-4 w-4" />
-          <span v-if="getRow(itemName, '_note_count').label">
-            {{ getRow(itemName, '_note_count').label }}
-          </span>
+          <Tooltip :text="__('Texts out / in')">
+            <div class="flex items-center gap-1">
+              <CommentIcon class="h-4 w-4" />
+              <span>{{ getRow(itemName, '_text_out_count').label ?? 0 }}&#8593;</span>
+              <span>{{ getRow(itemName, '_text_in_count').label ?? 0 }}&#8595;</span>
+            </div>
+          </Tooltip>
           <span class="text-3xl leading-[0]"> &middot; </span>
-          <TaskIcon class="h-4 w-4" />
-          <span v-if="getRow(itemName, '_task_count').label">
-            {{ getRow(itemName, '_task_count').label }}
-          </span>
-          <span class="text-3xl leading-[0]"> &middot; </span>
-          <CommentIcon class="h-4 w-4" />
-          <span v-if="getRow(itemName, '_comment_count').label">
-            {{ getRow(itemName, '_comment_count').label }}
-          </span>
+          <Tooltip :text="__('Emails out / in')">
+            <div class="flex items-center gap-1">
+              <EmailAtIcon class="h-4 w-4" />
+              <span>{{ getRow(itemName, '_email_out_count').label ?? 0 }}&#8593;</span>
+              <span>{{ getRow(itemName, '_email_in_count').label ?? 0 }}&#8595;</span>
+            </div>
+          </Tooltip>
         </div>
         <Dropdown
           class="flex items-center gap-2"
@@ -528,6 +533,16 @@ function parseRows(rows, columns = []) {
     _rows['_note_count'] = lead._note_count
     _rows['_task_count'] = lead._task_count
     _rows['_comment_count'] = lead._comment_count
+    _rows['_call_out_count'] = lead._call_out_count
+    _rows['_call_in_count'] = lead._call_in_count
+    _rows['_text_out_count'] = lead._text_out_count
+    _rows['_text_in_count'] = lead._text_in_count
+    _rows['_email_out_count'] = lead._email_out_count
+    _rows['_email_in_count'] = lead._email_in_count
+    _rows['_last_comm'] = {
+      label: lead._last_comm ? formatDate(lead._last_comm) : '',
+      timeAgo: lead._last_comm ? __(timeAgo(lead._last_comm)) : '',
+    }
     return _rows
   })
 }

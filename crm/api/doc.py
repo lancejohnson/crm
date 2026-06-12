@@ -418,6 +418,10 @@ def get_data(
 			if field not in rows:
 				rows.append(field)
 
+		# computed pseudo-fields (filled per-card in getCounts) — not DB columns,
+		# so they must never reach frappe.get_list
+		rows = [row for row in rows if row != "_last_comm"]
+
 		for kc in kanban_columns:
 			column_filters = {column_field: kc.get("name")}
 			order = kc.get("order")
@@ -690,6 +694,64 @@ def getCounts(d, doctype):
 	d["_note_count"] = frappe.db.count(
 		"FCRM Note", filters={"reference_doctype": doctype, "reference_docname": d.get("name")}
 	)
+
+	# per-direction contact counts + last communication (calls, texts, emails)
+	# for kanban cards. Quo Message is a site-resident custom doctype — guard
+	# so a site without it doesn't 500 the kanban.
+	has_quo_message = frappe.db.exists("DocType", "Quo Message")
+	for key, call_type in (("_call_out_count", "Outgoing"), ("_call_in_count", "Incoming")):
+		d[key] = frappe.db.count(
+			"CRM Call Log",
+			filters={"reference_doctype": doctype, "reference_docname": d.get("name"), "type": call_type},
+		)
+	for key, text_dir in (("_text_out_count", "Outgoing"), ("_text_in_count", "Incoming")):
+		d[key] = (
+			frappe.db.count(
+				"Quo Message",
+				filters={"reference_doctype": doctype, "reference_docname": d.get("name"), "direction": text_dir},
+			)
+			if has_quo_message
+			else 0
+		)
+	for key, email_dir in (("_email_out_count", "Sent"), ("_email_in_count", "Received")):
+		d[key] = frappe.db.count(
+			"Communication",
+			filters={
+				"reference_doctype": doctype,
+				"reference_name": d.get("name"),
+				"communication_type": "Communication",
+				"sent_or_received": email_dir,
+			},
+		)
+
+	last_email = frappe.db.get_value(
+		"Communication",
+		{
+			"reference_doctype": doctype,
+			"reference_name": d.get("name"),
+			"communication_type": "Communication",
+		},
+		"communication_date",
+		order_by="communication_date desc",
+	)
+	last_call = frappe.db.get_value(
+		"CRM Call Log",
+		{"reference_doctype": doctype, "reference_docname": d.get("name")},
+		"start_time",
+		order_by="start_time desc",
+	)
+	last_text = (
+		frappe.db.get_value(
+			"Quo Message",
+			{"reference_doctype": doctype, "reference_docname": d.get("name")},
+			"message_date",
+			order_by="message_date desc",
+		)
+		if has_quo_message
+		else None
+	)
+	comm_dates = [dt for dt in (last_email, last_call, last_text) if dt]
+	d["_last_comm"] = max(comm_dates) if comm_dates else None
 	return d
 
 

@@ -163,7 +163,7 @@ const fields = computed(() => {
     if (field) existingFields.push(field)
   })
 
-  return _fields
+  let mapped = _fields
     .filter(
       (field) => !existingFields?.find((f) => f.fieldname === field.fieldname),
     )
@@ -175,6 +175,18 @@ const fields = computed(() => {
         fieldtype: field.fieldtype,
       }
     })
+
+  // computed pseudo-field (server fills it per-card in get_data) — not in meta
+  if (props.doctype === 'CRM Lead') {
+    mapped.push({
+      label: __('Last Communication'),
+      value: '_last_comm',
+      fieldname: '_last_comm',
+      fieldtype: 'Datetime',
+    })
+  }
+
+  return mapped
 })
 
 const allFields = computed({
