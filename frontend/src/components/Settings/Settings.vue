@@ -45,6 +45,7 @@
 <script setup>
 import LucideLayoutDashboard from '~icons/lucide/layout-dashboard'
 import MonitorCogIcon from '~icons/lucide/monitor-cog'
+import PanelLeftIcon from '~icons/lucide/panel-left'
 import SlidersIcon from '@/components/Icons/SlidersIcon.vue'
 import SparkleIcon from '@/components/Icons/SparkleIcon.vue'
 import WhatsAppIcon from '@/components/Icons/WhatsAppIcon.vue'
@@ -63,6 +64,7 @@ import ERPNextSettings from '@/components/Settings/ERPNextSettings.vue'
 import LeadSyncSourcePage from '@/components/Settings/LeadSyncing/LeadSyncSourcePage.vue'
 import DefaultsSettings from '@/components/Settings/DefaultsSettings.vue'
 import BrandSettings from '@/components/Settings/BrandSettings.vue'
+import SidebarSettings from '@/components/Settings/SidebarSettings.vue'
 import HomeActions from '@/components/Settings/HomeActions.vue'
 import LeadStatusesSettings from '@/components/Settings/LeadStatusesSettings.vue'
 import IndicatorIcon from '@/components/Icons/IndicatorIcon.vue'
@@ -131,6 +133,11 @@ const tabs = computed(() => {
           label: __('Brand'),
           icon: SparkleIcon,
           component: markRaw(BrandSettings),
+        },
+        {
+          label: __('Sidebar'),
+          icon: PanelLeftIcon,
+          component: markRaw(SidebarSettings),
         },
       ],
       condition: () => isManager(),

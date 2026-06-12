@@ -150,7 +150,6 @@
 
 <script setup>
 import BrushCleaningIcon from '~icons/lucide/brush-cleaning'
-import LucideLayoutDashboard from '~icons/lucide/layout-dashboard'
 import CRMLogo from '@/components/Icons/CRMLogo.vue'
 import InviteIcon from '@/components/Icons/InviteIcon.vue'
 import ConvertIcon from '@/components/Icons/ConvertIcon.vue'
@@ -175,6 +174,8 @@ import SidebarLink from '@/components/SidebarLink.vue'
 import Notifications from '@/components/Notifications.vue'
 import Settings from '@/components/Settings/Settings.vue'
 import { viewsStore } from '@/stores/views'
+import { getSettings } from '@/stores/settings'
+import { applySidebarConfig } from '@/utils/sidebarLinks'
 import {
   unreadNotificationsCount,
   notificationsStore,
@@ -212,53 +213,13 @@ const isSidebarCollapsed = useStorage('isSidebarCollapsed', false)
 const isFCSite = ref(window.is_fc_site)
 const isDemoSite = ref(window.is_demo_site)
 
-const links = [
-  {
-    label: 'Dashboard',
-    icon: LucideLayoutDashboard,
-    to: 'Dashboard',
-  },
-  {
-    label: 'Leads',
-    icon: LeadsIcon,
-    to: 'Leads',
-  },
-  {
-    label: 'Deals',
-    icon: DealsIcon,
-    to: 'Deals',
-  },
-  {
-    label: 'Contacts',
-    icon: ContactsIcon,
-    to: 'Contacts',
-  },
-  {
-    label: 'Organizations',
-    icon: OrganizationsIcon,
-    to: 'Organizations',
-  },
-  {
-    label: 'Notes',
-    icon: NoteIcon,
-    to: 'Notes',
-  },
-  {
-    label: 'Tasks',
-    icon: TaskIcon,
-    to: 'Tasks',
-  },
-  {
-    label: 'Call Logs',
-    icon: PhoneIcon,
-    to: 'Call Logs',
-  },
-  {
-    label: 'Sequences',
-    icon: StepsIcon,
-    to: 'Sequences',
-  },
-]
+const { settings } = getSettings()
+
+// admin-defined order/visibility (Settings > Sidebar), canonical list +
+// merge logic in utils/sidebarLinks.js
+const links = computed(() =>
+  applySidebarConfig(settings.value?.custom_sidebar_items),
+)
 
 const allViews = computed(() => {
   let _views = [
@@ -266,7 +227,7 @@ const allViews = computed(() => {
       name: 'All Views',
       hideLabel: true,
       opened: true,
-      views: links.filter((link) => {
+      views: links.value.filter((link) => {
         if (link.condition) {
           return link.condition()
         }
