@@ -423,11 +423,19 @@ export const colors = [
 ]
 
 export function parseColor(color) {
-  let textColor = `!text-${color}-600`
+  // raw palette shades vanish on dark backgrounds (gray-700 on near-black
+  // is invisible) - pair every shade with a lighter dark-mode variant.
+  // The class names are built dynamically, and the safelist regex doesn't
+  // expand dark: variants, so the JIT scanner needs them spelled out:
+  // dark:!text-gray-400 dark:!text-blue-400 dark:!text-green-400
+  // dark:!text-red-400 dark:!text-pink-400 dark:!text-orange-400
+  // dark:!text-amber-400 dark:!text-yellow-400 dark:!text-cyan-400
+  // dark:!text-teal-400 dark:!text-violet-400 dark:!text-purple-400
+  let textColor = `!text-${color}-600 dark:!text-${color}-400`
   if (color == 'black') {
     textColor = '!text-ink-gray-9'
   } else if (['gray', 'green'].includes(color)) {
-    textColor = `!text-${color}-700`
+    textColor = `!text-${color}-700 dark:!text-${color}-400`
   }
 
   return textColor
