@@ -10,6 +10,26 @@
     :whatsappBox="whatsappBox"
     :modalRef="modalRef"
   />
+  <!-- lost-lead banner: lost reason lives here, not in the side panel -->
+  <div
+    v-if="title == 'Activity' && isLostLead"
+    class="mx-3 mt-3 flex items-center justify-between gap-2 rounded-lg border border-outline-red-1 bg-surface-red-1 px-4 py-2 sm:mx-10"
+  >
+    <div class="text-base text-ink-red-3">
+      <span class="font-medium">{{ __(doc.status) }}</span>
+      <template v-if="doc.lost_reason"> &middot; {{ doc.lost_reason }}</template>
+      <span v-if="doc.lost_notes" class="text-ink-gray-7">
+        — {{ doc.lost_notes }}
+      </span>
+    </div>
+    <Button :label="__('Edit')" @click="showLostReasonModal = true" />
+  </div>
+  <LostReasonModal
+    v-if="showLostReasonModal"
+    v-model="showLostReasonModal"
+    :doctype="doctype"
+    :document="_document"
+  />
   <FadedScrollableDiv class="flex flex-col h-full overflow-y-auto">
     <div
       v-if="all_activities?.loading"
@@ -474,6 +494,8 @@ import FadedScrollableDiv from '@/components/FadedScrollableDiv.vue'
 import CommunicationArea from '@/components/CommunicationArea.vue'
 import WhatsappTemplateSelectorModal from '@/components/Modals/WhatsappTemplateSelectorModal.vue'
 import AllModals from '@/components/Activities/AllModals.vue'
+import LostReasonModal from '@/components/Modals/LostReasonModal.vue'
+import { statusesStore } from '@/stores/statuses'
 import FilesUploader from '@/components/FilesUploader/FilesUploader.vue'
 import { timeAgo, formatDate, startCase } from '@/utils'
 import { globalStore } from '@/stores/global'
@@ -521,6 +543,15 @@ const modalRef = ref(null)
 const showFilesUploader = ref(false)
 
 const title = computed(() => props.tabs?.[tabIndex.value]?.name || 'Activity')
+
+const { getLeadStatus } = statusesStore()
+const showLostReasonModal = ref(false)
+const isLostLead = computed(
+  () =>
+    props.doctype == 'CRM Lead' &&
+    doc.value.status &&
+    getLeadStatus(doc.value.status)?.type == 'Lost',
+)
 
 const changeTabTo = (tabName) => {
   const tabNames = props.tabs?.map((tab) => tab.name?.toLowerCase())
