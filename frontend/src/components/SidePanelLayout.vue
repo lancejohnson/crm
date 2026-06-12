@@ -94,12 +94,12 @@
                           class="flex h-7 cursor-pointer items-center px-2 py-1 text-ink-gray-5"
                         >
                           <Tooltip :text="__(field.tooltip)">
-                            <div>{{ doc[field.fieldname] }}</div>
+                            <div>{{ displayValue(field) }}</div>
                           </Tooltip>
                         </div>
                         <PrimaryDropdown
                           v-else-if="field.fieldtype === 'Dropdown'"
-                          :value="doc[field.fieldname]"
+                          :value="displayValue(field)"
                           :placeholder="field.placeholder"
                           :options="field.options"
                           :create="field.create"
@@ -336,7 +336,7 @@
                           v-else
                           class="form-control"
                           type="text"
-                          :value="doc[field.fieldname]"
+                          :value="displayValue(field)"
                           :placeholder="field.placeholder"
                           :debounce="500"
                           @change.stop="fieldChange($event.target.value, field)"
@@ -410,6 +410,7 @@ import {
   interpolateTemplate,
 } from '@/utils'
 import { flt } from '@/utils/numberFormat.js'
+import { formatPhone } from '@/utils/phoneFormat'
 import { Tooltip, DateTimePicker, DatePicker } from 'frappe-ui'
 import { useDocument } from '@/data/document'
 import { ref, computed, getCurrentInstance } from 'vue'
@@ -443,6 +444,16 @@ if (props.docname) {
 }
 
 const doc = computed(() => document.doc || {})
+
+function displayValue(field) {
+  let value = doc.value[field.fieldname]
+  // Phone fields are Data fields with options "Phone"; the contact page
+  // swaps mobile_no's options for a dropdown array, so match fieldname too.
+  let isPhone =
+    field.options === 'Phone' ||
+    ['mobile_no', 'phone', 'actual_mobile_no'].includes(field.fieldname)
+  return isPhone ? formatPhone(value) : value
+}
 
 const _sections = computed(() => {
   if (!props.sections?.length) return []

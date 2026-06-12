@@ -312,6 +312,7 @@ import { statusesStore } from '@/stores/statuses'
 import { callEnabled } from '@/composables/settings'
 import { useBroadcast } from '@/composables/useBroadcast'
 import { formatDate, timeAgo, website, formatTime } from '@/utils'
+import { formatPhone } from '@/utils/phoneFormat'
 import { Avatar, Tooltip, Dropdown } from 'frappe-ui'
 import { useRoute } from 'vue-router'
 import { ref, computed, reactive, h } from 'vue'
@@ -458,6 +459,10 @@ function parseRows(rows, columns = []) {
 
       if (fieldType && fieldType == 'Percent') {
         _rows[row] = getFormattedPercent(row, lead)
+      }
+
+      if (['mobile_no', 'phone'].includes(row)) {
+        _rows[row] = formatPhone(lead[row])
       }
 
       if (row == 'lead_name') {

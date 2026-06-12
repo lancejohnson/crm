@@ -1,4 +1,5 @@
 import { formatDate, timeAgo } from '@/utils'
+import { formatPhone } from '@/utils/phoneFormat'
 import { getMeta } from '@/stores/meta'
 
 const { getFormattedPercent, getFormattedFloat, getFormattedCurrency } =
@@ -14,12 +15,12 @@ export function getCallLogDetail(row, log, columns = []) {
     }
   } else if (row === 'caller') {
     return {
-      label: log._caller?.label,
+      label: formatPhone(log._caller?.label),
       image: log._caller?.image,
     }
   } else if (row === 'receiver') {
     return {
-      label: log._receiver?.label,
+      label: formatPhone(log._receiver?.label),
       image: log._receiver?.image,
     }
   } else if (row === 'type') {
@@ -55,6 +56,10 @@ export function getCallLogDetail(row, log, columns = []) {
 
   if (fieldType && fieldType == 'Percent') {
     return getFormattedPercent(row, log)
+  }
+
+  if (['from', 'to'].includes(row)) {
+    return formatPhone(log[row])
   }
 
   return log[row]

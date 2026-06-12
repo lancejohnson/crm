@@ -281,6 +281,7 @@ import { organizationsStore } from '@/stores/organizations'
 import { statusesStore } from '@/stores/statuses'
 import { callEnabled } from '@/composables/settings'
 import { formatDate, timeAgo, website, formatTime } from '@/utils'
+import { formatPhone } from '@/utils/phoneFormat'
 import { Tooltip, Avatar, Dropdown } from 'frappe-ui'
 import { useRoute } from 'vue-router'
 import { ref, reactive, computed, h } from 'vue'
@@ -422,6 +423,10 @@ function parseRows(rows, columns = []) {
 
       if (fieldType && fieldType == 'Percent') {
         _rows[row] = getFormattedPercent(row, deal)
+      }
+
+      if (['mobile_no', 'phone'].includes(row)) {
+        _rows[row] = formatPhone(deal[row])
       }
 
       if (row == 'organization') {

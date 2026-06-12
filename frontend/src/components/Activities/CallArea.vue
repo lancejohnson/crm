@@ -8,7 +8,7 @@
           size="md"
         />
         <span class="font-medium text-ink-gray-8 ml-1">
-          {{ call._caller.label }}
+          {{ formatPhone(call._caller.label) }}
         </span>
         <span>{{
           call.type == 'Incoming'
@@ -41,13 +41,13 @@
             :avatars="[
               {
                 image: call._caller.image,
-                label: call._caller.label,
-                name: call._caller.label,
+                label: formatPhone(call._caller.label),
+                name: formatPhone(call._caller.label),
               },
               {
                 image: call._receiver.image,
-                label: call._receiver.label,
-                name: call._receiver.label,
+                label: formatPhone(call._receiver.label),
+                name: formatPhone(call._receiver.label),
               },
             ]"
             size="sm"
@@ -145,6 +145,7 @@ import CallLogDetailModal from '@/components/Modals/CallLogDetailModal.vue'
 import CallLogModal from '@/components/Modals/CallLogModal.vue'
 import { statusLabelMap, statusColorMap } from '@/utils/callLog.js'
 import { formatDate, timeAgo } from '@/utils'
+import { formatPhone } from '@/utils/phoneFormat'
 import { Avatar, Badge, Tooltip, createResource } from 'frappe-ui'
 import { reactive, ref } from 'vue'
 

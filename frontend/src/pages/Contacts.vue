@@ -71,6 +71,7 @@ import ViewControls from '@/components/ViewControls.vue'
 import { getMeta } from '@/stores/meta'
 import { organizationsStore } from '@/stores/organizations.js'
 import { formatDate, timeAgo } from '@/utils'
+import { formatPhone } from '@/utils/phoneFormat'
 import { ref, computed } from 'vue'
 
 const { getFormattedPercent, getFormattedFloat, getFormattedCurrency } =
@@ -121,6 +122,10 @@ const rows = computed(() => {
 
       if (fieldType && fieldType == 'Percent') {
         _rows[row] = getFormattedPercent(row, contact)
+      }
+
+      if (['mobile_no', 'phone', 'actual_mobile_no'].includes(row)) {
+        _rows[row] = formatPhone(contact[row])
       }
 
       if (row == 'full_name') {

@@ -192,7 +192,7 @@
                           </div>
                           <div class="flex items-center gap-3 p-1 py-1.5">
                             <PhoneIcon class="h-4 w-4" />
-                            {{ contact.mobile_no }}
+                            {{ formatPhone(contact.mobile_no) }}
                           </div>
                         </div>
                       </Section>
@@ -293,6 +293,7 @@ import SidePanelLayout from '@/components/SidePanelLayout.vue'
 import SLASection from '@/components/SLASection.vue'
 import CustomActions from '@/components/CustomActions.vue'
 import { setupCustomizations, isTranslatable } from '@/utils'
+import { formatPhone } from '@/utils/phoneFormat'
 import { getView } from '@/utils/view'
 import { getSettings } from '@/stores/settings'
 import { globalStore } from '@/stores/global'

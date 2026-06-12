@@ -258,7 +258,7 @@
                         class="flex items-center gap-3 p-1 py-1.5 text-ink-gray-8"
                       >
                         <PhoneIcon class="h-4 w-4" />
-                        {{ contact.mobile_no }}
+                        {{ formatPhone(contact.mobile_no) }}
                       </div>
                       <div
                         v-if="!contact.email && !contact.mobile_no"
@@ -372,6 +372,7 @@ import {
   copyToClipboard,
   isTranslatable,
 } from '@/utils'
+import { formatPhone } from '@/utils/phoneFormat'
 import { getView } from '@/utils/view'
 import { getSettings } from '@/stores/settings'
 import { globalStore } from '@/stores/global'
