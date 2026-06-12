@@ -370,16 +370,36 @@ def get_data(
 		if not rows:
 			rows = default_rows
 
-		if not kanban_columns and column_field:
+		if column_field:
 			field_meta = frappe.get_meta(doctype).get_field(column_field)
+			live_columns = []
 			if field_meta.fieldtype == "Link":
-				kanban_columns = frappe.get_all(
+				options_meta = frappe.get_meta(field_meta.options)
+				options_order = "position asc" if options_meta.has_field("position") else "modified asc"
+				options_fields = ["name", "color"] if options_meta.has_field("color") else ["name"]
+				live_columns = frappe.get_all(
 					field_meta.options,
-					fields=["name"],
-					order_by="modified asc",
+					fields=options_fields,
+					order_by=options_order,
 				)
 			elif field_meta.fieldtype == "Select":
-				kanban_columns = [{"name": option} for option in field_meta.options.split("\n")]
+				live_columns = [{"name": option} for option in (field_meta.options or "").split("\n")]
+
+			if not kanban_columns:
+				kanban_columns = live_columns
+			else:
+				# saved views snapshot kanban_columns at creation time; statuses
+				# added, renamed or deleted since would otherwise never show up
+				live_names = {column.get("name") for column in live_columns}
+				kanban_columns = [kc for kc in kanban_columns if kc.get("name") in live_names]
+				saved_names = {kc.get("name") for kc in kanban_columns}
+				kanban_columns += [c for c in live_columns if c.get("name") not in saved_names]
+
+			# the status record's color wins over any color snapshotted in the view
+			live_colors = {c.get("name"): c.get("color") for c in live_columns}
+			for kc in kanban_columns:
+				if live_colors.get(kc.get("name")):
+					kc["color"] = live_colors[kc.get("name")]
 
 		if not title_field:
 			title_field = "name"
