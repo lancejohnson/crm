@@ -225,6 +225,12 @@
                   onClick: () => showCustomizeQuickFilter(),
                   condition: () => isManager(),
                 },
+                {
+                  label: __('Edit Statuses'),
+                  icon: () => h(IndicatorIcon, { class: '!text-ink-gray-6' }),
+                  onClick: () => openStatusSettings(),
+                  condition: () => doctype === 'CRM Lead' && isManager(),
+                },
               ],
             },
           ]"
@@ -337,7 +343,12 @@ import {
 import { computed, ref, onMounted, watch, h, markRaw } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useDebounceFn } from '@vueuse/core'
-import { isMobileView } from '@/composables/settings'
+import {
+  isMobileView,
+  showSettings,
+  activeSettingsPage,
+} from '@/composables/settings'
+import IndicatorIcon from '@/components/Icons/IndicatorIcon.vue'
 import Draggable from 'vuedraggable'
 import _ from 'lodash'
 import ImportIcon from '~icons/lucide/import'
@@ -359,6 +370,11 @@ const { brand } = getSettings()
 const { $dialog } = globalStore()
 const { reload: reloadView, getDefaultView, getView } = viewsStore()
 const { isManager } = usersStore()
+
+function openStatusSettings() {
+  activeSettingsPage.value = 'Lead Statuses'
+  showSettings.value = true
+}
 
 const list = defineModel({ type: Object, default: () => ({}) })
 const loadMore = defineModel('loadMore', { type: Boolean })

@@ -9,16 +9,6 @@
         :actions="leadsListView.customListActions"
       />
       <Button
-        v-if="isManager()"
-        variant="outline"
-        :label="__('Edit Statuses')"
-        @click="openStatusSettings"
-      >
-        <template #prefix>
-          <IndicatorIcon class="!text-ink-gray-6" />
-        </template>
-      </Button>
-      <Button
         variant="solid"
         :label="__('Create')"
         iconLeft="plus"
@@ -314,11 +304,7 @@ import { getMeta } from '@/stores/meta'
 import { globalStore } from '@/stores/global'
 import { usersStore } from '@/stores/users'
 import { statusesStore } from '@/stores/statuses'
-import {
-  callEnabled,
-  showSettings,
-  activeSettingsPage,
-} from '@/composables/settings'
+import { callEnabled } from '@/composables/settings'
 import { useBroadcast } from '@/composables/useBroadcast'
 import { formatDate, timeAgo, website, formatTime } from '@/utils'
 import { Avatar, Tooltip, Dropdown } from 'frappe-ui'
@@ -328,16 +314,11 @@ import { ref, computed, reactive, h } from 'vue'
 const { getFormattedPercent, getFormattedFloat, getFormattedCurrency } =
   getMeta('CRM Lead')
 const { makeCall } = globalStore()
-const { getUser, isManager } = usersStore()
+const { getUser } = usersStore()
 const { getLeadStatus } = statusesStore()
 const { on } = useBroadcast()
 
 const route = useRoute()
-
-function openStatusSettings() {
-  activeSettingsPage.value = 'Lead Statuses'
-  showSettings.value = true
-}
 
 const leadsListView = ref(null)
 const showLeadModal = ref(false)
