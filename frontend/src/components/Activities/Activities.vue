@@ -298,8 +298,13 @@
                     <UserAvatar :user="activity.data.old_value" size="xs" />
                     {{ getUser(activity.data.old_value).full_name }}
                   </div>
-                  <div v-else class="truncate">
-                    {{ activity.data.old_value }}
+                  <div v-else class="flex items-center gap-1">
+                    <IndicatorIcon
+                      v-if="activity.data?.field === 'status'"
+                      class="h-3 w-3 shrink-0"
+                      :class="statusColorClass(activity, activity.data.old_value)"
+                    />
+                    <span class="truncate">{{ activity.data.old_value }}</span>
                   </div>
                 </span>
                 <span v-if="activity.to">{{ __('to') }}</span>
@@ -314,12 +319,13 @@
                     <UserAvatar :user="activity.data.value" size="xs" />
                     {{ getUser(activity.data.value).full_name }}
                   </div>
-                  <div
-                    v-else
-                    class="truncate"
-                    :class="statusColorClass(activity, activity.data.value)"
-                  >
-                    {{ activity.data.value }}
+                  <div v-else class="flex items-center gap-1">
+                    <IndicatorIcon
+                      v-if="activity.data?.field === 'status'"
+                      class="h-3 w-3 shrink-0"
+                      :class="statusColorClass(activity, activity.data.value)"
+                    />
+                    <span class="truncate">{{ activity.data.value }}</span>
                   </div>
                 </span>
               </div>
@@ -369,8 +375,13 @@
                       <UserAvatar :user="a.data.old_value" size="xs" />
                       {{ getUser(a.data.old_value).full_name }}
                     </div>
-                    <div v-else class="truncate">
-                      {{ a.data.old_value }}
+                    <div v-else class="flex items-center gap-1">
+                      <IndicatorIcon
+                        v-if="a.data?.field === 'status'"
+                        class="h-3 w-3 shrink-0"
+                        :class="statusColorClass(a, a.data.old_value)"
+                      />
+                      <span class="truncate">{{ a.data.old_value }}</span>
                     </div>
                   </span>
                   <span v-if="a.to">{{ __('to') }}</span>
@@ -385,12 +396,13 @@
                       <UserAvatar :user="a.data.value" size="xs" />
                       {{ getUser(a.data.value).full_name }}
                     </div>
-                    <div
-                      v-else
-                      class="truncate"
-                      :class="statusColorClass(a, a.data.value)"
-                    >
-                      {{ a.data.value }}
+                    <div v-else class="flex items-center gap-1">
+                      <IndicatorIcon
+                        v-if="a.data?.field === 'status'"
+                        class="h-3 w-3 shrink-0"
+                        :class="statusColorClass(a, a.data.value)"
+                      />
+                      <span class="truncate">{{ a.data.value }}</span>
                     </div>
                   </span>
                 </div>
@@ -477,6 +489,7 @@ import TaskArea from '@/components/Activities/TaskArea.vue'
 import AttachmentArea from '@/components/Activities/AttachmentArea.vue'
 import DataFields from '@/components/Activities/DataFields.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
+import IndicatorIcon from '@/components/Icons/IndicatorIcon.vue'
 import ActivityIcon from '@/components/Icons/ActivityIcon.vue'
 import EmailIcon from '@/components/Icons/EmailIcon.vue'
 import DetailsIcon from '@/components/Icons/DetailsIcon.vue'
