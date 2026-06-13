@@ -22,11 +22,18 @@
     :referenceDoc="referenceDoc"
     :options="{ afterInsert: () => activities.reload() }"
   />
+  <SendTextModal
+    v-if="showSendTextModal"
+    v-model="showSendTextModal"
+    :referenceDoc="referenceDoc"
+    :doctype="doctype"
+  />
 </template>
 <script setup>
 import TaskModal from '@/components/Modals/TaskModal.vue'
 import NoteModal from '@/components/Modals/NoteModal.vue'
 import CallLogModal from '@/components/Modals/CallLogModal.vue'
+import SendTextModal from '@/components/Modals/SendTextModal.vue'
 import { call } from 'frappe-ui'
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -101,6 +108,14 @@ function createCallLog() {
   showCallLogModal.value = true
 }
 
+// Send Text
+const showSendTextModal = ref(false)
+
+function sendText() {
+  referenceDoc.value = { ...props.doc }
+  showSendTextModal.value = true
+}
+
 // common
 const route = useRoute()
 const router = useRouter()
@@ -120,5 +135,6 @@ defineExpose({
   updateTaskStatus,
   showNote,
   createCallLog,
+  sendText,
 })
 </script>

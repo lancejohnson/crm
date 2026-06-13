@@ -136,6 +136,17 @@
                 }"
                 placement="right"
               />
+              <Dropdown
+                :options="getQuoOptions(user)"
+                :button="{
+                  label: user.custom_quo_number
+                    ? formatPhone(user.custom_quo_number)
+                    : __('No Quo number'),
+                  iconLeft: 'phone',
+                  iconRight: 'chevron-down',
+                }"
+                placement="right"
+              />
             </div>
           </li>
         </template>
@@ -165,6 +176,7 @@
 import AddExistingUserModal from '@/components/Modals/AddExistingUserModal.vue'
 import EmptyState from '@/components/ListViews/EmptyState.vue'
 import { activeSettingsPage } from '@/composables/settings'
+import { quoNumbers, formatPhone } from '@/composables/quoSender'
 import { usersStore } from '@/stores/users'
 import { DropdownOption } from '@/utils'
 import {
@@ -259,6 +271,35 @@ function getDropdownOptions(user) {
   return options.filter((option) => option.condition?.() || true)
 }
 
+function getQuoOptions(user) {
+  const opts = (quoNumbers.data || []).map((n) => ({
+    label: formatPhone(n.number) + (n.name ? ` — ${n.name}` : ''),
+    onClick: () => setQuoNumber(user, n.number),
+  }))
+  opts.push({
+    label: __('Clear number'),
+    icon: 'x',
+    onClick: () => setQuoNumber(user, ''),
+  })
+  return opts
+}
+
+function setQuoNumber(user, number) {
+  if ((user.custom_quo_number || '') === number) return
+  call('crm.api.sms.set_user_quo_number', { user: user.name, number })
+    .then(() => {
+      toast.success(
+        number
+          ? __('{0} now texts from {1}', [user.full_name, formatPhone(number)])
+          : __('Quo number cleared for {0}', [user.full_name]),
+      )
+      users.reload()
+    })
+    .catch((e) => {
+      toast.error(e?.messages?.[0] || __('Something went wrong'))
+    })
+}
+
 function updateRole(user, newRole) {
   if (user.role === newRole) return
 
@@ -297,5 +338,6 @@ onMounted(() => {
   if (searchRef.value) {
     searchRef.value.el.focus()
   }
+  if (!quoNumbers.data && !quoNumbers.loading) quoNumbers.fetch()
 })
 </script>

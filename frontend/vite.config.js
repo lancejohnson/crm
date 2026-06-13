@@ -12,6 +12,12 @@ export default defineConfig(async ({ mode }) => {
       vue(),
       vueJsx(),
       VitePWA({
+        // The precaching service worker served stale app bundles after deploys
+        // (a new SW installs but waits behind the open tab, so users kept the
+        // old JS — e.g. the pre-fix SMS pane). selfDestroying ships a SW that
+        // unregisters itself and clears its caches, so the CRM is always served
+        // fresh from the server. We don't use offline / installable-PWA mode.
+        selfDestroying: true,
         registerType: 'autoUpdate',
         devOptions: {
           enabled: true,

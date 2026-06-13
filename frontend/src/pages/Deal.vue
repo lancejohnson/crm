@@ -379,7 +379,7 @@ import { globalStore } from '@/stores/global'
 import { statusesStore } from '@/stores/statuses'
 import { getMeta } from '@/stores/meta'
 import { useDocument } from '@/data/document'
-import { whatsappEnabled, callEnabled } from '@/composables/settings'
+import { whatsappEnabled, smsEnabled, callEnabled } from '@/composables/settings'
 import { useBroadcast } from '@/composables/useBroadcast'
 import {
   createResource,
@@ -579,6 +579,12 @@ const tabs = computed(() => {
       name: 'Calls',
       label: __('Calls'),
       icon: PhoneIcon,
+    },
+    {
+      name: 'SMS',
+      label: __('Text Messages'),
+      icon: CommentIcon,
+      condition: () => smsEnabled.value,
     },
     {
       name: 'Tasks',

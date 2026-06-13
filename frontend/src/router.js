@@ -113,6 +113,11 @@ const routes = [
     props: true,
   },
   {
+    path: '/texts',
+    name: 'Text Messages',
+    component: () => import('@/pages/TextMessages.vue'),
+  },
+  {
     path: '/welcome',
     name: 'Welcome',
     component: () => import('@/pages/Welcome.vue'),

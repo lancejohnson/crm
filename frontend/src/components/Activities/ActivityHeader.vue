@@ -81,7 +81,7 @@ import TaskIcon from '@/components/Icons/TaskIcon.vue'
 import AttachmentIcon from '@/components/Icons/AttachmentIcon.vue'
 import WhatsAppIcon from '@/components/Icons/WhatsAppIcon.vue'
 import { globalStore } from '@/stores/global'
-import { whatsappEnabled, callEnabled } from '@/composables/settings'
+import { whatsappEnabled, smsEnabled, callEnabled } from '@/composables/settings'
 import { Dropdown } from 'frappe-ui'
 import { computed, h } from 'vue'
 
@@ -124,6 +124,12 @@ const defaultActions = computed(() => {
       label: __('Make a Call'),
       onClick: () => makeCall(props.doc.mobile_no),
       condition: () => callEnabled.value,
+    },
+    {
+      icon: h(CommentIcon, { class: 'h-4 w-4' }),
+      label: __('Send Text'),
+      onClick: () => props.modalRef.sendText(),
+      condition: () => smsEnabled.value,
     },
     {
       icon: h(NoteIcon, { class: 'h-4 w-4' }),

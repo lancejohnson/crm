@@ -35,6 +35,7 @@ def get_users():
 			"full_name",
 			"user_type",
 			"language",
+			"custom_quo_number",
 		],
 		order_by="full_name asc",
 		distinct=True,

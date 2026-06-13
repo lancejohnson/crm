@@ -41,7 +41,8 @@
     <div
       v-else-if="
         activities?.length ||
-        (whatsappMessages.data?.length && title == 'WhatsApp')
+        (whatsappMessages.data?.length && title == 'WhatsApp') ||
+        (smsMessages.data?.length && title == 'SMS')
       "
       class="activities"
     >
@@ -52,6 +53,9 @@
           class="px-3 sm:px-10"
           :messages="whatsappMessages.data"
         />
+      </div>
+      <div v-else-if="title == 'SMS' && smsMessages.data?.length">
+        <SMSArea class="px-3 pt-3 sm:px-10" :messages="smsMessages.data" />
       </div>
       <div
         v-else-if="title == 'Notes'"
@@ -252,6 +256,33 @@
             class="mb-4"
           >
             <CallArea :activity="activity" />
+          </div>
+          <div
+            v-else-if="
+              activity.activity_type == 'incoming_text' ||
+              activity.activity_type == 'outgoing_text'
+            "
+            class="mb-4 flex flex-col gap-1 py-1.5"
+          >
+            <div class="flex items-center justify-between gap-2 text-base">
+              <span class="text-ink-gray-5">
+                {{
+                  activity.activity_type == 'outgoing_text'
+                    ? __('Text sent')
+                    : __('Text received')
+                }}
+              </span>
+              <Tooltip :text="formatDate(activity.creation)">
+                <div class="text-sm text-ink-gray-5">
+                  {{ __(timeAgo(activity.creation)) }}
+                </div>
+              </Tooltip>
+            </div>
+            <div
+              class="max-w-2xl whitespace-pre-wrap rounded-md bg-surface-gray-2 px-2.5 py-1.5 text-ink-gray-8"
+            >
+              {{ activity.message }}
+            </div>
           </div>
           <div v-else class="mb-4 flex flex-col gap-2 py-1.5">
             <div class="flex items-center justify-stretch gap-2 text-base">
@@ -454,6 +485,14 @@
       :doctype="doctype"
       @scroll="scroll"
     />
+    <SMSBox
+      v-if="title == 'SMS'"
+      ref="smsBox"
+      v-model="doc"
+      v-model:sms="smsMessages"
+      :doctype="doctype"
+      @scroll="scroll"
+    />
   </div>
   <WhatsappTemplateSelectorModal
     v-if="whatsappEnabled"
@@ -500,6 +539,8 @@ import AttachmentIcon from '@/components/Icons/AttachmentIcon.vue'
 import WhatsAppIcon from '@/components/Icons/WhatsAppIcon.vue'
 import WhatsAppArea from '@/components/Activities/WhatsAppArea.vue'
 import WhatsAppBox from '@/components/Activities/WhatsAppBox.vue'
+import SMSArea from '@/components/Activities/SMSArea.vue'
+import SMSBox from '@/components/Activities/SMSBox.vue'
 import LoadingIndicator from '@/components/Icons/LoadingIndicator.vue'
 import EmptyState from '@/components/ListViews/EmptyState.vue'
 import LeadsIcon from '@/components/Icons/LeadsIcon.vue'
@@ -521,7 +562,7 @@ import FilesUploader from '@/components/FilesUploader/FilesUploader.vue'
 import { timeAgo, formatDate, startCase } from '@/utils'
 import { globalStore } from '@/stores/global'
 import { usersStore } from '@/stores/users'
-import { whatsappEnabled } from '@/composables/settings'
+import { whatsappEnabled, smsEnabled } from '@/composables/settings'
 import { useDocument } from '@/data/document'
 import { useTelemetry } from 'frappe-ui/frappe'
 import { Button, Tooltip, createResource, toast } from 'frappe-ui'
@@ -615,8 +656,30 @@ const whatsappMessages = createResource({
   onSuccess: () => nextTick(() => scroll()),
 })
 
+const smsMessages = createResource({
+  url: 'crm.api.sms.get_sms_messages',
+  cache: ['sms_messages', props.docname],
+  params: {
+    reference_doctype: props.doctype,
+    reference_name: props.docname,
+  },
+  transform: (data) => sortByCreation(data),
+  onSuccess: () => nextTick(() => scroll()),
+})
+
+// is_sms_enabled resolves asynchronously, so `auto: smsEnabled.value` is often
+// false at creation and the resource never fetches. Fetch once it's enabled.
+watch(
+  smsEnabled,
+  (on) => {
+    if (on) smsMessages.reload()
+  },
+  { immediate: true },
+)
+
 onBeforeUnmount(() => {
   $socket.off('whatsapp_message')
+  $socket.off('quo_message')
 })
 
 onMounted(() => {
@@ -627,6 +690,15 @@ onMounted(() => {
     ) {
       whatsappMessages.reload()
     }
+  })
+
+  // quo_message events are always lead-scoped; on a deal, match its linked lead
+  $socket.on('quo_message', (data) => {
+    const onLead =
+      props.doctype === 'CRM Lead' && data.reference_docname === props.docname
+    const onDeal =
+      props.doctype === 'CRM Deal' && data.reference_docname === doc.value.lead
+    if (onLead || onDeal) smsMessages.reload()
   })
 
   nextTick(() => {
@@ -666,10 +738,21 @@ function get_activities() {
   return [...all_activities.data.versions, ...all_activities.data.calls]
 }
 
+// texts as timeline entries, so they show in the unified Activity feed
+function get_text_activities() {
+  if (!smsMessages.data) return []
+  return smsMessages.data.map((m) => ({
+    name: m.name,
+    activity_type: m.type === 'Incoming' ? 'incoming_text' : 'outgoing_text',
+    creation: m.creation,
+    message: m.message,
+  }))
+}
+
 const activities = computed(() => {
   let _activities = []
   if (title.value == 'Activity') {
-    _activities = get_activities()
+    _activities = [...get_activities(), ...get_text_activities()]
   } else if (title.value == 'Emails') {
     if (!all_activities.data?.versions) return []
     _activities = all_activities.data.versions.filter(
@@ -700,7 +783,9 @@ const activities = computed(() => {
     if (
       activity.activity_type == 'incoming_call' ||
       activity.activity_type == 'outgoing_call' ||
-      activity.activity_type == 'communication'
+      activity.activity_type == 'communication' ||
+      activity.activity_type == 'incoming_text' ||
+      activity.activity_type == 'outgoing_text'
     )
       return
 
@@ -771,6 +856,8 @@ const emptyText = computed(() => {
     text = 'No Attachments Found'
   } else if (title.value == 'WhatsApp') {
     text = 'No WhatsApp Messages Found'
+  } else if (title.value == 'SMS') {
+    text = 'No Text Messages Found'
   }
   return text
 })
@@ -797,6 +884,8 @@ const emptyTextDescription = computed(() => {
       'No files have been attached yet. Upload files to see them here.'
   } else if (title.value == 'WhatsApp') {
     description = 'Start a conversation now!'
+  } else if (title.value == 'SMS') {
+    description = 'Send a text to start the conversation.'
   }
   return description
 })
@@ -819,6 +908,8 @@ const emptyTextIcon = computed(() => {
     icon = AttachmentIcon
   } else if (title.value == 'WhatsApp') {
     icon = WhatsAppIcon
+  } else if (title.value == 'SMS') {
+    icon = CommentIcon
   }
   return h(icon, { class: 'text-ink-gray-4' })
 })
@@ -844,6 +935,10 @@ function timelineIcon(activity_type, is_lead) {
     case 'attachment_log':
       icon = AttachmentIcon
       break
+    case 'incoming_text':
+    case 'outgoing_text':
+      icon = CommentIcon
+      break
     default:
       icon = DotIcon
   }
@@ -853,6 +948,7 @@ function timelineIcon(activity_type, is_lead) {
 
 const emailBox = ref(null)
 const whatsappBox = ref(null)
+const smsBox = ref(null)
 
 watch([reload, reload_email], ([reload_value, reload_email_value]) => {
   if (reload_value || reload_email_value) {

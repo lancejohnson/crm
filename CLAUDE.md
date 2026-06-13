@@ -18,9 +18,30 @@ server scripts, infra, and all operational context live in the ops repo:
 - `frontend/src/components/Modals/TaskModal.vue` — "Call Outcome" disposition
   dropdown (Connected / Left Voicemail / No Answer / Wrong Number / Do Not Call)
 - `crm/api/activities.py` — `call_outcome` in task field lists
+- **SMS / texting** (Quo/OpenPhone): native two-way texts on the `Quo Message`
+  doctype.
+  - `frontend/src/pages/TextMessages.vue` + `/texts` route + sidebar item — a
+    compose-first inbox (conversations · thread · compose)
+  - `frontend/src/components/Activities/SMSArea.vue`, `SMSBox.vue` — per-lead
+    Text Messages tab (thread + compose); also folded into the unified Activity
+    timeline (`Activities.vue`)
+  - `SendTextModal.vue` + `AllModals.vue` + `ActivityHeader.vue` — "Send Text"
+    quick action next to "Log a Call"
+  - per-user sending number on `User.custom_quo_number`: picker
+    `QuoFromSelect.vue` + `composables/quoSender.js`, admin assignment in
+    `Settings/Users.vue`; no default — the sender must pick a number
+  - `crm/api/sms.py` — read API (`get_sms_messages`, `get_sms_conversations`,
+    `is_sms_enabled`) + `set_user_quo_number`; `crm/api/session.py` exposes
+    `custom_quo_number`; `crm/hooks.py` — `Quo Message` after_insert publishes
+    the `quo_message` realtime event (the server scripts can't, sandbox)
+- `frontend/vite.config.js` — PWA service worker set `selfDestroying` (the
+  precache served stale app bundles after deploys)
 
 The companion server-side pieces (custom doctypes, scheduler engine, webhook
-endpoints) are Server Scripts managed from the ops repo, NOT app code here.
+endpoints) are Server Scripts managed from the ops repo, NOT app code here. SMS
+specifically: the `Quo Message` doctype, the `send-text` and `list-quo-numbers`
+API server scripts, and inbound text mirroring in the `sequence-events` webhook
+all live in `../frappe-crm-deploy`.
 
 ## Ship a change
 

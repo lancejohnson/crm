@@ -6,6 +6,7 @@ import OrganizationsIcon from '@/components/Icons/OrganizationsIcon.vue'
 import NoteIcon from '@/components/Icons/NoteIcon.vue'
 import TaskIcon from '@/components/Icons/TaskIcon.vue'
 import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
+import CommentIcon from '@/components/Icons/CommentIcon.vue'
 import StepsIcon from '@/components/Icons/StepsIcon.vue'
 
 // canonical module list for the left sidebar; admin-defined order/visibility
@@ -19,6 +20,7 @@ export const sidebarLinks = [
   { label: 'Notes', icon: NoteIcon, to: 'Notes' },
   { label: 'Tasks', icon: TaskIcon, to: 'Tasks' },
   { label: 'Call Logs', icon: PhoneIcon, to: 'Call Logs' },
+  { label: 'Text Messages', icon: CommentIcon, to: 'Text Messages' },
   { label: 'Sequences', icon: StepsIcon, to: 'Sequences' },
 ]
 

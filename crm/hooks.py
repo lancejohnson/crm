@@ -178,6 +178,12 @@ doc_events = {
 		"before_validate": ["crm.api.live_demo.validate_user"],
 		"validate_reset_password": ["crm.api.live_demo.validate_reset_password"],
 	},
+	# Quo Message is a custom doctype (ops repo); the SMS server scripts can't
+	# call publish_realtime (not whitelisted in the sandbox), so the live
+	# refresh for the SMS thread/inbox is emitted here on insert instead.
+	"Quo Message": {
+		"after_insert": ["crm.api.sms.on_quo_message_insert"],
+	},
 }
 
 # Scheduled Tasks
