@@ -314,7 +314,11 @@
                     <UserAvatar :user="activity.data.value" size="xs" />
                     {{ getUser(activity.data.value).full_name }}
                   </div>
-                  <div v-else class="truncate">
+                  <div
+                    v-else
+                    class="truncate"
+                    :class="statusColorClass(activity, activity.data.value)"
+                  >
                     {{ activity.data.value }}
                   </div>
                 </span>
@@ -381,7 +385,11 @@
                       <UserAvatar :user="a.data.value" size="xs" />
                       {{ getUser(a.data.value).full_name }}
                     </div>
-                    <div v-else class="truncate">
+                    <div
+                      v-else
+                      class="truncate"
+                      :class="statusColorClass(a, a.data.value)"
+                    >
                       {{ a.data.value }}
                     </div>
                   </span>
@@ -544,7 +552,7 @@ const showFilesUploader = ref(false)
 
 const title = computed(() => props.tabs?.[tabIndex.value]?.name || 'Activity')
 
-const { getLeadStatus } = statusesStore()
+const { getLeadStatus, getDealStatus } = statusesStore()
 const showLostReasonModal = ref(false)
 const isLostLead = computed(
   () =>
@@ -552,6 +560,15 @@ const isLostLead = computed(
     doc.value.status &&
     getLeadStatus(doc.value.status)?.type == 'Lost',
 )
+
+// Color a status value (e.g. in "changed Status from New to Called No Answer")
+// with that status's own color, matching how statuses appear elsewhere.
+function statusColorClass(activity, value) {
+  if (activity?.data?.field !== 'status' || !value) return ''
+  let status =
+    props.doctype == 'CRM Deal' ? getDealStatus(value) : getLeadStatus(value)
+  return status?.color || ''
+}
 
 const changeTabTo = (tabName) => {
   const tabNames = props.tabs?.map((tab) => tab.name?.toLowerCase())
@@ -683,7 +700,9 @@ const activities = computed(() => {
       })
     }
   })
-  return sortByCreation(_activities)
+  let sorted = sortByCreation(_activities)
+  // Activity timeline shows most recent first; other tabs stay oldest-first.
+  return title.value == 'Activity' ? sorted.reverse() : sorted
 })
 
 function sortByCreation(list) {
@@ -837,7 +856,8 @@ function scroll(hash) {
     let el
     if (!hash) {
       let e = document.getElementsByClassName('activity')
-      el = e[e.length - 1]
+      // Activity timeline is most-recent-first, so the newest is the first element.
+      el = title.value == 'Activity' ? e[0] : e[e.length - 1]
     } else {
       el = document.getElementById(hash)
     }
