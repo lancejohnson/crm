@@ -6,7 +6,7 @@ image actually contains the crm app (their image CI is broken after it).
 
 **This repo is the source of truth for UI/app-code changes.** Deployment,
 server scripts, infra, and all operational context live in the ops repo:
-`../frappe-crm` (read its CLAUDE.md first).
+`../frappe-crm-deploy` (read its CLAUDE.md first).
 
 ## Our changes vs upstream (keep this list current)
 
@@ -26,8 +26,8 @@ endpoints) are Server Scripts managed from the ops repo, NOT app code here.
 
 ```bash
 # edit source here, then:
-cd ../frappe-crm && ./scripts/build_image.sh && python3 scripts/smoke_test.py
-# commit here AND commit the compose pin bump in ../frappe-crm
+cd ../frappe-crm-deploy && ./scripts/build_image.sh && python3 scripts/smoke_test.py
+# commit here AND commit the compose pin bump in ../frappe-crm-deploy
 ```
 
 No local dev server is set up — the build_image.sh flow (~60s build) is the
@@ -38,4 +38,4 @@ gate. Don't run `bench run-tests` against the prod site.
 
 Upstream moves fast (v1.73+ as of 2026-06). To take upstream changes: rebase
 `groundwork` onto the target tag, verify the image-tag-contents problem is
-fixed (or build our own image), re-test everything in ../frappe-crm/CLAUDE.md.
+fixed (or build our own image), re-test everything in ../frappe-crm-deploy/CLAUDE.md.
