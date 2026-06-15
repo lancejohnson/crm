@@ -18,6 +18,10 @@ server scripts, infra, and all operational context live in the ops repo:
 - `frontend/src/components/Modals/TaskModal.vue` — "Call Outcome" disposition
   dropdown (Connected / Left Voicemail / No Answer / Wrong Number / Do Not Call)
 - `crm/api/activities.py` — `call_outcome` in task field lists
+- `frontend/src/components/Kanban/KanbanCardField.vue` + `pages/Leads.vue`
+  `#fields` slot — hover-only card affordances on the Leads Kanban: copy icon
+  for phone/address fields, pencil-to-edit (inline popover, `frappe.client.set_value`
+  + board reload) for any non-read-only field. Nothing shows until row hover.
 - **SMS / texting** (Quo/OpenPhone): native two-way texts on the `Quo Message`
   doctype.
   - `frontend/src/pages/TextMessages.vue` + `/texts` route + sidebar item — a

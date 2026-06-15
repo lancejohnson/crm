@@ -122,9 +122,14 @@
       </div>
     </template>
     <template #fields="{ fieldName, fieldLabel, showBlank, itemName }">
-      <div
+      <KanbanCardField
         v-if="getRow(itemName, fieldName).label || showBlank"
-        class="truncate flex items-center gap-2"
+        doctype="CRM Lead"
+        :name="itemName"
+        :fieldName="fieldName"
+        :rawValue="getRawValue(itemName, fieldName)"
+        :copyText="String(getRow(itemName, fieldName).label ?? '')"
+        @updated="reloadKanban"
       >
         <span v-if="fieldLabel" class="shrink-0 text-ink-gray-5">
           {{ fieldLabel }}
@@ -214,7 +219,7 @@
         <div v-else class="truncate text-base">
           {{ getRow(itemName, fieldName).label }}
         </div>
-      </div>
+      </KanbanCardField>
     </template>
     <template #actions="{ itemName }">
       <div class="flex gap-2 items-center justify-between">
@@ -318,6 +323,7 @@ import LayoutHeader from '@/components/LayoutHeader.vue'
 import LeadsListView from '@/components/ListViews/LeadsListView.vue'
 import EmptyState from '@/components/ListViews/EmptyState.vue'
 import KanbanView from '@/components/Kanban/KanbanView.vue'
+import KanbanCardField from '@/components/Kanban/KanbanCardField.vue'
 import LeadModal from '@/components/Modals/LeadModal.vue'
 import NoteModal from '@/components/Modals/NoteModal.vue'
 import TaskModal from '@/components/Modals/TaskModal.vue'
@@ -371,6 +377,22 @@ function getRow(name, field) {
     return { label: value }
   }
   return getValue(rows.value?.find((row) => row.name == name)[field])
+}
+
+// rows.value holds formatted/display values; the inline Kanban-card editor
+// needs the raw stored value, which lives on the un-parsed kanban data.
+function getRawValue(name, field) {
+  for (const col of leads.value?.data?.data || []) {
+    const lead = col.data?.find((r) => r.name === name)
+    if (lead) return lead[field]
+  }
+  return ''
+}
+
+// Re-fetch the board after an inline card edit so values (and any column move
+// when the grouping field changes) reflect the saved state.
+function reloadKanban() {
+  leads.value?.reload?.()
 }
 
 // Rows
