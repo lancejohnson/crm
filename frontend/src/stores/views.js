@@ -34,7 +34,15 @@ export const viewsStore = defineStore('crm-views', (doctype) => {
           publicViews.value?.push(view)
         }
         if (view.is_standard && view.dt) {
-          standardViews.value[view.dt + ' ' + view.type] = view
+          const key = view.dt + ' ' + view.type
+          const existing = standardViews.value[key]
+          // A global (user-less) standard view is the Administrator-defined
+          // default and overrides any personal standard view for the same
+          // doctype+type. Personal standard views only apply when no global
+          // one exists.
+          if (!existing || !view.user) {
+            standardViews.value[key] = view
+          }
         }
         if (view.is_default) {
           defaultView.value = view

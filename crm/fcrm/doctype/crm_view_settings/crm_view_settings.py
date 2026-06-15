@@ -234,14 +234,29 @@ def create_or_update_standard_view(view: dict):
 	elif not columns:
 		columns = sync_default_columns(view)
 
+	# Kanban card settings defined by the Administrator are GLOBAL: the standard
+	# Kanban view is owned by "" (which get_views serves to every user) so the
+	# admin's card layout becomes the default for everyone. Other view types and
+	# non-admin users keep their own per-user standard view.
+	is_global = (view.type or "list") == "kanban" and frappe.session.user == "Administrator"
+	owner = "" if is_global else frappe.session.user
+
 	doc = frappe.db.exists(
 		"CRM View Settings",
-		{"dt": view.doctype, "type": view.type or "list", "is_standard": True, "user": frappe.session.user},
+		{"dt": view.doctype, "type": view.type or "list", "is_standard": True, "user": owner},
 	)
+	if not doc and is_global:
+		# Promote the admin's pre-existing personal standard Kanban view (if any)
+		# to global instead of leaving a now-shadowed duplicate behind.
+		doc = frappe.db.exists(
+			"CRM View Settings",
+			{"dt": view.doctype, "type": "kanban", "is_standard": True, "user": "Administrator"},
+		)
 	if doc:
 		doc = frappe.get_doc("CRM View Settings", doc)
 		doc.label = view.label
 		doc.type = view.type or "list"
+		doc.user = owner
 		doc.route_name = view.route_name or get_route_name(view.doctype)
 		doc.load_default_columns = view.load_default_columns or False
 		doc.filters = json.dumps(filters)
@@ -268,7 +283,7 @@ def create_or_update_standard_view(view: dict):
 		doc.label = view.label or label
 		doc.type = view.type or "list"
 		doc.dt = view.doctype
-		doc.user = frappe.session.user
+		doc.user = owner
 		doc.route_name = view.route_name or get_route_name(view.doctype)
 		doc.load_default_columns = view.load_default_columns or False
 		doc.filters = json.dumps(filters)
