@@ -57,7 +57,7 @@
               v-model="editValue"
               type="select"
               :options="selectOptions"
-              @update:modelValue="(v) => save(v, close)"
+              @update:modelValue="(v) => save(v === NONE_VALUE ? '' : v, close)"
             />
 
             <FormControl
@@ -221,12 +221,15 @@ const action = computed(() => {
   return 'none'
 })
 
-// Select options come from getFields() as [{label, value}]. A non-required Select
-// carries an empty-value option to clear the field; surface it as a visible
-// "None" instead of a blank, easy-to-miss row in the editor dropdown.
+// Select options come from getFields() as [{label, value}]. frappe-ui's select
+// drops the empty-value option (it's treated as the placeholder), so a clear
+// choice needs a non-empty sentinel value that we map back to '' on save.
+const NONE_VALUE = '\x00__none__'
 const selectOptions = computed(() => {
   const opts = (fieldMeta.value.options || []).filter((o) => o.value !== '')
-  return [{ label: __('None'), value: '' }, ...opts]
+  // Required selects must keep a value; only offer "None" when clearing is allowed.
+  if (fieldMeta.value.reqd) return opts
+  return [{ label: __('None'), value: NONE_VALUE }, ...opts]
 })
 
 const showSaveButton = computed(() =>
