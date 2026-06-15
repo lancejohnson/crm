@@ -14,7 +14,8 @@
 
     <div
       v-if="action !== 'none'"
-      class="absolute right-0 top-1/2 hidden -translate-y-1/2 items-center rounded bg-surface-white pl-1 group-hover/kbf:flex"
+      class="absolute right-0 top-1/2 -translate-y-1/2 items-center rounded bg-surface-white pl-1"
+      :class="editorOpen ? 'flex' : 'hidden group-hover/kbf:flex'"
     >
       <!-- Copy: phone & address fields -->
       <Tooltip v-if="action === 'copy'" :text="__('Copy')">
@@ -27,7 +28,12 @@
       </Tooltip>
 
       <!-- Edit: everything else that isn't read-only -->
-      <Popover v-else-if="action === 'edit'" placement="bottom-end" @open="syncValue">
+      <Popover
+        v-else-if="action === 'edit'"
+        placement="bottom-end"
+        @open="onEditorOpen"
+        @close="editorOpen = false"
+      >
         <template #target="{ togglePopover }">
           <Tooltip :text="__('Edit')">
             <button
@@ -223,6 +229,10 @@ const showSaveButton = computed(() =>
 
 const editValue = ref(props.rawValue)
 const saving = ref(false)
+// Keep the trigger (the popover's anchor) visible while the editor is open —
+// otherwise moving the mouse off the row hides it and Popper repositions the
+// open popover to the top-left corner.
+const editorOpen = ref(false)
 
 // Keep the editor seeded with the latest stored value (e.g. after a reload, or
 // when the card is reused for a different record at the same position).
@@ -231,7 +241,8 @@ watch(
   (v) => (editValue.value = v),
 )
 
-function syncValue() {
+function onEditorOpen() {
+  editorOpen.value = true
   editValue.value = props.rawValue
 }
 
