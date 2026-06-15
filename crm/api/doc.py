@@ -395,6 +395,14 @@ def get_data(
 				saved_names = {kc.get("name") for kc in kanban_columns}
 				kanban_columns += [c for c in live_columns if c.get("name") not in saved_names]
 
+				# the status-settings order (position asc) is the source of truth for
+				# column order: re-sort the merged list by each column's live position
+				# so reordering statuses or adding a new one in Settings is reflected
+				# here, instead of the new status getting stuck at the end. The saved
+				# snapshot still contributes per-column state (e.g. the hidden flag).
+				live_order = {c.get("name"): i for i, c in enumerate(live_columns)}
+				kanban_columns.sort(key=lambda kc: live_order.get(kc.get("name"), len(live_order)))
+
 			# the status record's color wins over any color snapshotted in the view
 			live_colors = {c.get("name"): c.get("color") for c in live_columns}
 			for kc in kanban_columns:
