@@ -47,7 +47,11 @@
           {{ __('Fields Order') }}
         </div>
         <div class="text-sm text-ink-gray-5 mb-2">
-          {{ __('Set an optional label shown before each field on the card.') }}
+          {{
+            __(
+              'Set an optional label shown before each field on the card. Tick "Show if blank" to keep a field on the card even when it has no value.',
+            )
+          }}
         </div>
         <Draggable
           :list="selectedFields"
@@ -63,13 +67,28 @@
                 <DragVerticalIcon class="h-3.5 cursor-grab shrink-0" />
                 <div class="truncate">{{ field.label }}</div>
               </div>
-              <div class="flex items-center gap-1 shrink-0">
+              <div class="flex items-center gap-2 shrink-0">
+                <Tooltip
+                  :text="
+                    __('Show this field on the card even when it has no value')
+                  "
+                >
+                  <div>
+                    <FormControl
+                      v-model="field.showBlank"
+                      type="checkbox"
+                      size="sm"
+                      :label="__('Show if blank')"
+                      @click.stop
+                    />
+                  </div>
+                </Tooltip>
                 <FormControl
                   v-model="field.customLabel"
                   type="text"
                   size="sm"
                   :placeholder="__('Card label')"
-                  class="w-32"
+                  class="w-28"
                   @click.stop
                 />
                 <Button variant="ghost" icon="x" @click="removeField(field)" />
@@ -112,7 +131,7 @@ import DragVerticalIcon from '@/components/Icons/DragVerticalIcon.vue'
 import KanbanIcon from '@/components/Icons/KanbanIcon.vue'
 import Autocomplete from '@/components/frappe-ui/Autocomplete.vue'
 import { getMeta } from '@/stores/meta'
-import { Dialog } from 'frappe-ui'
+import { Dialog, Tooltip } from 'frappe-ui'
 import Draggable from 'vuedraggable'
 import { ref, computed, nextTick, watch } from 'vue'
 
@@ -193,7 +212,8 @@ const fields = computed(() => {
 const selectedFields = ref([])
 
 // kanban_fields persists as a mix of bare fieldnames (no custom label) and
-// { fieldname, label } objects (custom label set) — read both shapes.
+// { fieldname, label, showBlank } objects (custom label and/or "show if blank"
+// set) — read all shapes.
 function buildSelectedFields() {
   let rows = list.value?.data?.kanban_fields || []
   if (typeof rows === 'string') {
@@ -208,18 +228,23 @@ function buildSelectedFields() {
     .map((row) => {
       const fieldname = typeof row === 'string' ? row : row.fieldname
       const customLabel = typeof row === 'string' ? '' : row.label || ''
+      const showBlank = typeof row === 'string' ? false : !!row.showBlank
       const field = fields.value?.find((f) => f.fieldname === fieldname)
       if (!field) return null
-      return { ...field, customLabel }
+      return { ...field, customLabel, showBlank }
     })
     .filter(Boolean)
 }
 
-// keep only a bare fieldname when there's no custom label, so views without
-// labels stay byte-identical and back-compatible
+// keep only a bare fieldname when there's no custom label and no "show if
+// blank", so views without either stay byte-identical and back-compatible
 function serializeField(row) {
   const label = (row.customLabel || '').trim()
-  return label ? { fieldname: row.fieldname, label } : row.fieldname
+  if (!label && !row.showBlank) return row.fieldname
+  const out = { fieldname: row.fieldname }
+  if (label) out.label = label
+  if (row.showBlank) out.showBlank = true
+  return out
 }
 
 watch(showDialog, (open) => {
@@ -229,7 +254,7 @@ watch(showDialog, (open) => {
 function addField(field) {
   if (!field) return
   if (selectedFields.value.some((f) => f.fieldname === field.fieldname)) return
-  selectedFields.value.push({ ...field, customLabel: '' })
+  selectedFields.value.push({ ...field, customLabel: '', showBlank: false })
 }
 
 function removeField(field) {

@@ -117,17 +117,21 @@
                           fields,
                           fieldName: field.fieldname,
                           fieldLabel: field.label,
+                          showBlank: field.showBlank,
                           itemName: fields.name,
                         }"
                       >
                         <div
-                          v-if="fields[field.fieldname]"
+                          v-if="fields[field.fieldname] || field.showBlank"
                           class="truncate flex items-center gap-2"
                         >
                           <span v-if="field.label" class="shrink-0 text-ink-gray-5">
                             {{ field.label }}
                           </span>
-                          <span class="truncate">{{ fields[field.fieldname] }}</span>
+                          <span v-if="fields[field.fieldname]" class="truncate">
+                            {{ fields[field.fieldname] }}
+                          </span>
+                          <span v-else class="truncate text-ink-gray-4">&mdash;</span>
                         </div>
                       </slot>
                     </template>
@@ -210,12 +214,17 @@ const titleField = computed(() => {
 })
 
 // kanban_fields entries are either a bare fieldname (legacy / no custom label)
-// or { fieldname, label } when the user set a card label in Kanban Settings.
+// or { fieldname, label, showBlank } when the user set a card label and/or
+// "show if blank" in Kanban Settings.
 function normalizeFields(fieldsList) {
   return (fieldsList || []).map((f) =>
     typeof f === 'string'
-      ? { fieldname: f, label: '' }
-      : { fieldname: f.fieldname, label: f.label || '' },
+      ? { fieldname: f, label: '', showBlank: false }
+      : {
+          fieldname: f.fieldname,
+          label: f.label || '',
+          showBlank: !!f.showBlank,
+        },
   )
 }
 

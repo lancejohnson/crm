@@ -71,13 +71,19 @@
         <div v-else class="text-ink-gray-4">{{ __('No Title') }}</div>
       </div>
     </template>
-    <template #fields="{ fieldName, fieldLabel, itemName }">
+    <template #fields="{ fieldName, fieldLabel, showBlank, itemName }">
       <div
-        v-if="getRow(itemName, fieldName).label"
+        v-if="getRow(itemName, fieldName).label || showBlank"
         class="truncate flex items-center gap-2"
       >
         <span v-if="fieldLabel" class="shrink-0 text-ink-gray-5">
           {{ fieldLabel }}
+        </span>
+        <span
+          v-if="showBlank && !getRow(itemName, fieldName).label"
+          class="truncate text-base text-ink-gray-4"
+        >
+          &mdash;
         </span>
         <div v-if="fieldName === 'status'">
           <TaskStatusIcon
