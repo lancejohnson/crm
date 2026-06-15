@@ -107,17 +107,27 @@
                   <div class="border-b h-px my-2.5" />
 
                   <div class="flex flex-col gap-3.5">
-                    <template v-for="value in column.fields" :key="value">
+                    <template
+                      v-for="field in normalizeFields(column.fields)"
+                      :key="field.fieldname"
+                    >
                       <slot
                         name="fields"
                         v-bind="{
                           fields,
-                          fieldName: value,
+                          fieldName: field.fieldname,
+                          fieldLabel: field.label,
                           itemName: fields.name,
                         }"
                       >
-                        <div v-if="fields[value]" class="truncate">
-                          {{ fields[value] }}
+                        <div
+                          v-if="fields[field.fieldname]"
+                          class="truncate flex items-center gap-2"
+                        >
+                          <span v-if="field.label" class="shrink-0 text-ink-gray-5">
+                            {{ field.label }}
+                          </span>
+                          <span class="truncate">{{ fields[field.fieldname] }}</span>
                         </div>
                       </slot>
                     </template>
@@ -198,6 +208,16 @@ const kanban = defineModel({ type: Object })
 const titleField = computed(() => {
   return kanban.value?.data?.title_field
 })
+
+// kanban_fields entries are either a bare fieldname (legacy / no custom label)
+// or { fieldname, label } when the user set a card label in Kanban Settings.
+function normalizeFields(fieldsList) {
+  return (fieldsList || []).map((f) =>
+    typeof f === 'string'
+      ? { fieldname: f, label: '' }
+      : { fieldname: f.fieldname, label: f.label || '' },
+  )
+}
 
 const columns = computed(() => {
   if (!kanban.value?.data?.data || kanban.value.data.view_type != 'kanban')

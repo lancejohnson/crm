@@ -43,25 +43,35 @@
         </Autocomplete>
       </div>
       <div class="mt-4">
-        <div class="text-base text-ink-gray-8 mb-2">
+        <div class="text-base text-ink-gray-8 mb-1">
           {{ __('Fields Order') }}
         </div>
+        <div class="text-sm text-ink-gray-5 mb-2">
+          {{ __('Set an optional label shown before each field on the card.') }}
+        </div>
         <Draggable
-          :list="allFields"
+          :list="selectedFields"
           group="fields"
-          item-key="name"
+          item-key="fieldname"
           class="flex flex-col gap-1"
-          @end="reorder"
         >
           <template #item="{ element: field }">
             <div
               class="px-1 py-0.5 border border-outline-gray-modals rounded text-base text-ink-gray-8 flex items-center justify-between gap-2"
             >
-              <div class="flex items-center gap-2">
-                <DragVerticalIcon class="h-3.5 cursor-grab" />
-                <div>{{ field.label }}</div>
+              <div class="flex items-center gap-2 min-w-0">
+                <DragVerticalIcon class="h-3.5 cursor-grab shrink-0" />
+                <div class="truncate">{{ field.label }}</div>
               </div>
-              <div>
+              <div class="flex items-center gap-1 shrink-0">
+                <FormControl
+                  v-model="field.customLabel"
+                  type="text"
+                  size="sm"
+                  :placeholder="__('Card label')"
+                  class="w-32"
+                  @click.stop
+                />
                 <Button variant="ghost" icon="x" @click="removeField(field)" />
               </div>
             </div>
@@ -104,7 +114,7 @@ import Autocomplete from '@/components/frappe-ui/Autocomplete.vue'
 import { getMeta } from '@/stores/meta'
 import { Dialog } from 'frappe-ui'
 import Draggable from 'vuedraggable'
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 
 const props = defineProps({
   doctype: {
@@ -156,25 +166,14 @@ const fields = computed(() => {
   const _fields = getFields({ withStandardFields: true }) || []
   if (!_fields.length) return []
 
-  let existingFields = []
-
-  allFields.value?.forEach((fieldname) => {
-    let field = _fields.find((f) => f.fieldname === fieldname)
-    if (field) existingFields.push(field)
+  let mapped = _fields.map((field) => {
+    return {
+      label: field.label,
+      value: field.fieldname,
+      fieldname: field.fieldname,
+      fieldtype: field.fieldtype,
+    }
   })
-
-  let mapped = _fields
-    .filter(
-      (field) => !existingFields?.find((f) => f.fieldname === field.fieldname),
-    )
-    .map((field) => {
-      return {
-        label: field.label,
-        value: field.fieldname,
-        fieldname: field.fieldname,
-        fieldtype: field.fieldtype,
-      }
-    })
 
   // computed pseudo-field (server fills it per-card in get_data) — not in meta
   if (props.doctype === 'CRM Lead') {
@@ -189,42 +188,54 @@ const fields = computed(() => {
   return mapped
 })
 
-const allFields = computed({
-  get: () => {
-    let rows = list.value?.data?.kanban_fields
-    if (!rows) return []
+// The editable list of cards fields. Each row carries the field meta (for
+// display) plus the user's optional `customLabel` shown on the card.
+const selectedFields = ref([])
 
-    if (typeof rows === 'string') {
+// kanban_fields persists as a mix of bare fieldnames (no custom label) and
+// { fieldname, label } objects (custom label set) — read both shapes.
+function buildSelectedFields() {
+  let rows = list.value?.data?.kanban_fields || []
+  if (typeof rows === 'string') {
+    try {
       rows = JSON.parse(rows)
+    } catch {
+      rows = []
     }
+  }
 
-    if (rows && fields.value) {
-      rows = rows.map((row) => {
-        return fields.value.find((field) => field.fieldname === row) || {}
-      })
-    }
-    return rows.filter((row) => row.label)
-  },
-  set: (val) => {
-    list.value.data.kanban_fields = val
-  },
-})
-
-function reorder() {
-  allFields.value = allFields.value.map((row) => row.fieldname)
+  selectedFields.value = rows
+    .map((row) => {
+      const fieldname = typeof row === 'string' ? row : row.fieldname
+      const customLabel = typeof row === 'string' ? '' : row.label || ''
+      const field = fields.value?.find((f) => f.fieldname === fieldname)
+      if (!field) return null
+      return { ...field, customLabel }
+    })
+    .filter(Boolean)
 }
+
+// keep only a bare fieldname when there's no custom label, so views without
+// labels stay byte-identical and back-compatible
+function serializeField(row) {
+  const label = (row.customLabel || '').trim()
+  return label ? { fieldname: row.fieldname, label } : row.fieldname
+}
+
+watch(showDialog, (open) => {
+  if (open) buildSelectedFields()
+})
 
 function addField(field) {
   if (!field) return
-  let rows = allFields.value || []
-  rows.push(field)
-  allFields.value = rows.map((row) => row.fieldname)
+  if (selectedFields.value.some((f) => f.fieldname === field.fieldname)) return
+  selectedFields.value.push({ ...field, customLabel: '' })
 }
 
 function removeField(field) {
-  let rows = allFields.value
-  rows = rows.filter((row) => row.fieldname !== field.fieldname)
-  allFields.value = rows.map((row) => row.fieldname)
+  selectedFields.value = selectedFields.value.filter(
+    (f) => f.fieldname !== field.fieldname,
+  )
 }
 
 function apply() {
@@ -233,7 +244,7 @@ function apply() {
     emit('update', {
       column_field: columnField.value.fieldname,
       title_field: titleField.value.fieldname,
-      kanban_fields: allFields.value.map((row) => row.fieldname),
+      kanban_fields: selectedFields.value.map(serializeField),
     })
   })
 }

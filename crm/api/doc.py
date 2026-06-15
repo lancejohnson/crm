@@ -414,9 +414,13 @@ def get_data(
 			if hasattr(_list, "default_kanban_settings"):
 				kanban_fields = json.loads(_list.default_kanban_settings().get("kanban_fields"))
 
+		# kanban_fields entries may be a bare fieldname (legacy) or
+		# {"fieldname", "label"} when a custom card label is set — only the
+		# fieldname is a real DB column to fetch.
 		for field in kanban_fields:
-			if field not in rows:
-				rows.append(field)
+			fieldname = field.get("fieldname") if isinstance(field, dict) else field
+			if fieldname not in rows:
+				rows.append(fieldname)
 
 		# computed pseudo-fields (filled per-card in getCounts) — not DB columns,
 		# so they must never reach frappe.get_list
