@@ -47,6 +47,27 @@ specifically: the `Quo Message` doctype, the `send-text` and `list-quo-numbers`
 API server scripts, and inbound text mirroring in the `sequence-events` webhook
 all live in `../frappe-crm-deploy`.
 
+## Local dev loop (fast iteration)
+
+There IS a local dev mirror now — a disposable copy of the prod stack on this
+Mac, seeded from a prod backup, served by Vite HMR. Use it for all iteration;
+`build_image.sh` is only the ship/deploy step (see below).
+
+```bash
+# one-time (or after a wipe): cd ../frappe-crm-deploy && ./scripts/dev_setup.sh
+cd ../frappe-crm-deploy && ./scripts/dev.sh up          # start the dev stack
+cd ../frappe-crm-app/frontend && yarn dev               # http://localhost:8080/crm
+# edit any .vue -> browser hot-reloads in <1s, no image build
+```
+
+- Login: `Administrator` / `admin` (or any restored prod user).
+- Python edits (`crm/api/*.py`, `hooks.py`) are bind-mounted live — run
+  `../frappe-crm-deploy/scripts/dev.sh restart` to pick them up (frontend needs
+  nothing). Stale data? `scripts/refresh_dev_data.sh` re-pulls prod.
+- The mirror runs NO worker/scheduler and mutes email so restored live
+  enrollments can't fire real texts/emails/ring-alerts. Full details, safety
+  guards, and caveats: `../frappe-crm-deploy/CLAUDE.md` → "Local dev mirror".
+
 ## Ship a change
 
 ```bash
@@ -55,9 +76,10 @@ cd ../frappe-crm-deploy && ./scripts/build_image.sh && python3 scripts/smoke_tes
 # commit here AND commit the compose pin bump in ../frappe-crm-deploy
 ```
 
-No local dev server is set up — the build_image.sh flow (~60s build) is the
-iteration loop. Frontend has no tests upstream; `yarn build` succeeding is the
-gate. Don't run `bench run-tests` against the prod site.
+`build_image.sh` (~60s build) is the deploy step, not the iteration loop (use
+the dev mirror above for that). Frontend has no tests upstream; `yarn build`
+succeeding is the gate. Don't run `bench run-tests` against the prod site (the
+dev mirror is the place for that).
 
 ## Upstream sync
 
