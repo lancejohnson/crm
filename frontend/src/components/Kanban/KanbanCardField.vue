@@ -30,9 +30,8 @@
       <!-- Edit: everything else that isn't read-only -->
       <Popover
         v-else-if="action === 'edit'"
+        v-model:show="editorOpen"
         placement="bottom-end"
-        @open="onEditorOpen"
-        @close="editorOpen = false"
       >
         <template #target="{ togglePopover }">
           <Tooltip :text="__('Edit')">
@@ -241,10 +240,10 @@ watch(
   (v) => (editValue.value = v),
 )
 
-function onEditorOpen() {
-  editorOpen.value = true
-  editValue.value = props.rawValue
-}
+// Seed the editor with the latest stored value each time it opens.
+watch(editorOpen, (open) => {
+  if (open) editValue.value = props.rawValue
+})
 
 function coerce(value) {
   if (['Int', 'Float', 'Currency', 'Percent'].includes(fieldMeta.value.fieldtype)) {
