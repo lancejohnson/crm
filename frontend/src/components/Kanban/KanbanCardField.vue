@@ -56,7 +56,7 @@
               v-if="fieldMeta.fieldtype === 'Select'"
               v-model="editValue"
               type="select"
-              :options="fieldMeta.options"
+              :options="selectOptions"
               @update:modelValue="(v) => save(v, close)"
             />
 
@@ -219,6 +219,14 @@ const action = computed(() => {
   if (isPhone.value || isAddress.value) return props.copyText ? 'copy' : 'none'
   if (editable.value) return 'edit'
   return 'none'
+})
+
+// Select options come from getFields() as [{label, value}]. A non-required Select
+// carries an empty-value option to clear the field; surface it as a visible
+// "None" instead of a blank, easy-to-miss row in the editor dropdown.
+const selectOptions = computed(() => {
+  const opts = (fieldMeta.value.options || []).filter((o) => o.value !== '')
+  return [{ label: __('None'), value: '' }, ...opts]
 })
 
 const showSaveButton = computed(() =>
