@@ -6,13 +6,25 @@
       />
     </template>
     <template #right-header>
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
         <!-- rep filter -->
         <FormControl
           type="select"
           :options="repOptions"
           v-model="rep"
           :placeholder="__('All reps')"
+        />
+        <!-- min call length -->
+        <FormControl
+          type="select"
+          :options="lengthOptions"
+          v-model="minDuration"
+        />
+        <!-- review status -->
+        <FormControl
+          type="select"
+          :options="reviewOptions"
+          v-model="reviewFilter"
         />
         <!-- date nav -->
         <div class="flex items-center gap-1">
@@ -41,16 +53,16 @@
   </LayoutHeader>
 
   <div class="flex flex-1 flex-col overflow-y-auto">
-    <!-- overall summary -->
+    <!-- summary (reflects the active filters) -->
     <div class="flex flex-wrap gap-3 border-b bg-surface-menu-bar px-5 py-3">
-      <StatCard :label="__('Calls')" :value="totals.calls" />
+      <StatCard :label="__('Calls')" :value="displayTotals.calls" />
       <StatCard
         :label="__('Outbound / Inbound')"
-        :value="`${totals.outbound} / ${totals.inbound}`"
+        :value="`${displayTotals.outbound} / ${displayTotals.inbound}`"
       />
-      <StatCard :label="__('Talk time')" :value="formatDuration(totals.talk_time) || '0s'" />
-      <StatCard :label="__('Leads')" :value="totals.leads" />
-      <StatCard :label="__('First-time calls')" :value="totals.first_time" />
+      <StatCard :label="__('Talk time')" :value="formatDuration(displayTotals.talk_time) || '0s'" />
+      <StatCard :label="__('Leads')" :value="displayTotals.leads" />
+      <StatCard :label="__('First-time calls')" :value="displayTotals.first_time" />
     </div>
 
     <div
@@ -65,10 +77,16 @@
     >
       {{ __('No calls logged on this day.') }}
     </div>
+    <div
+      v-else-if="!filteredReps.length"
+      class="flex flex-1 items-center justify-center p-10 text-sm text-ink-gray-5"
+    >
+      {{ __('No calls match the current filters.') }}
+    </div>
 
     <!-- per-rep sections -->
     <div v-else class="flex flex-col gap-6 p-5">
-      <section v-for="r in reps" :key="r.user || 'unassigned'">
+      <section v-for="r in filteredReps" :key="r.user || 'unassigned'">
         <div class="mb-2 flex items-center gap-3">
           <h2 class="text-base font-semibold text-ink-gray-9">
             {{ r.user_name }}
@@ -294,6 +312,8 @@ const todayStr = (() => {
 
 const date = ref(todayStr)
 const rep = ref('')
+const minDuration = ref('0')
+const reviewFilter = ref('all')
 const expanded = reactive({})
 const notesOpen = reactive({})
 const noteDraft = reactive({})
@@ -313,22 +333,69 @@ const repsResource = createResource({
 })
 
 const reps = computed(() => review.data?.reps || [])
-const totals = computed(
-  () =>
-    review.data?.totals || {
-      calls: 0,
-      inbound: 0,
-      outbound: 0,
-      talk_time: 0,
-      leads: 0,
-      first_time: 0,
-    },
-)
 
 const repOptions = computed(() => [
   { label: __('All reps'), value: '' },
   ...(repsResource.data || []),
 ])
+
+const lengthOptions = [
+  { label: __('Any length'), value: '0' },
+  { label: __('≥ 10s'), value: '10' },
+  { label: __('≥ 30s'), value: '30' },
+  { label: __('≥ 1 min'), value: '60' },
+  { label: __('≥ 2 min'), value: '120' },
+  { label: __('≥ 5 min'), value: '300' },
+]
+const reviewOptions = [
+  { label: __('All calls'), value: 'all' },
+  { label: __('Not reviewed'), value: 'unreviewed' },
+  { label: __('Reviewed'), value: 'reviewed' },
+]
+
+function callPasses(c) {
+  if ((c.duration || 0) < Number(minDuration.value)) return false
+  if (reviewFilter.value === 'unreviewed' && c.my_review.reviewed) return false
+  if (reviewFilter.value === 'reviewed' && !c.my_review.reviewed) return false
+  return true
+}
+
+function totalsOf(leads) {
+  const t = { calls: 0, inbound: 0, outbound: 0, talk_time: 0, leads: leads.length, first_time: 0 }
+  for (const ld of leads) {
+    if (ld.first_time_today) t.first_time++
+    for (const c of ld.calls) {
+      t.calls++
+      t.talk_time += c.duration || 0
+      if (c.type === 'Incoming') t.inbound++
+      else t.outbound++
+    }
+  }
+  return t
+}
+
+// filter calls live (by length + my review state), dropping emptied leads/reps
+// and recomputing totals so the header reflects what's shown
+const filteredReps = computed(() => {
+  const out = []
+  for (const r of reps.value) {
+    const leads = []
+    for (const ld of r.leads) {
+      const calls = ld.calls.filter(callPasses)
+      if (calls.length) leads.push({ ...ld, calls })
+    }
+    if (leads.length) out.push({ ...r, leads, totals: totalsOf(leads) })
+  }
+  return out
+})
+
+const displayTotals = computed(() => {
+  const o = { calls: 0, inbound: 0, outbound: 0, talk_time: 0, leads: 0, first_time: 0 }
+  for (const r of filteredReps.value) {
+    for (const k in o) o[k] += r.totals[k]
+  }
+  return o
+})
 
 watch([date, rep], () => review.reload())
 
