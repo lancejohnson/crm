@@ -523,14 +523,9 @@ function dialNumber(number) {
   // an OpenPhone deep link so the call places through the user's Quo number.
   const href = callHref(number, myQuoNumber())
   if (!href) return
-  // The anchor must be in the DOM for Chrome to honor a protocol-handler
-  // (tel:/openphone:) click — a detached element's .click() is silently ignored.
-  const el = document.createElement('a')
-  el.href = href
-  el.style.display = 'none'
-  document.body.appendChild(el)
-  el.click()
-  el.remove()
+  // Navigate to the tel:/openphone: URL — the browser hands it to the OS handler
+  // (Quo) without unloading the page. More reliable than a synthetic <a> click.
+  window.location.href = href
 }
 
 function openEmailBox() {

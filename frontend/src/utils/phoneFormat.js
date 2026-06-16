@@ -15,6 +15,14 @@ export function formatPhone(value) {
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`
 }
 
+// True on iOS/Android handsets & tablets — where the Quo (OpenPhone) app's deep
+// link auto-dials. Desktop uses a plain tel: link instead: there the deep link
+// only opens the app without placing the call, whereas tel:+1… actually dials
+// (with Quo set as the system tel: handler).
+function isMobileDevice() {
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '')
+}
+
 // Normalize a US-ish phone string to E.164 (+1XXXXXXXXXX). Non-US digit runs
 // just get a leading '+'. Returns '' when there's nothing dialable.
 function toE164(value) {
@@ -25,20 +33,19 @@ function toE164(value) {
   return '+' + digits
 }
 
-// Build a click-to-call href for a phone number, using the Quo/OpenPhone deep
-// link so the call places through the workspace, with `from` setting the
-// caller-ID number and skipping the picker prompt.
-// (openphone://dial?number=…&from=…&action=call.)
-//
-// We use this on desktop too (not a plain tel:): the Quo desktop app registers
-// the `openphone:` scheme and routes unambiguously to it, whereas `tel:` is
-// shared with FaceTime/Skype/Teams/Zoom so the OS default rarely opens Quo —
-// clicking it just did nothing.
+// Build a click-to-call href for a phone number.
+//   Mobile: Quo/OpenPhone deep link so the call places through the workspace,
+//     with `from` setting the caller-ID number and skipping the picker prompt.
+//     (openphone://dial?number=…&from=…&action=call — auto-dials on the app.)
+//   Desktop: a plain tel: link (the deep link doesn't auto-dial on desktop).
 // Returns '' when there's no dialable number, so callers can hide the link.
 export function callHref(value, from = '') {
   const e164 = toE164(value)
   if (!e164) return ''
-  const params = new URLSearchParams({ number: e164, action: 'call' })
-  if (from) params.set('from', from)
-  return `openphone://dial?${params.toString()}`
+  if (isMobileDevice()) {
+    const params = new URLSearchParams({ number: e164, action: 'call' })
+    if (from) params.set('from', from)
+    return `openphone://dial?${params.toString()}`
+  }
+  return `tel:${e164}`
 }
