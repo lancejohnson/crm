@@ -131,9 +131,14 @@
                 />
 
                 <Button
-                  :tooltip="__('Log a Call')"
+                  :tooltip="__('Call')"
                   :icon="PhoneIcon"
-                  @click="() => activities?.createCallLog()"
+                  @click="
+                    () =>
+                      doc.mobile_no || doc.phone
+                        ? dialNumber(doc.mobile_no || doc.phone)
+                        : toast.error(__('Please set a mobile number to call'))
+                  "
                 />
 
                 <Button
@@ -521,6 +526,13 @@ function updateField(name, value) {
 
 function deleteLead() {
   showDeleteLinkedDocModal.value = true
+}
+
+function dialNumber(number) {
+  // tel: link — on mobile this opens the dialer and starts the call.
+  const el = document.createElement('a')
+  el.href = `tel:${number}`
+  el.click()
 }
 
 function openEmailBox() {

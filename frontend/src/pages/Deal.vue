@@ -89,9 +89,9 @@
             />
 
             <Button
-              :tooltip="__('Log a Call')"
+              :tooltip="__('Call')"
               :icon="PhoneIcon"
-              @click="() => activities?.createCallLog()"
+              @click="dialPrimaryContact"
             />
 
             <Button
@@ -786,6 +786,26 @@ function deleteDeal() {
 }
 
 const activities = ref(null)
+
+function dialNumber(number) {
+  // tel: link — on mobile this opens the dialer and starts the call.
+  const el = document.createElement('a')
+  el.href = `tel:${number}`
+  el.click()
+}
+
+function dialPrimaryContact() {
+  let primaryContact = dealContacts.data?.find((c) => c.is_primary)
+  if (!primaryContact) {
+    toast.error(__('No Primary Contact Set'))
+    return
+  }
+  if (!primaryContact.mobile_no) {
+    toast.error(__('No Mobile Number Set'))
+    return
+  }
+  dialNumber(primaryContact.mobile_no)
+}
 
 function openEmailBox() {
   let currentTab = tabs.value[tabIndex.value]
