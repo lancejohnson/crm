@@ -385,7 +385,8 @@ import {
   copyToClipboard,
   isTranslatable,
 } from '@/utils'
-import { formatPhone } from '@/utils/phoneFormat'
+import { formatPhone, callHref } from '@/utils/phoneFormat'
+import { myQuoNumber } from '@/composables/quoSender'
 import { getView } from '@/utils/view'
 import { getSettings } from '@/stores/settings'
 import { globalStore } from '@/stores/global'
@@ -788,9 +789,12 @@ function deleteDeal() {
 const activities = ref(null)
 
 function dialNumber(number) {
-  // tel: link — on mobile this opens the dialer and starts the call.
+  // Desktop: tel: (the Quo desktop app is the registered handler). Mobile:
+  // an OpenPhone deep link so the call places through the user's Quo number.
+  const href = callHref(number, myQuoNumber())
+  if (!href) return
   const el = document.createElement('a')
-  el.href = `tel:${number}`
+  el.href = href
   el.click()
 }
 
