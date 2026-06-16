@@ -7,6 +7,11 @@ from frappe import _
 from frappe.model.document import Document, get_controller
 from frappe.utils import parse_json
 
+# The user whose default Kanban card layout becomes the GLOBAL default for
+# everyone. Lance runs the CRM as lance.johnson@groundworkpro.com (not as the
+# raw Administrator account), so the global trigger must key off this user.
+GLOBAL_KANBAN_EDITOR = "lance.johnson@groundworkpro.com"
+
 
 class CRMViewSettings(Document):
 	# begin: auto-generated types
@@ -234,11 +239,11 @@ def create_or_update_standard_view(view: dict):
 	elif not columns:
 		columns = sync_default_columns(view)
 
-	# Kanban card settings defined by the Administrator are GLOBAL: the standard
-	# Kanban view is owned by "" (which get_views serves to every user) so the
-	# admin's card layout becomes the default for everyone. Other view types and
-	# non-admin users keep their own per-user standard view.
-	is_global = (view.type or "list") == "kanban" and frappe.session.user == "Administrator"
+	# Kanban card settings defined by GLOBAL_KANBAN_EDITOR are GLOBAL: the standard
+	# Kanban view is owned by "" (which get_views serves to every user) so that
+	# user's card layout becomes the default for everyone. Other view types and
+	# all other users keep their own per-user standard view.
+	is_global = (view.type or "list") == "kanban" and frappe.session.user == GLOBAL_KANBAN_EDITOR
 	owner = "" if is_global else frappe.session.user
 
 	doc = frappe.db.exists(
@@ -246,11 +251,11 @@ def create_or_update_standard_view(view: dict):
 		{"dt": view.doctype, "type": view.type or "list", "is_standard": True, "user": owner},
 	)
 	if not doc and is_global:
-		# Promote the admin's pre-existing personal standard Kanban view (if any)
+		# Promote the editor's pre-existing personal standard Kanban view (if any)
 		# to global instead of leaving a now-shadowed duplicate behind.
 		doc = frappe.db.exists(
 			"CRM View Settings",
-			{"dt": view.doctype, "type": "kanban", "is_standard": True, "user": "Administrator"},
+			{"dt": view.doctype, "type": "kanban", "is_standard": True, "user": GLOBAL_KANBAN_EDITOR},
 		)
 	if doc:
 		doc = frappe.get_doc("CRM View Settings", doc)

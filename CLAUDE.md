@@ -28,13 +28,16 @@ server scripts, infra, and all operational context live in the ops repo:
   `#fields` slot — hover-only card affordances on the Leads Kanban: copy icon
   for phone/address fields, pencil-to-edit (inline popover, `frappe.client.set_value`
   + board reload) for any non-read-only field. Nothing shows until row hover.
-- **Global Kanban card settings (admin = default for everyone)** — when the
-  `Administrator` edits the default Kanban card layout, the standard Kanban
-  view is saved globally (`user=""`, which `get_views` serves to every user)
-  and overrides each user's personal Kanban view. Non-admins / other view
-  types are unchanged (still per-user). Applies to any Kanban (Leads + Deals).
+- **Global Kanban card settings (one editor = default for everyone)** — when
+  `lance.johnson@groundworkpro.com` (the `GLOBAL_KANBAN_EDITOR` constant) edits
+  the default Kanban card layout, the standard Kanban view is saved globally
+  (`user=""`, which `get_views` serves to every user) and overrides each user's
+  personal Kanban view. (Originally keyed off `Administrator`, but Lance runs
+  the CRM as his own user, so his edits never went global — switched to his
+  email.) Everyone else / other view types are unchanged (still per-user).
+  Applies to any Kanban (Leads + Deals).
   `crm/fcrm/doctype/crm_view_settings/crm_view_settings.py`
-  (`create_or_update_standard_view`: admin+kanban → `user=""`, promotes any
+  (`create_or_update_standard_view`: editor+kanban → `user=""`, promotes any
   pre-existing personal row instead of duplicating) +
   `frontend/src/stores/views.js` (a global/user-less standard view always wins
   over a personal one when resolving `standardViews`).
