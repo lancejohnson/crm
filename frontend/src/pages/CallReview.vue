@@ -158,7 +158,7 @@
                     @change="toggleReviewed(call)"
                   />
                   <span class="w-16 shrink-0 text-ink-gray-5">
-                    {{ formatDate(call.time, 'h:mm a') }}
+                    {{ callTime(call.time) }}
                   </span>
                   <span
                     class="flex items-center gap-1"
@@ -288,7 +288,8 @@
 
 <script setup>
 import LayoutHeader from '@/components/LayoutHeader.vue'
-import { formatDate, formatDuration } from '@/utils'
+import { formatDuration } from '@/utils'
+import { dayjs } from 'frappe-ui'
 import {
   Breadcrumbs,
   Button,
@@ -409,6 +410,13 @@ function shiftDay(delta) {
 
 function toggle(name) {
   expanded[name] = !expanded[name]
+}
+
+// Call times are stored as the rep's local (Chicago) wall-clock, NOT UTC, so
+// format them verbatim — running them through dayjsLocal would re-convert an
+// already-local time and shift it by the viewer's timezone offset.
+function callTime(t) {
+  return t ? dayjs(t.slice(0, 19)).format('h:mm a') : ''
 }
 
 function reviewedByOthers(call) {
