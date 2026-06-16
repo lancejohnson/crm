@@ -118,6 +118,11 @@ const routes = [
     component: () => import('@/pages/TextMessages.vue'),
   },
   {
+    path: '/reports/calls',
+    name: 'Call Review',
+    component: () => import('@/pages/CallReview.vue'),
+  },
+  {
     path: '/welcome',
     name: 'Welcome',
     component: () => import('@/pages/Welcome.vue'),

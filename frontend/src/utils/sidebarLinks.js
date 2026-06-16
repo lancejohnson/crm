@@ -8,6 +8,7 @@ import TaskIcon from '@/components/Icons/TaskIcon.vue'
 import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
 import CommentIcon from '@/components/Icons/CommentIcon.vue'
 import StepsIcon from '@/components/Icons/StepsIcon.vue'
+import LucideHeadphones from '~icons/lucide/headphones'
 
 // canonical module list for the left sidebar; admin-defined order/visibility
 // lives in FCRM Settings.custom_sidebar_items as [{label, hidden}]
@@ -22,6 +23,7 @@ export const sidebarLinks = [
   { label: 'Call Logs', icon: PhoneIcon, to: 'Call Logs' },
   { label: 'Text Messages', icon: CommentIcon, to: 'Text Messages' },
   { label: 'Sequences', icon: StepsIcon, to: 'Sequences' },
+  { label: 'Call Review', icon: LucideHeadphones, to: 'Call Review' },
 ]
 
 // merge the saved [{label, hidden}] config with the canonical list:
