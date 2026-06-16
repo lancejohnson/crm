@@ -128,9 +128,17 @@
               <div
                 v-for="call in ld.calls"
                 :key="call.name"
-                class="flex flex-col gap-2 px-4 py-2.5"
+                class="flex flex-col gap-2 border-l-2 px-4 py-2.5"
+                :class="call.my_review.reviewed ? 'border-ink-green-3' : 'border-transparent'"
               >
                 <div class="flex flex-wrap items-center gap-3 text-sm">
+                  <input
+                    type="checkbox"
+                    class="size-4 shrink-0 cursor-pointer rounded border-outline-gray-2 text-ink-green-3 focus:ring-0"
+                    :checked="call.my_review.reviewed"
+                    :title="__('Mark reviewed')"
+                    @change="toggleReviewed(call)"
+                  />
                   <span class="w-16 shrink-0 text-ink-gray-5">
                     {{ formatDate(call.time, 'h:mm a') }}
                   </span>
@@ -174,12 +182,82 @@
                     :label="expanded[call.name] ? __('Hide summary') : __('AI summary')"
                     @click="toggle(call.name)"
                   />
+                  <Button
+                    variant="ghost"
+                    :label="call.my_review.notes ? __('Notes ✎') : __('Add note')"
+                    @click="toggleNotes(call)"
+                  />
+                  <span
+                    v-if="reviewedByOthers(call)"
+                    class="flex items-center gap-0.5 text-xs text-ink-gray-5"
+                    :title="othersTitle(call)"
+                  >
+                    <FeatherIcon name="check" class="h-3.5 w-3.5 text-ink-green-3" />
+                    {{ reviewedByOthers(call) }}
+                  </span>
                 </div>
+
                 <div
                   v-if="call.ai_summary && expanded[call.name]"
                   class="whitespace-pre-wrap rounded bg-surface-gray-1 px-3 py-2 text-sm text-ink-gray-7"
                 >
                   {{ call.ai_summary }}
+                </div>
+
+                <!-- review panel: your notes + everyone else's marks -->
+                <div
+                  v-if="notesOpen[call.name]"
+                  class="rounded bg-surface-gray-1 px-3 py-2"
+                >
+                  <div class="mb-1 text-xs font-medium text-ink-gray-5">
+                    {{ __('Your notes') }}
+                  </div>
+                  <textarea
+                    v-model="noteDraft[call.name]"
+                    rows="3"
+                    class="w-full rounded border bg-surface-white px-2 py-1 text-sm text-ink-gray-8 focus:outline-none"
+                    :placeholder="__('Notes on this call…')"
+                  />
+                  <div class="mt-2 flex items-center gap-2">
+                    <Button
+                      variant="solid"
+                      :label="__('Save')"
+                      :loading="saving[call.name]"
+                      @click="saveNotes(call)"
+                    />
+                    <Button
+                      variant="ghost"
+                      :label="__('Cancel')"
+                      @click="closeNotes(call)"
+                    />
+                  </div>
+                  <div
+                    v-if="call.reviews.length"
+                    class="mt-3 flex flex-col gap-2 border-t pt-2"
+                  >
+                    <div
+                      v-for="r in call.reviews"
+                      :key="r.reviewer"
+                      class="text-sm"
+                    >
+                      <span class="font-medium text-ink-gray-7">
+                        {{ r.reviewer_name }}
+                      </span>
+                      <Badge
+                        v-if="r.reviewed"
+                        :label="__('Reviewed')"
+                        variant="subtle"
+                        theme="green"
+                        class="ml-1"
+                      />
+                      <div
+                        v-if="r.notes"
+                        class="mt-0.5 whitespace-pre-wrap text-ink-gray-6"
+                      >
+                        {{ r.notes }}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -200,6 +278,7 @@ import {
   FormControl,
   FeatherIcon,
   createResource,
+  call as apiCall,
 } from 'frappe-ui'
 import { ref, computed, reactive, watch, h } from 'vue'
 import { useRouter } from 'vue-router'
@@ -216,6 +295,9 @@ const todayStr = (() => {
 const date = ref(todayStr)
 const rep = ref('')
 const expanded = reactive({})
+const notesOpen = reactive({})
+const noteDraft = reactive({})
+const saving = reactive({})
 
 const review = createResource({
   url: 'crm.api.reports.get_call_review',
@@ -260,6 +342,57 @@ function shiftDay(delta) {
 
 function toggle(name) {
   expanded[name] = !expanded[name]
+}
+
+function reviewedByOthers(call) {
+  return call.reviews.filter((r) => r.reviewed).length
+}
+
+function othersTitle(call) {
+  return call.reviews
+    .filter((r) => r.reviewed)
+    .map((r) => r.reviewer_name)
+    .join(', ')
+}
+
+async function toggleReviewed(call) {
+  const next = !call.my_review.reviewed
+  call.my_review.reviewed = next // optimistic
+  try {
+    await apiCall('crm.api.reports.set_call_review', {
+      call_log: call.name,
+      reviewed: next ? 1 : 0,
+    })
+  } catch (e) {
+    call.my_review.reviewed = !next // revert on failure
+    console.error('set_call_review (reviewed) failed', e)
+  }
+}
+
+function toggleNotes(call) {
+  if (!notesOpen[call.name]) noteDraft[call.name] = call.my_review.notes || ''
+  notesOpen[call.name] = !notesOpen[call.name]
+}
+
+function closeNotes(call) {
+  notesOpen[call.name] = false
+}
+
+async function saveNotes(call) {
+  const notes = noteDraft[call.name] ?? ''
+  saving[call.name] = true
+  try {
+    await apiCall('crm.api.reports.set_call_review', {
+      call_log: call.name,
+      notes,
+    })
+    call.my_review.notes = notes
+    notesOpen[call.name] = false
+  } catch (e) {
+    console.error('set_call_review (notes) failed', e)
+  } finally {
+    saving[call.name] = false
+  }
 }
 
 function openLead(ld) {

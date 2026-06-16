@@ -17,7 +17,7 @@ Read-only: this module touches no secrets and writes nothing.
 
 import frappe
 from frappe import _
-from frappe.utils import getdate, today
+from frappe.utils import cint, getdate, today
 
 ALLOWED_REPORT_ROLES = ["System Manager", "Sales Manager", "Sales User"]
 
@@ -44,6 +44,29 @@ def _quo_number_map():
 		if not existing or existing["name"] == "Administrator":
 			out[num] = u
 	return out
+
+
+def _split_reviews(rlist, me, names):
+	"""Split a call's review rows into the current user's editable review and the
+	read-only marks left by everyone else."""
+	mine = next((r for r in rlist if r["reviewer"] == me), None)
+	others = [
+		{
+			"reviewer": r["reviewer"],
+			"reviewer_name": names.get(r["reviewer"]) or r["reviewer"],
+			"reviewed": bool(r["reviewed"]),
+			"notes": r.get("notes") or "",
+		}
+		for r in rlist
+		if r["reviewer"] != me
+	]
+	return {
+		"my_review": {
+			"reviewed": bool(mine and mine["reviewed"]),
+			"notes": (mine.get("notes") if mine else "") or "",
+		},
+		"reviews": others,
+	}
 
 
 @frappe.whitelist()
@@ -130,6 +153,21 @@ def get_call_review(date: str = None, user: str = None):
 			if outcomes.get(l["link_name"]):
 				call_to_outcome[l["parent"]] = outcomes[l["link_name"]]
 
+	# --- per-reviewer review state: one CRM Call Review row per (call, reviewer),
+	# so several people can mark the same call reviewed with their own notes.
+	# Guarded so the report still works before the doctype is deployed. ---
+	me = frappe.session.user
+	reviews_by_call = {}
+	reviewer_emails = set()
+	if call_names and frappe.db.exists("DocType", "CRM Call Review"):
+		for rv in frappe.get_all(
+			"CRM Call Review",
+			filters={"call_log": ["in", call_names]},
+			fields=["call_log", "reviewer", "reviewed", "notes"],
+		):
+			reviews_by_call.setdefault(rv["call_log"], []).append(rv)
+			reviewer_emails.add(rv["reviewer"])
+
 	# --- lead display name + current status (calls are lead-linked) ---
 	lead_names = list({c["reference_docname"] for c in calls if c.get("reference_doctype") == "CRM Lead" and c.get("reference_docname")})
 	lead_info = {}
@@ -162,13 +200,13 @@ def get_call_review(date: str = None, user: str = None):
 		)
 		first_time_leads = {ln for ln in lead_names if ln not in prior}
 
-	# --- rep display names ---
-	rep_emails = list({c["rep"] for c in calls if c["rep"]})
+	# --- rep + reviewer display names ---
+	name_emails = list({c["rep"] for c in calls if c["rep"]} | reviewer_emails)
 	user_names = {}
-	if rep_emails:
+	if name_emails:
 		for u in frappe.get_all(
 			"User",
-			filters={"name": ["in", rep_emails]},
+			filters={"name": ["in", name_emails]},
 			fields=["name", "full_name"],
 		):
 			user_names[u["name"]] = u.get("full_name") or u["name"]
@@ -205,6 +243,7 @@ def get_call_review(date: str = None, user: str = None):
 				"calls": [],
 			},
 		)
+		review = _split_reviews(reviews_by_call.get(c["name"], []), me, user_names)
 		lead_bucket["calls"].append(
 			{
 				"name": c["name"],
@@ -215,6 +254,8 @@ def get_call_review(date: str = None, user: str = None):
 				"recording_url": c.get("recording_url") or "",
 				"ai_summary": c.get("custom_ai_summary") or "" if has_ai else "",
 				"call_outcome": call_to_outcome.get(c["name"], ""),
+				"my_review": review["my_review"],
+				"reviews": review["reviews"],
 			}
 		)
 
@@ -273,3 +314,41 @@ def get_call_review_reps():
 		out.append({"value": u["name"], "label": u.get("full_name") or u["name"]})
 	out.sort(key=lambda x: x["label"].lower())
 	return out
+
+
+@frappe.whitelist()
+def set_call_review(call_log: str, reviewed=None, notes=None):
+	"""Upsert the current user's review of a call (mark reviewed and/or leave notes).
+
+	Keyed on (call_log, session user): every reviewer gets their own row, so two
+	people reviewing the same call never clobber each other. A user can only touch
+	their own review — `reviewer` is always the session user, never a param.
+	"""
+	validate_access()
+	if not frappe.db.exists("CRM Call Log", call_log):
+		frappe.throw(_("Call {0} does not exist.").format(call_log), frappe.DoesNotExistError)
+
+	reviewer = frappe.session.user
+	existing = frappe.db.get_value(
+		"CRM Call Review", {"call_log": call_log, "reviewer": reviewer}, "name"
+	)
+	if existing:
+		doc = frappe.get_doc("CRM Call Review", existing)
+	else:
+		doc = frappe.new_doc("CRM Call Review")
+		doc.call_log = call_log
+		doc.reviewer = reviewer
+
+	if reviewed is not None:
+		doc.reviewed = 1 if cint(reviewed) else 0
+	if notes is not None:
+		doc.notes = notes
+
+	# already role-gated above and scoped to the session user's own row
+	doc.save(ignore_permissions=True)
+
+	return {
+		"call_log": call_log,
+		"reviewed": bool(doc.reviewed),
+		"notes": doc.notes or "",
+	}
