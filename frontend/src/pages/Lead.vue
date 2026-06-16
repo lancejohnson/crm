@@ -34,11 +34,6 @@
           </Button>
         </template>
       </Dropdown>
-      <Button
-        :label="__('Convert to Deal')"
-        variant="solid"
-        @click="showConvertToDealModal = true"
-      />
     </template>
   </LayoutHeader>
   <div v-if="doc.name" class="flex h-full overflow-hidden">
@@ -227,11 +222,6 @@
     :errorTitle="errorTitle"
     :errorMessage="errorMessage"
   />
-  <ConvertToDealModal
-    v-if="showConvertToDealModal"
-    v-model="showConvertToDealModal"
-    :lead="doc"
-  />
   <FilesUploader
     v-model="showFilesUploader"
     doctype="CRM Lead"
@@ -283,7 +273,6 @@ import FilesUploader from '@/components/FilesUploader/FilesUploader.vue'
 import SidePanelLayout from '@/components/SidePanelLayout.vue'
 import SLASection from '@/components/SLASection.vue'
 import CustomActions from '@/components/CustomActions.vue'
-import ConvertToDealModal from '@/components/Modals/ConvertToDealModal.vue'
 import {
   openWebsite,
   setupCustomizations,
@@ -333,7 +322,6 @@ const activities = ref(null)
 const errorTitle = ref('')
 const errorMessage = ref('')
 const showDeleteLinkedDocModal = ref(false)
-const showConvertToDealModal = ref(false)
 const showFilesUploader = ref(false)
 
 const {
@@ -535,9 +523,14 @@ function dialNumber(number) {
   // an OpenPhone deep link so the call places through the user's Quo number.
   const href = callHref(number, myQuoNumber())
   if (!href) return
+  // The anchor must be in the DOM for Chrome to honor a protocol-handler
+  // (tel:/openphone:) click — a detached element's .click() is silently ignored.
   const el = document.createElement('a')
   el.href = href
+  el.style.display = 'none'
+  document.body.appendChild(el)
   el.click()
+  el.remove()
 }
 
 function openEmailBox() {

@@ -16,15 +16,22 @@
 import { ref } from 'vue'
 
 const props = defineProps({
-  defaultWidth: { type: Number, default: 352 },
+  defaultWidth: { type: Number, default: 420 },
   minWidth: { type: Number, default: 16 * 16 },
-  maxWidth: { type: Number, default: 30 * 16 },
+  maxWidth: { type: Number, default: 36 * 16 },
   side: { type: String, default: 'left' },
   parent: { type: Object, default: null },
 })
 
 const sidebarResizing = ref(false)
-const sidebarWidth = ref(props.defaultWidth)
+// Restore the user's last manually-set width (persisted on resize); fall back to
+// the default. Clamp to the allowed range in case min/max changed.
+const stored = Number(localStorage.getItem('sidebarWidth'))
+const sidebarWidth = ref(
+  stored
+    ? Math.min(Math.max(stored, props.minWidth), props.maxWidth)
+    : props.defaultWidth,
+)
 
 function startResize() {
   document.addEventListener('mousemove', resize)
