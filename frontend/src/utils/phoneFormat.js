@@ -15,12 +15,6 @@ export function formatPhone(value) {
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`
 }
 
-// True on iOS/Android handsets & tablets — where the Quo (OpenPhone) app lives
-// and its deep link can be handled. Desktop falls through to a plain tel: link.
-function isMobileDevice() {
-  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '')
-}
-
 // Normalize a US-ish phone string to E.164 (+1XXXXXXXXXX). Non-US digit runs
 // just get a leading '+'. Returns '' when there's nothing dialable.
 function toE164(value) {
@@ -31,19 +25,20 @@ function toE164(value) {
   return '+' + digits
 }
 
-// Build a click-to-call href for a phone number.
-//   Mobile: Quo/OpenPhone deep link so the call places through the workspace,
-//     with `from` setting the caller-ID number and skipping the picker prompt.
-//     (openphone://dial?number=…&from=…&action=call — mobile app only.)
-//   Desktop: a plain tel: link.
+// Build a click-to-call href for a phone number, using the Quo/OpenPhone deep
+// link so the call places through the workspace, with `from` setting the
+// caller-ID number and skipping the picker prompt.
+// (openphone://dial?number=…&from=…&action=call.)
+//
+// We use this on desktop too (not a plain tel:): the Quo desktop app registers
+// the `openphone:` scheme and routes unambiguously to it, whereas `tel:` is
+// shared with FaceTime/Skype/Teams/Zoom so the OS default rarely opens Quo —
+// clicking it just did nothing.
 // Returns '' when there's no dialable number, so callers can hide the link.
 export function callHref(value, from = '') {
   const e164 = toE164(value)
   if (!e164) return ''
-  if (isMobileDevice()) {
-    const params = new URLSearchParams({ number: e164, action: 'call' })
-    if (from) params.set('from', from)
-    return `openphone://dial?${params.toString()}`
-  }
-  return `tel:${e164}`
+  const params = new URLSearchParams({ number: e164, action: 'call' })
+  if (from) params.set('from', from)
+  return `openphone://dial?${params.toString()}`
 }
