@@ -1,5 +1,5 @@
 <template>
-  <div :id="activity.name">
+  <div :id="activity.name" class="group">
     <div class="mb-1 flex items-center justify-stretch gap-2 py-1 text-base">
       <div class="inline-flex items-center flex-wrap gap-1 text-ink-gray-5">
         <UserAvatar class="mr-1" :user="activity.owner" size="md" />
@@ -11,7 +11,18 @@
           {{ __('comment') }}
         </span>
       </div>
-      <div class="ml-auto whitespace-nowrap">
+      <div class="ml-auto flex items-center gap-1 whitespace-nowrap">
+        <Button
+          v-if="canEdit && !editing"
+          class="opacity-0 transition-opacity group-hover:opacity-100"
+          variant="ghost"
+          :tooltip="__('Edit')"
+          @click="startEdit"
+        >
+          <template #icon>
+            <EditIcon class="h-3.5 w-3.5 text-ink-gray-5" />
+          </template>
+        </Button>
         <Tooltip :text="formatDate(activity.creation)">
           <div class="text-sm text-ink-gray-5">
             {{ __(timeAgo(activity.creation)) }}
@@ -20,6 +31,35 @@
       </div>
     </div>
     <div
+      v-if="editing"
+      class="rounded bg-surface-gray-1 px-3 py-[7.5px] text-base leading-6"
+    >
+      <TextEditor
+        ref="editor"
+        editor-class="prose-f max-w-none focus:outline-none"
+        :content="editedContent"
+        :placeholder="__('Edit comment...')"
+        :editable="true"
+        :bubbleMenu="true"
+        :mentions="users"
+        @change="editedContent = $event"
+      />
+      <div class="mt-2 flex justify-end gap-2">
+        <Button
+          :label="__('Cancel')"
+          :disabled="saving"
+          @click="cancelEdit"
+        />
+        <Button
+          variant="solid"
+          :label="__('Save')"
+          :loading="saving"
+          @click="saveEdit"
+        />
+      </div>
+    </div>
+    <div
+      v-else
       class="cursor-pointer rounded bg-surface-gray-1 px-3 py-[7.5px] text-base leading-6 transition-all duration-300 ease-in-out"
     >
       <!-- eslint-disable-next-line vue/no-v-html -->
@@ -38,10 +78,64 @@
 <script setup>
 import UserAvatar from '@/components/UserAvatar.vue'
 import AttachmentItem from '@/components/AttachmentItem.vue'
-import { Tooltip } from 'frappe-ui'
+import EditIcon from '@/components/Icons/EditIcon.vue'
+import { sessionStore } from '@/stores/session'
+import { usersStore } from '@/stores/users'
 import { timeAgo, formatDate, sanitizeHTML } from '@/utils'
+import { Button, Tooltip, TextEditor, call, toast } from 'frappe-ui'
+import { computed, ref } from 'vue'
 
-defineProps({
+const props = defineProps({
   activity: { type: Object, default: () => ({}) },
+})
+
+// Pass the activities resource (v-model) so we can refresh after an edit.
+const activities = defineModel({ type: Object })
+
+const { user } = sessionStore()
+const { users: usersList } = usersStore()
+
+const canEdit = computed(() => props.activity.owner === user)
+
+const editing = ref(false)
+const saving = ref(false)
+const editedContent = ref('')
+
+function startEdit() {
+  editedContent.value = props.activity.content
+  editing.value = true
+}
+
+function cancelEdit() {
+  editing.value = false
+}
+
+async function saveEdit() {
+  if (!editedContent.value?.trim()) return
+  saving.value = true
+  try {
+    await call('crm.api.comment.edit_comment', {
+      comment_name: props.activity.name,
+      content: editedContent.value,
+    })
+    editing.value = false
+    activities.value?.reload()
+    toast.success(__('Comment updated'))
+  } catch (e) {
+    toast.error(e?.messages?.[0] || __('Failed to update comment'))
+  } finally {
+    saving.value = false
+  }
+}
+
+const users = computed(() => {
+  return (
+    usersList.data?.crmUsers
+      ?.filter((u) => u.enabled)
+      .map((u) => ({
+        label: u.full_name.trimEnd(),
+        value: u.name,
+      })) || []
+  )
 })
 </script>

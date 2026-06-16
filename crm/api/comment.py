@@ -18,6 +18,9 @@ def notify_mentions(doc):
 	Extract mentions from `content`, and notify.
 	`content` must have `HTML` content.
 	"""
+	if doc.flags.skip_mention_notification:
+		# Edits re-trigger on_update; don't re-notify everyone already mentioned.
+		return
 	content = getattr(doc, "content", None)
 	if not content:
 		return
@@ -85,6 +88,32 @@ def add_comment(reference_doctype: str, reference_name: str, content: str, attac
 
 	if attachments and comment.name:
 		add_attachments(comment.name, attachments)
+
+	return comment
+
+
+@frappe.whitelist()
+def edit_comment(comment_name: str, content: str):
+	"""Edit the content of an existing comment.
+
+	Only the comment's author may edit it.
+
+	:param comment_name: Name of the Comment to edit
+	:param content: New comment content (HTML)
+	:return: Updated Comment Document
+	"""
+	comment = frappe.get_doc("Comment", comment_name)
+
+	if comment.comment_type != "Comment":
+		frappe.throw(_("Only comments can be edited"))
+
+	if comment.owner != frappe.session.user:
+		frappe.throw(_("You can only edit your own comments"), frappe.PermissionError)
+
+	comment.content = content
+	# Don't re-notify everyone already mentioned each time the comment is edited.
+	comment.flags.skip_mention_notification = True
+	comment.save(ignore_permissions=True)
 
 	return comment
 

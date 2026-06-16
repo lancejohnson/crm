@@ -18,6 +18,12 @@ server scripts, infra, and all operational context live in the ops repo:
 - `frontend/src/components/Modals/TaskModal.vue` — "Call Outcome" disposition
   dropdown (Connected / Left Voicemail / No Answer / Wrong Number / Do Not Call)
 - `crm/api/activities.py` — `call_outcome` in task field lists
+- `frontend/src/components/Activities/CommentArea.vue` + `Activities.vue` +
+  `crm/api/comment.py` — edit your own comments inline on the Lead/Deal activity
+  feed: a hover-only pencil (Comments tab + the unified Activity timeline) opens an
+  inline rich-text editor with Save/Cancel. Owner-only `edit_comment` API
+  (PermissionError guard; suppresses mention re-notify on edit); `Activities.vue`
+  passes the activities resource via `v-model` so the feed reloads after a save.
 - `frontend/src/components/Kanban/KanbanCardField.vue` + `pages/Leads.vue`
   `#fields` slot — hover-only card affordances on the Leads Kanban: copy icon
   for phone/address fields, pencil-to-edit (inline popover, `frappe.client.set_value`
