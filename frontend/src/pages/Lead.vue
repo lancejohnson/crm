@@ -131,6 +131,26 @@
                 />
 
                 <Button
+                  :tooltip="__('Log a Call')"
+                  :icon="PhoneIcon"
+                  @click="() => activities?.createCallLog()"
+                />
+
+                <Button
+                  v-if="smsEnabled"
+                  :tooltip="__('Send a Text')"
+                  :icon="CommentIcon"
+                  @click="
+                    () =>
+                      doc.mobile_no || doc.phone
+                        ? activities?.sendText()
+                        : toast.error(
+                            __('Please set a mobile number to send a text'),
+                          )
+                  "
+                />
+
+                <Button
                   :tooltip="__('Send an Email')"
                   :icon="Email2Icon"
                   @click="

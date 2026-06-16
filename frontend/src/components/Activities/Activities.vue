@@ -981,5 +981,10 @@ function scroll(hash) {
   }, 500)
 }
 
-defineExpose({ emailBox, all_activities, changeTabTo })
+// Surface the call-log / send-text modals so the page header (Lead/Deal) can
+// trigger them from buttons next to the name, mirroring ActivityHeader.
+const createCallLog = () => modalRef.value?.createCallLog()
+const sendText = () => modalRef.value?.sendText()
+
+defineExpose({ emailBox, all_activities, changeTabTo, createCallLog, sendText })
 </script>
