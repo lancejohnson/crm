@@ -14,9 +14,11 @@ const routes = [
     component: () => import('@/pages/MobileNotification.vue'),
   },
   {
+    // Groundwork custom leads dashboard (replaces the generic chart dashboard).
+    // The upstream Dashboard.vue is kept in the repo but no longer routed.
     path: '/dashboard',
     name: 'Dashboard',
-    component: () => import('@/pages/Dashboard.vue'),
+    component: () => import('@/pages/LeadsDashboard.vue'),
   },
   {
     alias: '/leads',
@@ -165,27 +167,8 @@ router.beforeEach(async (to, from, next) => {
   if (isLoggedIn && to.name !== 'Not Permitted' && !isCrmUser()) {
     next({ name: 'Not Permitted' })
   } else if (to.name === 'Home' && isLoggedIn) {
-    const { views, getDefaultView } = viewsStore()
-    await views.promise
-
-    let defaultView = getDefaultView()
-    if (!defaultView) {
-      next({ name: 'Leads' })
-      return
-    }
-
-    let { route_name, type, name, is_standard } = defaultView
-    route_name = route_name || 'Leads'
-
-    if (name && !is_standard) {
-      next({
-        name: route_name,
-        params: { viewType: type },
-        query: { view: name },
-      })
-    } else {
-      next({ name: route_name, params: { viewType: type } })
-    }
+    // Groundwork: the custom leads dashboard is the landing page.
+    next({ name: 'Dashboard' })
   } else if (!isLoggedIn) {
     window.location.href = '/login?redirect-to=/crm'
   } else if (to.matched.length === 0) {
