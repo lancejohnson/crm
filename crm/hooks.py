@@ -184,6 +184,14 @@ doc_events = {
 	"Quo Message": {
 		"after_insert": ["crm.api.sms.on_quo_message_insert"],
 	},
+	# Real-time drainer for sub-minute sequence steps. The sandboxed sequence
+	# engine can't sleep or enqueue cleanly into a worker, so the burst is driven
+	# from here (non-sandboxed): enqueue a worker that sleeps the real waits and
+	# reuses the engine for each step. Fires on the same condition as auto-enroll.
+	"CRM Lead": {
+		"after_insert": ["crm.api.sequence_drain.enqueue_for_lead"],
+		"on_update": ["crm.api.sequence_drain.enqueue_for_lead"],
+	},
 }
 
 # Scheduled Tasks
@@ -194,6 +202,10 @@ scheduler_events = {
 	"hourly_long": ["crm.lead_syncing.background_sync.sync_leads_from_sources_hourly"],
 	"monthly_long": ["crm.lead_syncing.background_sync.sync_leads_from_sources_monthly"],
 	"cron": {
+		# Single periodic driver for CRM Sequences: enqueue a drainer for every
+		# due enrollment (the old `CRM Sequence Runner` core-cron is disabled in
+		# favour of this). The drainer runs on the dedicated `seqdrain` queue.
+		"* * * * *": ["crm.api.sequence_drain.drain_due"],
 		"*/5 * * * *": ["crm.lead_syncing.background_sync.sync_leads_from_sources_5_minutes"],
 		"*/10 * * * *": ["crm.lead_syncing.background_sync.sync_leads_from_sources_10_minutes"],
 		"*/15 * * * *": ["crm.lead_syncing.background_sync.sync_leads_from_sources_15_minutes"],

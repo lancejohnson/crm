@@ -59,6 +59,14 @@ server scripts, infra, and all operational context live in the ops repo:
     the `quo_message` realtime event (the server scripts can't, sandbox)
 - `frontend/vite.config.js` — PWA service worker set `selfDestroying` (the
   precache served stale app bundles after deploys)
+- **Sequence real-time drainer** — `crm/api/sequence_drain.py` + `crm/hooks.py`
+  (CRM Lead doc-event `enqueue_for_lead` + 1-min `drain_due` scheduler). Makes
+  sub-minute sequence-step waits actually honor seconds (the sandboxed engine
+  can't `time.sleep`/delay-enqueue, so the old cron rounded every wait up to
+  ~60s). Single-driver model on a dedicated `seqdrain` worker; the old
+  "CRM Sequence Runner" cron is disabled. Full design + the two deploy gotchas
+  (register the `seqdrain` queue in common_site_config; `migrate`/`sync_jobs` to
+  register `drain_due`) live in `../frappe-crm-deploy/CLAUDE.md` → Sequences.
 
 The companion server-side pieces (custom doctypes, scheduler engine, webhook
 endpoints) are Server Scripts managed from the ops repo, NOT app code here. SMS
