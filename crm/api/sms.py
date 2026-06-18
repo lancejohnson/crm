@@ -12,10 +12,30 @@ the per-user from-number map). Shapes mirror `crm/api/whatsapp.py` so the fronte
 reuses the same thread components.
 """
 
+import json
+
 import frappe
 from frappe import _
 
 ALLOWED_SMS_ROLES = ["System Manager", "Sales Manager", "Sales User"]
+
+
+def _media(raw):
+	"""Parse the Quo Message `media` field (a JSON array of {url, type}) into the
+	shape the thread renders. MMS attachments arrive only in the Quo webhook
+	payload (the REST API omits them), so historical texts have no media."""
+	if not raw:
+		return []
+	if isinstance(raw, str):
+		try:
+			raw = json.loads(raw)
+		except (ValueError, TypeError):
+			return []
+	out = []
+	for it in raw or []:
+		if isinstance(it, dict) and it.get("url"):
+			out.append({"url": it.get("url"), "type": it.get("type") or ""})
+	return out
 
 
 def validate_access(reference_doctype=None, reference_name=None, permtype="read"):
@@ -53,6 +73,7 @@ def _shape(rows):
 				"from": m.get("from"),
 				"to": m.get("to"),
 				"message": m.content,
+				"media": _media(m.get("media")),
 				"status": (m.status or "").lower(),
 				"creation": m.message_date or m.creation,
 				"reference_doctype": m.reference_doctype,
@@ -104,6 +125,7 @@ def get_sms_messages(reference_doctype: str, reference_name: str):
 		"from",
 		"to",
 		"content",
+		"media",
 		"status",
 		"message_date",
 		"creation",
@@ -146,7 +168,7 @@ def get_sms_conversations():
 	rows = frappe.get_all(
 		"Quo Message",
 		filters={"reference_doctype": "CRM Lead"},
-		fields=["reference_docname", "direction", "content", "status", "message_date", "creation"],
+		fields=["reference_docname", "direction", "content", "media", "status", "message_date", "creation"],
 		order_by="message_date desc, creation desc",
 		limit_page_length=0,
 	)
@@ -158,10 +180,12 @@ def get_sms_conversations():
 		if not lead:
 			continue
 		if lead not in convos:
-			# rows are newest-first, so the first one seen per lead is the latest
+			# rows are newest-first, so the first one seen per lead is the latest.
+			# A media-only text (empty content) would show a blank preview — label it.
+			preview = m.content or ("📷 Attachment" if _media(m.get("media")) else "")
 			convos[lead] = {
 				"lead": lead,
-				"last_message": m.content,
+				"last_message": preview,
 				"last_direction": m.direction,
 				"last_date": m.message_date or m.creation,
 				"count": 0,

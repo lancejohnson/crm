@@ -21,8 +21,13 @@
           :label="sms.status"
           class="absolute -top-2 right-0"
         />
+        <SMSMedia
+          v-if="sms.media?.length"
+          :media="sms.media"
+          :class="sms.message ? 'mb-1' : ''"
+        />
         <div class="flex gap-2 justify-between">
-          <div class="break-words">{{ sms.message }}</div>
+          <div v-if="sms.message" class="break-words">{{ sms.message }}</div>
           <div
             class="-mb-1 flex shrink-0 items-end gap-1"
             :class="sms.type == 'Outgoing' ? 'text-ink-white' : 'text-ink-gray-5'"
@@ -52,6 +57,7 @@
 <script setup>
 import CheckIcon from '@/components/Icons/CheckIcon.vue'
 import DoubleCheckIcon from '@/components/Icons/DoubleCheckIcon.vue'
+import SMSMedia from '@/components/Activities/SMSMedia.vue'
 import { formatDate } from '@/utils'
 import { Tooltip, Badge } from 'frappe-ui'
 

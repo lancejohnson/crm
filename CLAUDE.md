@@ -57,6 +57,22 @@ server scripts, infra, and all operational context live in the ops repo:
     `is_sms_enabled`) + `set_user_quo_number`; `crm/api/session.py` exposes
     `custom_quo_number`; `crm/hooks.py` — `Quo Message` after_insert publishes
     the `quo_message` realtime event (the server scripts can't, sandbox)
+  - **MMS media (photos/videos)** — inbound texts can carry image/video
+    attachments. They arrive ONLY in the Quo `message.received` webhook payload
+    as `media:[{url,type}]` (the REST API omits media → already-received MMS are
+    unrecoverable; capture is going-forward only). Stored as a JSON array on the
+    new `Quo Message.media` Long Text field (added by ops
+    `setup_quo_message_doctype.py`; populated by the `sequence-events` webhook).
+    `sms.py` parses it (`_media`) and returns `media:[{url,type}]` per message;
+    the inbox preview shows "📷 Attachment" for an image-only (blank-text) text.
+    Rendered by `components/Activities/SMSMedia.vue` (images inline, videos with
+    a player, other types as download links) in both `SMSArea.vue` and the
+    unified timeline block in `Activities.vue`. Clicking an image opens
+    `components/Activities/ImageLightbox.vue` — a teleported full-screen viewer
+    that pages through that message's images (←/→ buttons + arrow keys, wraps,
+    counter; Esc / ✕ / backdrop close). The OpenPhone API CANNOT send MMS (send
+    is text-only) — test inbound media by POSTing a synthetic `message.received`
+    to `/api/method/sequence-events` (see ops repo).
 - `frontend/vite.config.js` — PWA service worker set `selfDestroying` (the
   precache served stale app bundles after deploys)
 - **Sequence real-time drainer** — `crm/api/sequence_drain.py` + `crm/hooks.py`

@@ -285,7 +285,12 @@
             <div
               class="max-w-2xl whitespace-pre-wrap rounded-md bg-surface-gray-2 px-2.5 py-1.5 text-ink-gray-8"
             >
-              {{ activity.message }}
+              <SMSMedia
+                v-if="activity.media?.length"
+                :media="activity.media"
+                :class="activity.message ? 'mb-1.5' : ''"
+              />
+              <span v-if="activity.message">{{ activity.message }}</span>
             </div>
           </div>
           <div v-else class="mb-4 flex flex-col gap-2 py-1.5">
@@ -544,6 +549,7 @@ import WhatsAppIcon from '@/components/Icons/WhatsAppIcon.vue'
 import WhatsAppArea from '@/components/Activities/WhatsAppArea.vue'
 import WhatsAppBox from '@/components/Activities/WhatsAppBox.vue'
 import SMSArea from '@/components/Activities/SMSArea.vue'
+import SMSMedia from '@/components/Activities/SMSMedia.vue'
 import SMSBox from '@/components/Activities/SMSBox.vue'
 import LoadingIndicator from '@/components/Icons/LoadingIndicator.vue'
 import EmptyState from '@/components/ListViews/EmptyState.vue'
@@ -750,6 +756,7 @@ function get_text_activities() {
     activity_type: m.type === 'Incoming' ? 'incoming_text' : 'outgoing_text',
     creation: m.creation,
     message: m.message,
+    media: m.media,
   }))
 }
 
