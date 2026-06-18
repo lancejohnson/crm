@@ -111,33 +111,26 @@
           <AxisChart :config="data.new_leads_trend" />
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <!-- 2. Status changes entered/exited per stage -->
-          <div class="rounded-md bg-surface-white shadow h-80 p-1">
-            <AxisChart
-              v-if="data.status_changes.data.length"
-              :config="data.status_changes"
-            />
-            <div
-              v-else
-              class="h-full flex items-center justify-center text-ink-gray-5"
-            >
-              {{ __('No status changes in this range') }}
-            </div>
-          </div>
+        <!-- 2. Status Change Report (table + flow + drill-down) -->
+        <StatusChangeReport
+          :fromDate="fromDate"
+          :toDate="toDate"
+          :user="filters.user"
+        />
 
-          <!-- 3. New leads by source -->
-          <div class="rounded-md bg-surface-white shadow h-80 overflow-hidden">
-            <DonutChart
-              v-if="data.leads_by_source.data.length"
-              :config="data.leads_by_source"
-            />
-            <div
-              v-else
-              class="h-full flex items-center justify-center text-ink-gray-5"
-            >
-              {{ __('No leads in this range') }}
-            </div>
+        <!-- 3. New leads by source -->
+        <div
+          class="rounded-md bg-surface-white shadow h-80 overflow-hidden lg:w-1/2"
+        >
+          <DonutChart
+            v-if="data.leads_by_source.data.length"
+            :config="data.leads_by_source"
+          />
+          <div
+            v-else
+            class="h-full flex items-center justify-center text-ink-gray-5"
+          >
+            {{ __('No leads in this range') }}
           </div>
         </div>
       </div>
@@ -150,6 +143,7 @@ import LayoutHeader from '@/components/LayoutHeader.vue'
 import ViewBreadcrumbs from '@/components/ViewBreadcrumbs.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 import Link from '@/components/Controls/Link.vue'
+import StatusChangeReport from '@/components/Dashboard/StatusChangeReport.vue'
 import LucideRefreshCcw from '~icons/lucide/refresh-ccw'
 import { usersStore } from '@/stores/users'
 import {

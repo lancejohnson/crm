@@ -67,6 +67,25 @@ server scripts, infra, and all operational context live in the ops repo:
   "CRM Sequence Runner" cron is disabled. Full design + the two deploy gotchas
   (register the `seqdrain` queue in common_site_config; `migrate`/`sync_jobs` to
   register `drain_due`) live in `../frappe-crm-deploy/CLAUDE.md` → Sequences.
+- **Status Change Report** (on the `/dashboard` landing page) — a drill-downable
+  table of how leads move between statuses, replacing the old status-changes bar
+  chart. Two lenses via a Cohort/Flow toggle: **Cohort** (default) = the leads
+  *created* in the range and where each went; **Flow** = every transition that
+  *happened* in the range (Started/Ended are population snapshots at the window
+  edges). Per-status columns Entered/Left/Started→Ended/Net; an unfold arrow
+  reveals each status's inflow/outflow flow (a synthetic "Created" node feeds
+  newly-created leads). Clicking any flow drills into the CRM Leads list filtered
+  to exactly those leads. All derived from the `CRM Status Change Log` child
+  table + each lead's `status`/`creation`; both lenses satisfy
+  `Ended = Started + Entered − Left`.
+  - `crm/api/leads_dashboard.py` — `get_status_change_report` (table + per-stage
+    inflow/outflow) and `get_status_transition_leads` (drill-down name resolver)
+  - `frontend/src/components/Dashboard/StatusChangeReport.vue` + `FlowEdge.vue`;
+    integrated in `pages/LeadsDashboard.vue`
+  - drill-down: `frontend/src/stores/leadDrilldown.js` holds an ad-hoc lead-name
+    set; `pages/Leads.vue` injects it as a never-persisted `name in […]`
+    default-filter (+ a dismissible banner); `components/ViewControls.vue` now
+    exposes `reload()` so clearing the drill refreshes the list
 
 The companion server-side pieces (custom doctypes, scheduler engine, webhook
 endpoints) are Server Scripts managed from the ops repo, NOT app code here. SMS

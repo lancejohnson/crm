@@ -16,6 +16,30 @@
       />
     </template>
   </LayoutHeader>
+  <div
+    v-if="drilldown.active"
+    class="mx-3 mt-2 flex items-center gap-2 rounded bg-surface-gray-2 px-3 py-2 text-sm"
+  >
+    <LucideFilter class="size-4 text-ink-gray-6 shrink-0" />
+    <span class="font-medium text-ink-gray-8">{{ drilldown.label }}</span>
+    <span v-if="drilldown.sub" class="text-ink-gray-5"
+      >· {{ drilldown.sub }}</span
+    >
+    <span class="text-ink-gray-5">
+      · {{ drilldown.names.length }}
+      {{ drilldown.names.length === 1 ? __('lead') : __('leads') }}
+    </span>
+    <span v-if="drilldown.truncated" class="text-ink-red-3">
+      ({{ __('capped') }})
+    </span>
+    <Button
+      class="ml-auto"
+      variant="ghost"
+      :label="__('Clear')"
+      iconLeft="x"
+      @click="clearDrill"
+    />
+  </div>
   <ViewControls
     ref="viewControls"
     v-model="leads"
@@ -23,7 +47,7 @@
     v-model:resizeColumn="triggerResize"
     v-model:updatedPageCount="updatedPageCount"
     doctype="CRM Lead"
-    :filters="{ converted: 0 }"
+    :filters="listFilters"
     :options="{
       allowedViews: ['list', 'group_by', 'kanban'],
     }"
@@ -332,6 +356,8 @@ import { getMeta } from '@/stores/meta'
 import { globalStore } from '@/stores/global'
 import { usersStore } from '@/stores/users'
 import { statusesStore } from '@/stores/statuses'
+import { leadDrilldownStore } from '@/stores/leadDrilldown'
+import LucideFilter from '~icons/lucide/filter'
 import { callEnabled } from '@/composables/settings'
 import { useBroadcast } from '@/composables/useBroadcast'
 import { formatDate, timeAgo, website, formatTime } from '@/utils'
@@ -368,6 +394,23 @@ const loadMore = ref(1)
 const triggerResize = ref(1)
 const updatedPageCount = ref(20)
 const viewControls = ref(null)
+
+// Drill-down from the Leads dashboard: an ad-hoc set of lead names to show.
+// Injected as a never-persisted `name in [...]` default filter; while a drill
+// is active we drop the `converted: 0` base filter so the list matches the
+// dashboard's count exactly (which includes converted leads).
+const drilldown = leadDrilldownStore()
+const listFilters = computed(() => {
+  if (drilldown.active) {
+    return { name: ['in', drilldown.names.length ? drilldown.names : ['__none__']] }
+  }
+  return { converted: 0 }
+})
+
+function clearDrill() {
+  drilldown.clear()
+  viewControls.value?.reload()
+}
 
 function getRow(name, field) {
   function getValue(value) {
