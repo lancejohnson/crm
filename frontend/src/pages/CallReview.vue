@@ -195,6 +195,12 @@
                     {{ __('No recording') }}
                   </span>
                   <Button
+                    v-if="call.recording_url"
+                    variant="ghost"
+                    :label="transcriptOpen[call.name] ? __('Hide transcript') : __('Transcript')"
+                    @click="toggleTranscript(call.name)"
+                  />
+                  <Button
                     v-if="call.ai_summary"
                     variant="ghost"
                     :label="expanded[call.name] ? __('Hide summary') : __('AI summary')"
@@ -213,6 +219,13 @@
                     <FeatherIcon name="check" class="h-3.5 w-3.5 text-ink-green-3" />
                     {{ reviewedByOthers(call) }}
                   </span>
+                </div>
+
+                <div
+                  v-if="transcriptOpen[call.name]"
+                  class="rounded border bg-surface-white px-3 py-2.5"
+                >
+                  <CallTranscript :call-log-name="call.name" />
                 </div>
 
                 <div
@@ -288,6 +301,7 @@
 
 <script setup>
 import LayoutHeader from '@/components/LayoutHeader.vue'
+import CallTranscript from '@/components/Activities/CallTranscript.vue'
 import { formatDuration } from '@/utils'
 import { dayjs } from 'frappe-ui'
 import {
@@ -316,6 +330,7 @@ const rep = ref('')
 const minDuration = ref('0')
 const reviewFilter = ref('all')
 const expanded = reactive({})
+const transcriptOpen = reactive({})
 const notesOpen = reactive({})
 const noteDraft = reactive({})
 const saving = reactive({})
@@ -410,6 +425,10 @@ function shiftDay(delta) {
 
 function toggle(name) {
   expanded[name] = !expanded[name]
+}
+
+function toggleTranscript(name) {
+  transcriptOpen[name] = !transcriptOpen[name]
 }
 
 // Call times are stored as the rep's local (Chicago) wall-clock, NOT UTC, so

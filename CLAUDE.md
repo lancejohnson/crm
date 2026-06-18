@@ -73,6 +73,35 @@ server scripts, infra, and all operational context live in the ops repo:
     counter; Esc / ✕ / backdrop close). The OpenPhone API CANNOT send MMS (send
     is text-only) — test inbound media by POSTing a synthetic `message.received`
     to `/api/method/sequence-events` (see ops repo).
+- **Call transcript + waveform sync** — a "conversation score" view for recorded
+  calls: a dual-lane diarized waveform (rep above the axis in blue, lead below in
+  amber, shared playhead), a click-anywhere-to-seek scrubber, a synced transcript
+  that auto-scrolls and highlights the active line (click a line → seek), a
+  talk-time balance bar (rep% vs lead%), and optional Gemini chapter ticks. No new
+  npm dependency: native `<audio>` for playback + Web Audio API `decodeAudioData`
+  for peaks + `<canvas>` for the waveform (single fetch reused for both decode and
+  a blob-URL `<audio>` source). Speaker colors live in JS (canvas can't read
+  Tailwind tokens) and are blue/amber for dichromat safety.
+  - `frontend/src/components/Activities/CallTranscript.vue` — the component
+  - `crm/api/call_transcript.py` — `get_call_transcript(call_log)`: normalizes
+    OpenPhone's diarized segments to clean `rep`/`lead` speakers (trusts a
+    pre-normalized `speaker`, else OpenPhone's `userId`, else a last-10-digit
+    identifier match), computes the talk-time ratio, and returns stored chapters
+  - hosts: `components/Activities/CallArea.vue` (a "Transcript" toggle badge in
+    the Lead/Deal activity timeline, next to "Listen") and `pages/CallReview.vue`
+    (a per-call "Transcript" expander)
+  - **Transcript source = OpenPhone native only.** The diarized, timestamped
+    transcript and Gemini chapters are captured server-side into two custom Long
+    Text fields the OPS REPO must add to CRM Call Log:
+    `custom_transcript` = `{"dialogue":[{speaker|userId|identifier,start,end,content}],"duration":n}`
+    and `custom_transcript_chapters` = `{"chapters":[{title,start,end}],"highlights":[{quote,t}]}`.
+    Neither field needs to exist for the app code to run — the endpoint degrades to
+    "transcript still processing". Ops work (in `../frappe-crm-deploy`): add the two
+    custom fields; subscribe the `call.transcript.completed` webhook
+    (`/v1/webhooks/call-transcripts`, Business/Scale plan) in `setup_quo_webhooks.py`;
+    capture it in `sequence_events_webhook.py` (fetch `/v1/call-transcripts/:callId`,
+    store `dialogue`); generate chapters via Gemini Flash over the transcript text
+    (key in Infisical); backfill historical calls.
 - `frontend/vite.config.js` — PWA service worker set `selfDestroying` (the
   precache served stale app bundles after deploys)
 - **Sequence real-time drainer** — `crm/api/sequence_drain.py` + `crm/hooks.py`

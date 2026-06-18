@@ -75,6 +75,16 @@
             <PlayIcon class="size-3" />
           </template>
         </Badge>
+        <Badge
+          v-if="call.recording_url"
+          :label="call.show_transcript ? __('Hide Transcript') : __('Transcript')"
+          class="cursor-pointer"
+          @click.stop="call.show_transcript = !call.show_transcript"
+        >
+          <template #prefix>
+            <SparkleIcon class="size-3" />
+          </template>
+        </Badge>
         <a
           v-if="call.recording_url"
           :href="call.recording_url"
@@ -103,6 +113,13 @@
         @click.stop
       >
         <AudioPlayer :src="callLog.data.recording_url_path" />
+      </div>
+      <div
+        v-if="call.show_transcript && call.recording_url"
+        class="border-t border-outline-gray-modals pt-2"
+        @click.stop
+      >
+        <CallTranscript :call-log-name="call.name" />
       </div>
       <div
         v-if="callLog?.data?.custom_ai_summary"
@@ -140,6 +157,7 @@ import ExternalLinkIcon from '@/components/Icons/ExternalLinkIcon.vue'
 import SparkleIcon from '@/components/Icons/SparkleIcon.vue'
 import MultipleAvatar from '@/components/MultipleAvatar.vue'
 import AudioPlayer from '@/components/Activities/AudioPlayer.vue'
+import CallTranscript from '@/components/Activities/CallTranscript.vue'
 import FadedScrollableDiv from '@/components/FadedScrollableDiv.vue'
 import CallLogDetailModal from '@/components/Modals/CallLogDetailModal.vue'
 import CallLogModal from '@/components/Modals/CallLogModal.vue'
