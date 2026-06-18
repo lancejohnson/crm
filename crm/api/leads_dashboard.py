@@ -620,3 +620,49 @@ def _occupancy_leads(to_stage, from_date, to_date, user, mode):
 	if user:
 		q = q.where(Lead.lead_owner == user)
 	return [r.name for r in q.run(as_dict=True)]
+
+
+@frappe.whitelist()
+@sales_user_only
+def get_leads_by_source_names(
+	source: str,
+	from_date: str | None = None,
+	to_date: str | None = None,
+	user: str | None = None,
+):
+	"""Lead names behind one slice of the "Leads by source" donut.
+
+	Mirrors `get_leads_by_source` exactly (leads created in the range, grouped by
+	`source` with null/blank rolled up to "Empty") so the drilled list count
+	matches the chart. Feeds the Leads list a `name in [...]` filter.
+	"""
+	if not from_date or not to_date:
+		from_date = frappe.utils.get_first_day(from_date or frappe.utils.nowdate())
+		to_date = frappe.utils.get_last_day(to_date or frappe.utils.nowdate())
+	from_date = str(frappe.utils.getdate(from_date))
+	to_date = str(frappe.utils.getdate(to_date))
+
+	roles = frappe.get_roles(frappe.session.user)
+	is_sales_manager = "Sales Manager" in roles or "System Manager" in roles
+	if "Sales User" in roles and not is_sales_manager:
+		user = frappe.session.user
+
+	Lead = DocType("CRM Lead")
+	q = (
+		frappe.qb.from_(Lead)
+		.select(Lead.name)
+		.where(Date(Lead.creation).between(from_date, to_date))
+	)
+	if source == "Empty":
+		q = q.where((Lead.source.isnull()) | (Lead.source == ""))
+	else:
+		q = q.where(Lead.source == source)
+	if user:
+		q = q.where(Lead.lead_owner == user)
+
+	names = sorted({r.name for r in q.run(as_dict=True)})
+	return {
+		"names": names[:DRILL_CAP],
+		"count": len(names),
+		"truncated": len(names) > DRILL_CAP,
+	}

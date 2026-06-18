@@ -65,7 +65,7 @@
           name: ['in', users.data?.crmUsers?.map((u) => u.name)],
           ignore_user_type: 1,
         }"
-        :placeholder="__('Sales User')"
+        :placeholder="__('All users')"
         :hideMe="true"
         @change="(v) => updateUser(v)"
       >
@@ -118,17 +118,41 @@
           :user="filters.user"
         />
 
-        <!-- 3. New leads by source -->
-        <div
-          class="rounded-md bg-surface-white shadow h-80 overflow-hidden lg:w-1/2"
-        >
-          <DonutChart
-            v-if="data.leads_by_source.data.length"
-            :config="data.leads_by_source"
-          />
+        <!-- 3. New leads by source (click a source to drill into its leads) -->
+        <div class="rounded-md bg-surface-white shadow overflow-hidden">
+          <div
+            v-if="sources.length"
+            class="flex items-center gap-2 flex-wrap p-1"
+          >
+            <div class="h-80 flex-1 min-w-[300px]">
+              <DonutChart :config="sourceConfig" />
+            </div>
+            <div class="flex-1 min-w-[240px] p-4 flex flex-col gap-1.5">
+              <div class="text-xs uppercase tracking-wide text-ink-gray-5 mb-1">
+                {{ __('Open a source in Leads') }}
+              </div>
+              <button
+                v-for="(s, i) in sources"
+                :key="s.source"
+                class="group flex items-center gap-2 rounded-md border border-outline-gray-1 px-2.5 py-1.5 text-sm hover:border-outline-gray-3 hover:bg-surface-gray-2 transition-colors"
+                @click="drillSource(s.source)"
+              >
+                <span
+                  class="size-2.5 rounded-full shrink-0"
+                  :style="{ backgroundColor: palette[i % palette.length] }"
+                />
+                <span class="truncate text-ink-gray-8">{{ s.source }}</span>
+                <span class="ml-auto shrink-0 tabular-nums text-ink-gray-6">
+                  {{ s.count }}
+                  <span class="text-ink-gray-4">({{ s.pct }}%)</span>
+                </span>
+                <LucideArrowRight class="size-3.5 text-ink-gray-5 shrink-0" />
+              </button>
+            </div>
+          </div>
           <div
             v-else
-            class="h-full flex items-center justify-center text-ink-gray-5"
+            class="h-80 flex items-center justify-center text-ink-gray-5"
           >
             {{ __('No leads in this range') }}
           </div>
@@ -145,6 +169,9 @@ import UserAvatar from '@/components/UserAvatar.vue'
 import Link from '@/components/Controls/Link.vue'
 import StatusChangeReport from '@/components/Dashboard/StatusChangeReport.vue'
 import LucideRefreshCcw from '~icons/lucide/refresh-ccw'
+import LucideArrowRight from '~icons/lucide/arrow-right'
+import { leadDrilldownStore } from '@/stores/leadDrilldown'
+import { useRouter } from 'vue-router'
 import { usersStore } from '@/stores/users'
 import {
   getLastXDays,
@@ -191,6 +218,58 @@ const dashboard = createResource({
 })
 
 const data = computed(() => dashboard.data)
+
+// --- Leads by source: clickable drill-down --------------------------------
+const router = useRouter()
+const drilldown = leadDrilldownStore()
+
+// Shared colour order for the donut + the clickable source list.
+const palette = [
+  '#2490EF',
+  '#FFB300',
+  '#28A745',
+  '#E24C4C',
+  '#7C4DFF',
+  '#00BCD4',
+  '#FF7043',
+  '#9C27B0',
+]
+
+const sourceConfig = computed(() => ({
+  ...(data.value?.leads_by_source || {}),
+  colors: palette,
+}))
+
+const sources = computed(() => {
+  const rows = data.value?.leads_by_source?.data || []
+  const total = rows.reduce((acc, r) => acc + (r.count || 0), 0)
+  return rows.map((r) => ({
+    source: r.source,
+    count: r.count,
+    pct: total ? Math.round((r.count / total) * 100) : 0,
+  }))
+})
+
+const sourceResolver = createResource({
+  url: 'crm.api.leads_dashboard.get_leads_by_source_names',
+})
+
+async function drillSource(source) {
+  const res = await sourceResolver.submit({
+    source,
+    from_date: fromDate.value,
+    to_date: toDate.value,
+    user: filters.user,
+  })
+  if (!res) return
+  drilldown.set({
+    names: res.names,
+    label: `${__('Source')}: ${source}`,
+    sub: `${__('created')} ${fromDate.value} – ${toDate.value}`,
+    truncated: res.truncated,
+  })
+  router.push({ name: 'Leads', params: { viewType: 'list' } })
+}
 
 function updateUser(v) {
   filters.user = v
