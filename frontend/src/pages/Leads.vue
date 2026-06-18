@@ -365,7 +365,7 @@ import { formatPhone, callHref } from '@/utils/phoneFormat'
 import { myQuoNumber } from '@/composables/quoSender'
 import { Avatar, Tooltip, Dropdown } from 'frappe-ui'
 import { useRoute } from 'vue-router'
-import { ref, computed, reactive, h } from 'vue'
+import { ref, computed, reactive, h, nextTick } from 'vue'
 
 const { getFormattedPercent, getFormattedFloat, getFormattedCurrency } =
   getMeta('CRM Lead')
@@ -409,7 +409,9 @@ const listFilters = computed(() => {
 
 function clearDrill() {
   drilldown.clear()
-  viewControls.value?.reload()
+  // Reload only after the updated `:filters` prop has propagated to ViewControls,
+  // otherwise getParams() re-reads the stale `name in [...]` filter.
+  nextTick(() => viewControls.value?.reload())
 }
 
 function getRow(name, field) {

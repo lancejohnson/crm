@@ -93,26 +93,35 @@ specifically: the `Quo Message` doctype, the `send-text` and `list-quo-numbers`
 API server scripts, and inbound text mirroring in the `sequence-events` webhook
 all live in `../frappe-crm-deploy`.
 
-## Local dev loop (fast iteration)
+## Testing & verification — use prod, not the local dev mirror
 
-There IS a local dev mirror now — a disposable copy of the prod stack on this
-Mac, seeded from a prod backup, served by Vite HMR. Use it for all iteration;
-`build_image.sh` is only the ship/deploy step (see below).
+Lance's standing preference: **do NOT use the local dev mirror — work against
+prod.** (A dev mirror still exists under `../frappe-crm-deploy`, but it's
+deprecated for this workflow; don't `dev.sh up` it.)
 
-```bash
-# one-time (or after a wipe): cd ../frappe-crm-deploy && ./scripts/dev_setup.sh
-cd ../frappe-crm-deploy && ./scripts/dev.sh up          # start the dev stack
-cd ../frappe-crm-app/frontend && yarn dev               # http://localhost:8080/crm
-# edit any .vue -> browser hot-reloads in <1s, no image build
-```
+- **Backend logic** — validate read-only against the live DB with `bench
+  execute` / `bench console` on the prod backend; roll back anything that writes:
 
-- Login: `Administrator` / `admin` (or any restored prod user).
-- Python edits (`crm/api/*.py`, `hooks.py`) are bind-mounted live — run
-  `../frappe-crm-deploy/scripts/dev.sh restart` to pick them up (frontend needs
-  nothing). Stale data? `scripts/refresh_dev_data.sh` re-pulls prod.
-- The mirror runs NO worker/scheduler and mutes email so restored live
-  enrollments can't fire real texts/emails/ring-alerts. Full details, safety
-  guards, and caveats: `../frappe-crm-deploy/CLAUDE.md` → "Local dev mirror".
+  ```bash
+  ssh groundwork-apps "cd /opt/frappe-crm && docker compose exec -T backend \
+    bench --site crm.groundworkpro.com execute <dotted.path.func> --kwargs '{...}'"
+  ```
+
+  Read-only queries (SELECTs / report builders) are safe to run as-is. To probe
+  unmerged code without deploying, `docker cp` the module into the backend
+  container under a throwaway name, `execute` it, then remove it. Any snippet
+  that writes must end in `frappe.db.rollback()`.
+- **Compile gate** — `cd frontend && yarn build` must succeed (no upstream
+  tests). From a worktree, symlink the main `frontend/node_modules` and add a
+  stub `sites/common_site_config.json` = `{"socketio_port": 9000}` first
+  (see the `dev-isolated-backend-for-worktree` memory).
+- **Visual / UI verification** — use the **Google Chrome MCP**
+  (`mcp__claude-in-chrome__*`) against the live site
+  `https://crm.groundworkpro.com/crm` — it rides Lance's real, logged-in Chrome
+  session. **Do NOT use headless Playwright here** (this overrides the global
+  browser-interaction default): the SPA needs real nginx + an authenticated
+  session, which prod has and the mirror does not. Ship the change first (below),
+  then open the live page to look at it.
 
 ## Ship a change
 
@@ -122,10 +131,10 @@ cd ../frappe-crm-deploy && ./scripts/build_image.sh && python3 scripts/smoke_tes
 # commit here AND commit the compose pin bump in ../frappe-crm-deploy
 ```
 
-`build_image.sh` (~60s build) is the deploy step, not the iteration loop (use
-the dev mirror above for that). Frontend has no tests upstream; `yarn build`
-succeeding is the gate. Don't run `bench run-tests` against the prod site (the
-dev mirror is the place for that).
+`build_image.sh` (~60s build) is the deploy step. It also takes
+`FORK=/path/to/worktree` to build+deploy straight from a worktree without
+merging first. Frontend has no tests upstream; `yarn build` succeeding is the
+gate. Don't run `bench run-tests` against the prod site.
 
 ## Upstream sync
 
