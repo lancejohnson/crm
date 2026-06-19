@@ -37,6 +37,9 @@ import SendTextModal from '@/components/Modals/SendTextModal.vue'
 import { call } from 'frappe-ui'
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { usersStore } from '@/stores/users'
+
+const { getUser } = usersStore()
 
 const props = defineProps({
   doctype: { type: String, default: '' },
@@ -59,6 +62,24 @@ function showTask(t) {
     status: 'Backlog',
   }
   showTaskModal.value = true
+}
+
+// Trello-style quick-add: title-only task, defaulted to the current user and
+// 'Todo'. Due date / priority get filled in later by clicking the task open.
+async function addTask(title) {
+  const t = (title || '').trim()
+  if (!t) return
+  await call('frappe.client.insert', {
+    doc: {
+      doctype: 'CRM Task',
+      title: t,
+      status: 'Todo',
+      reference_doctype: props.doctype,
+      reference_docname: doc.value?.name || null,
+      assigned_to: getUser().name,
+    },
+  })
+  activities.value.reload()
 }
 
 async function deleteTask(name) {
@@ -131,6 +152,7 @@ function redirect(tabName) {
 
 defineExpose({
   showTask,
+  addTask,
   deleteTask,
   updateTaskStatus,
   showNote,

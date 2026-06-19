@@ -167,6 +167,25 @@
           />
         </div>
         <div
+          v-else-if="fieldName === '_next_task_due'"
+          class="truncate text-base"
+        >
+          <Tooltip
+            v-if="getRow(itemName, fieldName).value"
+            :text="getRow(itemName, fieldName).label"
+          >
+            <div
+              :class="
+                getRow(itemName, fieldName).color
+                  ? parseColor(getRow(itemName, fieldName).color)
+                  : ''
+              "
+            >
+              {{ getRow(itemName, fieldName).value }}
+            </div>
+          </Tooltip>
+        </div>
+        <div
           v-else-if="fieldName === '_assign'"
           class="flex items-center truncate"
         >
@@ -297,7 +316,7 @@ import { usersStore } from '@/stores/users'
 import { organizationsStore } from '@/stores/organizations'
 import { statusesStore } from '@/stores/statuses'
 import { callEnabled } from '@/composables/settings'
-import { formatDate, timeAgo, website, formatTime } from '@/utils'
+import { formatDate, timeAgo, website, formatTime, dueColor, parseColor } from '@/utils'
 import { formatPhone, callHref } from '@/utils/phoneFormat'
 import { myQuoNumber } from '@/composables/quoSender'
 import { Tooltip, Avatar, Dropdown } from 'frappe-ui'
@@ -520,6 +539,11 @@ function parseRows(rows, columns = []) {
     _rows['_note_count'] = deal._note_count
     _rows['_task_count'] = deal._task_count
     _rows['_comment_count'] = deal._comment_count
+    _rows['_next_task_due'] = {
+      label: deal._next_task_due ? formatDate(deal._next_task_due) : '',
+      value: deal._next_task_due ? __(timeAgo(deal._next_task_due)) : '',
+      color: dueColor(deal._next_task_due),
+    }
     return _rows
   })
 }

@@ -100,6 +100,18 @@ export function timeAgo(date) {
   return prettyDate(date)
 }
 
+// Color name for a due date, shared by the lead task to-do list and the kanban
+// "next task due" badge: 'red' once the due datetime has passed (overdue),
+// 'amber' while it's still due today, '' (no special color) for a future day.
+export function dueColor(date) {
+  if (!date) return ''
+  const due = dayjs(date)
+  const now = dayjs()
+  if (due.isBefore(now)) return 'red'
+  if (due.isSame(now, 'day')) return 'amber'
+  return ''
+}
+
 function getBrowserTimezone() {
   return Intl.DateTimeFormat().resolvedOptions().timeZone
 }

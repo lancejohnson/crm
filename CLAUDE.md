@@ -112,6 +112,34 @@ server scripts, infra, and all operational context live in the ops repo:
   "CRM Sequence Runner" cron is disabled. Full design + the two deploy gotchas
   (register the `seqdrain` queue in common_site_config; `migrate`/`sync_jobs` to
   register `drain_due`) live in `../frappe-crm-deploy/CLAUDE.md` → Sequences.
+- **Lead/Deal tasks as a Trello-style to-do list** — the existing `CRM Task`
+  feature (its own Tasks tab + heavyweight `TaskModal`) is now surfaced in the
+  **unified Activity timeline**: a pinned **"To-do"** block at the top of the
+  Activity feed lists every open task with a Trello-style **inline quick-add**
+  (`Add a task…`, Enter → title-only insert defaulted to current user + `Todo`)
+  and a **hover circle → click-to-complete** checkbox; tasks sort by due date
+  (overdue first), the relative due date is **red** once overdue / **amber** when
+  due today. Completed/canceled tasks drop into the chronological history anchored
+  at their completion date (`modified`), struck-through. Open tasks live only in
+  the To-do block, completed only in history — no duplication.
+  - `frontend/src/components/Activities/TaskTodoList.vue` — **new** (quick-add +
+    checkbox list)
+  - `frontend/src/components/Activities/Activities.vue` — `openTasks` computed +
+    `get_task_activities()` (completed tasks → timeline entries keyed on
+    `modified`), merged into the Activity feed; `task` branch in the timeline +
+    `timelineIcon`; renders `<TaskTodoList>` and widened the feed's `v-if` so the
+    quick-add shows on a lead with no other history
+  - `frontend/src/components/Activities/AllModals.vue` — `addTask(title)` helper
+    (centralized with the existing `updateTaskStatus`/`deleteTask`)
+  - **Kanban next-task-due badge** (Leads **and** Deals) — each card shows the
+    soonest open task's due date as **colored text** (red overdue / amber today /
+    muted future). Server computes it as a pseudo-field `_next_task_due` in
+    `crm/api/doc.py` `getCounts` (earliest `due_date` among non-Done/Canceled
+    tasks; filtered out of the DB `rows` like `_last_comm`); added to the default
+    `kanban_fields` in `crm_lead.py` + `crm_deal.py`; selectable via
+    `KanbanSettings.vue`; rendered in the `#fields` slot of `pages/Leads.vue` +
+    `pages/Deals.vue` (`parseRows` → `{label, value, color}`); shared `dueColor()`
+    helper in `frontend/src/utils/index.js`. No schema change, no new npm dep.
 - **Status Change Report** (on the `/dashboard` landing page) — a drill-downable
   table of how leads move between statuses, replacing the old status-changes bar
   chart. Two lenses via a Cohort/Flow toggle: **Cohort** (default) = the leads
@@ -138,11 +166,10 @@ specifically: the `Quo Message` doctype, the `send-text` and `list-quo-numbers`
 API server scripts, and inbound text mirroring in the `sequence-events` webhook
 all live in `../frappe-crm-deploy`.
 
-## Testing & verification — use prod, not the local dev mirror
+## Testing & verification — prod only (no local dev mirror)
 
-Lance's standing preference: **do NOT use the local dev mirror — work against
-prod.** (A dev mirror still exists under `../frappe-crm-deploy`, but it's
-deprecated for this workflow; don't `dev.sh up` it.)
+The local dev mirror was **removed (2026-06-19)** — work exclusively against
+prod. There is no `dev.sh`/`docker-compose.dev.yml` anymore; don't recreate one.
 
 - **Backend logic** — validate read-only against the live DB with `bench
   execute` / `bench console` on the prod backend; roll back anything that writes:
@@ -157,16 +184,20 @@ deprecated for this workflow; don't `dev.sh up` it.)
   container under a throwaway name, `execute` it, then remove it. Any snippet
   that writes must end in `frappe.db.rollback()`.
 - **Compile gate** — `cd frontend && yarn build` must succeed (no upstream
-  tests). From a worktree, symlink the main `frontend/node_modules` and add a
-  stub `sites/common_site_config.json` = `{"socketio_port": 9000}` first
-  (see the `dev-isolated-backend-for-worktree` memory).
+  tests); the in-image build run by `build_image.sh` is the real gate. A host
+  `yarn build` needs the `socket.js` bench-relative config import resolved: from
+  the **main repo** stub `../sites/common_site_config.json` (i.e.
+  `Projects/sites/common_site_config.json`) = `{"socketio_port": 9000}`; from a
+  worktree symlink the main `frontend/node_modules` and stub
+  `sites/common_site_config.json` (see the `frontend-yarn-build-compile-gate`
+  memory).
 - **Visual / UI verification** — use the **Google Chrome MCP**
   (`mcp__claude-in-chrome__*`) against the live site
   `https://crm.groundworkpro.com/crm` — it rides Lance's real, logged-in Chrome
   session. **Do NOT use headless Playwright here** (this overrides the global
   browser-interaction default): the SPA needs real nginx + an authenticated
-  session, which prod has and the mirror does not. Ship the change first (below),
-  then open the live page to look at it.
+  session, which only prod has. Ship the change first (below), then open the
+  live page to look at it.
 
 ## Ship a change
 

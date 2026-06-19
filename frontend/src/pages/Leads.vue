@@ -224,6 +224,25 @@
           />
         </div>
         <div
+          v-else-if="fieldName === '_next_task_due'"
+          class="truncate text-base"
+        >
+          <Tooltip
+            v-if="getRow(itemName, fieldName).value"
+            :text="getRow(itemName, fieldName).label"
+          >
+            <div
+              :class="
+                getRow(itemName, fieldName).color
+                  ? parseColor(getRow(itemName, fieldName).color)
+                  : ''
+              "
+            >
+              {{ getRow(itemName, fieldName).value }}
+            </div>
+          </Tooltip>
+        </div>
+        <div
           v-else-if="fieldName === '_assign'"
           class="flex items-center truncate"
         >
@@ -360,7 +379,7 @@ import { leadDrilldownStore } from '@/stores/leadDrilldown'
 import LucideFilter from '~icons/lucide/filter'
 import { callEnabled } from '@/composables/settings'
 import { useBroadcast } from '@/composables/useBroadcast'
-import { formatDate, timeAgo, website, formatTime } from '@/utils'
+import { formatDate, timeAgo, website, formatTime, dueColor, parseColor } from '@/utils'
 import { formatPhone, callHref } from '@/utils/phoneFormat'
 import { myQuoNumber } from '@/composables/quoSender'
 import { Avatar, Tooltip, Dropdown } from 'frappe-ui'
@@ -635,6 +654,11 @@ function parseRows(rows, columns = []) {
     _rows['_last_comm'] = {
       label: lead._last_comm ? formatDate(lead._last_comm) : '',
       timeAgo: lead._last_comm ? __(timeAgo(lead._last_comm)) : '',
+    }
+    _rows['_next_task_due'] = {
+      label: lead._next_task_due ? formatDate(lead._next_task_due) : '',
+      value: lead._next_task_due ? __(timeAgo(lead._next_task_due)) : '',
+      color: dueColor(lead._next_task_due),
     }
     return _rows
   })

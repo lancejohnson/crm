@@ -194,12 +194,20 @@ const fields = computed(() => {
     }
   })
 
-  // computed pseudo-field (server fills it per-card in get_data) — not in meta
+  // computed pseudo-fields (server fills them per-card in get_data) — not in meta
   if (props.doctype === 'CRM Lead') {
     mapped.push({
       label: __('Last Communication'),
       value: '_last_comm',
       fieldname: '_last_comm',
+      fieldtype: 'Datetime',
+    })
+  }
+  if (['CRM Lead', 'CRM Deal'].includes(props.doctype)) {
+    mapped.push({
+      label: __('Next Task Due'),
+      value: '_next_task_due',
+      fieldname: '_next_task_due',
       fieldtype: 'Datetime',
     })
   }

@@ -432,7 +432,7 @@ def get_data(
 
 		# computed pseudo-fields (filled per-card in getCounts) — not DB columns,
 		# so they must never reach frappe.get_list
-		rows = [row for row in rows if row != "_last_comm"]
+		rows = [row for row in rows if row not in ("_last_comm", "_next_task_due")]
 
 		for kc in kanban_columns:
 			column_filters = {column_field: kc.get("name")}
@@ -764,6 +764,20 @@ def getCounts(d, doctype):
 	)
 	comm_dates = [dt for dt in (last_email, last_call, last_text) if dt]
 	d["_last_comm"] = max(comm_dates) if comm_dates else None
+
+	# soonest due date among this card's still-open tasks — drives the kanban
+	# "next task due" badge (frontend colors it red when overdue, amber today)
+	d["_next_task_due"] = frappe.db.get_value(
+		"CRM Task",
+		{
+			"reference_doctype": doctype,
+			"reference_docname": d.get("name"),
+			"status": ("not in", ["Done", "Canceled"]),
+			"due_date": (">", ""),
+		},
+		"due_date",
+		order_by="due_date asc",
+	)
 	return d
 
 

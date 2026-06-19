@@ -42,10 +42,16 @@
       v-else-if="
         activities?.length ||
         (whatsappMessages.data?.length && title == 'WhatsApp') ||
-        (smsMessages.data?.length && title == 'SMS')
+        (smsMessages.data?.length && title == 'SMS') ||
+        (openTasks.length && title == 'Activity')
       "
       class="activities"
     >
+      <TaskTodoList
+        v-if="title == 'Activity'"
+        :tasks="openTasks"
+        :modalRef="modalRef"
+      />
       <div v-if="title == 'WhatsApp' && whatsappMessages.data?.length">
         <WhatsAppArea
           v-model="whatsappMessages"
@@ -293,6 +299,25 @@
               <span v-if="activity.message">{{ activity.message }}</span>
             </div>
           </div>
+          <div
+            v-else-if="activity.activity_type == 'task'"
+            class="mb-4 flex cursor-pointer items-center gap-2 py-1.5 text-base"
+            @click="modalRef.showTask(activity.task)"
+          >
+            <span class="truncate text-ink-gray-5 line-through">
+              {{ activity.task.title }}
+            </span>
+            <span class="whitespace-nowrap text-ink-gray-5">
+              {{
+                activity.task.status == 'Done' ? __('completed') : __('canceled')
+              }}
+            </span>
+            <Tooltip :text="formatDate(activity.creation)" class="ml-auto">
+              <div class="whitespace-nowrap text-sm text-ink-gray-5">
+                {{ __(timeAgo(activity.creation)) }}
+              </div>
+            </Tooltip>
+          </div>
           <div v-else class="mb-4 flex flex-col gap-2 py-1.5">
             <div class="flex items-center justify-stretch gap-2 text-base">
               <div
@@ -534,6 +559,7 @@ import CommentArea from '@/components/Activities/CommentArea.vue'
 import CallArea from '@/components/Activities/CallArea.vue'
 import NoteArea from '@/components/Activities/NoteArea.vue'
 import TaskArea from '@/components/Activities/TaskArea.vue'
+import TaskTodoList from '@/components/Activities/TaskTodoList.vue'
 import AttachmentArea from '@/components/Activities/AttachmentArea.vue'
 import DataFields from '@/components/Activities/DataFields.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
@@ -760,10 +786,36 @@ function get_text_activities() {
   }))
 }
 
+// open tasks pinned at the top of the Activity feed (Trello-style to-do list)
+const openTasks = computed(() => {
+  if (!all_activities.data?.tasks) return []
+  return all_activities.data.tasks.filter(
+    (t) => !['Done', 'Canceled'].includes(t.status),
+  )
+})
+
+// completed/canceled tasks fold into the chronological history, anchored at
+// their completion date (modified ≈ when the status was flipped).
+function get_task_activities() {
+  if (!all_activities.data?.tasks) return []
+  return all_activities.data.tasks
+    .filter((t) => ['Done', 'Canceled'].includes(t.status))
+    .map((t) => ({
+      name: t.name,
+      activity_type: 'task',
+      creation: t.modified,
+      task: t,
+    }))
+}
+
 const activities = computed(() => {
   let _activities = []
   if (title.value == 'Activity') {
-    _activities = [...get_activities(), ...get_text_activities()]
+    _activities = [
+      ...get_activities(),
+      ...get_text_activities(),
+      ...get_task_activities(),
+    ]
   } else if (title.value == 'Emails') {
     if (!all_activities.data?.versions) return []
     _activities = all_activities.data.versions.filter(
@@ -796,7 +848,8 @@ const activities = computed(() => {
       activity.activity_type == 'outgoing_call' ||
       activity.activity_type == 'communication' ||
       activity.activity_type == 'incoming_text' ||
-      activity.activity_type == 'outgoing_text'
+      activity.activity_type == 'outgoing_text' ||
+      activity.activity_type == 'task'
     )
       return
 
@@ -949,6 +1002,9 @@ function timelineIcon(activity_type, is_lead) {
     case 'incoming_text':
     case 'outgoing_text':
       icon = CommentIcon
+      break
+    case 'task':
+      icon = TaskIcon
       break
     default:
       icon = DotIcon
