@@ -116,21 +116,25 @@ server scripts, infra, and all operational context live in the ops repo:
   feature (its own Tasks tab + heavyweight `TaskModal`) is now surfaced in the
   **unified Activity timeline**: a pinned **"To-do"** block at the top of the
   Activity feed lists every open task with a Trello-style **inline quick-add**
-  (`Add a task…`, Enter → title-only insert defaulted to current user + `Todo`)
-  and a **hover circle → click-to-complete** checkbox; tasks sort by due date
-  (overdue first), the relative due date is **red** once overdue / **amber** when
-  due today. Completed/canceled tasks drop into the chronological history anchored
-  at their completion date (`modified`), struck-through. Open tasks live only in
-  the To-do block, completed only in history — no duplication.
-  - `frontend/src/components/Activities/TaskTodoList.vue` — **new** (quick-add +
-    checkbox list)
+  (`Add a task…` + a `DateTimePicker` for an optional **due date/time**, Enter →
+  insert defaulted to current user + `Todo`), a **hover circle →
+  click-to-complete** checkbox, and a **hover trash icon** to delete a to-do
+  inline; tasks sort by due date (overdue first), the relative due date is **red**
+  once overdue / **amber** when due today. Completed/canceled tasks drop into the
+  chronological history anchored at their completion date (`modified`),
+  struck-through. Open tasks live only in the To-do block, completed only in
+  history — no duplication. Creating/saving a task **stays on the Activity tab**
+  (removed `TaskModal`'s `@after="redirect('tasks')"`).
+  - `frontend/src/components/Activities/TaskTodoList.vue` — **new** (quick-add w/
+    date picker + checkbox + per-row delete)
   - `frontend/src/components/Activities/Activities.vue` — `openTasks` computed +
     `get_task_activities()` (completed tasks → timeline entries keyed on
     `modified`), merged into the Activity feed; `task` branch in the timeline +
     `timelineIcon`; renders `<TaskTodoList>` and widened the feed's `v-if` so the
     quick-add shows on a lead with no other history
-  - `frontend/src/components/Activities/AllModals.vue` — `addTask(title)` helper
-    (centralized with the existing `updateTaskStatus`/`deleteTask`)
+  - `frontend/src/components/Activities/AllModals.vue` — `addTask(title, due_date)`
+    helper (centralized with the existing `updateTaskStatus`/`deleteTask`); no
+    longer redirects to the Tasks tab after a task save
   - **Kanban next-task-due badge** (Leads **and** Deals) — each card shows the
     soonest open task's due date as **colored text** (red overdue / amber today /
     muted future). Server computes it as a pseudo-field `_next_task_due` in
@@ -140,6 +144,13 @@ server scripts, infra, and all operational context live in the ops repo:
     `KanbanSettings.vue`; rendered in the `#fields` slot of `pages/Leads.vue` +
     `pages/Deals.vue` (`parseRows` → `{label, value, color}`); shared `dueColor()`
     helper in `frontend/src/utils/index.js`. No schema change, no new npm dep.
+  - **Kanban "Tasks due" filter** (Leads) — a header dropdown (Due today / Overdue
+    / Due today + overdue / Clear) filters the board to leads with a matching open
+    task. `crm/api/doc.py` `get_docs_with_due_tasks(doctype, scope)` resolves the
+    lead names server-side (since `_next_task_due` is computed, not a column);
+    `pages/Leads.vue` injects them as the same never-persisted `name in [...]`
+    default filter the dashboard drill uses. (Deals not wired yet — same backend
+    would extend it.)
 - **Status Change Report** (on the `/dashboard` landing page) — a drill-downable
   table of how leads move between statuses, replacing the old status-changes bar
   chart. Two lenses via a Cohort/Flow toggle: **Cohort** (default) = the leads
