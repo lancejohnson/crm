@@ -36,11 +36,14 @@ export const usersStore = defineStore('crm-users', () => {
       email = session.user
     }
     if (!usersByName[email]) {
+      // Records created by an unauthenticated API call have owner "Guest";
+      // show that as "API" in the activity feed instead of "Guest".
+      const fallbackName = email === 'Guest' ? 'API' : email.split('@')[0]
       usersByName[email] = {
         name: email,
         email: email,
-        full_name: email.split('@')[0],
-        first_name: email.split('@')[0],
+        full_name: fallbackName,
+        first_name: fallbackName,
         last_name: '',
         user_image: null,
         role: null,

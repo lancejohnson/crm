@@ -110,6 +110,17 @@
                   {{ title }}
                 </div>
               </Tooltip>
+              <a
+                v-if="doc.property_address"
+                :href="`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(doc.property_address)}`"
+                target="_blank"
+                rel="noopener noreferrer"
+                :title="doc.property_address"
+                class="flex items-center gap-1.5 truncate text-sm text-ink-gray-7 hover:text-ink-gray-9 hover:underline"
+              >
+                <AddressIcon class="size-3.5 shrink-0" />
+                <span class="truncate">{{ doc.property_address }}</span>
+              </a>
               <div class="flex gap-1.5">
                 <Button
                   v-if="callEnabled"
@@ -265,6 +276,7 @@ import IndicatorIcon from '@/components/Icons/IndicatorIcon.vue'
 import CameraIcon from '@/components/Icons/CameraIcon.vue'
 import LinkIcon from '@/components/Icons/LinkIcon.vue'
 import AttachmentIcon from '@/components/Icons/AttachmentIcon.vue'
+import AddressIcon from '@/components/Icons/AddressIcon.vue'
 import LostReasonModal from '@/components/Modals/LostReasonModal.vue'
 import LayoutHeader from '@/components/LayoutHeader.vue'
 import Activities from '@/components/Activities/Activities.vue'
