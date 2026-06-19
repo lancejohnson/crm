@@ -782,7 +782,32 @@ def getCounts(d, doctype):
 
 
 @frappe.whitelist()
-def get_linked_docs_of_document(doctype: str, docname: str):
+def get_docs_with_due_tasks(doctype: str, scope: str = "today_overdue"):
+	"""Names of `doctype` docs (CRM Lead / CRM Deal) that have at least one open
+	task (status not Done/Canceled) due in `scope`. Feeds the kanban "tasks due"
+	filter as a `name in [...]` injection. scope: 'today' | 'overdue' |
+	'today_overdue'."""
+	from frappe.utils import add_days, get_datetime, now_datetime, today
+
+	now = now_datetime()
+	start_today = get_datetime(today())  # today 00:00:00
+	end_today = add_days(start_today, 1)  # tomorrow 00:00:00 (exclusive)
+
+	filters = [
+		["reference_doctype", "=", doctype],
+		["status", "not in", ["Done", "Canceled"]],
+	]
+	if scope == "overdue":
+		filters.append(["due_date", "<", now])
+	elif scope == "today":
+		filters.append(["due_date", ">=", start_today])
+		filters.append(["due_date", "<", end_today])
+	else:  # today_overdue — anything due up to end of today
+		filters.append(["due_date", "is", "set"])
+		filters.append(["due_date", "<", end_today])
+
+	names = frappe.get_all("CRM Task", filters=filters, pluck="reference_docname", distinct=True)
+	return list({n for n in names if n})
 	try:
 		doc = frappe.get_doc(doctype, docname)
 	except frappe.DoesNotExistError:

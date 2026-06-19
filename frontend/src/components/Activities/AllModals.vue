@@ -5,7 +5,6 @@
     :task="task"
     :doctype="doctype"
     :doc="doc?.name"
-    @after="redirect('tasks')"
   />
   <NoteModal
     v-model="showNoteModal"
@@ -64,9 +63,9 @@ function showTask(t) {
   showTaskModal.value = true
 }
 
-// Trello-style quick-add: title-only task, defaulted to the current user and
-// 'Todo'. Due date / priority get filled in later by clicking the task open.
-async function addTask(title) {
+// Trello-style quick-add: title (+ optional due date) defaulted to the current
+// user and 'Todo'. Stays on the Activity tab — no redirect to the Tasks screen.
+async function addTask(title, due_date) {
   const t = (title || '').trim()
   if (!t) return
   await call('frappe.client.insert', {
@@ -74,6 +73,7 @@ async function addTask(title) {
       doctype: 'CRM Task',
       title: t,
       status: 'Todo',
+      due_date: due_date || null,
       reference_doctype: props.doctype,
       reference_docname: doc.value?.name || null,
       assigned_to: getUser().name,

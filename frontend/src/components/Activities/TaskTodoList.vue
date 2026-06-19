@@ -42,19 +42,34 @@
             {{ __(timeAgo(task.due_date)) }}
           </div>
         </Tooltip>
+        <Tooltip :text="__('Delete')">
+          <button
+            class="hidden shrink-0 items-center text-ink-gray-4 hover:text-ink-red-3 group-hover/td:flex"
+            @click.stop="modalRef.deleteTask(task.name)"
+          >
+            <LucideTrash2 class="size-3.5" />
+          </button>
+        </Tooltip>
       </div>
 
-      <!-- Trello-style quick add -->
+      <!-- Trello-style quick add: title + optional due date/time -->
       <div
-        class="flex items-center gap-2.5 border-t border-outline-gray-1 px-3 py-1.5"
+        class="flex items-center gap-2 border-t border-outline-gray-1 px-3 py-1.5"
       >
         <LucidePlus class="size-4 shrink-0 text-ink-gray-4" />
         <input
           v-model="newTitle"
           type="text"
           :placeholder="__('Add a task…')"
-          class="flex-1 bg-transparent text-base text-ink-gray-8 placeholder:text-ink-gray-4 focus:outline-none"
+          class="min-w-0 flex-1 bg-transparent text-base text-ink-gray-8 placeholder:text-ink-gray-4 focus:outline-none"
           @keydown.enter="submit"
+        />
+        <DateTimePicker
+          v-model="newDue"
+          class="todo-datepicker w-40 shrink-0"
+          :placeholder="__('Due date')"
+          :format="getFormat('', '', true, true, false)"
+          input-class="border-none !bg-transparent text-sm"
         />
       </div>
     </div>
@@ -66,8 +81,9 @@ import ListTodoIcon from '~icons/lucide/list-todo'
 import LucideCircle from '~icons/lucide/circle'
 import LucideCircleCheckBig from '~icons/lucide/circle-check-big'
 import LucidePlus from '~icons/lucide/plus'
-import { formatDate, timeAgo, dueColor, parseColor } from '@/utils'
-import { Tooltip } from 'frappe-ui'
+import LucideTrash2 from '~icons/lucide/trash-2'
+import { formatDate, timeAgo, dueColor, parseColor, getFormat } from '@/utils'
+import { Tooltip, DateTimePicker } from 'frappe-ui'
 import { ref, computed } from 'vue'
 
 const props = defineProps({
@@ -76,6 +92,7 @@ const props = defineProps({
 })
 
 const newTitle = ref('')
+const newDue = ref('')
 
 // open tasks sorted by due date ascending (overdue first → today → future);
 // undated tasks sink to the bottom.
@@ -95,7 +112,9 @@ function dueClass(date) {
 function submit() {
   const t = newTitle.value.trim()
   if (!t) return
+  const due = newDue.value
   newTitle.value = ''
-  props.modalRef.addTask(t)
+  newDue.value = ''
+  props.modalRef.addTask(t, due)
 }
 </script>

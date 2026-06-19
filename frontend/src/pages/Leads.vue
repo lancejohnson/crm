@@ -8,6 +8,15 @@
         v-if="leadsListView?.customListActions"
         :actions="leadsListView.customListActions"
       />
+      <Dropdown :options="taskDueOptions">
+        <Button
+          :label="taskDueLabel"
+          :variant="taskDueScope ? 'subtle' : 'ghost'"
+          :theme="taskDueScope ? 'blue' : 'gray'"
+        >
+          <template #prefix><LucideCalendarClock class="size-4" /></template>
+        </Button>
+      </Dropdown>
       <Button
         variant="solid"
         :label="__('Create')"
@@ -377,12 +386,13 @@ import { usersStore } from '@/stores/users'
 import { statusesStore } from '@/stores/statuses'
 import { leadDrilldownStore } from '@/stores/leadDrilldown'
 import LucideFilter from '~icons/lucide/filter'
+import LucideCalendarClock from '~icons/lucide/calendar-clock'
 import { callEnabled } from '@/composables/settings'
 import { useBroadcast } from '@/composables/useBroadcast'
 import { formatDate, timeAgo, website, formatTime, dueColor, parseColor } from '@/utils'
 import { formatPhone, callHref } from '@/utils/phoneFormat'
 import { myQuoNumber } from '@/composables/quoSender'
-import { Avatar, Tooltip, Dropdown } from 'frappe-ui'
+import { Avatar, Tooltip, Dropdown, call } from 'frappe-ui'
 import { useRoute } from 'vue-router'
 import { ref, computed, reactive, h, nextTick } from 'vue'
 
@@ -419,12 +429,62 @@ const viewControls = ref(null)
 // is active we drop the `converted: 0` base filter so the list matches the
 // dashboard's count exactly (which includes converted leads).
 const drilldown = leadDrilldownStore()
+
+// "Tasks due" kanban filter: show only leads that have an open task due today /
+// overdue. _next_task_due is a computed pseudo-field (not a DB column), so we
+// resolve the matching lead names server-side and inject them as the same
+// never-persisted `name in [...]` default filter the dashboard drill uses.
+const taskDueScope = ref('')
+const taskDueNames = ref([])
+
 const listFilters = computed(() => {
   if (drilldown.active) {
     return { name: ['in', drilldown.names.length ? drilldown.names : ['__none__']] }
   }
+  if (taskDueScope.value) {
+    return {
+      converted: 0,
+      name: ['in', taskDueNames.value.length ? taskDueNames.value : ['__none__']],
+    }
+  }
   return { converted: 0 }
 })
+
+const TASK_DUE_LABELS = {
+  today: __('Due today'),
+  overdue: __('Overdue'),
+  today_overdue: __('Due today + overdue'),
+}
+const taskDueLabel = computed(() =>
+  taskDueScope.value ? TASK_DUE_LABELS[taskDueScope.value] : __('Tasks due'),
+)
+const taskDueOptions = computed(() => {
+  const opts = [
+    { label: __('Due today'), onClick: () => applyTaskDue('today') },
+    { label: __('Overdue'), onClick: () => applyTaskDue('overdue') },
+    { label: __('Due today + overdue'), onClick: () => applyTaskDue('today_overdue') },
+  ]
+  if (taskDueScope.value) {
+    opts.push({ label: __('Clear'), icon: 'x', onClick: clearTaskDue })
+  }
+  return opts
+})
+
+async function applyTaskDue(scope) {
+  const names = await call('crm.api.doc.get_docs_with_due_tasks', {
+    doctype: 'CRM Lead',
+    scope,
+  })
+  taskDueNames.value = names || []
+  taskDueScope.value = scope
+  nextTick(() => viewControls.value?.reload())
+}
+
+function clearTaskDue() {
+  taskDueScope.value = ''
+  taskDueNames.value = []
+  nextTick(() => viewControls.value?.reload())
+}
 
 function clearDrill() {
   drilldown.clear()
