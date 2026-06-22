@@ -10,6 +10,36 @@ server scripts, infra, and all operational context live in the ops repo:
 
 ## Our changes vs upstream (keep this list current)
 
+- **Realtime task auto-refresh (no page reload), site-wide** — `CRM Task` now
+  broadcasts a `crm_task_update` realtime event (with
+  `reference_doctype`/`reference_docname`) on `after_insert`/`on_update`/`on_trash`,
+  mirroring the `quo_message` pattern. The Lead/Deal **Activity feed** reloads
+  `all_activities` when the event matches the open doc (To-do block +
+  completed-task history update live); the **Leads & Deals Kanban** refetch the
+  board (to refresh the server-computed `_next_task_due` badge) but only when on
+  the Kanban view AND the affected record is currently on the board.
+  SMS→Activity was already live via the existing `quo_message` listener (the
+  unified timeline reads `smsMessages` reactively).
+  - **Site-wide delivery is automatic, not extra work**: `frappe.publish_realtime`
+    with no `room`/`user` broadcasts to the site room (`get_site_room()` → `"all"`),
+    and the socketio handler (`frappe_handlers.js`) joins *every* logged-in System
+    User to that room on connect. So one user's task/text update reaches all
+    other users' open boards/leads. (Do NOT pass `doctype`/`docname`/`user` — that
+    would *narrow* delivery to a single room.)
+  - **`after_commit=True` on both publishes** (`crm_task_update` AND `quo_message`)
+    — defers the emit until the DB transaction commits, so a listener's reload
+    can't race ahead of the commit and read stale data (the old default
+    `after_commit=False` is the likely cause of the "text doesn't show until I
+    refresh" flakiness: the emit fired pre-commit, the client refetched, and the
+    new row wasn't visible yet).
+  - `crm/fcrm/doctype/crm_task/crm_task.py` — `notify_task_update()` +
+    `on_update`/`on_trash` hooks (publish `crm_task_update`, `after_commit=True`)
+  - `crm/api/sms.py` — `on_quo_message_insert` now uses `after_commit=True`
+  - `frontend/src/components/Activities/Activities.vue` — `crm_task_update`
+    listener → `all_activities.reload()`
+  - `frontend/src/pages/Leads.vue` + `pages/Deals.vue` — `crm_task_update`
+    listener → `reloadKanban()` (Deals gained a `reloadKanban` helper); on-board
+    membership guard to avoid needless reloads
 - `frontend/src/pages/Sequences.vue`, `Sequence.vue` — native sequences list +
   step editor + enrollments management
 - `frontend/src/router.js` — `/sequences`, `/sequences/:sequenceId` routes

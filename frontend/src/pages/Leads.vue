@@ -394,11 +394,11 @@ import { formatPhone, callHref } from '@/utils/phoneFormat'
 import { myQuoNumber } from '@/composables/quoSender'
 import { Avatar, Tooltip, Dropdown, call } from 'frappe-ui'
 import { useRoute } from 'vue-router'
-import { ref, computed, reactive, h, nextTick } from 'vue'
+import { ref, computed, reactive, h, nextTick, onMounted, onBeforeUnmount } from 'vue'
 
 const { getFormattedPercent, getFormattedFloat, getFormattedCurrency } =
   getMeta('CRM Lead')
-const { makeCall } = globalStore()
+const { makeCall, $socket } = globalStore()
 const { getUser } = usersStore()
 const { getLeadStatus } = statusesStore()
 
@@ -518,6 +518,26 @@ function getRawValue(name, field) {
 function reloadKanban() {
   leads.value?.reload?.()
 }
+
+// A task changed somewhere (created/completed/deleted). The Kanban next-task-due
+// badge (_next_task_due) is computed server-side, so refetch the board — but only
+// when we're on the Kanban view and the affected lead is currently shown, to avoid
+// needless reloads.
+function onTaskUpdate(data) {
+  if (data?.reference_doctype !== 'CRM Lead') return
+  if (route.params.viewType !== 'kanban') return
+  const onBoard = (leads.value?.data?.data || []).some((col) =>
+    col.data?.some((r) => r.name === data.reference_docname),
+  )
+  if (onBoard) reloadKanban()
+}
+
+onMounted(() => {
+  $socket.on('crm_task_update', onTaskUpdate)
+})
+onBeforeUnmount(() => {
+  $socket.off('crm_task_update', onTaskUpdate)
+})
 
 // Rows
 const rows = computed(() => {

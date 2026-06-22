@@ -716,6 +716,7 @@ watch(
 onBeforeUnmount(() => {
   $socket.off('whatsapp_message')
   $socket.off('quo_message')
+  $socket.off('crm_task_update')
 })
 
 onMounted(() => {
@@ -735,6 +736,16 @@ onMounted(() => {
     const onDeal =
       props.doctype === 'CRM Deal' && data.reference_docname === doc.value.lead
     if (onLead || onDeal) smsMessages.reload()
+  })
+
+  // tasks (create / complete / delete) — refresh the to-do block + history
+  $socket.on('crm_task_update', (data) => {
+    if (
+      data.reference_doctype === props.doctype &&
+      data.reference_docname === props.docname
+    ) {
+      all_activities.reload()
+    }
   })
 
   nextTick(() => {

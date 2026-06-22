@@ -1,6 +1,7 @@
 # Copyright (c) 2023, Frappe Technologies Pvt. Ltd. and contributors
 # For license information, please see license.txt
 
+import frappe
 from frappe.desk.form.assign_to import add as assign
 from frappe.desk.form.assign_to import remove as unassign
 from frappe.model.document import Document
@@ -29,6 +30,33 @@ class CRMTask(Document):
 
 	def after_insert(self):
 		self.assign_to()
+		self.notify_task_update()
+
+	def on_update(self):
+		self.notify_task_update()
+
+	def on_trash(self):
+		self.notify_task_update()
+
+	def notify_task_update(self):
+		"""Broadcast a realtime event so the Lead/Deal Activity feed (the Trello-style
+		to-do list) and the Kanban next-task-due badge refresh without a page reload.
+		Mirrors the quo_message pattern in crm/api/sms.py (the front-end listens for
+		`crm_task_update` and reloads the matching lead/deal).
+
+		No room/user is passed, so Frappe broadcasts to the site room ("all") — every
+		logged-in System User receives it (site-wide). `after_commit=True` defers the
+		emit until the DB transaction commits, so the client's reload can't race ahead
+		and read the task in its pre-commit (stale / not-yet-deleted) state."""
+		if self.reference_doctype and self.reference_docname:
+			frappe.publish_realtime(
+				"crm_task_update",
+				{
+					"reference_doctype": self.reference_doctype,
+					"reference_docname": self.reference_docname,
+				},
+				after_commit=True,
+			)
 
 	def validate(self):
 		if self.is_new() or not self.assigned_to:

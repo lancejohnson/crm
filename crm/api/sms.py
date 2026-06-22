@@ -88,12 +88,16 @@ def on_quo_message_insert(doc, method=None):
 	and inbox listen for. Lives in app code because the server scripts that insert
 	these (send-text, the Quo webhook) run in a sandbox without publish_realtime."""
 	if doc.get("reference_doctype") and doc.get("reference_docname"):
+		# No room/user → broadcast to the site room ("all"): every logged-in System
+		# User gets it (site-wide). after_commit=True defers the emit until the insert
+		# commits, so a listener's reload can't race ahead and miss the new message.
 		frappe.publish_realtime(
 			"quo_message",
 			{
 				"reference_doctype": doc.reference_doctype,
 				"reference_docname": doc.reference_docname,
 			},
+			after_commit=True,
 		)
 
 
