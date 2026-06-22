@@ -167,6 +167,7 @@
           :doctype="doctype"
           @update="updateGroupBy"
         />
+        <slot name="actions" />
         <Filter
           v-model="list"
           :doctype="doctype"

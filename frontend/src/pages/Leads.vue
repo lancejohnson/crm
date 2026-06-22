@@ -8,15 +8,6 @@
         v-if="leadsListView?.customListActions"
         :actions="leadsListView.customListActions"
       />
-      <Dropdown :options="taskDueOptions">
-        <Button
-          :label="taskDueLabel"
-          :variant="taskDueScope ? 'subtle' : 'ghost'"
-          :theme="taskDueScope ? 'blue' : 'gray'"
-        >
-          <template #prefix><LucideCalendarClock class="size-4" /></template>
-        </Button>
-      </Dropdown>
       <Button
         variant="solid"
         :label="__('Create')"
@@ -60,7 +51,19 @@
     :options="{
       allowedViews: ['list', 'group_by', 'kanban'],
     }"
-  />
+  >
+    <template #actions>
+      <Dropdown :options="taskDueOptions">
+        <Button
+          :label="taskDueLabel"
+          variant="subtle"
+          :theme="taskDueScope ? 'blue' : 'gray'"
+        >
+          <template #prefix><LucideCalendarClock class="size-4" /></template>
+        </Button>
+      </Dropdown>
+    </template>
+  </ViewControls>
   <KanbanView
     v-if="route.params.viewType == 'kanban'"
     v-model="leads"

@@ -198,7 +198,11 @@ def get_quick_filters(doctype: str, cached: bool = True):
 		)
 
 	if doctype == "CRM Lead":
-		quick_filters = [filter for filter in quick_filters if filter.get("fieldname") != "converted"]
+		# Curated Leads quick filters: drop `converted` (internal flag) and the
+		# Email/Organization fields (rarely searched here; freed for the To-do
+		# "Tasks due" control that now lives in the view-controls row).
+		_hidden = {"converted", "email", "organization"}
+		quick_filters = [filter for filter in quick_filters if filter.get("fieldname") not in _hidden]
 
 	return quick_filters
 

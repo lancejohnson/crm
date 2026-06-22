@@ -174,13 +174,18 @@ server scripts, infra, and all operational context live in the ops repo:
     `KanbanSettings.vue`; rendered in the `#fields` slot of `pages/Leads.vue` +
     `pages/Deals.vue` (`parseRows` → `{label, value, color}`); shared `dueColor()`
     helper in `frontend/src/utils/index.js`. No schema change, no new npm dep.
-  - **Kanban "Tasks due" filter** (Leads) — a header dropdown (Due today / Overdue
+  - **Kanban "Tasks due" filter** (Leads) — a dropdown (Due today / Overdue
     / Due today + overdue / Clear) filters the board to leads with a matching open
     task. `crm/api/doc.py` `get_docs_with_due_tasks(doctype, scope)` resolves the
     lead names server-side (since `_next_task_due` is computed, not a column);
     `pages/Leads.vue` injects them as the same never-persisted `name in [...]`
     default filter the dashboard drill uses. (Deals not wired yet — same backend
-    would extend it.)
+    would extend it.) **Lives in the view-controls row** next to the Filter
+    button (not the page header): `ViewControls.vue` exposes a `#actions` slot
+    just left of `<Filter>`, and `pages/Leads.vue` fills it with the Tasks-due
+    `Dropdown`. To make room, `get_quick_filters` now also drops the `email` and
+    `organization` quick filters for CRM Lead (alongside the existing `converted`
+    strip), so the Leads search row is Full Name / Status / Source only.
 - **Status Change Report** (on the `/dashboard` landing page) — a drill-downable
   table of how leads move between statuses, replacing the old status-changes bar
   chart. Two lenses via a Cohort/Flow toggle: **Cohort** (default) = the leads
