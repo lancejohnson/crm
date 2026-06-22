@@ -47,7 +47,11 @@ export function formatter(range: string) {
 }
 
 export function formatRange(date: string) {
-  const dateObj = new Date(date)
+  // Parse "YYYY-MM-DD" as a LOCAL date. `new Date('2026-06-19')` treats the
+  // string as UTC midnight, which toLocaleDateString then renders in the local
+  // timezone — shifting the displayed day back one (e.g. "Jun 18") west of UTC.
+  const [y, m, d] = date.split('-').map(Number)
+  const dateObj = new Date(y, m - 1, d)
   return dateObj.toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
