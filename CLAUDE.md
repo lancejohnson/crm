@@ -346,13 +346,17 @@ prod. There is no `dev.sh`/`docker-compose.dev.yml` anymore; don't recreate one.
   worktree symlink the main `frontend/node_modules` and stub
   `sites/common_site_config.json` (see the `frontend-yarn-build-compile-gate`
   memory).
-- **Visual / UI verification** — use the **Google Chrome MCP**
+- **Visual / UI verification — MANDATORY for any UI change.** If a change touches
+  a UI component (a `.vue` file, a new screen, a button, a layout), you MUST open
+  it in the live site and actually look at it after shipping — the change isn't
+  "done" until you've confirmed it renders and works. Use the **Google Chrome MCP**
   (`mcp__claude-in-chrome__*`) against the live site
   `https://crm.groundworkpro.com/crm` — it rides Lance's real, logged-in Chrome
   session. **Do NOT use headless Playwright here** (this overrides the global
   browser-interaction default): the SPA needs real nginx + an authenticated
   session, which only prod has. Ship the change first (below), then open the
-  live page to look at it.
+  live page, exercise the new component (click it, unfold it, etc.), and report
+  what you saw — don't just confirm the page loaded.
 
 ## Ship a change
 
