@@ -72,6 +72,31 @@
           input-class="border-none !bg-transparent text-sm"
         />
       </div>
+
+      <!-- One-tap follow-up: drops a task due now + the interval. Uses the typed
+           title if there is one, else "Follow up". Lands at the top of the feed,
+           right where you return after a Send Text / Log a Call modal closes. -->
+      <div
+        class="flex items-center gap-2 border-t border-outline-gray-1 px-3 py-1.5"
+      >
+        <span class="shrink-0 text-sm text-ink-gray-4">
+          {{ __('Follow up in') }}
+        </span>
+        <div class="flex flex-wrap items-center gap-1.5">
+          <Tooltip
+            v-for="f in followUps"
+            :key="f.label"
+            :text="dueTooltip(f)"
+          >
+            <button
+              class="rounded-md border border-outline-gray-1 px-2 py-0.5 text-sm text-ink-gray-7 hover:bg-surface-gray-3"
+              @click="followUp(f)"
+            >
+              {{ f.label }}
+            </button>
+          </Tooltip>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -83,7 +108,7 @@ import LucideCircleCheckBig from '~icons/lucide/circle-check-big'
 import LucidePlus from '~icons/lucide/plus'
 import LucideTrash2 from '~icons/lucide/trash-2'
 import { formatDate, timeAgo, dueColor, parseColor, getFormat } from '@/utils'
-import { Tooltip, DateTimePicker } from 'frappe-ui'
+import { Tooltip, DateTimePicker, dayjs } from 'frappe-ui'
 import { ref, computed } from 'vue'
 
 const props = defineProps({
@@ -116,5 +141,30 @@ function submit() {
   newTitle.value = ''
   newDue.value = ''
   props.modalRef.addTask(t, due)
+}
+
+// One-tap follow-up presets. `amount`/`unit` feed dayjs().add(); the resulting
+// due date is formatted to match what the DateTimePicker emits (CRM Task
+// due_date is a Datetime → 'YYYY-MM-DD HH:mm:ss').
+const followUps = [
+  { label: '2h', amount: 2, unit: 'hour' },
+  { label: '24h', amount: 24, unit: 'hour' },
+  { label: '1wk', amount: 1, unit: 'week' },
+  { label: '1mo', amount: 1, unit: 'month' },
+]
+
+function dueAt(f) {
+  return dayjs().add(f.amount, f.unit)
+}
+
+function dueTooltip(f) {
+  return formatDate(dueAt(f), 'ddd, MMM D, YYYY | hh:mm a')
+}
+
+function followUp(f) {
+  const title = newTitle.value.trim() || __('Follow up')
+  newTitle.value = ''
+  newDue.value = ''
+  props.modalRef.addTask(title, dueAt(f).format('YYYY-MM-DD HH:mm:ss'))
 }
 </script>
