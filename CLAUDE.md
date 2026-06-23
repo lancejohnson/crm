@@ -207,19 +207,20 @@ server scripts, infra, and all operational context live in the ops repo:
     exposes `reload()` so clearing the drill refreshes the list
 - **Activity Report** (on the `/dashboard` landing page) — an unfoldable table of
   outreach for the selected range: **Leads called**, **Leads texted**, and
-  **Agreements sent**, each shown "both side by side" (per Lance) as **unique
-  leads** *and* **total actions**, split **Outbound vs All** (outbound = a
-  call/text the team placed; agreements have no inbound so outbound == all).
-  Clicking a unique-leads number drills the matching leads into the Leads list
-  (same `leadDrilldown` mechanism as the source/status drills); unfolding a row
-  (chevron) lists the actual leads inline with per-lead counts, each clickable to
-  open the lead, plus "Open all in Leads". All three dated by `creation`, scoped
-  to `CRM Lead`-referenced records and (for sales users) the current user.
-  Also shows **Quo talk time** (total CRM Call Log `duration` for the range,
-  outbound/all) as a stat in the card header, with per-lead talk time in the
-  Leads-called unfold. (Note: inbound calls only count if the telephony webhook
-  logged them as `type=Incoming` and linked them to a lead — historically all
-  logged calls have been Outgoing.)
+  **Agreements sent**, each shown as **unique leads** *and* **total actions**,
+  split **Outbound vs Inbound** (inbound = the lead's replies, so you can see
+  who's responding — inbound counts are tinted green; agreements have no inbound).
+  Clicking an Outbound/Inbound number drills that set into the Leads list (same
+  `leadDrilldown` mechanism as the source/status drills); unfolding a row
+  (chevron) lists every lead inline with per-lead out (↗) / inbound (↙, green)
+  counts, each clickable to open the lead, plus "Open all in Leads". All three
+  dated by `creation`, scoped to `CRM Lead`-referenced records and (for sales
+  users) the current user. Also shows **Quo talk time** (total CRM Call Log
+  `duration` for the range, outbound/inbound in the tooltip) as a stat in the card
+  header, with per-lead talk time in the Leads-called unfold. (Note: inbound calls
+  only count if the telephony webhook logged them as `type=Incoming` and linked
+  them to a lead — historically all logged calls have been Outgoing, so call
+  inbound reads 0; inbound texts work via Quo `direction`.)
   - `crm/api/leads_dashboard.py` — `_activity_summary` (added to
     `get_leads_dashboard` as `activity`) + per-source row fetchers
     (`_call_rows` = CRM Call Log `type`, `_text_rows` = Quo Message `direction`,

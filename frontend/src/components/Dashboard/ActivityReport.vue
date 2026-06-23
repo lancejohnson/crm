@@ -13,11 +13,11 @@
 
       <!-- Quo talk time (call duration) -->
       <Tooltip
-        v-if="talkSecs.all"
+        v-if="talkSecs.total"
         :text="
-          __('Outbound {0} · All {1}', [
+          __('Outbound {0} · Inbound {1}', [
             formatDuration(talkSecs.out) || '0s',
-            formatDuration(talkSecs.all) || '0s',
+            formatDuration(talkSecs.in) || '0s',
           ])
         "
       >
@@ -28,7 +28,7 @@
             {{ __('Talk time') }}
           </div>
           <div class="text-lg font-semibold text-ink-gray-9 tabular-nums">
-            {{ formatDuration(talkSecs.all) }}
+            {{ formatDuration(talkSecs.total) }}
           </div>
         </div>
       </Tooltip>
@@ -69,13 +69,17 @@
             {{ __('Outbound') }}
           </th>
           <th class="text-right font-normal pb-2 px-2 w-24">
-            {{ __('All') }}
+            <Tooltip :text="__('Leads who replied (inbound)')">
+              <span>{{ __('Inbound') }}</span>
+            </Tooltip>
           </th>
           <th class="text-right font-normal pb-2 px-2 w-24 border-l border-outline-gray-1">
             {{ __('Outbound') }}
           </th>
           <th class="text-right font-normal pb-2 pl-2 pr-4 w-24">
-            {{ __('All') }}
+            <Tooltip :text="__('Replies received (inbound)')">
+              <span>{{ __('Inbound') }}</span>
+            </Tooltip>
           </th>
         </tr>
       </thead>
@@ -98,7 +102,7 @@
                 <span class="text-ink-gray-8">{{ row.title }}</span>
               </div>
             </td>
-            <!-- Unique leads: outbound / all (clickable → drill into Leads) -->
+            <!-- Unique leads: outbound / inbound (clickable → drill into Leads) -->
             <td class="text-right py-2.5 px-2 tabular-nums border-l border-outline-gray-1">
               <button
                 v-if="row.unique_out"
@@ -111,20 +115,22 @@
             </td>
             <td class="text-right py-2.5 px-2 tabular-nums">
               <button
-                v-if="row.unique_all"
-                class="text-ink-gray-8 hover:text-ink-blue-3 hover:underline"
-                @click.stop="drill(row, 'all')"
+                v-if="row.unique_in"
+                class="font-medium text-ink-green-3 hover:underline"
+                @click.stop="drill(row, 'in')"
               >
-                {{ fmt(row.unique_all) }}
+                {{ fmt(row.unique_in) }}
               </button>
               <span v-else class="text-ink-gray-4">–</span>
             </td>
-            <!-- Total actions: outbound / all -->
+            <!-- Total actions: outbound / inbound -->
             <td class="text-right py-2.5 px-2 tabular-nums text-ink-gray-7 border-l border-outline-gray-1">
               {{ row.total_out ? fmt(row.total_out) : '–' }}
             </td>
-            <td class="text-right py-2.5 pl-2 pr-4 tabular-nums text-ink-gray-7">
-              {{ row.total_all ? fmt(row.total_all) : '–' }}
+            <td class="text-right py-2.5 pl-2 pr-4 tabular-nums">
+              <span :class="row.total_in ? 'text-ink-green-3' : 'text-ink-gray-4'">
+                {{ row.total_in ? fmt(row.total_in) : '–' }}
+              </span>
             </td>
           </tr>
 
@@ -151,7 +157,7 @@
                   <Button
                     variant="ghost"
                     :label="__('Open all in Leads')"
-                    @click="drill(row, 'all')"
+                    @click="drill(row, 'any')"
                   >
                     <template #suffix>
                       <LucideArrowRight class="size-3.5" />
@@ -175,9 +181,21 @@
                       class="shrink-0 tabular-nums text-ink-gray-4 text-xs"
                       >{{ formatDuration(lead.secs) }}</span
                     >
-                    <span class="shrink-0 tabular-nums text-ink-gray-5">{{
-                      lead.count
-                    }}</span>
+                    <Tooltip :text="__('Outbound')">
+                      <span
+                        class="shrink-0 inline-flex items-center gap-0.5 tabular-nums text-ink-gray-5"
+                      >
+                        <LucideArrowUpRight class="size-3" />{{ lead.out }}
+                      </span>
+                    </Tooltip>
+                    <Tooltip :text="__('Inbound (replied)')">
+                      <span
+                        class="shrink-0 inline-flex items-center gap-0.5 tabular-nums"
+                        :class="lead.inb ? 'text-ink-green-3 font-medium' : 'text-ink-gray-4'"
+                      >
+                        <LucideArrowDownLeft class="size-3" />{{ lead.inb }}
+                      </span>
+                    </Tooltip>
                     <LucideArrowRight
                       class="size-3.5 text-ink-gray-4 shrink-0 opacity-0 group-hover:opacity-100"
                     />
@@ -201,6 +219,8 @@
 <script setup>
 import LucideChevronRight from '~icons/lucide/chevron-right'
 import LucideArrowRight from '~icons/lucide/arrow-right'
+import LucideArrowUpRight from '~icons/lucide/arrow-up-right'
+import LucideArrowDownLeft from '~icons/lucide/arrow-down-left'
 import LucidePhone from '~icons/lucide/phone'
 import LucideMessageSquare from '~icons/lucide/message-square'
 import LucideFileSignature from '~icons/lucide/file-signature'
@@ -226,13 +246,17 @@ const unfold = reactive({}) // { [key]: { loading, leads, count, truncated } }
 // Only show rows that actually have data so an absent doctype (texts /
 // agreements not provisioned) silently drops out.
 const rows = computed(() =>
-  (props.activity || []).filter((r) => r.unique_all || r.total_all),
+  (props.activity || []).filter(
+    (r) => r.unique_out || r.unique_in || r.total_out || r.total_in,
+  ),
 )
 
-// Quo talk time = total call duration (lives on the calls row).
+// Quo talk time = total call duration (lives on the calls row), split out/in.
 const talkSecs = computed(() => {
   const calls = (props.activity || []).find((r) => r.key === 'calls')
-  return { out: calls?.secs_out || 0, all: calls?.secs_all || 0 }
+  const out = calls?.secs_out || 0
+  const inb = calls?.secs_in || 0
+  return { out, in: inb, total: out + inb }
 })
 
 const icons = {
@@ -270,7 +294,7 @@ async function loadLeads(key) {
   unfold[key] = { loading: true, leads: [], count: 0, truncated: false, stamp }
   const res = await resolver.submit({
     activity: key,
-    scope: 'all',
+    scope: 'any',
     from_date: props.fromDate,
     to_date: props.toDate,
     user: props.user,
@@ -297,7 +321,12 @@ async function drill(row, scope) {
     user: props.user,
   })
   if (!res) return
-  const scopeLabel = scope === 'out' ? __('outbound') : __('all')
+  const scopeLabel =
+    scope === 'out'
+      ? __('outbound')
+      : scope === 'in'
+        ? __('inbound')
+        : __('all')
   drilldown.set({
     names: res.names,
     label: `${row.title} (${scopeLabel})`,

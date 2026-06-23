@@ -673,13 +673,14 @@ def get_leads_by_source_names(
 # Activity summary (calls / texts / agreements)
 # ---------------------------------------------------------------------------
 # Three outreach metrics for the range, each able to unfold into the exact leads
-# behind it. Per Lance, each is shown "both side by side": outbound (what the
-# team placed) and all (inbound + outbound), as unique leads AND total actions.
+# behind it. Outbound (what the team placed) and inbound (the lead's replies) are
+# split out — per Lance, so we can see who's responding — as unique leads AND
+# total actions, with call talk time alongside.
 #   calls       — CRM Call Log rows referencing a CRM Lead (`type` Outgoing/Incoming)
 #   texts       — Quo Message rows referencing a CRM Lead (`direction` Outgoing/
 #                 Incoming; custom doctype managed by the ops repo, may be absent)
-#   agreements  — CRM Esign Agreement rows (always "sent" — no inbound, so
-#                 outbound == all; custom doctype, may be absent)
+#   agreements  — CRM Esign Agreement rows (always "sent" — no inbound;
+#                 custom doctype, may be absent)
 # All three are dated by `creation`, matching the rest of this dashboard. Each
 # row is keyed by the lead it references, so the same fetch powers the headline
 # counts and the per-lead unfold/drill-down.
@@ -771,19 +772,20 @@ def _tally(rows):
 		if not ref:
 			continue
 		secs = r.get("secs", 0)
-		d = per_lead.setdefault(ref, {"out": 0, "all": 0, "secs_out": 0, "secs_all": 0})
-		d["all"] += r["c"]
-		d["secs_all"] += secs
+		d = per_lead.setdefault(ref, {"out": 0, "inb": 0, "secs_out": 0, "secs_in": 0})
 		if r["out"]:
 			d["out"] += r["c"]
 			d["secs_out"] += secs
+		else:
+			d["inb"] += r["c"]
+			d["secs_in"] += secs
 	counts = {
 		"unique_out": sum(1 for d in per_lead.values() if d["out"]),
-		"unique_all": len(per_lead),
+		"unique_in": sum(1 for d in per_lead.values() if d["inb"]),
 		"total_out": sum(d["out"] for d in per_lead.values()),
-		"total_all": sum(d["all"] for d in per_lead.values()),
+		"total_in": sum(d["inb"] for d in per_lead.values()),
 		"secs_out": sum(d["secs_out"] for d in per_lead.values()),
-		"secs_all": sum(d["secs_all"] for d in per_lead.values()),
+		"secs_in": sum(d["secs_in"] for d in per_lead.values()),
 	}
 	return per_lead, counts
 
@@ -806,16 +808,18 @@ def _activity_summary(from_date, to_date, user):
 @sales_user_only
 def get_activity_leads(
 	activity: str,
-	scope: str = "all",
+	scope: str = "any",
 	from_date: str | None = None,
 	to_date: str | None = None,
 	user: str | None = None,
 ):
-	"""Leads behind one activity metric, with per-lead counts (powers the unfold).
+	"""Leads behind one activity metric, with per-lead out/in counts (the unfold).
 
-	`scope` selects the outbound-only ("out") or full ("all") set. Returns the
-	leads (display name + count) sorted busiest-first, plus the bare `names` the
-	caller feeds into the Leads list as a `name in [...]` drill-down filter.
+	`scope` picks the set: "out" = leads we reached out to, "in" = leads who
+	responded (inbound), "any" = either (the unfold's full list). Each lead row
+	carries both outbound and inbound counts (and talk time for calls) so the
+	unfold can show who's responding. `names` feeds the Leads list a
+	`name in [...]` drill-down filter.
 	"""
 	if activity not in ACTIVITY_ROWS:
 		frappe.throw(_("Unknown activity {0}").format(activity))
@@ -830,16 +834,38 @@ def get_activity_leads(
 	if "Sales User" in roles and not is_sales_manager:
 		user = frappe.session.user
 
-	scope = "out" if scope == "out" else "all"
+	scope = scope if scope in ("out", "in", "any") else "any"
 	per_lead, _counts = _tally(ACTIVITY_ROWS[activity](from_date, to_date, user))
 
 	items = []
 	for name, d in per_lead.items():
-		c = d["out"] if scope == "out" else d["all"]
-		if c:
-			secs = d["secs_out"] if scope == "out" else d["secs_all"]
-			items.append({"name": name, "count": c, "secs": secs})
-	items.sort(key=lambda r: (-r["count"], r["name"]))
+		out, inb = d["out"], d["inb"]
+		if scope == "out" and not out:
+			continue
+		if scope == "in" and not inb:
+			continue
+		if not (out or inb):
+			continue
+		items.append(
+			{
+				"name": name,
+				"out": out,
+				"inb": inb,
+				"count": out + inb,
+				"secs_out": d["secs_out"],
+				"secs_in": d["secs_in"],
+				"secs": d["secs_out"] + d["secs_in"],
+			}
+		)
+	# Sort by the scope's relevant count so the drilled set reads busiest-first.
+	def sort_key(r):
+		if scope == "out":
+			return (-r["out"], r["name"])
+		if scope == "in":
+			return (-r["inb"], r["name"])
+		return (-r["count"], r["name"])
+
+	items.sort(key=sort_key)
 
 	# Resolve display names in chunked IN-list queries.
 	name_map = {}
