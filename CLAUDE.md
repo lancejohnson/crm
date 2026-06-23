@@ -205,6 +205,79 @@ server scripts, infra, and all operational context live in the ops repo:
     set; `pages/Leads.vue` injects it as a never-persisted `name in […]`
     default-filter (+ a dismissible banner); `components/ViewControls.vue` now
     exposes `reload()` so clearing the drill refreshes the list
+- **BatchData "Fetch Tax Info"** (Leads) — a $0.10/pull button on a lead that
+  fetches owner, APN, and tax status from BatchData (Property Search). A confirm
+  dialog ("This will charge $0.10", requested-by user, and a "last pulled by X
+  on <date>" re-pull warning) precedes the charge. Each pull is a **CRM Property
+  Tax Pull** row (audit trail: pulled_by/at/cost + raw record + flattened
+  columns); headline fields (apn, property_owner, tax_status, annual_tax,
+  assessed_value, last_tax_pull_at/by — all read_only so they auto-hide until
+  filled) are written back onto the lead and show in the Property Details
+  sidebar. Also: a dedicated **Tax Info** sidebar card (latest pull + pulled-by/
+  when, re-pull button) and a **`tax_pull`** Activity-timeline entry. Live
+  refresh via the `crm_tax_pull` realtime event (site-wide, `after_commit`,
+  emitted from the app hook since the server-script sandbox can't publish — see
+  the SMS/task realtime pattern).
+  - **Architecture mirrors SMS**: the external BatchData call lives in the ops
+    server script `pull-tax-info` (key via `__INFISICAL:BATCHDATA_API_KEY__`,
+    like `send-text`); it stores the raw property record and the app-code
+    `after_insert` hook does all parsing + lead writeback + realtime.
+  - `crm/api/tax_info.py` — `on_tax_pull_insert` hook (parse + writeback +
+    publish `crm_tax_pull`) + `get_tax_pulls(lead)` read API
+  - `crm/hooks.py` — `CRM Property Tax Pull` `after_insert`
+  - `frontend/src/components/Modals/FetchTaxInfoModal.vue` (charge confirm),
+    `components/TaxInfoCard.vue` (sidebar object), `pages/Lead.vue` (header
+    button + card + realtime doc/sidebar reload), `components/Activities/
+    Activities.vue` (`tax_pull` timeline type + `taxPulls` resource + listener),
+    `AllModals.vue` (`fetchTaxInfo`), `utils/index.js` (`formatNumber`)
+  - **Tax-assessor caveat**: `tax.taxAmount`/`assessment.totalAssessedValue`
+    only populate once the "Core Property Data (Tax Assessor)" product is enabled
+    on the BatchData account; until then owner/APN/value/tax-status-flags come
+    through and the assessor columns stay empty (parser already wired for them).
+    BatchData has NO cumulative back-taxes-owed $ field — "taxes owed" = annual
+    tax + delinquency status (`tax.taxDelinquentYear` / `quickLists.taxDefault`).
+  - Ops (`../frappe-crm-deploy`): `scripts/setup_tax_info.py` (doctype + lead
+    custom fields + Property side-panel layout), `site/server_scripts/
+    pull_tax_info.py` + manifest entry, synced via `sync_server_scripts.py`.
+
+- **Documenso "Create Purchase Agreement"** (Leads) — a header action (in the
+  decluttered "More" menu next to the name) that spins up a pre-filled, editable
+  Documenso e-sign draft of the wholesale purchase agreement and hands back a
+  self-serve buyer signing link. A modal picks the agreement type (Standard vs
+  Novation/+AIF) and seller count; two sellers reveals a Seller 2 name/email (one
+  seller drops the Seller 2 fields). Mirrors the BatchData Fetch-Tax-Info wiring.
+  - `components/Modals/CreateAgreementModal.vue` (chooser + success view: buyer
+    link with copy/open + seller links), mounted in `Activities/AllModals.vue`
+    (`createAgreement()` + expose), forwarded by `Activities/Activities.vue`.
+  - `pages/Lead.vue` — **button row decluttered** into Call · Text · **More ▾**
+    (Dropdown via a `moreActions` computed: Make-a-Call / Email / Website /
+    Attach / Fetch Tax Info / Create Purchase Agreement) · Delete. (Email +
+    Website moved off the row into the menu per Lance — "that area is getting
+    unruly".) `MoneyIcon`/`Email2Icon`/`LinkIcon`/`AttachmentIcon` imports now
+    unused but harmless.
+  - **Backend = ops server script** `create_agreement_draft.py` (api_method
+    `create-agreement-draft`, token via `__INFISICAL:DOCUMENSO_API_TOKEN_ACQ__`):
+    resolve template by title → `/template/use` w/ prefill → delete Seller 2 for
+    one-seller → `/document/distribute` distributionMethod NONE (no emails). See
+    `../frappe-crm-deploy` + the `documenso-deployment` memory.
+  - Modal also: asks **Seller 1 email** when the lead has none (optional); creates
+    a **Contact attached to the lead** when a Seller 2 is entered (email optional).
+- **E-sign agreement tracking + live status** — each draft is recorded as a
+  **CRM Esign Agreement** row (ops doctype) shown in a sidebar card +
+  Activity-timeline entry, with status that updates live as recipients sign
+  (Documenso webhook → ops `documenso-webhook` server script → CRM Esign Agreement
+  on_update APP hook → `crm_esign` realtime). Mirrors the tax-info realtime/card/
+  timeline pattern exactly.
+  - `crm/api/agreement.py` — `on_agreement_insert`/`on_agreement_update`
+    (stamp last_event_at + publish `crm_esign`, the sandbox can't) + `get_agreements`
+  - `crm/hooks.py` — CRM Esign Agreement after_insert + on_update
+  - `frontend/src/components/AgreementsCard.vue` (sidebar: status badge + signed
+    count + buyer/seller links), mounted in `pages/Lead.vue` after `<TaxInfoCard>`
+  - `frontend/src/components/Activities/Activities.vue` — `agreement` timeline
+    type (`get_agreements` resource + `crm_esign` listener + DetailsIcon)
+  - Documenso webhooks are DB-managed (Webhook table, not the public API); a row
+    for teamId 4 points at `/api/method/documenso-webhook?secret=…`. Details in
+    `../frappe-crm-deploy` + the `documenso-deployment` memory.
 
 The companion server-side pieces (custom doctypes, scheduler engine, webhook
 endpoints) are Server Scripts managed from the ops repo, NOT app code here. SMS

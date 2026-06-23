@@ -123,20 +123,6 @@
               </a>
               <div class="flex gap-1.5">
                 <Button
-                  v-if="callEnabled"
-                  :tooltip="__('Make a Call')"
-                  :icon="PhoneIcon"
-                  @click="
-                    () =>
-                      doc.mobile_no
-                        ? makeCall(doc.mobile_no)
-                        : toast.error(
-                            __('Please set a mobile number to make calls'),
-                          )
-                  "
-                />
-
-                <Button
                   :tooltip="__('Call')"
                   :icon="PhoneIcon"
                   @click="
@@ -161,32 +147,14 @@
                   "
                 />
 
-                <Button
-                  :tooltip="__('Send an Email')"
-                  :icon="Email2Icon"
-                  @click="
-                    doc.email
-                      ? openEmailBox()
-                      : toast.error(
-                          __('Please set an email address to send emails'),
-                        )
-                  "
-                />
-                <Button
-                  :tooltip="__('Go to Website')"
-                  :icon="LinkIcon"
-                  @click="
-                    doc.website
-                      ? openWebsite(doc.website)
-                      : toast.error(__('Please set a website to visit'))
-                  "
-                />
-
-                <Button
-                  :tooltip="__('Attach a File')"
-                  :icon="AttachmentIcon"
-                  @click="showFilesUploader = true"
-                />
+                <!-- Secondary actions live in a single menu so the row stays
+                     uncluttered: email / website / attach / tax / agreement. -->
+                <Dropdown :options="moreActions" placement="bottom-start">
+                  <Button
+                    :tooltip="__('More actions')"
+                    icon="more-horizontal"
+                  />
+                </Dropdown>
 
                 <Button
                   v-if="canDelete"
@@ -207,6 +175,8 @@
         v-model="doc"
         @updateField="updateField"
       />
+      <TaxInfoCard :lead="leadId" @fetch="activities?.fetchTaxInfo()" />
+      <AgreementsCard :lead="leadId" @create="activities?.createAgreement()" />
       <div
         v-if="sections.data"
         class="flex flex-1 flex-col justify-between overflow-hidden"
@@ -285,6 +255,9 @@ import FilesUploader from '@/components/FilesUploader/FilesUploader.vue'
 import SidePanelLayout from '@/components/SidePanelLayout.vue'
 import SLASection from '@/components/SLASection.vue'
 import CustomActions from '@/components/CustomActions.vue'
+import TaxInfoCard from '@/components/TaxInfoCard.vue'
+import AgreementsCard from '@/components/AgreementsCard.vue'
+import MoneyIcon from '@/components/Icons/MoneyIcon.vue'
 import {
   openWebsite,
   setupCustomizations,
@@ -313,7 +286,7 @@ import {
   usePageMeta,
   toast,
 } from 'frappe-ui'
-import { ref, computed, watch, nextTick, onMounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useActiveTabManager } from '@/composables/useActiveTabManager'
 
@@ -350,9 +323,79 @@ const canDelete = computed(() => permissions.data?.permissions?.delete || false)
 
 const doc = computed(() => document.doc || {})
 
+// Secondary header actions, collapsed into the "More" menu next to the name.
+const moreActions = computed(() => {
+  const d = doc.value
+  const items = []
+  if (callEnabled.value) {
+    items.push({
+      label: __('Make a Call'),
+      icon: 'phone',
+      onClick: () =>
+        d.mobile_no
+          ? makeCall(d.mobile_no)
+          : toast.error(__('Please set a mobile number to make calls')),
+    })
+  }
+  items.push({
+    label: __('Send an Email'),
+    icon: 'mail',
+    onClick: () =>
+      d.email
+        ? openEmailBox()
+        : toast.error(__('Please set an email address to send emails')),
+  })
+  items.push({
+    label: __('Go to Website'),
+    icon: 'link',
+    onClick: () =>
+      d.website
+        ? openWebsite(d.website)
+        : toast.error(__('Please set a website to visit')),
+  })
+  items.push({
+    label: __('Attach a File'),
+    icon: 'paperclip',
+    onClick: () => {
+      showFilesUploader.value = true
+    },
+  })
+  items.push({
+    label: __('Fetch Tax Info ($0.10)'),
+    icon: 'dollar-sign',
+    onClick: () =>
+      d.property_address
+        ? activities.value?.fetchTaxInfo()
+        : toast.error(__('Set a property address to fetch tax info')),
+  })
+  items.push({
+    label: __('Create Purchase Agreement'),
+    icon: 'file-text',
+    onClick: () =>
+      d.property_address
+        ? activities.value?.createAgreement()
+        : toast.error(__('Set a property address to create an agreement')),
+  })
+  return items
+})
+
 onMounted(async () => {
   if (document.doc) await triggerOnRender()
 })
+
+// A tax-info pull writes owner/APN/tax fields back onto the lead — refresh the
+// doc + sidebar fields when one lands for this lead (site-wide realtime event).
+function onTaxPull(data) {
+  if (
+    data.reference_doctype === 'CRM Lead' &&
+    data.reference_docname === props.leadId
+  ) {
+    document.reload()
+    sections.reload()
+  }
+}
+onMounted(() => $socket.on('crm_tax_pull', onTaxPull))
+onBeforeUnmount(() => $socket.off('crm_tax_pull', onTaxPull))
 
 watch(error, (err) => {
   if (err) {

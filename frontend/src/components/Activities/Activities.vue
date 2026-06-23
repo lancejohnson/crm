@@ -318,6 +318,111 @@
               </div>
             </Tooltip>
           </div>
+          <div
+            v-else-if="activity.activity_type == 'tax_pull'"
+            class="mb-4 flex flex-col gap-1.5 py-1.5 text-base"
+          >
+            <div class="flex items-center gap-1.5">
+              <span class="font-medium text-ink-gray-8">{{
+                activity.pull.pulled_by_name || activity.pull.pulled_by
+              }}</span>
+              <span class="text-ink-gray-5">{{ __('fetched tax info') }}</span>
+              <span class="text-ink-gray-4">·</span>
+              <span class="text-ink-gray-5">$0.10</span>
+              <Tooltip :text="formatDate(activity.creation)" class="ml-auto">
+                <div class="whitespace-nowrap text-sm text-ink-gray-5">
+                  {{ __(timeAgo(activity.creation)) }}
+                </div>
+              </Tooltip>
+            </div>
+            <div
+              class="flex flex-col gap-1 rounded-md bg-surface-gray-2 px-2.5 py-2 text-sm"
+            >
+              <template v-if="activity.pull.matched">
+                <div v-if="activity.pull.owner_name" class="flex gap-1.5">
+                  <span class="shrink-0 text-ink-gray-5">{{ __('Owner') }}</span>
+                  <span class="text-ink-gray-8">{{
+                    activity.pull.owner_name
+                  }}</span>
+                </div>
+                <div v-if="activity.pull.apn" class="flex gap-1.5">
+                  <span class="shrink-0 text-ink-gray-5">{{ __('APN') }}</span>
+                  <span class="text-ink-gray-8">{{ activity.pull.apn }}</span>
+                </div>
+                <div v-if="activity.pull.tax_status" class="flex gap-1.5">
+                  <span class="shrink-0 text-ink-gray-5">{{
+                    __('Tax status')
+                  }}</span>
+                  <span
+                    :class="
+                      activity.pull.tax_default || activity.pull.tax_delinquent_year
+                        ? 'font-medium text-ink-red-3'
+                        : 'text-ink-gray-8'
+                    "
+                    >{{ activity.pull.tax_status }}</span
+                  >
+                </div>
+                <div v-if="activity.pull.annual_tax" class="flex gap-1.5">
+                  <span class="shrink-0 text-ink-gray-5">{{
+                    __('Annual tax')
+                  }}</span>
+                  <span class="text-ink-gray-8"
+                    >${{ formatNumber(activity.pull.annual_tax) }}</span
+                  >
+                </div>
+                <div v-if="activity.pull.assessed_value" class="flex gap-1.5">
+                  <span class="shrink-0 text-ink-gray-5">{{
+                    __('Assessed')
+                  }}</span>
+                  <span class="text-ink-gray-8"
+                    >${{ formatNumber(activity.pull.assessed_value) }}</span
+                  >
+                </div>
+              </template>
+              <span v-else class="text-ink-gray-5">{{
+                __('No property match found for this address.')
+              }}</span>
+            </div>
+          </div>
+          <div
+            v-else-if="activity.activity_type == 'agreement'"
+            class="mb-4 flex flex-col gap-1.5 py-1.5 text-base"
+          >
+            <div class="flex items-center gap-1.5">
+              <span class="font-medium text-ink-gray-8">{{
+                activity.agreement.created_by_name || activity.agreement.owner
+              }}</span>
+              <span class="text-ink-gray-5">{{
+                __('created a purchase agreement')
+              }}</span>
+              <Tooltip :text="formatDate(activity.creation)" class="ml-auto">
+                <div class="whitespace-nowrap text-sm text-ink-gray-5">
+                  {{ __(timeAgo(activity.creation)) }}
+                </div>
+              </Tooltip>
+            </div>
+            <div
+              class="flex flex-col gap-1.5 rounded-md bg-surface-gray-2 px-2.5 py-2 text-sm"
+            >
+              <div class="flex items-center justify-between gap-2">
+                <span class="truncate text-ink-gray-8">{{
+                  activity.agreement.template_title
+                }}</span>
+                <span class="shrink-0 text-xs text-ink-gray-5">
+                  {{ activity.agreement.signed_count || 0 }}/{{
+                    activity.agreement.total_signers || 0
+                  }}
+                  {{ __('signed') }}
+                </span>
+              </div>
+              <button
+                class="self-start text-xs text-ink-gray-6 underline hover:text-ink-gray-9"
+                @click="openAgreementLink(activity.agreement.buyer_link)"
+              >
+                {{ __('Open buyer link') }}
+              </button>
+            </div>
+          </div>
           <div v-else class="mb-4 flex flex-col gap-2 py-1.5">
             <div class="flex items-center justify-stretch gap-2 text-base">
               <div
@@ -582,6 +687,7 @@ import EmptyState from '@/components/ListViews/EmptyState.vue'
 import LeadsIcon from '@/components/Icons/LeadsIcon.vue'
 import DealsIcon from '@/components/Icons/DealsIcon.vue'
 import DotIcon from '@/components/Icons/DotIcon.vue'
+import MoneyIcon from '@/components/Icons/MoneyIcon.vue'
 import CommentIcon from '@/components/Icons/CommentIcon.vue'
 import SelectIcon from '@/components/Icons/SelectIcon.vue'
 import MissedCallIcon from '@/components/Icons/MissedCallIcon.vue'
@@ -595,7 +701,7 @@ import AllModals from '@/components/Activities/AllModals.vue'
 import LostReasonModal from '@/components/Modals/LostReasonModal.vue'
 import { statusesStore } from '@/stores/statuses'
 import FilesUploader from '@/components/FilesUploader/FilesUploader.vue'
-import { timeAgo, formatDate, startCase } from '@/utils'
+import { timeAgo, formatDate, startCase, formatNumber } from '@/utils'
 import { globalStore } from '@/stores/global'
 import { usersStore } from '@/stores/users'
 import { whatsappEnabled, smsEnabled } from '@/composables/settings'
@@ -703,6 +809,25 @@ const smsMessages = createResource({
   onSuccess: () => nextTick(() => scroll()),
 })
 
+// BatchData tax-info pulls for this lead (shown in the Activity timeline + the
+// sidebar Tax Info card). Leads only.
+const taxPulls = createResource({
+  url: 'crm.api.tax_info.get_tax_pulls',
+  cache: ['tax_pulls', props.docname],
+  params: { lead: props.docname },
+  auto: props.doctype === 'CRM Lead',
+  onSuccess: () => nextTick(() => scroll()),
+})
+
+// Documenso e-sign agreements for this lead (timeline + sidebar card). Leads only.
+const agreements = createResource({
+  url: 'crm.api.agreement.get_agreements',
+  cache: ['agreements', props.docname],
+  params: { lead: props.docname },
+  auto: props.doctype === 'CRM Lead',
+  onSuccess: () => nextTick(() => scroll()),
+})
+
 // is_sms_enabled resolves asynchronously, so `auto: smsEnabled.value` is often
 // false at creation and the resource never fetches. Fetch once it's enabled.
 watch(
@@ -717,6 +842,8 @@ onBeforeUnmount(() => {
   $socket.off('whatsapp_message')
   $socket.off('quo_message')
   $socket.off('crm_task_update')
+  $socket.off('crm_tax_pull')
+  $socket.off('crm_esign')
 })
 
 onMounted(() => {
@@ -745,6 +872,26 @@ onMounted(() => {
       data.reference_docname === props.docname
     ) {
       all_activities.reload()
+    }
+  })
+
+  // tax-info pull finished — refresh the timeline entry + sidebar Tax Info card
+  $socket.on('crm_tax_pull', (data) => {
+    if (
+      data.reference_doctype === props.doctype &&
+      data.reference_docname === props.docname
+    ) {
+      taxPulls.reload()
+    }
+  })
+
+  // e-sign agreement created or a recipient signed — refresh timeline + card
+  $socket.on('crm_esign', (data) => {
+    if (
+      data.reference_doctype === props.doctype &&
+      data.reference_docname === props.docname
+    ) {
+      agreements.reload()
     }
   })
 
@@ -797,6 +944,32 @@ function get_text_activities() {
   }))
 }
 
+// tax-info pulls as timeline entries, anchored at the time of the pull
+function get_tax_pull_activities() {
+  if (!taxPulls.data) return []
+  return taxPulls.data.map((p) => ({
+    name: p.name,
+    activity_type: 'tax_pull',
+    creation: p.pulled_at || p.creation,
+    pull: p,
+  }))
+}
+
+// e-sign agreements as timeline entries, anchored at creation
+function get_agreement_activities() {
+  if (!agreements.data) return []
+  return agreements.data.map((a) => ({
+    name: a.name,
+    activity_type: 'agreement',
+    creation: a.creation,
+    agreement: a,
+  }))
+}
+
+function openAgreementLink(url) {
+  if (url) window.open(url, '_blank', 'noopener,noreferrer')
+}
+
 // open tasks pinned at the top of the Activity feed (Trello-style to-do list)
 const openTasks = computed(() => {
   if (!all_activities.data?.tasks) return []
@@ -826,6 +999,8 @@ const activities = computed(() => {
       ...get_activities(),
       ...get_text_activities(),
       ...get_task_activities(),
+      ...get_tax_pull_activities(),
+      ...get_agreement_activities(),
     ]
   } else if (title.value == 'Emails') {
     if (!all_activities.data?.versions) return []
@@ -860,7 +1035,9 @@ const activities = computed(() => {
       activity.activity_type == 'communication' ||
       activity.activity_type == 'incoming_text' ||
       activity.activity_type == 'outgoing_text' ||
-      activity.activity_type == 'task'
+      activity.activity_type == 'task' ||
+      activity.activity_type == 'tax_pull' ||
+      activity.activity_type == 'agreement'
     )
       return
 
@@ -1017,6 +1194,12 @@ function timelineIcon(activity_type, is_lead) {
     case 'task':
       icon = TaskIcon
       break
+    case 'tax_pull':
+      icon = MoneyIcon
+      break
+    case 'agreement':
+      icon = DetailsIcon
+      break
     default:
       icon = DotIcon
   }
@@ -1059,6 +1242,16 @@ function scroll(hash) {
 // trigger them from buttons next to the name, mirroring ActivityHeader.
 const createCallLog = () => modalRef.value?.createCallLog()
 const sendText = () => modalRef.value?.sendText()
+const fetchTaxInfo = () => modalRef.value?.fetchTaxInfo()
+const createAgreement = () => modalRef.value?.createAgreement()
 
-defineExpose({ emailBox, all_activities, changeTabTo, createCallLog, sendText })
+defineExpose({
+  emailBox,
+  all_activities,
+  changeTabTo,
+  createCallLog,
+  sendText,
+  fetchTaxInfo,
+  createAgreement,
+})
 </script>

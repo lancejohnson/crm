@@ -184,6 +184,21 @@ doc_events = {
 	"Quo Message": {
 		"after_insert": ["crm.api.sms.on_quo_message_insert"],
 	},
+	# CRM Property Tax Pull is a custom doctype (ops repo). The `pull-tax-info`
+	# server script stores BatchData's raw property record; the sandbox can't
+	# parse it richly or publish_realtime, so the parse + lead writeback + live
+	# refresh happen here on insert. See crm/api/tax_info.py.
+	"CRM Property Tax Pull": {
+		"after_insert": ["crm.api.tax_info.on_tax_pull_insert"],
+	},
+	# CRM Esign Agreement is a custom doctype (ops repo). The create-agreement-draft
+	# + documenso-webhook server scripts can't publish_realtime or stamp time in
+	# the sandbox, so the live refresh (crm_esign event) + last_event_at stamping
+	# happen here. See crm/api/agreement.py.
+	"CRM Esign Agreement": {
+		"after_insert": ["crm.api.agreement.on_agreement_insert"],
+		"on_update": ["crm.api.agreement.on_agreement_update"],
+	},
 	# Real-time drainer for sub-minute sequence steps. The sandboxed sequence
 	# engine can't sleep or enqueue cleanly into a worker, so the burst is driven
 	# from here (non-sandboxed): enqueue a worker that sleeps the real waits and

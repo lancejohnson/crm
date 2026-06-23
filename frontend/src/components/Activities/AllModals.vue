@@ -27,12 +27,26 @@
     :referenceDoc="referenceDoc"
     :doctype="doctype"
   />
+  <FetchTaxInfoModal
+    v-if="showFetchTaxInfoModal"
+    v-model="showFetchTaxInfoModal"
+    :referenceDoc="referenceDoc"
+    :options="{ afterPull: () => activities.reload() }"
+  />
+  <CreateAgreementModal
+    v-if="showCreateAgreementModal"
+    v-model="showCreateAgreementModal"
+    :referenceDoc="referenceDoc"
+    :options="{ afterCreate: () => activities.reload() }"
+  />
 </template>
 <script setup>
 import TaskModal from '@/components/Modals/TaskModal.vue'
 import NoteModal from '@/components/Modals/NoteModal.vue'
 import CallLogModal from '@/components/Modals/CallLogModal.vue'
 import SendTextModal from '@/components/Modals/SendTextModal.vue'
+import FetchTaxInfoModal from '@/components/Modals/FetchTaxInfoModal.vue'
+import CreateAgreementModal from '@/components/Modals/CreateAgreementModal.vue'
 import { call } from 'frappe-ui'
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -137,6 +151,24 @@ function sendText() {
   showSendTextModal.value = true
 }
 
+// Fetch Tax Info (BatchData) — opens the $0.10 charge confirmation. Reloads on
+// success are also driven site-wide by the crm_tax_pull realtime event.
+const showFetchTaxInfoModal = ref(false)
+
+function fetchTaxInfo() {
+  referenceDoc.value = { ...doc.value }
+  showFetchTaxInfoModal.value = true
+}
+
+// Create Purchase Agreement (Documenso) — opens the seller-count / template
+// chooser, then creates a pre-filled draft and returns a self-serve buyer link.
+const showCreateAgreementModal = ref(false)
+
+function createAgreement() {
+  referenceDoc.value = { ...doc.value }
+  showCreateAgreementModal.value = true
+}
+
 // common
 const route = useRoute()
 const router = useRouter()
@@ -158,5 +190,7 @@ defineExpose({
   showNote,
   createCallLog,
   sendText,
+  fetchTaxInfo,
+  createAgreement,
 })
 </script>
