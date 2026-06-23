@@ -205,6 +205,22 @@ server scripts, infra, and all operational context live in the ops repo:
     set; `pages/Leads.vue` injects it as a never-persisted `name in […]`
     default-filter (+ a dismissible banner); `components/ViewControls.vue` now
     exposes `reload()` so clearing the drill refreshes the list
+- **Collapse fleeting (<60s) status changes** — a status changed by mistake and
+  quickly corrected no longer leaves a fleeting intermediate behind. A run of
+  consecutive status changes where each intermediate was held <60s collapses to
+  the net transition (A→B→C in under a minute reads as A→C); a bounce back
+  (A→B→A) disappears entirely. Applied on **both** surfaces that show status
+  changes, which read different sources, so they agree:
+  - **Per-lead/Deal Activity timeline** (Frappe Version history) —
+    `crm/api/activities.py` `collapse_rapid_status_changes()`, a display-only
+    pass wired into `get_lead_activities` + `get_deal_activities` before the sort
+    (never mutates the Version audit trail).
+  - **Dashboard Status Change Report** (`CRM Status Change Log` child table) —
+    `crm/fcrm/doctype/crm_status_change_log/crm_status_change_log.py`
+    `add_status_change_log()` rewrites the prior transition to the corrected
+    status and drops the fleeting row at write time (bounce reopens the prior
+    row). Threshold constant `MIN_STATUS_HELD_SECONDS` / `STATUS_COLLAPSE_SECONDS`
+    = 60 in each file. The creation/initial status is never collapsed.
 - **BatchData "Fetch Tax Info"** (Leads) — a $0.10/pull button on a lead that
   fetches owner, APN, and tax status from BatchData (Property Search). A confirm
   dialog ("This will charge $0.10", requested-by user, and a "last pulled by X
