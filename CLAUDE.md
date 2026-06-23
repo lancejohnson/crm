@@ -54,6 +54,30 @@ server scripts, infra, and all operational context live in the ops repo:
   inline rich-text editor with Save/Cancel. Owner-only `edit_comment` API
   (PermissionError guard; suppresses mention re-notify on edit); `Activities.vue`
   passes the activities resource via `v-model` so the feed reloads after a save.
+- **Quick comments (customizable canned comments)** — a "Quick comment" block in
+  the Lead/Deal Activity feed (directly below the To-do block, same card style):
+  a row of one-tap chips that each post a canned comment to the timeline. Each
+  user customizes their own list via an inline pencil editor (add/edit/remove
+  rows + Save). Seeded defaults for any user who hasn't customized: "Call 3x's,
+  voicemail, sent text" / "Called" / "Voicemail" / "Sent text". Persisted
+  cross-device on a `User.custom_quick_comments` JSON field (mirrors the
+  `custom_quo_number` per-user-setting pattern). Requested by Dennis.
+  - `frontend/src/components/Activities/QuickComments.vue` — **new** (chips +
+    inline editor; reads the session user's list from the users store, falls back
+    to defaults when unset)
+  - `frontend/src/components/Activities/AllModals.vue` — `addComment(content)`
+    helper (posts via `crm.api.comment.add_comment`, wraps plain chip text in a
+    `<div>`, reloads the feed) + exposed
+  - `frontend/src/components/Activities/Activities.vue` — renders `<QuickComments>`
+    after `<TaskTodoList>`; widened the Activity-tab `v-else-if` to `title ==
+    'Activity'` so the To-do + Quick-comment blocks always show (even on an empty
+    lead) instead of the EmptyState
+  - `crm/api/session.py` — `custom_quick_comments` added to `get_users` fields
+  - `crm/api/comment.py` — `set_user_quick_comments(comments)` (session user's
+    own list only; stores a cleaned JSON array, capped at 30)
+  - Ops (`../frappe-crm-deploy`): `scripts/setup_quick_comments.py` adds the
+    `User.custom_quick_comments` Long Text custom field (no seeding — defaults
+    live in the frontend)
 - `frontend/src/components/Kanban/KanbanCardField.vue` + `pages/Leads.vue`
   `#fields` slot — hover-only card affordances on the Leads Kanban: copy icon
   for phone/address fields, pencil-to-edit (inline popover, `frappe.client.set_value`

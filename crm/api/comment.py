@@ -1,3 +1,4 @@
+import json
 from collections.abc import Iterable
 
 import frappe
@@ -116,6 +117,39 @@ def edit_comment(comment_name: str, content: str):
 	comment.save(ignore_permissions=True)
 
 	return comment
+
+
+QUICK_COMMENTS_MAX = 30
+
+
+@frappe.whitelist()
+def set_user_quick_comments(comments):
+	"""Persist the current user's customizable quick-comment chips.
+
+	A user only ever edits their own list (no `user` param — keyed to the session
+	user), stored as a JSON array of strings on `User.custom_quick_comments`. An
+	empty/unset value means "fall back to the frontend defaults".
+
+	:param comments: JSON array (or already-parsed list) of comment strings
+	:return: the cleaned list that was stored
+	"""
+	if isinstance(comments, str):
+		try:
+			comments = json.loads(comments)
+		except (ValueError, TypeError):
+			frappe.throw(_("Invalid quick comments payload."))
+	if not isinstance(comments, list):
+		frappe.throw(_("Quick comments must be a list."))
+
+	cleaned = [str(c).strip() for c in comments if str(c).strip()][:QUICK_COMMENTS_MAX]
+	frappe.db.set_value(
+		"User",
+		frappe.session.user,
+		"custom_quick_comments",
+		json.dumps(cleaned),
+		update_modified=False,
+	)
+	return cleaned
 
 
 def add_attachments(name: str, attachments: Iterable[str | dict]) -> None:

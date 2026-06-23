@@ -115,6 +115,20 @@ function updateTaskStatus(status, task) {
   })
 }
 
+// Quick comment — one-tap canned comment from the Activity feed. Posts via the
+// same endpoint as the rich-text composer; content is HTML so wrap the plain
+// chip text in a <div> to match what the editor stores.
+async function addComment(content) {
+  const c = (content || '').trim()
+  if (!c) return
+  await call('crm.api.comment.add_comment', {
+    reference_doctype: props.doctype,
+    reference_name: doc.value?.name,
+    content: `<div>${c}</div>`,
+  })
+  activities.value.reload()
+}
+
 // Notes
 const showNoteModal = ref(false)
 const note = ref({})
@@ -187,6 +201,7 @@ defineExpose({
   addTask,
   deleteTask,
   updateTaskStatus,
+  addComment,
   showNote,
   createCallLog,
   sendText,

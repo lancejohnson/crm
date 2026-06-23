@@ -43,7 +43,7 @@
         activities?.length ||
         (whatsappMessages.data?.length && title == 'WhatsApp') ||
         (smsMessages.data?.length && title == 'SMS') ||
-        (openTasks.length && title == 'Activity')
+        title == 'Activity'
       "
       class="activities"
     >
@@ -52,6 +52,7 @@
         :tasks="openTasks"
         :modalRef="modalRef"
       />
+      <QuickComments v-if="title == 'Activity'" :modalRef="modalRef" />
       <div v-if="title == 'WhatsApp' && whatsappMessages.data?.length">
         <WhatsAppArea
           v-model="whatsappMessages"
@@ -665,6 +666,7 @@ import CallArea from '@/components/Activities/CallArea.vue'
 import NoteArea from '@/components/Activities/NoteArea.vue'
 import TaskArea from '@/components/Activities/TaskArea.vue'
 import TaskTodoList from '@/components/Activities/TaskTodoList.vue'
+import QuickComments from '@/components/Activities/QuickComments.vue'
 import AttachmentArea from '@/components/Activities/AttachmentArea.vue'
 import DataFields from '@/components/Activities/DataFields.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
