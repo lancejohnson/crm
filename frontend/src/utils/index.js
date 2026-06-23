@@ -112,6 +112,14 @@ export function dueColor(date) {
   return ''
 }
 
+// Thousands-separated integer (no currency symbol — callers prefix "$"). Used by
+// the tax-info pull timeline entry + sidebar card for tax/assessed amounts.
+export function formatNumber(value) {
+  const n = Number(value)
+  if (!isFinite(n)) return value ?? ''
+  return Math.round(n).toLocaleString('en-US')
+}
+
 function getBrowserTimezone() {
   return Intl.DateTimeFormat().resolvedOptions().timeZone
 }
