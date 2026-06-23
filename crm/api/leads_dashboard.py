@@ -15,7 +15,7 @@ both stamped at `to_date`.
 import frappe
 from frappe import _
 from frappe.query_builder import DocType
-from frappe.query_builder.functions import Count, Date
+from frappe.query_builder.functions import Count, Date, Sum
 
 from crm.api.dashboard import get_leads_by_source
 from crm.utils import sales_user_only
@@ -692,7 +692,12 @@ def _call_rows(from_date, to_date, user):
 		frappe.qb.from_(CL)
 		.join(Lead)
 		.on(CL.reference_docname == Lead.name)
-		.select(CL.reference_docname.as_("ref"), CL.type.as_("dir"), Count("*").as_("c"))
+		.select(
+			CL.reference_docname.as_("ref"),
+			CL.type.as_("dir"),
+			Count("*").as_("c"),
+			Sum(CL.duration).as_("secs"),
+		)
 		.where(
 			(CL.reference_doctype == "CRM Lead") & Date(CL.creation).between(from_date, to_date)
 		)
@@ -701,7 +706,10 @@ def _call_rows(from_date, to_date, user):
 	)
 	if user:
 		q = q.where(Lead.lead_owner == user)
-	return [{"ref": r.ref, "out": r.dir == "Outgoing", "c": r.c or 0} for r in q.run(as_dict=True)]
+	return [
+		{"ref": r.ref, "out": r.dir == "Outgoing", "c": r.c or 0, "secs": int(r.secs or 0)}
+		for r in q.run(as_dict=True)
+	]
 
 
 def _text_rows(from_date, to_date, user):
@@ -752,21 +760,30 @@ ACTIVITY_ROWS = {
 
 
 def _tally(rows):
-	"""Aggregate grouped activity rows into {lead: {out, all}} plus headline counts."""
+	"""Aggregate grouped activity rows into per-lead totals plus headline counts.
+
+	`secs` (call talk time) rides along so the Leads-called row / unfold can show
+	time on the phone; it's 0 for texts and agreements.
+	"""
 	per_lead = {}
 	for r in rows:
 		ref = r["ref"]
 		if not ref:
 			continue
-		d = per_lead.setdefault(ref, {"out": 0, "all": 0})
+		secs = r.get("secs", 0)
+		d = per_lead.setdefault(ref, {"out": 0, "all": 0, "secs_out": 0, "secs_all": 0})
 		d["all"] += r["c"]
+		d["secs_all"] += secs
 		if r["out"]:
 			d["out"] += r["c"]
+			d["secs_out"] += secs
 	counts = {
 		"unique_out": sum(1 for d in per_lead.values() if d["out"]),
 		"unique_all": len(per_lead),
 		"total_out": sum(d["out"] for d in per_lead.values()),
 		"total_all": sum(d["all"] for d in per_lead.values()),
+		"secs_out": sum(d["secs_out"] for d in per_lead.values()),
+		"secs_all": sum(d["secs_all"] for d in per_lead.values()),
 	}
 	return per_lead, counts
 
@@ -820,7 +837,8 @@ def get_activity_leads(
 	for name, d in per_lead.items():
 		c = d["out"] if scope == "out" else d["all"]
 		if c:
-			items.append({"name": name, "count": c})
+			secs = d["secs_out"] if scope == "out" else d["secs_all"]
+			items.append({"name": name, "count": c, "secs": secs})
 	items.sort(key=lambda r: (-r["count"], r["name"]))
 
 	# Resolve display names in chunked IN-list queries.

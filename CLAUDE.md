@@ -215,6 +215,11 @@ server scripts, infra, and all operational context live in the ops repo:
   (chevron) lists the actual leads inline with per-lead counts, each clickable to
   open the lead, plus "Open all in Leads". All three dated by `creation`, scoped
   to `CRM Lead`-referenced records and (for sales users) the current user.
+  Also shows **Quo talk time** (total CRM Call Log `duration` for the range,
+  outbound/all) as a stat in the card header, with per-lead talk time in the
+  Leads-called unfold. (Note: inbound calls only count if the telephony webhook
+  logged them as `type=Incoming` and linked them to a lead — historically all
+  logged calls have been Outgoing.)
   - `crm/api/leads_dashboard.py` — `_activity_summary` (added to
     `get_leads_dashboard` as `activity`) + per-source row fetchers
     (`_call_rows` = CRM Call Log `type`, `_text_rows` = Quo Message `direction`,

@@ -1,13 +1,37 @@
 <template>
   <div class="rounded-md bg-surface-white shadow">
     <!-- Header -->
-    <div class="px-4 pt-4 pb-3">
-      <div class="text-lg font-semibold text-ink-gray-9">
-        {{ __('Activity') }}
+    <div class="flex items-start justify-between gap-4 flex-wrap px-4 pt-4 pb-3">
+      <div>
+        <div class="text-lg font-semibold text-ink-gray-9">
+          {{ __('Activity') }}
+        </div>
+        <div class="text-sm text-ink-gray-5 mt-0.5">
+          {{ __('Leads reached by call, text, and agreement in this range') }}
+        </div>
       </div>
-      <div class="text-sm text-ink-gray-5 mt-0.5">
-        {{ __('Leads reached by call, text, and agreement in this range') }}
-      </div>
+
+      <!-- Quo talk time (call duration) -->
+      <Tooltip
+        v-if="talkSecs.all"
+        :text="
+          __('Outbound {0} · All {1}', [
+            formatDuration(talkSecs.out) || '0s',
+            formatDuration(talkSecs.all) || '0s',
+          ])
+        "
+      >
+        <div
+          class="rounded-md border border-outline-gray-1 px-3 py-1.5 text-right"
+        >
+          <div class="text-xs uppercase tracking-wide text-ink-gray-5">
+            {{ __('Talk time') }}
+          </div>
+          <div class="text-lg font-semibold text-ink-gray-9 tabular-nums">
+            {{ formatDuration(talkSecs.all) }}
+          </div>
+        </div>
+      </Tooltip>
     </div>
 
     <div
@@ -146,6 +170,11 @@
                     <span class="truncate text-ink-gray-8 flex-1">{{
                       lead.lead_name
                     }}</span>
+                    <span
+                      v-if="row.key === 'calls' && lead.secs"
+                      class="shrink-0 tabular-nums text-ink-gray-4 text-xs"
+                      >{{ formatDuration(lead.secs) }}</span
+                    >
                     <span class="shrink-0 tabular-nums text-ink-gray-5">{{
                       lead.count
                     }}</span>
@@ -176,6 +205,7 @@ import LucidePhone from '~icons/lucide/phone'
 import LucideMessageSquare from '~icons/lucide/message-square'
 import LucideFileSignature from '~icons/lucide/file-signature'
 import { leadDrilldownStore } from '@/stores/leadDrilldown'
+import { formatDuration } from '@/utils'
 import { createResource, Button, Tooltip } from 'frappe-ui'
 import { ref, computed, reactive } from 'vue'
 import { useRouter } from 'vue-router'
@@ -198,6 +228,12 @@ const unfold = reactive({}) // { [key]: { loading, leads, count, truncated } }
 const rows = computed(() =>
   (props.activity || []).filter((r) => r.unique_all || r.total_all),
 )
+
+// Quo talk time = total call duration (lives on the calls row).
+const talkSecs = computed(() => {
+  const calls = (props.activity || []).find((r) => r.key === 'calls')
+  return { out: calls?.secs_out || 0, all: calls?.secs_all || 0 }
+})
 
 const icons = {
   calls: LucidePhone,
