@@ -361,6 +361,20 @@ const moreActions = computed(() => {
     },
   })
   items.push({
+    label: __('View on Zillow'),
+    icon: 'home',
+    onClick: () =>
+      d.property_address
+        ? window.open(
+            `https://www.zillow.com/homes/${encodeURIComponent(
+              d.property_address,
+            )}_rb/`,
+            '_blank',
+            'noopener',
+          )
+        : toast.error(__('Set a property address to view on Zillow')),
+  })
+  items.push({
     label: __('Fetch Tax Info ($0.10)'),
     icon: 'dollar-sign',
     onClick: () =>
