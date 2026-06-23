@@ -6,6 +6,7 @@ from frappe import _
 from frappe.desk.form.load import get_docinfo
 from frappe.query_builder import JoinType
 from frappe.translate import get_translated_doctypes
+from frappe.utils import get_datetime
 
 from crm.fcrm.doctype.crm_call_log.crm_call_log import parse_call_log
 
@@ -168,6 +169,7 @@ def get_deal_activities(name: str):
 	tasks = tasks + get_linked_tasks(name) + get_linked_calls(name).get("tasks", [])
 	attachments = attachments + get_attachments("CRM Deal", name)
 
+	activities = collapse_rapid_status_changes(activities)
 	activities.sort(key=lambda x: x["creation"], reverse=True)
 	activities = handle_multiple_versions(activities)
 
@@ -309,6 +311,7 @@ def get_lead_activities(name: str):
 	tasks = get_linked_tasks(name) + get_linked_calls(name).get("tasks", [])
 	attachments = get_attachments("CRM Lead", name)
 
+	activities = collapse_rapid_status_changes(activities)
 	activities.sort(key=lambda x: x["creation"], reverse=True)
 	activities = handle_multiple_versions(activities)
 
@@ -334,6 +337,79 @@ def get_attachments(doctype: str, name: str):
 		)
 		or []
 	)
+
+
+# Status changes held for less than this are treated as mis-clicks and hidden
+# from the activity timeline — mirrors the CRM Status Change Log collapse so the
+# two surfaces agree (see crm_status_change_log.add_status_change_log).
+STATUS_COLLAPSE_SECONDS = 60
+
+
+def _is_status_change(activity):
+	return (
+		activity.get("activity_type") in ("changed", "added", "removed")
+		and isinstance(activity.get("data"), dict)
+		and activity["data"].get("field") == "status"
+	)
+
+
+def _status_from(activity):
+	# "added" entries carry only the new value; their prior status is empty
+	if activity["activity_type"] == "added":
+		return ""
+	return activity["data"].get("old_value") or ""
+
+
+def _status_to(activity):
+	return activity["data"].get("value") or ""
+
+
+def collapse_rapid_status_changes(activities, threshold_seconds=STATUS_COLLAPSE_SECONDS):
+	"""Hide fleeting intermediate status changes from the activity timeline.
+
+	A run of consecutive status changes where each intermediate status was held
+	for less than ``threshold_seconds`` collapses to a single net transition, so
+	a mistaken A→B→C done within a minute shows only A→C. A run that returns to
+	where it started (A→B→A) is dropped entirely. The surviving entry keeps the
+	final change's timestamp (when the status actually settled). This is a
+	display-only filter — it never touches the underlying Version audit trail.
+	"""
+	status_acts = sorted(
+		(a for a in activities if _is_status_change(a)),
+		key=lambda a: get_datetime(a["creation"]),
+	)
+	if len(status_acts) < 2:
+		return activities
+
+	drop = set()
+	i, n = 0, len(status_acts)
+	while i < n:
+		j = i
+		while (
+			j + 1 < n
+			and (
+				get_datetime(status_acts[j + 1]["creation"]) - get_datetime(status_acts[j]["creation"])
+			).total_seconds()
+			< threshold_seconds
+			and _status_to(status_acts[j]) == _status_from(status_acts[j + 1])
+		):
+			j += 1
+		if j > i:
+			first, last = status_acts[i], status_acts[j]
+			net_from, net_to = _status_from(first), _status_to(last)
+			for k in range(i, j):
+				drop.add(id(status_acts[k]))  # drop the fleeting intermediates
+			if net_from == net_to:
+				drop.add(id(last))  # bounced back — no net change to show
+			else:
+				# rewrite the surviving entry to read as the net transition
+				last["data"]["old_value"] = net_from
+				last["activity_type"] = "changed"
+		i = j + 1
+
+	if not drop:
+		return activities
+	return [a for a in activities if id(a) not in drop]
 
 
 def handle_multiple_versions(versions: list):
