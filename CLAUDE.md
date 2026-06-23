@@ -205,6 +205,26 @@ server scripts, infra, and all operational context live in the ops repo:
     set; `pages/Leads.vue` injects it as a never-persisted `name in […]`
     default-filter (+ a dismissible banner); `components/ViewControls.vue` now
     exposes `reload()` so clearing the drill refreshes the list
+- **Activity Report** (on the `/dashboard` landing page) — an unfoldable table of
+  outreach for the selected range: **Leads called**, **Leads texted**, and
+  **Agreements sent**, each shown "both side by side" (per Lance) as **unique
+  leads** *and* **total actions**, split **Outbound vs All** (outbound = a
+  call/text the team placed; agreements have no inbound so outbound == all).
+  Clicking a unique-leads number drills the matching leads into the Leads list
+  (same `leadDrilldown` mechanism as the source/status drills); unfolding a row
+  (chevron) lists the actual leads inline with per-lead counts, each clickable to
+  open the lead, plus "Open all in Leads". All three dated by `creation`, scoped
+  to `CRM Lead`-referenced records and (for sales users) the current user.
+  - `crm/api/leads_dashboard.py` — `_activity_summary` (added to
+    `get_leads_dashboard` as `activity`) + per-source row fetchers
+    (`_call_rows` = CRM Call Log `type`, `_text_rows` = Quo Message `direction`,
+    `_agreement_rows` = CRM Esign Agreement) + `_tally` + the `get_activity_leads`
+    drill/unfold endpoint (per-lead counts + display names, `DRILL_CAP`). Quo
+    Message / Esign Agreement are guarded by `frappe.db.exists` so an unprovisioned
+    site just drops that row.
+  - `frontend/src/components/Dashboard/ActivityReport.vue` — **new**; mounted in
+    `pages/LeadsDashboard.vue` (between the summary cards and the New-leads chart),
+    fed `data.activity`; lazy-fetches the per-row lead list on unfold.
 - **Collapse fleeting (<60s) status changes** — a status changed by mistake and
   quickly corrected no longer leaves a fleeting intermediate behind. A run of
   consecutive status changes where each intermediate was held <60s collapses to

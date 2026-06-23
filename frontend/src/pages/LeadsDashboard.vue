@@ -106,6 +106,14 @@
           </div>
         </div>
 
+        <!-- Activity: leads called / texted + agreements sent (unfold to leads) -->
+        <ActivityReport
+          :activity="data.activity"
+          :fromDate="fromDate"
+          :toDate="toDate"
+          :user="filters.user"
+        />
+
         <!-- 1. New leads per day -->
         <div class="rounded-md bg-surface-white shadow h-80 p-1">
           <AxisChart :config="data.new_leads_trend" />
@@ -168,6 +176,7 @@ import ViewBreadcrumbs from '@/components/ViewBreadcrumbs.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 import Link from '@/components/Controls/Link.vue'
 import StatusChangeReport from '@/components/Dashboard/StatusChangeReport.vue'
+import ActivityReport from '@/components/Dashboard/ActivityReport.vue'
 import LucideRefreshCcw from '~icons/lucide/refresh-ccw'
 import LucideArrowRight from '~icons/lucide/arrow-right'
 import { leadDrilldownStore } from '@/stores/leadDrilldown'

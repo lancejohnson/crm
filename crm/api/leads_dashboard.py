@@ -42,6 +42,7 @@ def get_leads_dashboard(
 		"status_changes": _status_changes(from_date, to_date, user),
 		"leads_by_source": get_leads_by_source(from_date, to_date, user),
 		"summary": _summary(from_date, to_date, user),
+		"activity": _activity_summary(from_date, to_date, user),
 	}
 
 
@@ -665,4 +666,183 @@ def get_leads_by_source_names(
 		"names": names[:DRILL_CAP],
 		"count": len(names),
 		"truncated": len(names) > DRILL_CAP,
+	}
+
+
+# ---------------------------------------------------------------------------
+# Activity summary (calls / texts / agreements)
+# ---------------------------------------------------------------------------
+# Three outreach metrics for the range, each able to unfold into the exact leads
+# behind it. Per Lance, each is shown "both side by side": outbound (what the
+# team placed) and all (inbound + outbound), as unique leads AND total actions.
+#   calls       — CRM Call Log rows referencing a CRM Lead (`type` Outgoing/Incoming)
+#   texts       — Quo Message rows referencing a CRM Lead (`direction` Outgoing/
+#                 Incoming; custom doctype managed by the ops repo, may be absent)
+#   agreements  — CRM Esign Agreement rows (always "sent" — no inbound, so
+#                 outbound == all; custom doctype, may be absent)
+# All three are dated by `creation`, matching the rest of this dashboard. Each
+# row is keyed by the lead it references, so the same fetch powers the headline
+# counts and the per-lead unfold/drill-down.
+
+
+def _call_rows(from_date, to_date, user):
+	CL = DocType("CRM Call Log")
+	Lead = DocType("CRM Lead")
+	q = (
+		frappe.qb.from_(CL)
+		.join(Lead)
+		.on(CL.reference_docname == Lead.name)
+		.select(CL.reference_docname.as_("ref"), CL.type.as_("dir"), Count("*").as_("c"))
+		.where(
+			(CL.reference_doctype == "CRM Lead") & Date(CL.creation).between(from_date, to_date)
+		)
+		.groupby(CL.reference_docname)
+		.groupby(CL.type)
+	)
+	if user:
+		q = q.where(Lead.lead_owner == user)
+	return [{"ref": r.ref, "out": r.dir == "Outgoing", "c": r.c or 0} for r in q.run(as_dict=True)]
+
+
+def _text_rows(from_date, to_date, user):
+	if not frappe.db.exists("DocType", "Quo Message"):
+		return []
+	QM = DocType("Quo Message")
+	Lead = DocType("CRM Lead")
+	q = (
+		frappe.qb.from_(QM)
+		.join(Lead)
+		.on(QM.reference_docname == Lead.name)
+		.select(QM.reference_docname.as_("ref"), QM.direction.as_("dir"), Count("*").as_("c"))
+		.where(
+			(QM.reference_doctype == "CRM Lead") & Date(QM.creation).between(from_date, to_date)
+		)
+		.groupby(QM.reference_docname)
+		.groupby(QM.direction)
+	)
+	if user:
+		q = q.where(Lead.lead_owner == user)
+	return [{"ref": r.ref, "out": r.dir == "Outgoing", "c": r.c or 0} for r in q.run(as_dict=True)]
+
+
+def _agreement_rows(from_date, to_date, user):
+	if not frappe.db.exists("DocType", "CRM Esign Agreement"):
+		return []
+	AG = DocType("CRM Esign Agreement")
+	Lead = DocType("CRM Lead")
+	q = (
+		frappe.qb.from_(AG)
+		.join(Lead)
+		.on(AG.lead == Lead.name)
+		.select(AG.lead.as_("ref"), Count("*").as_("c"))
+		.where(Date(AG.creation).between(from_date, to_date))
+		.groupby(AG.lead)
+	)
+	if user:
+		q = q.where(Lead.lead_owner == user)
+	# Agreements have no inbound direction — every one is outbound ("sent").
+	return [{"ref": r.ref, "out": True, "c": r.c or 0} for r in q.run(as_dict=True)]
+
+
+ACTIVITY_ROWS = {
+	"calls": _call_rows,
+	"texts": _text_rows,
+	"agreements": _agreement_rows,
+}
+
+
+def _tally(rows):
+	"""Aggregate grouped activity rows into {lead: {out, all}} plus headline counts."""
+	per_lead = {}
+	for r in rows:
+		ref = r["ref"]
+		if not ref:
+			continue
+		d = per_lead.setdefault(ref, {"out": 0, "all": 0})
+		d["all"] += r["c"]
+		if r["out"]:
+			d["out"] += r["c"]
+	counts = {
+		"unique_out": sum(1 for d in per_lead.values() if d["out"]),
+		"unique_all": len(per_lead),
+		"total_out": sum(d["out"] for d in per_lead.values()),
+		"total_all": sum(d["all"] for d in per_lead.values()),
+	}
+	return per_lead, counts
+
+
+def _activity_summary(from_date, to_date, user):
+	"""Headline counts for each outreach activity (calls / texts / agreements)."""
+	titles = {
+		"calls": _("Leads called"),
+		"texts": _("Leads texted"),
+		"agreements": _("Agreements sent"),
+	}
+	out = []
+	for key in ("calls", "texts", "agreements"):
+		_per_lead, counts = _tally(ACTIVITY_ROWS[key](from_date, to_date, user))
+		out.append({"key": key, "title": titles[key], **counts})
+	return out
+
+
+@frappe.whitelist()
+@sales_user_only
+def get_activity_leads(
+	activity: str,
+	scope: str = "all",
+	from_date: str | None = None,
+	to_date: str | None = None,
+	user: str | None = None,
+):
+	"""Leads behind one activity metric, with per-lead counts (powers the unfold).
+
+	`scope` selects the outbound-only ("out") or full ("all") set. Returns the
+	leads (display name + count) sorted busiest-first, plus the bare `names` the
+	caller feeds into the Leads list as a `name in [...]` drill-down filter.
+	"""
+	if activity not in ACTIVITY_ROWS:
+		frappe.throw(_("Unknown activity {0}").format(activity))
+	if not from_date or not to_date:
+		from_date = frappe.utils.get_first_day(from_date or frappe.utils.nowdate())
+		to_date = frappe.utils.get_last_day(to_date or frappe.utils.nowdate())
+	from_date = str(frappe.utils.getdate(from_date))
+	to_date = str(frappe.utils.getdate(to_date))
+
+	roles = frappe.get_roles(frappe.session.user)
+	is_sales_manager = "Sales Manager" in roles or "System Manager" in roles
+	if "Sales User" in roles and not is_sales_manager:
+		user = frappe.session.user
+
+	scope = "out" if scope == "out" else "all"
+	per_lead, _counts = _tally(ACTIVITY_ROWS[activity](from_date, to_date, user))
+
+	items = []
+	for name, d in per_lead.items():
+		c = d["out"] if scope == "out" else d["all"]
+		if c:
+			items.append({"name": name, "count": c})
+	items.sort(key=lambda r: (-r["count"], r["name"]))
+
+	# Resolve display names in chunked IN-list queries.
+	name_map = {}
+	for chunk in _chunks([it["name"] for it in items], 5000):
+		for r in frappe.get_all(
+			"CRM Lead",
+			filters={"name": ["in", chunk]},
+			fields=["name", "lead_name", "first_name", "last_name"],
+		):
+			name_map[r.name] = (
+				r.lead_name
+				or " ".join(x for x in [r.first_name, r.last_name] if x)
+				or r.name
+			)
+	for it in items:
+		it["lead_name"] = name_map.get(it["name"], it["name"])
+
+	capped = items[:DRILL_CAP]
+	return {
+		"leads": capped,
+		"names": [it["name"] for it in capped],
+		"count": len(items),
+		"truncated": len(items) > DRILL_CAP,
 	}
