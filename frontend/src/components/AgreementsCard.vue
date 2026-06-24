@@ -30,6 +30,18 @@
           <span v-if="a.last_event" class="truncate">{{ eventLabel(a.last_event) }}</span>
         </div>
 
+        <a
+          v-if="a.is_signed"
+          :href="signedUrl(a)"
+          class="mt-0.5 block"
+        >
+          <Button class="w-full" size="sm" theme="green" :label="__('Download signed PDF')">
+            <template #prefix>
+              <FeatherIcon name="download" class="size-3.5" />
+            </template>
+          </Button>
+        </a>
+
         <div class="mt-0.5 flex items-center gap-2">
           <Button
             class="flex-1"
@@ -132,6 +144,12 @@ function copy(text) {
 }
 function openLink(url) {
   if (url) window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+// Proxy endpoint that streams the fully-signed PDF (the backend holds the
+// Documenso token; the raw Documenso URL is an internal, expiring MinIO link).
+function signedUrl(a) {
+  return `/api/method/crm.api.agreement.download_signed_agreement?agreement=${encodeURIComponent(a.name)}`
 }
 
 // A labeled, paste-ready block of every link for an email/text.

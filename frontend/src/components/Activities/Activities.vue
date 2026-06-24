@@ -416,12 +416,22 @@
                   {{ __('signed') }}
                 </span>
               </div>
-              <button
-                class="self-start text-xs text-ink-gray-6 underline hover:text-ink-gray-9"
-                @click="openAgreementLink(activity.agreement.buyer_link)"
-              >
-                {{ __('Open buyer link') }}
-              </button>
+              <div class="flex items-center gap-3">
+                <button
+                  class="self-start text-xs text-ink-gray-6 underline hover:text-ink-gray-9"
+                  @click="openAgreementLink(activity.agreement.buyer_link)"
+                >
+                  {{ __('Open buyer link') }}
+                </button>
+                <a
+                  v-if="activity.agreement.is_signed"
+                  :href="signedAgreementUrl(activity.agreement)"
+                  class="flex items-center gap-1 self-start text-xs font-medium text-ink-green-3 hover:text-ink-green-2"
+                >
+                  <FeatherIcon name="download" class="size-3" />
+                  {{ __('Download signed PDF') }}
+                </a>
+              </div>
             </div>
           </div>
           <div
@@ -1022,6 +1032,12 @@ function get_agreement_activities() {
 
 function openAgreementLink(url) {
   if (url) window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+// Proxy endpoint that streams the fully-signed PDF (the backend holds the
+// Documenso token; the raw Documenso URL is an internal, expiring MinIO link).
+function signedAgreementUrl(a) {
+  return `/api/method/crm.api.agreement.download_signed_agreement?agreement=${encodeURIComponent(a.name)}`
 }
 
 // underwriting workbooks as timeline entries, anchored at creation

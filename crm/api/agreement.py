@@ -13,11 +13,16 @@ tax-info pattern (crm/api/tax_info.py).
 """
 
 import json
+import re
 
 import frappe
 from frappe import _
 
 AGREEMENT_DOCTYPE = "CRM Esign Agreement"
+
+# Documenso public API (same host/version the ops server scripts use). The signed
+# PDF lives behind the API token, so we proxy the bytes through the backend.
+DOCUMENSO_API = "https://sign.groundworkpro.com/api/v2"
 
 
 def _publish(lead):
@@ -81,4 +86,70 @@ def get_agreements(lead: str):
 			r["seller_links"] = json.loads(r.get("seller_links") or "[]")
 		except (ValueError, TypeError):
 			r["seller_links"] = []
+		r["is_signed"] = _is_completed(r)
 	return rows
+
+
+def _is_completed(agr) -> bool:
+	"""A fully-signed agreement: Documenso says COMPLETED, or every signer signed."""
+	if (agr.get("agreement_status") or "").upper() == "COMPLETED":
+		return True
+	signed = agr.get("signed_count") or 0
+	total = agr.get("total_signers") or 0
+	return bool(total and signed >= total)
+
+
+def _signed_filename(agr) -> str:
+	base = (agr.get("template_title") or "agreement").strip()
+	safe = re.sub(r"[^\w.-]+", "_", base).strip("_") or "agreement"
+	return f"{safe}_signed.pdf"
+
+
+@frappe.whitelist()
+def download_signed_agreement(agreement: str):
+	"""Stream the fully-signed PDF for a completed CRM Esign Agreement.
+
+	Documenso's `download-beta` endpoint hands back an internal, expiring MinIO
+	presigned URL (`http://minio:9000/...`) that a browser can't reach, so we can't
+	just store/redirect to a link. Instead the backend — which holds the Documenso
+	API token — fetches the signed PDF bytes from `/document/{id}/download?version=signed`
+	and streams them to the client as a download.
+	"""
+	import requests
+
+	if not frappe.db.exists(AGREEMENT_DOCTYPE, agreement):
+		frappe.throw(_("Agreement not found"), frappe.DoesNotExistError)
+
+	agr = frappe.db.get_value(
+		AGREEMENT_DOCTYPE,
+		agreement,
+		["lead", "document_id", "agreement_status", "signed_count", "total_signers", "template_title"],
+		as_dict=True,
+	)
+	if not agr.lead or not frappe.has_permission("CRM Lead", "read", agr.lead):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	if not _is_completed(agr):
+		frappe.throw(_("This agreement is not fully signed yet."))
+	if not agr.document_id:
+		frappe.throw(_("This agreement has no Documenso document on file."))
+
+	token = (frappe.conf.get("documenso_api_token") or "").strip()
+	if not token:
+		frappe.throw(_("Documenso API token is not configured on this site."))
+
+	try:
+		resp = requests.get(
+			f"{DOCUMENSO_API}/document/{agr.document_id}/download",
+			params={"version": "signed"},
+			headers={"Authorization": token},
+			timeout=30,
+		)
+	except requests.RequestException:
+		frappe.throw(_("Could not reach Documenso to fetch the signed document."))
+
+	if resp.status_code != 200 or not resp.content:
+		frappe.throw(_("Could not fetch the signed document from Documenso ({0}).").format(resp.status_code))
+
+	frappe.local.response.filename = _signed_filename(agr)
+	frappe.local.response.filecontent = resp.content
+	frappe.local.response.type = "download"
