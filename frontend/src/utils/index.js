@@ -112,6 +112,44 @@ export function dueColor(date) {
   return ''
 }
 
+// First-Call Read 2x2: (motivated x on-price) -> quadrant metadata. motivated /
+// onPrice are each '' (unanswered) | 'Yes' | 'No'. Returns { answered, quad }
+// where quad is null until BOTH axes are answered. Shared by the lead-page
+// FirstCallReadCard and the Kanban quadrant chip so they stay in lockstep.
+const FIRST_CALL_QUADRANTS = {
+  'Yes|Yes': {
+    label: 'Motivated · On price',
+    theme: 'green',
+    guide:
+      'Hot lead — they want to sell and the price works. Get a purchase agreement out today.',
+  },
+  'Yes|No': {
+    label: 'Motivated · Off price',
+    theme: 'orange',
+    guide:
+      'They want to sell, but their price is too high. Stay on it — work the price and keep nurturing.',
+  },
+  'No|Yes': {
+    label: 'Not motivated · On price',
+    theme: 'blue',
+    guide:
+      'Price is realistic but they’re not ready. Set a long-term follow-up and check back later.',
+  },
+  'No|No': {
+    label: 'Not motivated · Off price',
+    theme: 'red',
+    guide:
+      'Not ready and the price is unrealistic. Low priority — drip campaign or recycle.',
+  },
+}
+
+export function firstCallRead(motivated, onPrice) {
+  const m = motivated === 'Yes' || motivated === 'No' ? motivated : ''
+  const p = onPrice === 'Yes' || onPrice === 'No' ? onPrice : ''
+  const answered = !!(m && p)
+  return { motivated: m, onPrice: p, answered, quad: answered ? FIRST_CALL_QUADRANTS[`${m}|${p}`] : null }
+}
+
 // Thousands-separated integer (no currency symbol — callers prefix "$"). Used by
 // the tax-info pull timeline entry + sidebar card for tax/assessed amounts.
 export function formatNumber(value) {

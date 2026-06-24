@@ -436,7 +436,7 @@ def get_data(
 
 		# computed pseudo-fields (filled per-card in getCounts) — not DB columns,
 		# so they must never reach frappe.get_list
-		rows = [row for row in rows if row not in ("_last_comm", "_next_task_due")]
+		rows = [row for row in rows if row not in ("_last_comm", "_next_task_due", "_first_call")]
 
 		for kc in kanban_columns:
 			column_filters = {column_field: kc.get("name")}
@@ -782,6 +782,17 @@ def getCounts(d, doctype):
 		"due_date",
 		order_by="due_date asc",
 	)
+
+	# First-Call Read 2x2 chip ("motivated|on_price", e.g. "Yes|No"); blank on
+	# either axis = not qualified yet. Fields live on CRM Lead only — guard so the
+	# Deals board (and a site pre-setup) doesn't error.
+	if doctype == "CRM Lead" and frappe.db.has_column("CRM Lead", "first_call_motivated"):
+		motivated, on_price = frappe.db.get_value(
+			"CRM Lead", d.get("name"), ["first_call_motivated", "first_call_on_price"]
+		) or ("", "")
+		d["_first_call"] = f"{motivated or ''}|{on_price or ''}"
+	else:
+		d["_first_call"] = "|"
 	return d
 
 

@@ -202,6 +202,12 @@ const fields = computed(() => {
       fieldname: '_last_comm',
       fieldtype: 'Datetime',
     })
+    mapped.push({
+      label: __('First-Call Read'),
+      value: '_first_call',
+      fieldname: '_first_call',
+      fieldtype: 'Data',
+    })
   }
   if (['CRM Lead', 'CRM Deal'].includes(props.doctype)) {
     mapped.push({

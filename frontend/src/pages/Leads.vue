@@ -255,6 +255,18 @@
           </Tooltip>
         </div>
         <div
+          v-else-if="fieldName === '_first_call'"
+          class="truncate text-base"
+        >
+          <Badge
+            v-if="getRow(itemName, fieldName).label"
+            variant="subtle"
+            :theme="getRow(itemName, fieldName).color"
+            size="md"
+            :label="getRow(itemName, fieldName).label"
+          />
+        </div>
+        <div
           v-else-if="fieldName === '_assign'"
           class="flex items-center truncate"
         >
@@ -392,7 +404,15 @@ import LucideFilter from '~icons/lucide/filter'
 import LucideCalendarClock from '~icons/lucide/calendar-clock'
 import { callEnabled } from '@/composables/settings'
 import { useBroadcast } from '@/composables/useBroadcast'
-import { formatDate, timeAgo, website, formatTime, dueColor, parseColor } from '@/utils'
+import {
+  formatDate,
+  timeAgo,
+  website,
+  formatTime,
+  dueColor,
+  parseColor,
+  firstCallRead,
+} from '@/utils'
 import { formatPhone, callHref } from '@/utils/phoneFormat'
 import { myQuoNumber } from '@/composables/quoSender'
 import { Avatar, Tooltip, Dropdown, call } from 'frappe-ui'
@@ -535,11 +555,24 @@ function onTaskUpdate(data) {
   if (onBoard) reloadKanban()
 }
 
+// A First-Call Read was recorded somewhere. The quadrant chip (_first_call) is
+// computed server-side, so refetch the board on the same on-board guard.
+function onFirstCallUpdate(data) {
+  if (data?.reference_doctype !== 'CRM Lead') return
+  if (route.params.viewType !== 'kanban') return
+  const onBoard = (leads.value?.data?.data || []).some((col) =>
+    col.data?.some((r) => r.name === data.reference_docname),
+  )
+  if (onBoard) reloadKanban()
+}
+
 onMounted(() => {
   $socket.on('crm_task_update', onTaskUpdate)
+  $socket.on('crm_first_call', onFirstCallUpdate)
 })
 onBeforeUnmount(() => {
   $socket.off('crm_task_update', onTaskUpdate)
+  $socket.off('crm_first_call', onFirstCallUpdate)
 })
 
 // Rows
@@ -742,6 +775,14 @@ function parseRows(rows, columns = []) {
       label: lead._next_task_due ? formatDate(lead._next_task_due) : '',
       value: lead._next_task_due ? __(timeAgo(lead._next_task_due)) : '',
       color: dueColor(lead._next_task_due),
+    }
+    // First-Call Read quadrant chip — only when both axes answered (server sends
+    // "_first_call" as "motivated|on_price", e.g. "Yes|No").
+    const [_fcMot, _fcPrice] = (lead._first_call || '|').split('|')
+    const _fc = firstCallRead(_fcMot, _fcPrice)
+    _rows['_first_call'] = {
+      label: _fc.quad ? __(_fc.quad.label) : '',
+      color: _fc.quad ? _fc.quad.theme : '',
     }
     return _rows
   })

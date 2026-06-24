@@ -488,7 +488,7 @@ class CRMLead(Document):
 		return {
 			"column_field": "status",
 			"title_field": "lead_name",
-			"kanban_fields": '["organization", "email", "mobile_no", "_assign", "_last_comm", "_next_task_due", "source"]',
+			"kanban_fields": '["organization", "email", "mobile_no", "_assign", "_last_comm", "_next_task_due", "_first_call", "source"]',
 		}
 
 

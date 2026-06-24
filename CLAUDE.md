@@ -344,6 +344,41 @@ server scripts, infra, and all operational context live in the ops repo:
   - Documenso webhooks are DB-managed (Webhook table, not the public API); a row
     for teamId 4 points at `/api/method/documenso-webhook?secret=…`. Details in
     `../frappe-crm-deploy` + the `documenso-deployment` memory.
+- **First-Call Read (2x2 lead qualification)** — after the first call a rep marks
+  two yes/no reads that place the lead in a 2x2: **Motivated?** (is the seller
+  motivated) x **On price?** (is their price realistic) → Motivated·On price /
+  Motivated·Off price / Not motivated·On price / Not motivated·Off price; blank on
+  either axis = "Not qualified yet". Drives the team to answer it on every initial
+  call. Three-state (unset/Yes/No) so "not asked" is distinct from "No".
+  - **Lead-page sidebar card** (top of the sidebar, above Tax Info): plain-English
+    questions with big Yes/No buttons (green Yes / red No), a mini 2x2 grid that
+    lights up the cell the lead lands in, and a color-coded guidance band (per-
+    quadrant next-action sentence) + "Set by X · date" stamp. Tap the active
+    choice again to clear it.
+    `frontend/src/components/FirstCallReadCard.vue` (new), mounted in
+    `pages/Lead.vue` before `<TaxInfoCard>` (`@saved="document.reload()"`).
+  - **Kanban quadrant chip** (Leads) — a subtle themed Badge on each card (green/
+    orange/blue/red) showing the quadrant label, only when BOTH axes are answered.
+    Server pseudo-field `_first_call` ("motivated|on_price", e.g. "Yes|No") computed
+    in `crm/api/doc.py` getCounts (guarded by `has_column`, CRM Lead only; excluded
+    from the DB `rows` SELECT like `_next_task_due`); added to default
+    `kanban_fields` in `crm_lead.py`; selectable in `Kanban/KanbanSettings.vue`;
+    rendered in the `#fields` slot of `pages/Leads.vue` (`parseRows` → label/theme
+    via the shared `firstCallRead()` helper in `utils/index.js`). Realtime
+    `crm_first_call` (site-wide, after_commit) → `reloadKanban()` on the same
+    on-board guard as `crm_task_update`. (Deals not wired — same backend extends.)
+  - **Backend = app code** (not a server script): `crm/api/first_call.py`
+    `set_first_call_read(lead, motivated, on_price)` — validates ''/Yes/No, writes
+    all four fields via `db.set_value` (no full doc.save → no status/assign side-
+    effects), stamps `first_call_by`/`first_call_at` server-side, publishes
+    `crm_first_call`.
+  - Ops (`../frappe-crm-deploy`): `scripts/setup_first_call_read.py` adds the four
+    CRM Lead custom fields (`first_call_motivated`/`first_call_on_price` Select
+    `\nYes\nNo`; `first_call_by` Link User read_only; `first_call_at` Datetime
+    read_only) — kept OUT of the side-panel layout (the card renders them). The
+    chip was also added to the saved Leads kanban views (CRM View Settings rows 3
+    + 4, after `_next_task_due`, `label:""`) so it shows without each user re-
+    adding it.
 
 The companion server-side pieces (custom doctypes, scheduler engine, webhook
 endpoints) are Server Scripts managed from the ops repo, NOT app code here. SMS

@@ -175,6 +175,14 @@
         v-model="doc"
         @updateField="updateField"
       />
+      <FirstCallReadCard
+        :lead="leadId"
+        :motivated="doc.first_call_motivated"
+        :onPrice="doc.first_call_on_price"
+        :setBy="doc.first_call_by"
+        :setAt="doc.first_call_at"
+        @saved="document.reload()"
+      />
       <TaxInfoCard :lead="leadId" @fetch="activities?.fetchTaxInfo()" />
       <AgreementsCard :lead="leadId" @create="activities?.createAgreement()" />
       <div
@@ -255,6 +263,7 @@ import FilesUploader from '@/components/FilesUploader/FilesUploader.vue'
 import SidePanelLayout from '@/components/SidePanelLayout.vue'
 import SLASection from '@/components/SLASection.vue'
 import CustomActions from '@/components/CustomActions.vue'
+import FirstCallReadCard from '@/components/FirstCallReadCard.vue'
 import TaxInfoCard from '@/components/TaxInfoCard.vue'
 import AgreementsCard from '@/components/AgreementsCard.vue'
 import MoneyIcon from '@/components/Icons/MoneyIcon.vue'
