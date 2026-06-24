@@ -53,6 +53,18 @@
     }"
   >
     <template #actions>
+      <Dropdown
+        v-if="route.params.viewType === 'kanban'"
+        :options="taskSortOptions"
+      >
+        <Button
+          :label="taskSortLabel"
+          variant="subtle"
+          :theme="taskSortDir ? 'blue' : 'gray'"
+        >
+          <template #prefix><LucideArrowDownUp class="size-4" /></template>
+        </Button>
+      </Dropdown>
       <Dropdown :options="taskDueOptions">
         <Button
           :label="taskDueLabel"
@@ -402,6 +414,7 @@ import { statusesStore } from '@/stores/statuses'
 import { leadDrilldownStore } from '@/stores/leadDrilldown'
 import LucideFilter from '~icons/lucide/filter'
 import LucideCalendarClock from '~icons/lucide/calendar-clock'
+import LucideArrowDownUp from '~icons/lucide/arrow-down-up'
 import { callEnabled } from '@/composables/settings'
 import { useBroadcast } from '@/composables/useBroadcast'
 import {
@@ -507,6 +520,46 @@ function clearTaskDue() {
   taskDueScope.value = ''
   taskDueNames.value = []
   nextTick(() => viewControls.value?.reload())
+}
+
+// Kanban "sort by next task due": orders each column's cards by their soonest
+// open task (the _next_task_due pseudo-field). The server can't SQL-sort a
+// computed field, so it re-derives the card order per column from this order_by.
+// Active direction is read straight off the live order_by so it survives reloads
+// and view switches; '' = the default (modified desc), no task sort applied.
+const taskSortDir = computed(() => {
+  const ob = leads.value?.params?.order_by || ''
+  if (!ob.startsWith('_next_task_due')) return ''
+  return ob.includes('desc') ? 'desc' : 'asc'
+})
+const taskSortLabel = computed(() => {
+  if (taskSortDir.value === 'asc') return __('Task due: soonest')
+  if (taskSortDir.value === 'desc') return __('Task due: latest')
+  return __('Sort by task')
+})
+const taskSortOptions = computed(() => {
+  const opts = [
+    {
+      label: __('Soonest due first'),
+      onClick: () => applyTaskSort('_next_task_due asc'),
+    },
+    {
+      label: __('Latest due first'),
+      onClick: () => applyTaskSort('_next_task_due desc'),
+    },
+  ]
+  if (taskSortDir.value) {
+    opts.push({
+      label: __('Clear'),
+      icon: 'x',
+      onClick: () => applyTaskSort('modified desc'),
+    })
+  }
+  return opts
+})
+
+function applyTaskSort(orderBy) {
+  viewControls.value?.updateSort(orderBy)
 }
 
 function clearDrill() {

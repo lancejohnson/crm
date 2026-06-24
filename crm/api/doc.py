@@ -299,6 +299,15 @@ def get_data(
 		default_filters = frappe.parse_json(default_filters)
 		filters.update(default_filters)
 
+	# "_next_task_due" is a computed pseudo-field (soonest open-task due date),
+	# not a DB column, so it can't reach a SQL order_by. Pull the requested
+	# direction out and neutralize order_by; the kanban path below re-derives the
+	# card order from it per column (list view falls back to modified desc).
+	next_task_dir = None
+	if order_by and "_next_task_due" in order_by:
+		next_task_dir = "desc" if "_next_task_due desc" in order_by else "asc"
+		order_by = "modified desc"
+
 	is_default = True
 	data = []
 	_list = get_controller(doctype)
@@ -449,6 +458,11 @@ def get_data(
 
 				if kc.get("page_length"):
 					page_length = kc.get("page_length")
+
+				# sorting by next-task-due overrides any manual drag order: derive
+				# the card order from each card's soonest open task (undated last)
+				if next_task_dir:
+					order = get_next_task_due_order(doctype, column_filters.copy(), next_task_dir)
 
 				if order:
 					column_data = get_records_based_on_order(
@@ -623,6 +637,47 @@ def get_records_based_on_order(doctype, rows, filters, page_length, order):
 			records.append(record)
 
 	return records
+
+
+def get_next_task_due_order(doctype, column_filters, direction="asc"):
+	"""Card names (Lead/Deal) matching `column_filters`, ordered by their soonest
+	open-task due date — the kanban "_next_task_due" pseudo-field. Cards with an
+	open dated task sort by due date (asc/desc per `direction`); cards with no
+	open task sink to the bottom. Returned as a name list the kanban `order`
+	machinery (get_records_based_on_order) consumes."""
+	names = frappe.get_list(
+		doctype,
+		filters=convert_filter_to_tuple(doctype, column_filters),
+		pluck="name",
+		limit_page_length=0,
+	)
+	if not names:
+		return []
+
+	# earliest open-task due date per card: fetch dated open tasks ascending and
+	# keep the first (= soonest) seen per card. Avoids a SQL aggregate/group_by.
+	task_rows = frappe.get_all(
+		"CRM Task",
+		filters={
+			"reference_doctype": doctype,
+			"reference_docname": ("in", names),
+			"status": ("not in", ["Done", "Canceled"]),
+			"due_date": (">", ""),
+		},
+		fields=["reference_docname", "due_date"],
+		order_by="due_date asc",
+	)
+	due_map = {}
+	for r in task_rows:
+		due_map.setdefault(r.reference_docname, r.due_date)
+
+	dated = sorted(
+		(n for n in names if n in due_map),
+		key=lambda n: due_map[n],
+		reverse=(direction == "desc"),
+	)
+	undated = [n for n in names if n not in due_map]
+	return dated + undated
 
 
 @frappe.whitelist()

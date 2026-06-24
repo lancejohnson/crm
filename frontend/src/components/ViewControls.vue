@@ -1379,6 +1379,7 @@ defineExpose({
   applyFilter,
   applyLikeFilter,
   likeDoc,
+  updateSort,
   updateKanbanSettings,
   fetchAndUpdateKanbanColumns,
   loadMoreKanban,

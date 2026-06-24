@@ -101,13 +101,16 @@ export function timeAgo(date) {
 }
 
 // Color name for a due date, shared by the lead task to-do list and the kanban
-// "next task due" badge: 'red' once the due datetime has passed (overdue),
-// 'amber' while it's still due today, '' (no special color) for a future day.
+// "next task due" badge. Keyed on the calendar *day*, not the exact time, so a
+// task stays amber all day it's due (instead of flipping red the moment its
+// clock time passes) and only goes red once the due day is in the past (i.e.
+// yesterday or earlier): 'red' = due before today, 'amber' = due today, '' = a
+// future day.
 export function dueColor(date) {
   if (!date) return ''
   const due = dayjs(date)
   const now = dayjs()
-  if (due.isBefore(now)) return 'red'
+  if (due.isBefore(now, 'day')) return 'red'
   if (due.isSame(now, 'day')) return 'amber'
   return ''
 }
