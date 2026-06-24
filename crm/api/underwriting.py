@@ -59,24 +59,32 @@ SCOPES = (
 # ---------------------------------------------------------------------------
 def _google_access_token() -> str:
 	"""Mint a Google OAuth2 access token from the service-account JSON in site
-	config, impersonating the configured Workspace user (domain-wide delegation).
-	Uses PyJWT (RS256) + a token-endpoint POST — no Google client libs needed."""
+	config. Uses PyJWT (RS256) + a token-endpoint POST — no Google client libs.
+
+	Two modes:
+	  - **SA acts as itself** (preferred): a dedicated SA that's a member of the
+	    Underwriting Shared Drive. Set `google_workspace_subject` to "" (empty).
+	  - **Domain-wide delegation**: impersonate a Workspace user — used only when
+	    `google_workspace_subject` is set (or unset → default Lance, legacy)."""
 	raw = frappe.conf.get("google_sa_json")
 	if not raw:
 		frappe.throw(_("Google service account is not configured (google_sa_json)."))
 	sa = json.loads(raw) if isinstance(raw, str) else raw
-	subject = frappe.conf.get("google_workspace_subject") or DEFAULT_SUBJECT
+	# .get(key, default): absent → legacy DWD as Lance; present-but-"" → no `sub`.
+	subject = frappe.conf.get("google_workspace_subject", DEFAULT_SUBJECT)
 
 	now = int(time.time())
+	claims = {
+		"iss": sa["client_email"],
+		"scope": " ".join(SCOPES),
+		"aud": TOKEN_URI,
+		"iat": now,
+		"exp": now + 3600,
+	}
+	if subject:
+		claims["sub"] = subject
 	assertion = jwt.encode(
-		{
-			"iss": sa["client_email"],
-			"sub": subject,
-			"scope": " ".join(SCOPES),
-			"aud": TOKEN_URI,
-			"iat": now,
-			"exp": now + 3600,
-		},
+		claims,
 		sa["private_key"],
 		algorithm="RS256",
 		headers={"kid": sa.get("private_key_id")},

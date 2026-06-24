@@ -461,14 +461,22 @@ server scripts, infra, and all operational context live in the ops repo:
     the read API; `on_workbook_insert` hook mirrors the URL onto the lead
     (`underwriting_url`, has_field-guarded — field not required) + publishes
     `crm_underwriting`. `crm/hooks.py` — `CRM Underwriting Workbook` `after_insert`.
-  - **Credentials**: a Google service-account JSON (domain-wide delegation,
-    drive+sheets scopes) impersonating a fixed Workspace identity — read from site
-    config `google_sa_json` (+ `google_workspace_subject`, default
-    `lance.johnson@groundworkpro.com`), the same `frappe.conf.get` route
-    `live_demo.py` uses for `demo_password`. Reuses the existing
-    `workspace-admin@claude-code-486305` SA (broad scopes — a dedicated drive+sheets
-    SA is the recommended hardening follow-up). Template id + folder id are module
-    constants in `underwriting.py` (config-overridable: `underwriting_folder_id`).
+  - **Credentials**: a dedicated, minimally-scoped Google service account
+    `crm-underwriting@claude-code-486305.iam.gserviceaccount.com` (key in
+    `~/.config/gcloud/crm-underwriting-key.json`). It is **NOT** domain-wide
+    delegated — it's added as a **Content Manager (fileOrganizer) of only the
+    Underwriting Drive folder**, so it can touch that folder + the template (which
+    lives inside it) and nothing else in the org. It **acts as itself** (no `sub`
+    claim): `_google_access_token()` omits `sub` when `google_workspace_subject`
+    is "" (present-but-empty). The key + empty subject are read from site config
+    (`google_sa_json` / `google_workspace_subject`), the `frappe.conf.get` route
+    `live_demo.py` uses for `demo_password`. (Legacy: an absent
+    `google_workspace_subject` falls back to DWD impersonating
+    `lance.johnson@groundworkpro.com` — the original broad `workspace-admin` SA.)
+    Template id + folder id are module constants in `underwriting.py`
+    (config-overridable: `underwriting_folder_id`). Files created in the Shared
+    Drive are owned by the drive, not the SA, so the SA's zero storage quota is a
+    non-issue.
   - `frontend/src/components/UnderwritingCard.vue` (sidebar) +
     `Modals/CreateUnderwritingModal.vue` (confirm → progress → success/open link;
     auto-detects an existing sheet on open) + `Activities/AllModals.vue`
