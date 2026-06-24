@@ -115,6 +115,23 @@ export function dueColor(date) {
   return ''
 }
 
+// Full-card background + border tint for the Leads kanban, keyed on the next
+// task's due color from dueColor() ('red' overdue / 'amber' due today / '' none).
+// Semi-transparent washes (not solid bg-*-50) so the tint reads on BOTH themes:
+// this app toggles dark mode via `[data-theme="dark"]`, NOT Tailwind's `.dark`
+// class, so `dark:` variants never fire — a translucent wash lets the themed
+// surface + text show through and stay readable either way. Literal class
+// strings (not interpolated) so Tailwind's JIT keeps them; '' = no tint. `!`
+// overrides the card's `bg-surface-white`.
+export function dueTint(color) {
+  return (
+    {
+      amber: '!bg-amber-400/25 !border-amber-600/60',
+      red: '!bg-red-400/25 !border-red-600/70',
+    }[color] || ''
+  )
+}
+
 // First-Call Read 2x2: (motivated x on-price) -> quadrant metadata. motivated /
 // onPrice are each '' (unanswered) | 'Yes' | 'No'. Returns { answered, quad }
 // where quad is null until BOTH axes are answered. Shared by the lead-page
