@@ -23,6 +23,13 @@
           <Button variant="ghost" :label="`${playbackSpeed}×`" />
         </Dropdown>
         <Button variant="ghost" icon="download" @click="download" />
+        <Tooltip v-if="canShareLink" :text="__('Copy link to this moment')">
+          <Button
+            variant="ghost"
+            :icon="LinkIcon"
+            @click="copyMomentLink(currentTime)"
+          />
+        </Tooltip>
 
         <!-- talk-time balance: the two voices as a tug-of-war -->
         <div
@@ -116,7 +123,7 @@
           v-for="(line, i) in dialogue"
           :key="i"
           :data-idx="i"
-          class="flex w-full items-start gap-2 rounded-md py-1.5 pl-2 pr-2 text-left transition-colors"
+          class="group flex w-full items-start gap-2 rounded-md py-1.5 pl-2 pr-2 text-left transition-colors"
           :class="
             i === activeLine
               ? 'bg-surface-gray-2'
@@ -146,6 +153,15 @@
           >
             {{ line.content }}
           </span>
+          <span
+            v-if="canShareLink"
+            role="button"
+            :title="__('Copy link to this line')"
+            class="ml-1 shrink-0 self-center opacity-0 transition-opacity group-hover:opacity-100"
+            @click.stop.prevent="copyMomentLink(line.start)"
+          >
+            <LinkIcon class="size-3.5 text-ink-gray-4 hover:text-ink-gray-7" />
+          </span>
         </button>
       </div>
 
@@ -166,6 +182,9 @@
       ref="audioEl"
       preload="none"
       @loadedmetadata="onMeta"
+      @progress="applyPendingSeek"
+      @canplay="applyPendingSeek"
+      @canplaythrough="applyPendingSeek"
       @timeupdate="onTimeUpdate"
       @play="isPaused = false"
       @pause="isPaused = true"
@@ -177,8 +196,11 @@
 <script setup>
 import PlayIcon from '@/components/Icons/PlayIcon.vue'
 import PauseIcon from '@/components/Icons/PauseIcon.vue'
+import LinkIcon from '@/components/Icons/LinkIcon.vue'
 import Dropdown from '@/components/frappe-ui/Dropdown.vue'
-import { Button, createResource } from 'frappe-ui'
+import { copyToClipboard } from '@/utils'
+import { Button, Tooltip, createResource, toast } from 'frappe-ui'
+import { useRoute } from 'vue-router'
 import {
   ref,
   reactive,
@@ -192,7 +214,36 @@ import {
 const props = defineProps({
   // CRM Call Log docname
   callLogName: { type: String, required: true },
+  // optional deep-link seek target (seconds) — auto-seeks once audio is ready
+  seekTo: { type: Number, default: null },
+  // where a "copy link" should point, e.g. { type: 'leads', id: 'CRM-LEAD-…' }.
+  // when omitted, the link is derived from the current Lead/Deal route.
+  linkTarget: { type: Object, default: null },
 })
+
+const route = useRoute()
+
+// ---- shareable deep links ----------------------------------------------
+// resolve the doc this call belongs to → a /crm/<seg>/<id> base, or null when
+// we can't tell (e.g. a standalone view that didn't pass linkTarget)
+function linkBase() {
+  if (props.linkTarget?.id) {
+    return { seg: props.linkTarget.type || 'leads', id: props.linkTarget.id }
+  }
+  if (route.name === 'Lead') return { seg: 'leads', id: route.params.leadId }
+  if (route.name === 'Deal') return { seg: 'deals', id: route.params.dealId }
+  return null
+}
+const canShareLink = computed(() => !!linkBase()?.id)
+function copyMomentLink(t) {
+  const base = linkBase()
+  if (!base?.id) return toast.error(__('Can’t build a link here'))
+  const url =
+    `${window.location.origin}/crm/${base.seg}/${base.id}` +
+    `?call=${encodeURIComponent(props.callLogName)}&t=${Math.round(t || 0)}` +
+    `#activity`
+  copyToClipboard(url)
+}
 
 // the two voices — kept here (not just CSS) because canvas needs raw colors
 const REP = '#3B82F6'
@@ -249,9 +300,30 @@ const displayDuration = computed(
   () => mediaDuration.value || apiDuration.value || 0,
 )
 
+// a deep-link seek (?t=) can't be applied the instant metadata arrives: only
+// part of the audio is buffered/seekable then, so the browser clamps the seek
+// to the buffered edge. Queue it and apply once the target is actually
+// reachable (buffering catches up — fast here since the bytes are local).
+let pendingSeek = null
+
+function applyPendingSeek() {
+  if (pendingSeek == null) return
+  const a = audioEl.value
+  if (!a || !a.duration || !isFinite(a.duration)) return
+  const target = Math.max(0, Math.min(pendingSeek, a.duration))
+  const sk = a.seekable
+  const reachable = sk && sk.length ? sk.end(sk.length - 1) >= target - 0.25 : false
+  if (!reachable) return // a later progress/canplaythrough event will retry
+  a.currentTime = target
+  currentTime.value = target
+  pendingSeek = null
+  draw()
+}
+
 function onMeta() {
   const d = audioEl.value?.duration
   if (d && isFinite(d)) mediaDuration.value = d
+  applyPendingSeek()
   draw()
 }
 
@@ -312,6 +384,12 @@ async function loadAudio() {
     // play from the bytes we already have (avoids a second download)
     blobUrl = URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }))
     a.src = blobUrl
+    // a queued deep-link seek needs the target buffered to land exactly;
+    // preload='none' never fetches on its own, so buffer the (local) bytes
+    if (pendingSeek != null) {
+      a.preload = 'auto'
+      a.load()
+    }
     // decodeAudioData detaches its buffer, so hand it a copy
     const Ctx = window.AudioContext || window.webkitAudioContext
     const ctx = new Ctx()
@@ -542,6 +620,18 @@ onBeforeUnmount(() => {
 })
 
 watch(() => props.callLogName, () => transcript.reload())
+
+// deep-link seek: queue the target; applyPendingSeek lands it as soon as the
+// audio has buffered far enough (or immediately if it already has)
+watch(
+  () => props.seekTo,
+  (t) => {
+    if (t == null || isNaN(t)) return
+    pendingSeek = t
+    applyPendingSeek()
+  },
+  { immediate: true },
+)
 </script>
 
 <style scoped>

@@ -171,6 +171,26 @@ server scripts, infra, and all operational context live in the ops repo:
     capture it in `sequence_events_webhook.py` (fetch `/v1/call-transcripts/:callId`,
     store `dialogue`); generate chapters via Gemini Flash over the transcript text
     (key in Infisical); backfill historical calls.
+- **Call transcript deep-link to a timestamp** — share a link to a specific
+  moment in a recorded call's transcript + audio, landing in the lead's Activity
+  timeline. Link shape `/crm/leads/<leadId>?call=<callLogName>&t=<seconds>#activity`
+  (Deals supported too via `linkTarget`); opening it switches to the Activity tab,
+  auto-expands that call's `<CallTranscript>`, seeks the audio to `t`, and scrolls
+  the card into view. Grab a link two ways: hover any transcript line → a 🔗 at the
+  line's end copies a link to THAT line's start; or the 🔗 in the player bar copies
+  a link to the current playhead (both via `copyToClipboard`). Pure frontend, no
+  schema/server piece.
+  - `components/Activities/CallTranscript.vue` — new `seekTo` + `linkTarget` props;
+    `applyPendingSeek()` defers the seek until the audio has buffered far enough to
+    land there (`preload='auto'` + retries on `progress`/`canplay`/`canplaythrough`)
+    — seeking at `loadedmetadata` clamps to the buffered edge (apiDuration is often
+    null for these); the two 🔗 copy buttons.
+  - `components/Activities/CallArea.vue` — self-activates when
+    `route.query.call === call.name` (expand + a scroll-retry loop that re-runs
+    `scrollIntoView` until the card parks near the top, since the feed re-lays-out
+    after mount); passes `:seek-to` down.
+  - `pages/CallReview.vue` — passes `:link-target="{type:'leads',id:reference_name}"`
+    so its copy-link points at the lead timeline.
 - `frontend/vite.config.js` — PWA service worker set `selfDestroying` (the
   precache served stale app bundles after deploys)
 - **Sequence real-time drainer** — `crm/api/sequence_drain.py` + `crm/hooks.py`

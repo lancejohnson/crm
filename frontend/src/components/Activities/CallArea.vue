@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div ref="rootEl">
     <div class="mb-1 flex items-center justify-stretch gap-2 py-1 text-base">
       <div class="inline-flex items-center flex-wrap gap-1 text-ink-gray-5">
         <Avatar
@@ -119,7 +119,7 @@
         class="border-t border-outline-gray-modals pt-2"
         @click.stop
       >
-        <CallTranscript :call-log-name="call.name" />
+        <CallTranscript :call-log-name="call.name" :seek-to="seekTo" />
       </div>
       <div
         v-if="callLog?.data?.custom_ai_summary"
@@ -165,13 +165,44 @@ import { statusLabelMap, statusColorMap } from '@/utils/callLog.js'
 import { formatDate, timeAgo } from '@/utils'
 import { formatPhone } from '@/utils/phoneFormat'
 import { Avatar, Badge, Tooltip, createResource } from 'frappe-ui'
-import { reactive, ref } from 'vue'
+import { reactive, ref, computed, watch, onMounted, nextTick } from 'vue'
+import { useRoute } from 'vue-router'
 
 const props = defineProps({
   activity: { type: Object, default: () => ({}) },
 })
 
 const call = reactive(props.activity)
+
+// deep link (?call=<id>&t=<sec>): if this is the targeted call, auto-open its
+// transcript, hand the timestamp to <CallTranscript>, and scroll it into view
+const route = useRoute()
+const rootEl = ref(null)
+const isTarget = computed(
+  () => route.query.call && String(route.query.call) === String(call.name),
+)
+const seekTo = computed(() =>
+  isTarget.value && route.query.t != null ? Number(route.query.t) : null,
+)
+function revealIfTarget() {
+  if (!isTarget.value) return
+  call.show_transcript = true
+  // the activity feed keeps loading/re-laying-out after this card mounts (and may
+  // scroll itself back to top), so a single scrollIntoView gets lost. Re-scroll on
+  // an interval until the card top is actually parked near the top of the viewport.
+  let tries = 0
+  const tick = () => {
+    const el = rootEl.value
+    if (!el) return
+    el.scrollIntoView({ block: 'start' })
+    const top = el.getBoundingClientRect().top
+    const parked = top >= 0 && top < window.innerHeight * 0.4
+    if (!parked && ++tries < 14) setTimeout(tick, 300)
+  }
+  nextTick(tick)
+}
+onMounted(revealIfTarget)
+watch(isTarget, revealIfTarget)
 
 const callLog = createResource({
   url: 'crm.fcrm.doctype.crm_call_log.crm_call_log.get_call_log',

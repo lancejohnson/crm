@@ -225,7 +225,14 @@
                   v-if="transcriptOpen[call.name]"
                   class="rounded border bg-surface-white px-3 py-2.5"
                 >
-                  <CallTranscript :call-log-name="call.name" />
+                  <CallTranscript
+                    :call-log-name="call.name"
+                    :link-target="
+                      ld.reference_doctype === 'CRM Lead' && ld.reference_name
+                        ? { type: 'leads', id: ld.reference_name }
+                        : null
+                    "
+                  />
                 </div>
 
                 <div
