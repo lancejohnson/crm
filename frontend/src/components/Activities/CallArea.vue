@@ -67,22 +67,12 @@
         </Badge>
         <Badge
           v-if="call.recording_url"
-          :label="call.show_recording ? __('Hide Recording') : __('Listen')"
-          class="cursor-pointer"
-          @click.stop="call.show_recording = !call.show_recording"
-        >
-          <template #prefix>
-            <PlayIcon class="size-3" />
-          </template>
-        </Badge>
-        <Badge
-          v-if="call.recording_url"
-          :label="call.show_transcript ? __('Hide Transcript') : __('Transcript')"
+          :label="call.show_transcript ? __('Hide Playback') : __('Playback')"
           class="cursor-pointer"
           @click.stop="call.show_transcript = !call.show_transcript"
         >
           <template #prefix>
-            <SparkleIcon class="size-3" />
+            <PlayIcon class="size-3" />
           </template>
         </Badge>
         <a
@@ -102,17 +92,6 @@
           :label="statusLabelMap[call.status]"
           :theme="statusColorMap[call.status]"
         />
-      </div>
-      <div
-        v-if="
-          call.show_recording &&
-          call.recording_url &&
-          callLog?.data?.recording_url_path
-        "
-        class="flex flex-col items-center justify-between"
-        @click.stop
-      >
-        <AudioPlayer :src="callLog.data.recording_url_path" />
       </div>
       <div
         v-if="call.show_transcript && call.recording_url"
@@ -156,7 +135,6 @@ import DurationIcon from '@/components/Icons/DurationIcon.vue'
 import ExternalLinkIcon from '@/components/Icons/ExternalLinkIcon.vue'
 import SparkleIcon from '@/components/Icons/SparkleIcon.vue'
 import MultipleAvatar from '@/components/MultipleAvatar.vue'
-import AudioPlayer from '@/components/Activities/AudioPlayer.vue'
 import CallTranscript from '@/components/Activities/CallTranscript.vue'
 import FadedScrollableDiv from '@/components/FadedScrollableDiv.vue'
 import CallLogDetailModal from '@/components/Modals/CallLogDetailModal.vue'

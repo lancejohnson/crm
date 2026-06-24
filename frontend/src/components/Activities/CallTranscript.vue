@@ -30,6 +30,9 @@
             @click="copyMomentLink(currentTime)"
           />
         </Tooltip>
+        <Tooltip :text="__('Comment on this moment')">
+          <Button variant="ghost" icon="message-square" @click="startComposing" />
+        </Tooltip>
 
         <!-- talk-time balance: the two voices as a tug-of-war -->
         <div
@@ -58,6 +61,37 @@
           <span class="tnum shrink-0 text-xs font-medium" :style="{ color: LEAD }">
             {{ pct(talk.lead) }}
           </span>
+        </div>
+      </div>
+
+      <!-- add a comment at the current playhead -->
+      <div
+        v-if="composing"
+        class="flex items-start gap-2 rounded-md border border-outline-gray-2 bg-surface-gray-1 p-2"
+      >
+        <span
+          class="tnum mt-1.5 shrink-0 rounded bg-surface-gray-3 px-1.5 py-0.5 text-xs font-medium text-ink-gray-7"
+        >
+          {{ formatTime(draftTime) }}
+        </span>
+        <textarea
+          ref="composerEl"
+          v-model="draft"
+          rows="2"
+          :placeholder="__('Comment on this moment…')"
+          class="flex-1 resize-none rounded-md border border-outline-gray-2 bg-surface-white px-2 py-1 text-sm text-ink-gray-9 focus:border-outline-gray-3 focus:outline-none"
+          @keydown.enter.meta.prevent="submitComment"
+          @keydown.enter.ctrl.prevent="submitComment"
+          @keydown.esc.prevent="cancelComposing"
+        />
+        <div class="flex shrink-0 flex-col gap-1">
+          <Button
+            variant="solid"
+            :label="__('Save')"
+            :loading="saving"
+            @click="submitComment"
+          />
+          <Button variant="ghost" :label="__('Cancel')" @click="cancelComposing" />
         </div>
       </div>
 
@@ -111,6 +145,27 @@
             {{ __('Drawing waveform…') }}
           </span>
         </div>
+
+        <!-- comment pins, time-aligned under the waveform -->
+        <div v-if="commentList.length" class="relative mt-1 h-4">
+          <button
+            v-for="c in commentList"
+            :key="c.name"
+            class="group absolute top-0 -translate-x-1/2"
+            :style="{ left: posOf(c.at_time) }"
+            :title="`${c.author_name} · ${formatTime(c.at_time)} — ${c.content}`"
+            @click="selectComment(c)"
+          >
+            <span
+              class="flex size-4 items-center justify-center rounded-full text-[9px] font-semibold text-white shadow-sm ring-1 ring-white transition-transform group-hover:scale-110"
+              :style="{
+                backgroundColor: selectedComment === c.name ? '#171717' : COMMENT,
+              }"
+            >
+              {{ initialOf(c.author_name) }}
+            </span>
+          </button>
+        </div>
       </div>
 
       <!-- transcript -->
@@ -154,13 +209,26 @@
             {{ line.content }}
           </span>
           <span
-            v-if="canShareLink"
-            role="button"
-            :title="__('Copy link to this line')"
-            class="ml-1 shrink-0 self-center opacity-0 transition-opacity group-hover:opacity-100"
-            @click.stop.prevent="copyMomentLink(line.start)"
+            class="ml-1 flex shrink-0 items-center gap-1.5 self-center opacity-0 transition-opacity group-hover:opacity-100"
           >
-            <LinkIcon class="size-3.5 text-ink-gray-4 hover:text-ink-gray-7" />
+            <span
+              v-if="canShareLink"
+              role="button"
+              :title="__('Copy link to this line')"
+              @click.stop.prevent="copyMomentLink(line.start)"
+            >
+              <LinkIcon class="size-3.5 text-ink-gray-4 hover:text-ink-gray-7" />
+            </span>
+            <span
+              role="button"
+              :title="__('Comment on this moment')"
+              @click.stop.prevent="startCommentAt(line.start)"
+            >
+              <FeatherIcon
+                name="message-square"
+                class="size-3.5 text-ink-gray-4 hover:text-ink-gray-7"
+              />
+            </span>
           </span>
         </button>
       </div>
@@ -175,6 +243,81 @@
             'Transcript is still processing — it usually appears a few minutes after the call ends.',
           )
         }}
+      </div>
+
+      <!-- comments on this call -->
+      <div
+        v-if="commentList.length"
+        class="flex flex-col gap-0.5 border-t border-outline-gray-modals pt-2"
+      >
+        <div class="mb-1 flex items-center gap-1.5 text-sm font-medium text-ink-gray-5">
+          <span
+            class="size-2.5 rounded-full"
+            :style="{ backgroundColor: COMMENT }"
+          />
+          {{ __('Comments') }} · {{ commentList.length }}
+        </div>
+        <div
+          v-for="c in commentList"
+          :key="c.name"
+          class="group flex items-start gap-2 rounded-md px-2 py-1.5 transition-colors"
+          :class="
+            selectedComment === c.name
+              ? 'bg-surface-gray-2'
+              : 'hover:bg-surface-gray-1'
+          "
+        >
+          <button
+            class="tnum mt-0.5 shrink-0 rounded bg-surface-gray-3 px-1.5 py-0.5 text-xs font-medium text-ink-gray-7 hover:text-ink-gray-9"
+            :title="__('Jump to this moment')"
+            @click="selectComment(c)"
+          >
+            {{ formatTime(c.at_time) }}
+          </button>
+          <div class="min-w-0 flex-1">
+            <span class="text-xs font-medium text-ink-gray-8">
+              {{ c.author_name }}
+            </span>
+            <div v-if="editingName === c.name" class="mt-1 flex items-start gap-2">
+              <textarea
+                v-model="editDraft"
+                rows="2"
+                class="flex-1 resize-none rounded-md border border-outline-gray-2 bg-surface-white px-2 py-1 text-sm text-ink-gray-9 focus:outline-none"
+                @keydown.enter.meta.prevent="saveEdit(c)"
+                @keydown.enter.ctrl.prevent="saveEdit(c)"
+                @keydown.esc.prevent="editingName = null"
+              />
+              <div class="flex shrink-0 flex-col gap-1">
+                <Button variant="solid" :label="__('Save')" @click="saveEdit(c)" />
+                <Button
+                  variant="ghost"
+                  :label="__('Cancel')"
+                  @click="editingName = null"
+                />
+              </div>
+            </div>
+            <p v-else class="whitespace-pre-line text-sm leading-relaxed text-ink-gray-7">
+              {{ c.content }}
+            </p>
+          </div>
+          <div
+            v-if="c.mine && editingName !== c.name"
+            class="flex shrink-0 items-center gap-1.5 opacity-0 transition-opacity group-hover:opacity-100"
+          >
+            <button :title="__('Edit')" @click="startEdit(c)">
+              <FeatherIcon
+                name="edit-2"
+                class="size-3.5 text-ink-gray-4 hover:text-ink-gray-7"
+              />
+            </button>
+            <button :title="__('Delete')" @click="removeComment(c)">
+              <FeatherIcon
+                name="trash-2"
+                class="size-3.5 text-ink-gray-4 hover:text-red-500"
+              />
+            </button>
+          </div>
+        </div>
       </div>
     </template>
 
@@ -199,7 +342,15 @@ import PauseIcon from '@/components/Icons/PauseIcon.vue'
 import LinkIcon from '@/components/Icons/LinkIcon.vue'
 import Dropdown from '@/components/frappe-ui/Dropdown.vue'
 import { copyToClipboard } from '@/utils'
-import { Button, Tooltip, createResource, toast } from 'frappe-ui'
+import { globalStore } from '@/stores/global'
+import {
+  Button,
+  Tooltip,
+  FeatherIcon,
+  createResource,
+  call,
+  toast,
+} from 'frappe-ui'
 import { useRoute } from 'vue-router'
 import {
   ref,
@@ -250,6 +401,8 @@ const REP = '#3B82F6'
 const LEAD = '#F59E0B'
 const SILENCE = 'rgba(148, 163, 184, 0.45)'
 const PLAYHEAD = '#171717'
+// comment pins — violet so they don't read as a third speaker (blue/amber)
+const COMMENT = '#8B5CF6'
 
 const colorFor = (s) => (s === 'rep' ? REP : LEAD)
 
@@ -605,6 +758,100 @@ function formatTime(t) {
 function pct(r) {
   return `${Math.round((r || 0) * 100)}%`
 }
+function initialOf(name) {
+  return (name || '?').trim().charAt(0).toUpperCase() || '?'
+}
+
+// ---- comments (timestamped, pinned on the waveform) ---------------------
+const { $socket } = globalStore()
+
+const comments = createResource({
+  url: 'crm.api.call_comments.get_call_comments',
+  params: { call_log: props.callLogName },
+  auto: true,
+  initialData: [],
+})
+const commentList = computed(() => comments.data || [])
+
+const selectedComment = ref(null)
+function selectComment(c) {
+  selectedComment.value = c.name
+  seek(c.at_time)
+}
+
+// add a comment at the current playhead
+const composing = ref(false)
+const draft = ref('')
+const draftTime = ref(0)
+const saving = ref(false)
+const composerEl = ref(null)
+function startCommentAt(t) {
+  draftTime.value = t || 0
+  draft.value = ''
+  composing.value = true
+  nextTick(() => composerEl.value?.focus())
+}
+function startComposing() {
+  startCommentAt(currentTime.value)
+}
+function cancelComposing() {
+  composing.value = false
+  draft.value = ''
+}
+async function submitComment() {
+  const content = draft.value.trim()
+  if (!content || saving.value) return
+  saving.value = true
+  try {
+    await call('crm.api.call_comments.add_call_comment', {
+      call_log: props.callLogName,
+      at_time: draftTime.value,
+      content,
+    })
+    composing.value = false
+    draft.value = ''
+    comments.reload()
+  } catch (e) {
+    toast.error(e?.messages?.[0] || __('Could not add comment'))
+  } finally {
+    saving.value = false
+  }
+}
+
+// edit / delete your own
+const editingName = ref(null)
+const editDraft = ref('')
+function startEdit(c) {
+  editingName.value = c.name
+  editDraft.value = c.content
+}
+async function saveEdit(c) {
+  const content = editDraft.value.trim()
+  if (!content) return
+  try {
+    await call('crm.api.call_comments.edit_call_comment', {
+      name: c.name,
+      content,
+    })
+    editingName.value = null
+    comments.reload()
+  } catch (e) {
+    toast.error(e?.messages?.[0] || __('Could not save comment'))
+  }
+}
+async function removeComment(c) {
+  try {
+    await call('crm.api.call_comments.delete_call_comment', { name: c.name })
+    if (selectedComment.value === c.name) selectedComment.value = null
+    comments.reload()
+  } catch (e) {
+    toast.error(e?.messages?.[0] || __('Could not delete comment'))
+  }
+}
+
+function onCommentEvent(data) {
+  if (data?.call_log === props.callLogName) comments.reload()
+}
 
 onMounted(() => {
   resizeObs = new ResizeObserver(() => {
@@ -612,14 +859,20 @@ onMounted(() => {
     draw()
   })
   if (waveWrap.value) resizeObs.observe(waveWrap.value)
+  $socket.on('crm_call_comment', onCommentEvent)
 })
 
 onBeforeUnmount(() => {
   resizeObs?.disconnect()
   if (blobUrl) URL.revokeObjectURL(blobUrl)
+  $socket.off('crm_call_comment', onCommentEvent)
 })
 
-watch(() => props.callLogName, () => transcript.reload())
+watch(() => props.callLogName, () => {
+  transcript.reload()
+  comments.update({ params: { call_log: props.callLogName } })
+  comments.reload()
+})
 
 // deep-link seek: queue the target; applyPendingSeek lands it as soon as the
 // audio has buffered far enough (or immediately if it already has)

@@ -184,20 +184,17 @@
                     variant="subtle"
                     theme="blue"
                   />
-                  <audio
-                    v-if="call.recording_url"
-                    controls
-                    preload="none"
-                    :src="call.recording_url"
-                    class="ml-auto h-8 max-w-[260px]"
-                  />
-                  <span v-else class="ml-auto text-xs text-ink-gray-4">
+                  <span
+                    v-if="!call.recording_url"
+                    class="ml-auto text-xs text-ink-gray-4"
+                  >
                     {{ __('No recording') }}
                   </span>
                   <Button
                     v-if="call.recording_url"
+                    class="ml-auto"
                     variant="ghost"
-                    :label="transcriptOpen[call.name] ? __('Hide transcript') : __('Transcript')"
+                    :label="transcriptOpen[call.name] ? __('Hide Playback') : __('Playback')"
                     @click="toggleTranscript(call.name)"
                   />
                   <Button

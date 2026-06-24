@@ -191,6 +191,34 @@ server scripts, infra, and all operational context live in the ops repo:
     after mount); passes `:seek-to` down.
   - `pages/CallReview.vue` — passes `:link-target="{type:'leads',id:reference_name}"`
     so its copy-link points at the lead timeline.
+- **Timestamped call comments + "Playback" consolidation** — reviewers annotate a
+  specific moment in a recorded call ("ask a better question here") and the comment
+  is pinned (a violet author-initial dot) on a time-aligned ruler under the
+  waveform; a Comments list under the transcript shows each with a clickable
+  time-badge (→ seek), and owners get hover edit/delete. Collaborative: every sales
+  user sees all comments on a call; edit/delete is owner-only (managers may delete).
+  Also **decluttered the call UI**: removed the separate **Listen** inline player
+  (activity timeline) and the standalone `<audio>` player (Call Review) — hitting
+  one control opens audio+waveform+transcript+comments — and **renamed that control
+  "Transcript" → "Playback"** (the "Recording" raw-file link stays).
+  - **Storage = new ops doctype `CRM Call Comment`** (mirrors `CRM Call Review`):
+    `call_log` / `at_time` (Float secs) / `author` / `content`, autoname hash,
+    Sales-roles perms. Created by `../frappe-crm-deploy/scripts/setup_crm_call_comment.py`
+    (idempotent REST, `--dry-run`). No CRM Call Log custom field.
+  - `crm/api/call_comments.py` — `get_call_comments` / `add_call_comment` (author =
+    session user) / `edit_call_comment` (owner-only) / `delete_call_comment`
+    (owner or manager); each mutation publishes `crm_call_comment` realtime
+    (site-wide, `after_commit`); all guarded by `db.exists` so a pre-provision site
+    returns `[]`. Reuses the `reports.py` sales-role gate.
+  - `components/Activities/CallTranscript.vue` — comments resource + 💬 transport
+    button → inline composer at the current playhead, plus a per-transcript-line
+    hover 💬 next to the 🔗 (`startCommentAt(line.start)` → composer at that line's
+    moment); waveform pins (`posOf(at_time)`, `selectComment` → seek + highlight),
+    comments list with inline edit, `crm_call_comment` `$socket` listener (reload
+    when `call_log` matches). Add/edit/delete via frappe-ui `call()`.
+  - `components/Activities/CallArea.vue` — dropped the Listen badge + `AudioPlayer`;
+    Transcript badge → **Playback** (PlayIcon). `pages/CallReview.vue` — dropped the
+    `<audio>` element; toggle label → **Playback** (keeps the "No recording" span).
 - `frontend/vite.config.js` — PWA service worker set `selfDestroying` (the
   precache served stale app bundles after deploys)
 - **Sequence real-time drainer** — `crm/api/sequence_drain.py` + `crm/hooks.py`
