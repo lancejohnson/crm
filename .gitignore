@@ -14,3 +14,9 @@ build
 .github/instructions
 .github/skills
 .github/copilot-instructions.md
+
+# local-only scaffolding (compile-gate stubs + git worktrees) — never shipped
+/sites/
+/.worktrees/
+.claude/sites/
+.claude/worktrees/
