@@ -424,6 +424,38 @@
               </button>
             </div>
           </div>
+          <div
+            v-else-if="activity.activity_type == 'underwriting'"
+            class="mb-4 flex flex-col gap-1.5 py-1.5 text-base"
+          >
+            <div class="flex items-center gap-1.5">
+              <span class="font-medium text-ink-gray-8">{{
+                activity.workbook.created_by_name ||
+                activity.workbook.created_by_user
+              }}</span>
+              <span class="text-ink-gray-5">{{
+                __('created an underwriting sheet')
+              }}</span>
+              <Tooltip :text="formatDate(activity.creation)" class="ml-auto">
+                <div class="whitespace-nowrap text-sm text-ink-gray-5">
+                  {{ __(timeAgo(activity.creation)) }}
+                </div>
+              </Tooltip>
+            </div>
+            <div
+              class="flex items-center justify-between gap-2 rounded-md bg-surface-gray-2 px-2.5 py-2 text-sm"
+            >
+              <span class="truncate text-ink-gray-8">{{
+                activity.workbook.address || __('Underwriting sheet')
+              }}</span>
+              <button
+                class="shrink-0 text-xs text-ink-gray-6 underline hover:text-ink-gray-9"
+                @click="openUnderwritingLink(activity.workbook.sheet_url)"
+              >
+                {{ __('Open sheet') }}
+              </button>
+            </div>
+          </div>
           <div v-else class="mb-4 flex flex-col gap-2 py-1.5">
             <div class="flex items-center justify-stretch gap-2 text-base">
               <div
@@ -830,6 +862,15 @@ const agreements = createResource({
   onSuccess: () => nextTick(() => scroll()),
 })
 
+// Google Sheets underwriting workbooks for this lead (timeline + sidebar card).
+const underwritingWorkbooks = createResource({
+  url: 'crm.api.underwriting.get_underwriting_workbooks',
+  cache: ['underwriting_workbooks', props.docname],
+  params: { lead: props.docname },
+  auto: props.doctype === 'CRM Lead',
+  onSuccess: () => nextTick(() => scroll()),
+})
+
 // is_sms_enabled resolves asynchronously, so `auto: smsEnabled.value` is often
 // false at creation and the resource never fetches. Fetch once it's enabled.
 watch(
@@ -846,6 +887,7 @@ onBeforeUnmount(() => {
   $socket.off('crm_task_update')
   $socket.off('crm_tax_pull')
   $socket.off('crm_esign')
+  $socket.off('crm_underwriting')
 })
 
 onMounted(() => {
@@ -894,6 +936,16 @@ onMounted(() => {
       data.reference_docname === props.docname
     ) {
       agreements.reload()
+    }
+  })
+
+  // underwriting sheet created — refresh the timeline entry + Underwriting card
+  $socket.on('crm_underwriting', (data) => {
+    if (
+      data.reference_doctype === props.doctype &&
+      data.reference_docname === props.docname
+    ) {
+      underwritingWorkbooks.reload()
     }
   })
 
@@ -972,6 +1024,21 @@ function openAgreementLink(url) {
   if (url) window.open(url, '_blank', 'noopener,noreferrer')
 }
 
+// underwriting workbooks as timeline entries, anchored at creation
+function get_underwriting_activities() {
+  if (!underwritingWorkbooks.data) return []
+  return underwritingWorkbooks.data.map((w) => ({
+    name: w.name,
+    activity_type: 'underwriting',
+    creation: w.workbook_created_at || w.creation,
+    workbook: w,
+  }))
+}
+
+function openUnderwritingLink(url) {
+  if (url) window.open(url, '_blank', 'noopener,noreferrer')
+}
+
 // open tasks pinned at the top of the Activity feed (Trello-style to-do list)
 const openTasks = computed(() => {
   if (!all_activities.data?.tasks) return []
@@ -1003,6 +1070,7 @@ const activities = computed(() => {
       ...get_task_activities(),
       ...get_tax_pull_activities(),
       ...get_agreement_activities(),
+      ...get_underwriting_activities(),
     ]
   } else if (title.value == 'Emails') {
     if (!all_activities.data?.versions) return []
@@ -1039,7 +1107,8 @@ const activities = computed(() => {
       activity.activity_type == 'outgoing_text' ||
       activity.activity_type == 'task' ||
       activity.activity_type == 'tax_pull' ||
-      activity.activity_type == 'agreement'
+      activity.activity_type == 'agreement' ||
+      activity.activity_type == 'underwriting'
     )
       return
 
@@ -1202,6 +1271,9 @@ function timelineIcon(activity_type, is_lead) {
     case 'agreement':
       icon = DetailsIcon
       break
+    case 'underwriting':
+      icon = DetailsIcon
+      break
     default:
       icon = DotIcon
   }
@@ -1246,6 +1318,7 @@ const createCallLog = () => modalRef.value?.createCallLog()
 const sendText = () => modalRef.value?.sendText()
 const fetchTaxInfo = () => modalRef.value?.fetchTaxInfo()
 const createAgreement = () => modalRef.value?.createAgreement()
+const createUnderwriting = () => modalRef.value?.createUnderwriting()
 
 defineExpose({
   emailBox,
@@ -1255,5 +1328,6 @@ defineExpose({
   sendText,
   fetchTaxInfo,
   createAgreement,
+  createUnderwriting,
 })
 </script>

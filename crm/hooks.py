@@ -199,6 +199,13 @@ doc_events = {
 		"after_insert": ["crm.api.agreement.on_agreement_insert"],
 		"on_update": ["crm.api.agreement.on_agreement_update"],
 	},
+	# CRM Underwriting Workbook is a custom doctype (ops repo). The Google Sheets
+	# copy/fill happens in app code (crm.api.underwriting, the sandbox can't sign
+	# the OAuth JWT); the hook mirrors the sheet URL onto the lead + publishes the
+	# crm_underwriting realtime event. See crm/api/underwriting.py.
+	"CRM Underwriting Workbook": {
+		"after_insert": ["crm.api.underwriting.on_workbook_insert"],
+	},
 	# Real-time drainer for sub-minute sequence steps. The sandboxed sequence
 	# engine can't sleep or enqueue cleanly into a worker, so the burst is driven
 	# from here (non-sandboxed): enqueue a worker that sleeps the real waits and

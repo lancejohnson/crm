@@ -442,6 +442,46 @@ server scripts, infra, and all operational context live in the ops repo:
     chip was also added to the saved Leads kanban views (CRM View Settings rows 3
     + 4, after `_next_task_due`, `label:""`) so it shows without each user re-
     adding it.
+- **Underwriting workbook (Google Sheets) "Create Underwriting Sheet"** (Leads) —
+  a header **More ▾** action + sidebar **Underwriting** card that copies the
+  underwriting template Google Sheet into the shared "Underwriting" Shared Drive
+  folder, renames it to the lead's `property_address`, pre-fills the **ARV** tab
+  (B4=today's date, B5=the clicking user's full name, B9=`zillow.com/homes/<addr>_rb/`),
+  records a **CRM Underwriting Workbook** row, and surfaces the link in the sidebar
+  card + Activity timeline so the team can open underwriting later. **One workbook
+  per lead** — re-clicking just re-opens the existing sheet. Live refresh via the
+  `crm_underwriting` realtime event (site-wide, `after_commit`). Mirrors the
+  tax-info/agreement card+timeline+realtime pattern.
+  - **Google call lives in APP CODE, not a server script** — a Frappe server-script
+    sandbox can't sign the OAuth2 JWT to mint a Google token. `crm/api/underwriting.py`
+    `create_underwriting_workbook(lead)` mints a token with **PyJWT (RS256) + a
+    `requests` token POST** (no Google client libs — already in the Frappe env),
+    does the Drive `files.copy` (supportsAllDrives) + Sheets `values:batchUpdate`,
+    inserts the doctype row, returns the URL. `get_underwriting_workbooks(lead)` is
+    the read API; `on_workbook_insert` hook mirrors the URL onto the lead
+    (`underwriting_url`, has_field-guarded — field not required) + publishes
+    `crm_underwriting`. `crm/hooks.py` — `CRM Underwriting Workbook` `after_insert`.
+  - **Credentials**: a Google service-account JSON (domain-wide delegation,
+    drive+sheets scopes) impersonating a fixed Workspace identity — read from site
+    config `google_sa_json` (+ `google_workspace_subject`, default
+    `lance.johnson@groundworkpro.com`), the same `frappe.conf.get` route
+    `live_demo.py` uses for `demo_password`. Reuses the existing
+    `workspace-admin@claude-code-486305` SA (broad scopes — a dedicated drive+sheets
+    SA is the recommended hardening follow-up). Template id + folder id are module
+    constants in `underwriting.py` (config-overridable: `underwriting_folder_id`).
+  - `frontend/src/components/UnderwritingCard.vue` (sidebar) +
+    `Modals/CreateUnderwritingModal.vue` (confirm → progress → success/open link;
+    auto-detects an existing sheet on open) + `Activities/AllModals.vue`
+    (`createUnderwriting()` + expose) + `Activities/Activities.vue` (`underwriting`
+    timeline type + `underwritingWorkbooks` resource + `crm_underwriting` listener +
+    icon + **forwards `createUnderwriting` through its own `defineExpose`** — easy to
+    miss; the card→page→Activities→AllModals chain needs every hop) + `pages/Lead.vue`
+    (card mount + More-menu item, both guarded by `property_address`).
+  - Ops (`../frappe-crm-deploy`): `scripts/setup_underwriting_workbook.py` creates
+    the `CRM Underwriting Workbook` doctype (fields `lead`/`address`/`sheet_id`/
+    `sheet_url`/`created_by_user`/`workbook_created_at`; sales-role perms; autoname
+    hash). The SA JSON was delivered into the backend `site_config` via `bench
+    set-config` (not a script in the repo).
 
 The companion server-side pieces (custom doctypes, scheduler engine, webhook
 endpoints) are Server Scripts managed from the ops repo, NOT app code here. SMS

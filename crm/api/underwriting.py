@@ -1,0 +1,244 @@
+"""Per-lead underwriting workbook — a copy of the Google Sheets underwriting
+template, pre-filled and dropped into the shared "Underwriting" Drive folder.
+
+A user clicks **Create Underwriting Sheet** on a lead →
+`create_underwriting_workbook` copies the template spreadsheet into the shared
+Drive folder, renames it to the lead's `property_address`, fills the ARV input
+block (Date / Team Member / Subject Zillow link), records a **CRM Underwriting
+Workbook** row, and hands the sheet URL back so the team can open underwriting
+later (sidebar card + Activity timeline).
+
+Unlike the BatchData / Documenso integrations (whose external call lives in a
+sandboxed ops *server script*), the Google call happens **here, in app code** —
+a Frappe server script can't sign the OAuth2 JWT needed to mint a Google token.
+The backend reads a Google service-account JSON from site config
+(`google_sa_json`, delivered at deploy time the same way `live_demo.py` reads
+`demo_password`) and impersonates a fixed Workspace identity
+(`google_workspace_subject`, default Lance) via domain-wide delegation — so CRM
+user emails need not match Google emails and the whole team sees the file via
+the Shared Drive.
+
+The `after_insert` hook mirrors the sheet URL back onto the lead and broadcasts a
+`crm_underwriting` realtime event (site-wide, `after_commit`) so every open
+Lead's Activity feed + Underwriting card refresh live — same pattern as
+`crm_tax_pull` / `crm_esign`.
+"""
+
+import json
+import time
+import urllib.parse
+
+import jwt
+import requests
+
+import frappe
+from frappe import _
+
+WORKBOOK_DOCTYPE = "CRM Underwriting Workbook"
+
+# The underwriting template + the shared "Underwriting" Drive folder it's copied
+# into. Stable, but overridable via site config if they ever move.
+TEMPLATE_ID = "1GqjMgpKkZX18bfLy79y3YiiE9WKmyojz3Cqpzp1UTMg"
+FOLDER_ID = "11xzBIXcsTpx8E_Fi34DnCdnXcy4Kgba9"
+
+# The ARV tab's input block (A4=Date / A5=Team Member / B8=Subject, A9=Link → B9).
+CELL_DATE = "ARV!B4"
+CELL_TEAM_MEMBER = "ARV!B5"
+CELL_ZILLOW = "ARV!B9"
+
+DEFAULT_SUBJECT = "lance.johnson@groundworkpro.com"
+TOKEN_URI = "https://oauth2.googleapis.com/token"
+SCOPES = (
+	"https://www.googleapis.com/auth/drive",
+	"https://www.googleapis.com/auth/spreadsheets",
+)
+
+
+# ---------------------------------------------------------------------------
+# Google auth + the Drive/Sheets calls
+# ---------------------------------------------------------------------------
+def _google_access_token() -> str:
+	"""Mint a Google OAuth2 access token from the service-account JSON in site
+	config, impersonating the configured Workspace user (domain-wide delegation).
+	Uses PyJWT (RS256) + a token-endpoint POST — no Google client libs needed."""
+	raw = frappe.conf.get("google_sa_json")
+	if not raw:
+		frappe.throw(_("Google service account is not configured (google_sa_json)."))
+	sa = json.loads(raw) if isinstance(raw, str) else raw
+	subject = frappe.conf.get("google_workspace_subject") or DEFAULT_SUBJECT
+
+	now = int(time.time())
+	assertion = jwt.encode(
+		{
+			"iss": sa["client_email"],
+			"sub": subject,
+			"scope": " ".join(SCOPES),
+			"aud": TOKEN_URI,
+			"iat": now,
+			"exp": now + 3600,
+		},
+		sa["private_key"],
+		algorithm="RS256",
+		headers={"kid": sa.get("private_key_id")},
+	)
+	resp = requests.post(
+		TOKEN_URI,
+		data={
+			"grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+			"assertion": assertion,
+		},
+		timeout=30,
+	)
+	resp.raise_for_status()
+	return resp.json()["access_token"]
+
+
+def _create_sheet(token: str, name: str, date_str: str, team_member: str, zillow_url: str):
+	"""Copy the template into the shared folder (renamed), fill the ARV inputs,
+	return (spreadsheet_id, web_view_link)."""
+	headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+	copy = requests.post(
+		f"https://www.googleapis.com/drive/v3/files/{TEMPLATE_ID}/copy",
+		params={"supportsAllDrives": "true", "fields": "id,name,webViewLink"},
+		headers=headers,
+		json={"name": name, "parents": [frappe.conf.get("underwriting_folder_id") or FOLDER_ID]},
+		timeout=60,
+	)
+	copy.raise_for_status()
+	info = copy.json()
+	sid = info["id"]
+
+	fill = requests.post(
+		f"https://sheets.googleapis.com/v4/spreadsheets/{sid}/values:batchUpdate",
+		headers=headers,
+		json={
+			"valueInputOption": "USER_ENTERED",
+			"data": [
+				{"range": CELL_DATE, "values": [[date_str]]},
+				{"range": CELL_TEAM_MEMBER, "values": [[team_member]]},
+				{"range": CELL_ZILLOW, "values": [[zillow_url]]},
+			],
+		},
+		timeout=60,
+	)
+	fill.raise_for_status()
+
+	url = info.get("webViewLink") or f"https://docs.google.com/spreadsheets/d/{sid}/edit"
+	return sid, url
+
+
+def _zillow_url(address: str) -> str:
+	"""Same Zillow search URL the lead's 'View on Zillow' action builds."""
+	return f"https://www.zillow.com/homes/{urllib.parse.quote(address, safe='')}_rb/"
+
+
+# ---------------------------------------------------------------------------
+# Whitelisted API
+# ---------------------------------------------------------------------------
+def _existing_workbook(lead: str):
+	"""The lead's most recent workbook, or None (one workbook per lead)."""
+	if not frappe.db.exists("DocType", WORKBOOK_DOCTYPE):
+		return None
+	rows = frappe.get_all(
+		WORKBOOK_DOCTYPE,
+		filters={"lead": lead},
+		fields=["name", "sheet_url", "sheet_id", "address"],
+		order_by="creation desc",
+		limit=1,
+	)
+	return rows[0] if rows else None
+
+
+@frappe.whitelist()
+def create_underwriting_workbook(lead: str):
+	"""Create (or return the existing) underwriting sheet for a lead."""
+	if not frappe.db.exists("CRM Lead", lead):
+		frappe.throw(_("Lead not found"), frappe.DoesNotExistError)
+	if not frappe.has_permission("CRM Lead", "read", lead):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	if not frappe.db.exists("DocType", WORKBOOK_DOCTYPE):
+		frappe.throw(_("Underwriting workbook storage isn't set up yet."))
+
+	# One workbook per lead — re-clicking just opens the existing one.
+	existing = _existing_workbook(lead)
+	if existing:
+		return {**existing, "existing": True}
+
+	address = (frappe.db.get_value("CRM Lead", lead, "property_address") or "").strip()
+	if not address:
+		frappe.throw(_("Set a property address before creating an underwriting sheet."))
+
+	team_member = frappe.utils.get_fullname(frappe.session.user)
+	try:
+		token = _google_access_token()
+		sid, url = _create_sheet(token, address, frappe.utils.today(), team_member, _zillow_url(address))
+	except Exception:
+		frappe.log_error(title="Underwriting workbook creation failed", message=frappe.get_traceback())
+		frappe.throw(_("Couldn't create the underwriting sheet (Google API error)."))
+
+	doc = frappe.get_doc(
+		{
+			"doctype": WORKBOOK_DOCTYPE,
+			"lead": lead,
+			"sheet_id": sid,
+			"sheet_url": url,
+			"address": address,
+			"created_by_user": frappe.session.user,
+			"workbook_created_at": frappe.utils.now_datetime(),
+		}
+	).insert(ignore_permissions=True)
+
+	return {
+		"name": doc.name,
+		"sheet_url": url,
+		"sheet_id": sid,
+		"address": address,
+		"existing": False,
+	}
+
+
+def on_workbook_insert(doc, method=None):
+	"""after_insert — mirror the URL onto the lead + live-refresh open clients."""
+	if not doc.get("lead") or not frappe.db.exists("CRM Lead", doc.lead):
+		return
+	if doc.get("sheet_url") and frappe.get_meta("CRM Lead").has_field("underwriting_url"):
+		frappe.db.set_value("CRM Lead", doc.lead, {"underwriting_url": doc.sheet_url}, update_modified=False)
+	frappe.publish_realtime(
+		"crm_underwriting",
+		{"reference_doctype": "CRM Lead", "reference_docname": doc.lead},
+		after_commit=True,
+	)
+
+
+@frappe.whitelist()
+def get_underwriting_workbooks(lead: str):
+	"""Underwriting workbooks for a lead, most recent first (card + timeline)."""
+	if not frappe.db.exists("CRM Lead", lead):
+		frappe.throw(_("Lead not found"), frappe.DoesNotExistError)
+	if not frappe.has_permission("CRM Lead", "read", lead):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	if not frappe.db.exists("DocType", WORKBOOK_DOCTYPE):
+		return []
+
+	rows = frappe.get_all(
+		WORKBOOK_DOCTYPE,
+		filters={"lead": lead},
+		fields=[
+			"name",
+			"sheet_id",
+			"sheet_url",
+			"address",
+			"created_by_user",
+			"workbook_created_at",
+			"creation",
+		],
+		order_by="creation desc",
+	)
+	for r in rows:
+		r["created_by_name"] = (
+			frappe.get_cached_value("User", r.created_by_user, "full_name")
+			if r.get("created_by_user")
+			else None
+		)
+	return rows

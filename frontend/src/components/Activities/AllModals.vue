@@ -39,6 +39,12 @@
     :referenceDoc="referenceDoc"
     :options="{ afterCreate: () => activities.reload() }"
   />
+  <CreateUnderwritingModal
+    v-if="showCreateUnderwritingModal"
+    v-model="showCreateUnderwritingModal"
+    :referenceDoc="referenceDoc"
+    :options="{ afterCreate: () => activities.reload() }"
+  />
 </template>
 <script setup>
 import TaskModal from '@/components/Modals/TaskModal.vue'
@@ -47,6 +53,7 @@ import CallLogModal from '@/components/Modals/CallLogModal.vue'
 import SendTextModal from '@/components/Modals/SendTextModal.vue'
 import FetchTaxInfoModal from '@/components/Modals/FetchTaxInfoModal.vue'
 import CreateAgreementModal from '@/components/Modals/CreateAgreementModal.vue'
+import CreateUnderwritingModal from '@/components/Modals/CreateUnderwritingModal.vue'
 import { call } from 'frappe-ui'
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -183,6 +190,16 @@ function createAgreement() {
   showCreateAgreementModal.value = true
 }
 
+// Create Underwriting Sheet (Google Sheets) — copies the underwriting template
+// into the shared Drive folder, pre-filled; one per lead (re-open if it exists).
+// Live refresh is also driven site-wide by the crm_underwriting realtime event.
+const showCreateUnderwritingModal = ref(false)
+
+function createUnderwriting() {
+  referenceDoc.value = { ...doc.value }
+  showCreateUnderwritingModal.value = true
+}
+
 // common
 const route = useRoute()
 const router = useRouter()
@@ -207,5 +224,6 @@ defineExpose({
   sendText,
   fetchTaxInfo,
   createAgreement,
+  createUnderwriting,
 })
 </script>

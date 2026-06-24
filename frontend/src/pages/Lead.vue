@@ -185,6 +185,10 @@
       />
       <TaxInfoCard :lead="leadId" @fetch="activities?.fetchTaxInfo()" />
       <AgreementsCard :lead="leadId" @create="activities?.createAgreement()" />
+      <UnderwritingCard
+        :lead="leadId"
+        @create="activities?.createUnderwriting()"
+      />
       <div
         v-if="sections.data"
         class="flex flex-1 flex-col justify-between overflow-hidden"
@@ -266,6 +270,7 @@ import CustomActions from '@/components/CustomActions.vue'
 import FirstCallReadCard from '@/components/FirstCallReadCard.vue'
 import TaxInfoCard from '@/components/TaxInfoCard.vue'
 import AgreementsCard from '@/components/AgreementsCard.vue'
+import UnderwritingCard from '@/components/UnderwritingCard.vue'
 import MoneyIcon from '@/components/Icons/MoneyIcon.vue'
 import {
   openWebsite,
@@ -398,6 +403,14 @@ const moreActions = computed(() => {
       d.property_address
         ? activities.value?.createAgreement()
         : toast.error(__('Set a property address to create an agreement')),
+  })
+  items.push({
+    label: __('Create Underwriting Sheet'),
+    icon: 'grid',
+    onClick: () =>
+      d.property_address
+        ? activities.value?.createUnderwriting()
+        : toast.error(__('Set a property address to create an underwriting sheet')),
   })
   return items
 })
