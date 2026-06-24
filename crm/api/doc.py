@@ -445,7 +445,11 @@ def get_data(
 
 		# computed pseudo-fields (filled per-card in getCounts) — not DB columns,
 		# so they must never reach frappe.get_list
-		rows = [row for row in rows if row not in ("_last_comm", "_next_task_due", "_first_call")]
+		rows = [
+			row
+			for row in rows
+			if row not in ("_last_comm", "_next_task_due", "_first_call", "_new_lead_color")
+		]
 
 		for kc in kanban_columns:
 			column_filters = {column_field: kc.get("name")}
@@ -848,6 +852,23 @@ def getCounts(d, doctype):
 		d["_first_call"] = f"{motivated or ''}|{on_price or ''}"
 	else:
 		d["_first_call"] = "|"
+
+	# New-lead age tint (CRM Lead only): a lead sitting in the "New" status is
+	# colored purely by how long it's been there — yellow on the day it was
+	# created, red once it's a day or more old and STILL "New" — regardless of any
+	# contact activity or open tasks. Drives the kanban to flag untouched new
+	# leads. Empty for any other status (those cards keep the task-due tint).
+	# Calendar-day math in the site timezone (creation is stored site-tz).
+	d["_new_lead_color"] = ""
+	if doctype == "CRM Lead":
+		status, creation = frappe.db.get_value("CRM Lead", d.get("name"), ["status", "creation"]) or (
+			None,
+			None,
+		)
+		if status == "New" and creation:
+			from frappe.utils import getdate
+
+			d["_new_lead_color"] = "red" if getdate(creation) < getdate() else "amber"
 	return d
 
 
