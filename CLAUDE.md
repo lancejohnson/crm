@@ -10,6 +10,21 @@ server scripts, infra, and all operational context live in the ops repo:
 
 ## Our changes vs upstream (keep this list current)
 
+- **Lead name auto-formatting** — inbound leads (iSpeedToLead webhook, manual
+  entry, imports) often arrive oddly cased ("joe cholock", "priscilla Diaz",
+  "JOHN SMITH"). `crm/api/name_format.py` `format_person_name()` title-cases a
+  person name but only re-cases words that look machine-mangled (all-lower /
+  all-upper), preserving already-cased names (McDonald, DeAngelo, O'Brien);
+  handles Mc-, the O'/D' apostrophe family, hyphenated names, Jr/Sr/Roman-numeral
+  suffixes, and keeps connectors lowercase ("Carol and Charles"). Idempotent.
+  Wired as a `CRM Lead` `before_validate` hook (`normalize_lead_names`) that
+  re-cases `first/middle/last_name` **on creation only** (later manual edits are
+  respected); `validate()` rebuilds `lead_name` from the normalized parts.
+  `backfill_lead_names(dry_run=1)` is a bench-executable backfill (writes via
+  `db.set_value`, `update_modified=False`, no `doc.save` → no side-effects;
+  dry-run by default). Pure app code — no ops/server-script piece. Backend only
+  (no `.vue`). `crm/hooks.py` + `crm/api/name_format.py`.
+
 - **Realtime task auto-refresh (no page reload), site-wide** — `CRM Task` now
   broadcasts a `crm_task_update` realtime event (with
   `reference_doctype`/`reference_docname`) on `after_insert`/`on_update`/`on_trash`,
