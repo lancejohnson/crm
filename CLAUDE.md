@@ -407,6 +407,22 @@ server scripts, infra, and all operational context live in the ops repo:
   - Documenso webhooks are DB-managed (Webhook table, not the public API); a row
     for teamId 4 points at `/api/method/documenso-webhook?secret=…`. Details in
     `../frappe-crm-deploy` + the `documenso-deployment` memory.
+  - **"Download signed PDF" once completed** — when an agreement is fully signed
+    (Documenso status `COMPLETED`, or `signed_count >= total_signers` — some rows
+    never flip to COMPLETED in the webhook but reach 2/2), a green **Download
+    signed PDF** link shows in the sidebar card AND the Activity-timeline entry,
+    streaming the signed PDF. **Backend proxy** because Documenso's `download-beta`
+    returns an internal, expiring MinIO presigned URL (`http://minio:9000/…`) a
+    browser can't reach: `crm/api/agreement.py` `download_signed_agreement(agreement)`
+    (whitelisted, GET) permission-checks via the lead, then `requests.get` the
+    Documenso `/api/v2/document/{document_id}/download?version=signed` with the API
+    token and sets `frappe.local.response` (`type="download"`, `filecontent`,
+    `filename=<template>_signed.pdf`). `get_agreements` now returns an `is_signed`
+    flag (`_is_completed`) the UI gates the link on. **Token is in site_config**
+    `documenso_api_token` (set via `bench set-config`, mirrors the underwriting
+    `google_sa_json` pattern — app code can't read the server-scripts'
+    `__INFISICAL:…__` placeholder). `frontend/src/components/AgreementsCard.vue` +
+    `Activities/Activities.vue` (both build `/api/method/…download_signed_agreement?agreement=<name>`).
 - **First-Call Read (2x2 lead qualification)** — after the first call a rep marks
   two yes/no reads that place the lead in a 2x2: **Motivated?** (is the seller
   motivated) x **On price?** (is their price realistic) → Motivated·On price /
