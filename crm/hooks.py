@@ -204,6 +204,10 @@ doc_events = {
 	# from here (non-sandboxed): enqueue a worker that sleeps the real waits and
 	# reuses the engine for each step. Fires on the same condition as auto-enroll.
 	"CRM Lead": {
+		# Normalize odd-cased inbound names ("joe cholock" -> "Joe Cholock") on
+		# creation only, so later manual edits are respected. Runs before the
+		# controller rebuilds lead_name/title from the name parts in validate().
+		"before_validate": ["crm.api.name_format.normalize_lead_names"],
 		"after_insert": ["crm.api.sequence_drain.enqueue_for_lead"],
 		"on_update": ["crm.api.sequence_drain.enqueue_for_lead"],
 	},
