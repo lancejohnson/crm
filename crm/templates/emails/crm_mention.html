@@ -1,0 +1,13 @@
+<p>
+	<span style="font-weight: 600;">{{ mentioned_by }}</span>
+	mentioned you in a comment on
+	<span style="font-weight: 600;">{{ record_label }}</span>.
+</p>
+
+<blockquote style="margin: 16px 0; padding: 8px 16px; border-left: 3px solid #d1d8dd; color: #1f272e;">
+	{{ comment_content | safe }}
+</blockquote>
+
+<p>
+	<a class="btn btn-primary" href="{{ comment_link }}">View comment</a>
+</p>

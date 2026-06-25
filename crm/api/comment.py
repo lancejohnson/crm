@@ -27,16 +27,16 @@ def notify_mentions(doc):
 		return
 	mentions = extract_mentions(content)
 	reference_doc = frappe.get_doc(doc.reference_doctype, doc.reference_name)
+	owner = frappe.get_cached_value("User", doc.owner, "full_name")
+	doctype = doc.reference_doctype
+	if doctype.startswith("CRM "):
+		doctype = doctype[4:].lower()
+	name = (
+		reference_doc.lead_name
+		if doctype == "lead"
+		else reference_doc.organization or reference_doc.lead_name
+	)
 	for mention in mentions:
-		owner = frappe.get_cached_value("User", doc.owner, "full_name")
-		doctype = doc.reference_doctype
-		if doctype.startswith("CRM "):
-			doctype = doctype[4:].lower()
-		name = (
-			reference_doc.lead_name
-			if doctype == "lead"
-			else reference_doc.organization or reference_doc.lead_name
-		)
 		notification_text = f"""
             <div class="mb-2 leading-5 text-ink-gray-5">
                 <span class="font-medium text-ink-gray-9">{ owner }</span>
@@ -57,6 +57,40 @@ def notify_mentions(doc):
 				"redirect_to_docname": doc.reference_name,
 			}
 		)
+		email_mention(doc, mention, mentioned_by=owner, record_label=name)
+
+
+def email_mention(doc, mention, mentioned_by, record_label):
+	"""Email the mentioned user the comment plus a deep-link back to it.
+
+	Mirrors the in-app notification's redirect: the CRM app route
+	`/crm/{leads|deals}/<reference_name>#<comment_name>` lands on the record and
+	scrolls to the comment (same `#<comment_name>` hash the bell menu uses).
+	Best-effort — a mail failure must never roll back the comment.
+	"""
+	# Don't email yourself for your own mention (mirrors notify_user's skip).
+	if not mention.email or mention.email == doc.owner:
+		return
+
+	route = "deals" if doc.reference_doctype == "CRM Deal" else "leads"
+	comment_link = frappe.utils.get_url(f"/crm/{route}/{doc.reference_name}#{doc.name}")
+
+	try:
+		frappe.sendmail(
+			recipients=mention.email,
+			subject=_("{0} mentioned you in {1}").format(mentioned_by, record_label),
+			template="crm_mention",
+			args={
+				"mentioned_by": mentioned_by,
+				"record_label": record_label,
+				"comment_content": doc.content,
+				"comment_link": comment_link,
+			},
+			reference_doctype=doc.reference_doctype,
+			reference_name=doc.reference_name,
+		)
+	except Exception:
+		frappe.log_error("CRM mention email failed", frappe.get_traceback())
 
 
 def extract_mentions(html):
