@@ -429,6 +429,45 @@ def docuseal_webhook(secret: str = None):
 	return {"ok": True, "updated": len(rows)}
 
 
+@frappe.whitelist()
+def archive_agreement(agreement: str):
+	"""Archive an agreement: archive the provider's submission + drop the CRM row.
+
+	For DocuSeal, `DELETE /submissions/{id}` archives the submission (recoverable
+	on DocuSeal, signing links stop working). The CRM Esign Agreement row is then
+	removed so it disappears from the lead's card + timeline; a `crm_esign`
+	realtime event refreshes the open lead.
+	"""
+	if not frappe.db.exists(AGREEMENT_DOCTYPE, agreement):
+		frappe.throw(_("Agreement not found"), frappe.DoesNotExistError)
+	wanted = ["lead", "document_id"]
+	if frappe.db.has_column(AGREEMENT_DOCTYPE, "provider"):
+		wanted.append("provider")
+	agr = frappe.db.get_value(AGREEMENT_DOCTYPE, agreement, wanted, as_dict=True)
+	if not agr.lead or not frappe.has_permission("CRM Lead", "write", agr.lead):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+	provider = (agr.get("provider") or "documenso").lower()
+	# Best-effort archive on the provider side — never block the local removal.
+	if provider == "docuseal" and agr.document_id:
+		token = (frappe.conf.get("docuseal_api_token") or "").strip()
+		if token:
+			try:
+				requests.delete(
+					f"{DOCUSEAL_API}/submissions/{agr.document_id}",
+					headers={"X-Auth-Token": token},
+					timeout=20,
+				)
+			except requests.RequestException:
+				pass
+
+	lead = agr.lead
+	frappe.delete_doc(AGREEMENT_DOCTYPE, agreement, ignore_permissions=True, force=True)
+	frappe.db.commit()
+	_publish(lead)
+	return {"ok": True}
+
+
 # --------------------------------------------------------------------------- #
 # read + download (both providers)
 # --------------------------------------------------------------------------- #

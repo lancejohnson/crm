@@ -21,7 +21,16 @@
       >
         <div class="flex items-center justify-between gap-2">
           <div class="truncate text-ink-gray-8">{{ a.template_title }}</div>
-          <Badge :theme="statusTheme(a)" variant="subtle" :label="statusLabel(a)" />
+          <div class="flex shrink-0 items-center gap-1">
+            <Badge :theme="statusTheme(a)" variant="subtle" :label="statusLabel(a)" />
+            <Button
+              variant="ghost"
+              size="sm"
+              icon="archive"
+              :tooltip="__('Archive agreement')"
+              @click="confirmArchive(a)"
+            />
+          </div>
         </div>
 
         <div class="flex items-center gap-1.5 text-xs text-ink-gray-6">
@@ -86,14 +95,41 @@
     <div v-else class="mt-2 text-sm text-ink-gray-5">
       {{ __('No agreements yet.') }}
     </div>
+
+    <Dialog
+      v-model="showArchive"
+      :options="{
+        title: __('Archive agreement?'),
+        message: __(
+          'This removes the agreement from this lead and archives it in DocuSeal. The signing links will stop working.',
+        ),
+        actions: [
+          {
+            label: __('Archive'),
+            variant: 'solid',
+            theme: 'red',
+            loading: archiving,
+            onClick: doArchive,
+          },
+        ],
+      }"
+    />
   </div>
 </template>
 
 <script setup>
 import { formatDate } from '@/utils'
 import { globalStore } from '@/stores/global'
-import { Button, Badge, FeatherIcon, createResource, toast } from 'frappe-ui'
-import { computed, onMounted, onBeforeUnmount } from 'vue'
+import {
+  Button,
+  Badge,
+  Dialog,
+  FeatherIcon,
+  createResource,
+  call,
+  toast,
+} from 'frappe-ui'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 
 const props = defineProps({
   lead: { type: String, required: true },
@@ -163,6 +199,32 @@ function copyAll(a) {
   }
   navigator.clipboard?.writeText(lines.join('\n'))
   toast.success(__('All links copied'))
+}
+
+// Archive an agreement (archives the DocuSeal submission + removes it here).
+const showArchive = ref(false)
+const archiving = ref(false)
+const archiveTarget = ref(null)
+
+function confirmArchive(a) {
+  archiveTarget.value = a
+  showArchive.value = true
+}
+async function doArchive(close) {
+  if (!archiveTarget.value || archiving.value) return
+  archiving.value = true
+  try {
+    await call('crm.api.agreement.archive_agreement', {
+      agreement: archiveTarget.value.name,
+    })
+    toast.success(__('Agreement archived'))
+    agreementsResource.reload()
+    close?.()
+  } catch (e) {
+    toast.error(e.messages?.[0] || __('Could not archive agreement'))
+  } finally {
+    archiving.value = false
+  }
 }
 
 function onEsign(data) {
