@@ -10,6 +10,22 @@ server scripts, infra, and all operational context live in the ops repo:
 
 ## Our changes vs upstream (keep this list current)
 
+- **Activity feed no longer auto-scrolls on every reload** — the Lead/Deal
+  Activity timeline used to yank the viewport on every action (adding a
+  comment/task, sending a text) and on every realtime reload from a teammate,
+  because each feed resource re-ran `scroll()` in its `onSuccess`, the comment
+  composer emitted `@scroll` on send, and the attachments `@reload` chained
+  `scroll()`. On the Comments tab that forced the feed to the bottom; on Activity,
+  to the top — and the user then had to scroll back to the To-do/quick-add at the
+  top. Now auto-scroll happens **only on mount** (deep-link to a `#comment` hash,
+  or no-hash → newest entry). Removed the `onSuccess` scroll from all six feed
+  resources (`all_activities`, `whatsappMessages`, `smsMessages`, `taxPulls`,
+  `agreements`, `underwritingWorkbooks`), the `CommunicationArea` `@scroll`
+  handler, and the attachments `@reload` scroll; kept the SMS/WhatsApp chat-tab
+  send-scroll (standard chat behavior) and the mount `scroll(hash)`. Pure
+  frontend. `frontend/src/components/Activities/Activities.vue`. Requested by
+  Lance (the feed "scrolls to the bottom" every time he did anything).
+
 - **Lead name auto-formatting** — inbound leads (iSpeedToLead webhook, manual
   entry, imports) often arrive oddly cased ("joe cholock", "priscilla Diaz",
   "JOHN SMITH"). `crm/api/name_format.py` `format_person_name()` title-cases a
