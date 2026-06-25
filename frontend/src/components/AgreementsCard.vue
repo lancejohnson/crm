@@ -111,12 +111,13 @@ const agreementsResource = createResource({
 
 const agreements = computed(() => agreementsResource.data || [])
 
-// Documenso document status (+ rejection/cancel) → a colored badge.
+// Document status → a colored badge (Documenso + DocuSeal statuses).
 function statusLabel(a) {
   const s = (a.agreement_status || '').toUpperCase()
   if (s === 'COMPLETED') return __('Completed')
-  if (s === 'REJECTED') return __('Rejected')
+  if (s === 'REJECTED' || s === 'DECLINED') return __('Declined')
   if (s === 'CANCELLED') return __('Cancelled')
+  if (s === 'EXPIRED') return __('Expired')
   if (a.signed_count && a.total_signers && a.signed_count >= a.total_signers)
     return __('Completed')
   if (a.signed_count > 0) return __('Signing')
@@ -125,14 +126,16 @@ function statusLabel(a) {
 function statusTheme(a) {
   const s = (a.agreement_status || '').toUpperCase()
   if (s === 'COMPLETED') return 'green'
-  if (s === 'REJECTED' || s === 'CANCELLED') return 'red'
+  if (['REJECTED', 'CANCELLED', 'DECLINED', 'EXPIRED'].includes(s)) return 'red'
   if (a.signed_count > 0) return 'blue'
   return 'orange'
 }
+// Documenso `DOCUMENT_SIGNED` or DocuSeal `form.completed` → "Signed".
 function eventLabel(ev) {
   return String(ev)
     .replace(/^DOCUMENT_/, '')
-    .replace(/_/g, ' ')
+    .replace(/^(form|submission)\./, '')
+    .replace(/[_.]/g, ' ')
     .toLowerCase()
     .replace(/^\w/, (c) => c.toUpperCase())
 }

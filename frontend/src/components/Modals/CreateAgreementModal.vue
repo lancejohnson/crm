@@ -226,7 +226,7 @@ async function createDraft() {
   loading.value = true
   error.value = null
   try {
-    result.value = await call('create-agreement-draft', {
+    result.value = await call('crm.api.agreement.create_docuseal_agreement', {
       lead,
       template: template.value,
       two_sellers: sellerCount.value,
