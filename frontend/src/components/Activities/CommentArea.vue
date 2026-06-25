@@ -23,6 +23,17 @@
             <EditIcon class="h-3.5 w-3.5 text-ink-gray-5" />
           </template>
         </Button>
+        <Button
+          v-if="canEdit && !editing"
+          class="opacity-0 transition-opacity group-hover:opacity-100"
+          variant="ghost"
+          :tooltip="__('Delete')"
+          @click="showDeleteConfirm = true"
+        >
+          <template #icon>
+            <LucideTrash2 class="h-3.5 w-3.5 text-ink-gray-5" />
+          </template>
+        </Button>
         <Tooltip :text="formatDate(activity.creation)">
           <div class="text-sm text-ink-gray-5">
             {{ __(timeAgo(activity.creation)) }}
@@ -73,16 +84,33 @@
         />
       </div>
     </div>
+    <Dialog
+      v-model="showDeleteConfirm"
+      :options="{
+        title: __('Delete comment'),
+        message: __('Are you sure you want to delete this comment? This cannot be undone.'),
+        actions: [
+          {
+            label: __('Delete'),
+            variant: 'solid',
+            theme: 'red',
+            loading: deleting,
+            onClick: deleteComment,
+          },
+        ],
+      }"
+    />
   </div>
 </template>
 <script setup>
 import UserAvatar from '@/components/UserAvatar.vue'
 import AttachmentItem from '@/components/AttachmentItem.vue'
 import EditIcon from '@/components/Icons/EditIcon.vue'
+import LucideTrash2 from '~icons/lucide/trash-2'
 import { sessionStore } from '@/stores/session'
 import { usersStore } from '@/stores/users'
 import { timeAgo, formatDate, sanitizeHTML } from '@/utils'
-import { Button, Tooltip, TextEditor, call, toast } from 'frappe-ui'
+import { Button, Tooltip, TextEditor, Dialog, call, toast } from 'frappe-ui'
 import { computed, ref } from 'vue'
 
 const props = defineProps({
@@ -100,6 +128,9 @@ const canEdit = computed(() => props.activity.owner === user)
 const editing = ref(false)
 const saving = ref(false)
 const editedContent = ref('')
+
+const showDeleteConfirm = ref(false)
+const deleting = ref(false)
 
 function startEdit() {
   editedContent.value = props.activity.content
@@ -125,6 +156,22 @@ async function saveEdit() {
     toast.error(e?.messages?.[0] || __('Failed to update comment'))
   } finally {
     saving.value = false
+  }
+}
+
+async function deleteComment() {
+  deleting.value = true
+  try {
+    await call('crm.api.comment.delete_comment', {
+      comment_name: props.activity.name,
+    })
+    showDeleteConfirm.value = false
+    activities.value?.reload()
+    toast.success(__('Comment deleted'))
+  } catch (e) {
+    toast.error(e?.messages?.[0] || __('Failed to delete comment'))
+  } finally {
+    deleting.value = false
   }
 }
 

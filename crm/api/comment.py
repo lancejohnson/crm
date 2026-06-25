@@ -160,6 +160,25 @@ def edit_comment(comment_name: str, content: str):
 	return comment
 
 
+@frappe.whitelist()
+def delete_comment(comment_name: str):
+	"""Delete an existing comment.
+
+	Only the comment's author may delete it (mirrors `edit_comment`).
+
+	:param comment_name: Name of the Comment to delete
+	"""
+	comment = frappe.get_doc("Comment", comment_name)
+
+	if comment.comment_type != "Comment":
+		frappe.throw(_("Only comments can be deleted"))
+
+	if comment.owner != frappe.session.user:
+		frappe.throw(_("You can only delete your own comments"), frappe.PermissionError)
+
+	comment.delete(ignore_permissions=True)
+
+
 QUICK_COMMENTS_MAX = 30
 
 
