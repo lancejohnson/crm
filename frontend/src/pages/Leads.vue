@@ -412,6 +412,7 @@ import { getMeta } from '@/stores/meta'
 import { globalStore } from '@/stores/global'
 import { usersStore } from '@/stores/users'
 import { statusesStore } from '@/stores/statuses'
+import { sessionStore } from '@/stores/session'
 import { leadDrilldownStore } from '@/stores/leadDrilldown'
 import LucideFilter from '~icons/lucide/filter'
 import LucideCalendarClock from '~icons/lucide/calendar-clock'
@@ -438,6 +439,7 @@ const { getFormattedPercent, getFormattedFloat, getFormattedCurrency } =
 const { makeCall, $socket } = globalStore()
 const { getUser } = usersStore()
 const { getLeadStatus } = statusesStore()
+const { user } = sessionStore()
 
 // Current user's Quo number — caller ID for the mobile click-to-call deep link.
 const myNumber = computed(() => myQuoNumber())
@@ -471,7 +473,14 @@ const drilldown = leadDrilldownStore()
 // overdue. _next_task_due is a computed pseudo-field (not a DB column), so we
 // resolve the matching lead names server-side and inject them as the same
 // never-persisted `name in [...]` default filter the dashboard drill uses.
-const taskDueScope = ref('')
+//
+// The chosen *scope* (not the resolved names — those go stale) is persisted
+// per-user in localStorage so the filter survives leaving the board (into a
+// lead and back) and full page reloads, staying on until the user clears it.
+// On mount we re-resolve the names fresh from the persisted scope (see
+// onMounted below). Keyed by user so a different login doesn't inherit it.
+const TASK_DUE_STORAGE_KEY = 'leadsTaskDueScope:' + user
+const taskDueScope = ref(localStorage.getItem(TASK_DUE_STORAGE_KEY) || '')
 const taskDueNames = ref([])
 
 const listFilters = computed(() => {
@@ -514,12 +523,14 @@ async function applyTaskDue(scope) {
   })
   taskDueNames.value = names || []
   taskDueScope.value = scope
+  localStorage.setItem(TASK_DUE_STORAGE_KEY, scope)
   nextTick(() => viewControls.value?.reload())
 }
 
 function clearTaskDue() {
   taskDueScope.value = ''
   taskDueNames.value = []
+  localStorage.removeItem(TASK_DUE_STORAGE_KEY)
   nextTick(() => viewControls.value?.reload())
 }
 
@@ -623,6 +634,13 @@ function onFirstCallUpdate(data) {
 onMounted(() => {
   $socket.on('crm_task_update', onTaskUpdate)
   $socket.on('crm_first_call', onFirstCallUpdate)
+  // Restore a persisted "Tasks due" filter: re-resolve the matching lead names
+  // fresh (the stored scope is the source of truth; names go stale), then let
+  // applyTaskDue reload the board with them. Skip while a dashboard drill is
+  // active — that takes precedence in listFilters.
+  if (taskDueScope.value && !drilldown.active) {
+    applyTaskDue(taskDueScope.value)
+  }
 })
 onBeforeUnmount(() => {
   $socket.off('crm_task_update', onTaskUpdate)
