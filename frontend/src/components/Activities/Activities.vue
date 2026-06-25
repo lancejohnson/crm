@@ -141,7 +141,7 @@
       >
         <AttachmentArea
           :attachments="activities"
-          @reload="all_activities.reload() && scroll()"
+          @reload="all_activities.reload()"
         />
       </div>
       <template v-else>
@@ -656,7 +656,6 @@
       v-model="doc"
       v-model:reload="reload_email"
       :doctype="doctype"
-      @scroll="scroll"
     />
     <WhatsAppBox
       v-if="title == 'WhatsApp'"
@@ -825,7 +824,6 @@ const all_activities = createResource({
   transform: ([versions, calls, notes, tasks, attachments]) => {
     return { versions, calls, notes, tasks, attachments }
   },
-  onSuccess: () => nextTick(() => scroll()),
 })
 
 const showWhatsappTemplates = ref(false)
@@ -839,7 +837,6 @@ const whatsappMessages = createResource({
   },
   auto: whatsappEnabled.value,
   transform: (data) => sortByCreation(data),
-  onSuccess: () => nextTick(() => scroll()),
 })
 
 const smsMessages = createResource({
@@ -850,7 +847,6 @@ const smsMessages = createResource({
     reference_name: props.docname,
   },
   transform: (data) => sortByCreation(data),
-  onSuccess: () => nextTick(() => scroll()),
 })
 
 // BatchData tax-info pulls for this lead (shown in the Activity timeline + the
@@ -860,7 +856,6 @@ const taxPulls = createResource({
   cache: ['tax_pulls', props.docname],
   params: { lead: props.docname },
   auto: props.doctype === 'CRM Lead',
-  onSuccess: () => nextTick(() => scroll()),
 })
 
 // Documenso e-sign agreements for this lead (timeline + sidebar card). Leads only.
@@ -869,7 +864,6 @@ const agreements = createResource({
   cache: ['agreements', props.docname],
   params: { lead: props.docname },
   auto: props.doctype === 'CRM Lead',
-  onSuccess: () => nextTick(() => scroll()),
 })
 
 // Google Sheets underwriting workbooks for this lead (timeline + sidebar card).
@@ -878,7 +872,6 @@ const underwritingWorkbooks = createResource({
   cache: ['underwriting_workbooks', props.docname],
   params: { lead: props.docname },
   auto: props.doctype === 'CRM Lead',
-  onSuccess: () => nextTick(() => scroll()),
 })
 
 // is_sms_enabled resolves asynchronously, so `auto: smsEnabled.value` is often
@@ -959,6 +952,10 @@ onMounted(() => {
     }
   })
 
+  // Auto-scroll happens ONLY here, on mount: land on the deep-linked element
+  // (e.g. a #comment hash) or, with no hash, on the newest entry. We intentionally
+  // do NOT scroll on resource reloads (comment/task adds, realtime events from
+  // teammates) — that yanked the viewport away every time the user did anything.
   nextTick(() => {
     const hash = route.hash.slice(1) || null
     let tabNames = props.tabs?.map((tab) => tab.name)
