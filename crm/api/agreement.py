@@ -40,6 +40,34 @@ _OCCUPANCY_DEFAULT = (
 	"on or before the Closing Date."
 )
 
+# Governing law on the agreement reads as a 2-letter state code, so normalize
+# whatever the lead stores ("Texas" / "TX" / "texas") to the abbreviation.
+_STATE_ABBR = {
+	"alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
+	"california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
+	"district of columbia": "DC", "florida": "FL", "georgia": "GA", "hawaii": "HI",
+	"idaho": "ID", "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
+	"kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
+	"massachusetts": "MA", "michigan": "MI", "minnesota": "MN", "mississippi": "MS",
+	"missouri": "MO", "montana": "MT", "nebraska": "NE", "nevada": "NV",
+	"new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY",
+	"north carolina": "NC", "north dakota": "ND", "ohio": "OH", "oklahoma": "OK",
+	"oregon": "OR", "pennsylvania": "PA", "rhode island": "RI", "south carolina": "SC",
+	"south dakota": "SD", "tennessee": "TN", "texas": "TX", "utah": "UT",
+	"vermont": "VT", "virginia": "VA", "washington": "WA", "west virginia": "WV",
+	"wisconsin": "WI", "wyoming": "WY",
+}
+
+
+def _state_abbr(state) -> str:
+	"""Return a 2-letter state code: pass-through if already 2 chars, else map."""
+	s = (state or "").strip()
+	if not s:
+		return ""
+	if len(s) == 2:
+		return s.upper()
+	return _STATE_ABBR.get(s.lower(), s)
+
 
 # --------------------------------------------------------------------------- #
 # realtime + hooks (shared by both providers)
@@ -189,7 +217,7 @@ def create_docuseal_agreement(
 		"Property Address": addr,
 		"County": (leaddoc.get("property_county") or "").strip(),
 		"APN": (leaddoc.get("apn") or "").strip(),
-		"Governing State": (leaddoc.get("property_state") or "").strip(),
+		"Governing State": _state_abbr(leaddoc.get("property_state")),
 		"Signer Name": buyer_name,
 		# standard defaults
 		"Earnest Money": "100",
