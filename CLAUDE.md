@@ -69,6 +69,17 @@ server scripts, infra, and all operational context live in the ops repo:
   inline rich-text editor with Save/Cancel. Owner-only `edit_comment` API
   (PermissionError guard; suppresses mention re-notify on edit); `Activities.vue`
   passes the activities resource via `v-model` so the feed reloads after a save.
+- **@-mention emails** — `@`-mentioning a teammate in a Lead/Deal comment already
+  created an in-app `CRM Notification`; now it ALSO emails them. `crm/api/comment.py`
+  `notify_mentions()` calls a new `email_mention()` per mention: `frappe.sendmail`
+  with the `crm_mention` template (comment HTML + a "View comment" button) linking
+  to `/crm/{leads|deals}/<reference_name>#<comment_name>` — the same route+hash the
+  bell notification uses, so it lands on the record and scrolls to the comment.
+  Self-mentions are skipped (mirrors `notify_user`); a send failure is caught/logged
+  so it can never roll back the comment; owner full_name + record label are computed
+  once before the mention loop. Pure app code, no ops piece (reuses existing SMTP).
+  `crm/api/comment.py` + `crm/templates/emails/crm_mention.html` (**new**, mirrors
+  the `crm_invitation` template).
 - **Quick comments (customizable canned comments)** — a "Quick comment" block in
   the Lead/Deal Activity feed (directly below the To-do block, same card style):
   a row of one-tap chips that each post a canned comment to the timeline. Each
