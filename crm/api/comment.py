@@ -26,15 +26,22 @@ def notify_mentions(doc):
 	if not content:
 		return
 	mentions = extract_mentions(content)
+	if not mentions:
+		# Nothing to notify. Crucially, this also skips the work below for the
+		# assignment comments Frappe auto-creates on *any* doctype (e.g. a CRM Task
+		# when it's assigned) — those reference docs aren't Leads/Deals and have no
+		# `organization`/`lead_name`, so computing `name` would raise and 500 the
+		# whole insert (which is what broke all task creation).
+		return
 	reference_doc = frappe.get_doc(doc.reference_doctype, doc.reference_name)
 	owner = frappe.get_cached_value("User", doc.owner, "full_name")
 	doctype = doc.reference_doctype
 	if doctype.startswith("CRM "):
 		doctype = doctype[4:].lower()
 	name = (
-		reference_doc.lead_name
+		reference_doc.get("lead_name")
 		if doctype == "lead"
-		else reference_doc.organization or reference_doc.lead_name
+		else reference_doc.get("organization") or reference_doc.get("lead_name")
 	)
 	for mention in mentions:
 		notification_text = f"""
