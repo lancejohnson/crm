@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { usersStore } from '@/stores/users'
 import { sessionStore } from '@/stores/session'
 import { viewsStore } from '@/stores/views'
+import { CALL_REVIEW_USER, currentUser } from '@/utils/sidebarLinks'
 
 const routes = [
   {
@@ -165,6 +166,9 @@ router.beforeEach(async (to, from, next) => {
   }
 
   if (isLoggedIn && to.name !== 'Not Permitted' && !isCrmUser()) {
+    next({ name: 'Not Permitted' })
+  } else if (to.name === 'Call Review' && currentUser() !== CALL_REVIEW_USER) {
+    // Call Review (AI integrity notes) is Lance-only; backend enforces it too.
     next({ name: 'Not Permitted' })
   } else if (to.name === 'Home' && isLoggedIn) {
     // Groundwork: the custom leads dashboard is the landing page.

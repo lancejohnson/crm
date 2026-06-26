@@ -15,16 +15,24 @@ Data sources, all already in the CRM:
 Read-only: this module touches no secrets and writes nothing.
 """
 
+import json
+
 import frappe
 from frappe import _
 from frappe.utils import cint, getdate, today
 
-ALLOWED_REPORT_ROLES = ["System Manager", "Sales Manager", "Sales User"]
+# The Call Review tab (and the AI integrity notes it surfaces) is restricted to
+# Lance — he runs the CRM as his own user and reviews calls himself. System Manager
+# is kept so Administrator and `bench execute` still work.
+CALL_REVIEW_USER = "lance.johnson@groundworkpro.com"
 
 
 def validate_access():
-	if not any(role in ALLOWED_REPORT_ROLES for role in frappe.get_roles()):
-		frappe.throw(_("Only sales users can access reports."), frappe.PermissionError)
+	if frappe.session.user == CALL_REVIEW_USER:
+		return
+	if "System Manager" in frappe.get_roles():
+		return
+	frappe.throw(_("Only the call review manager can access this report."), frappe.PermissionError)
 
 
 def _quo_number_map():
@@ -168,6 +176,38 @@ def get_call_review(date: str = None, user: str = None):
 			reviews_by_call.setdefault(rv["call_log"], []).append(rv)
 			reviewer_emails.add(rv["reviewer"])
 
+	# --- AI integrity review per call (CRM Call AI Review, ops-provisioned) ---
+	ai_by_call = {}
+	if call_names and frappe.db.exists("DocType", "CRM Call AI Review"):
+		for ai in frappe.get_all(
+			"CRM Call AI Review",
+			filters={"call_log": ["in", call_names]},
+			fields=[
+				"call_log", "motivation_score", "motivation_reason", "integrity_issues",
+				"lead_status", "what_could_be_better", "overall_flag", "reviewed_at",
+			],
+		):
+			try:
+				issues = json.loads(ai.get("integrity_issues") or "[]")
+			except Exception:
+				issues = []
+			# stored as Data ('' = n/a) → int|None so the UI can hide the score
+			raw_score = ai.get("motivation_score")
+			score = None
+			if raw_score not in (None, ""):
+				try:
+					score = int(raw_score)
+				except (TypeError, ValueError):
+					score = None
+			ai_by_call[ai["call_log"]] = {
+				"motivation_score": score,
+				"motivation_reason": ai.get("motivation_reason") or "",
+				"integrity_issues": issues,
+				"lead_status": ai.get("lead_status") or "",
+				"what_could_be_better": ai.get("what_could_be_better") or "",
+				"overall_flag": ai.get("overall_flag") or "ok",
+			}
+
 	# --- lead display name + current status (calls are lead-linked) ---
 	lead_names = list({c["reference_docname"] for c in calls if c.get("reference_doctype") == "CRM Lead" and c.get("reference_docname")})
 	lead_info = {}
@@ -256,6 +296,7 @@ def get_call_review(date: str = None, user: str = None):
 				"call_outcome": call_to_outcome.get(c["name"], ""),
 				"my_review": review["my_review"],
 				"reviews": review["reviews"],
+				"ai_review": ai_by_call.get(c["name"]),
 			}
 		)
 

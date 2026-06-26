@@ -1,0 +1,49 @@
+<p>
+	<span style="font-weight: 600;">Call Integrity Report</span> — {{ day }}
+</p>
+
+<p style="color: #1f272e;">
+	Reviewed <span style="font-weight: 600;">{{ reviewed_count }}</span> recorded call{{ "s" if reviewed_count != 1 }}.
+	{% if attention %}<span style="font-weight: 600; color: #b54708;">{{ attention | length }} need{{ "s" if (attention | length) == 1 else "" }} a look.</span>
+	{% else %}All clean — nothing flagged.{% endif %}
+	{% if clean_count %} ({{ clean_count }} clean.){% endif %}
+	{% if failed_count %}<br><span style="color: #b42318;">{{ failed_count }} call(s) failed to review and will be retried tomorrow.</span>{% endif %}
+</p>
+
+{% if not attention %}
+<p style="color: #1f272e;">No integrity or motivation concerns in yesterday's calls. 👍</p>
+{% endif %}
+
+{% for item in attention %}
+<div style="margin: 18px 0; padding: 12px 16px; border-left: 4px solid {{ '#d92d20' if item.flag == 'serious' else '#f79009' }}; background: #fafafa;">
+	<p style="margin: 0 0 6px 0;">
+		<span style="display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #fff; background: {{ '#d92d20' if item.flag == 'serious' else '#f79009' }}; padding: 2px 8px; border-radius: 4px;">{{ item.flag }}</span>
+		{% if item.link %}<a href="{{ item.link }}" style="font-weight: 600; color: #1f272e; text-decoration: none;">{{ item.lead_name }}</a>{% else %}<span style="font-weight: 600;">{{ item.lead_name }}</span>{% endif %}
+		<span style="color: #6b7280;"> · {{ item.rep_name }} · {{ (item.duration // 60) }}m {{ (item.duration % 60) }}s</span>
+	</p>
+
+	{% if item.motivation_score is not none %}
+	<p style="margin: 4px 0; color: #1f272e;">
+		<span style="font-weight: 600;">Motivation:</span> {{ item.motivation_score }}/5{% if item.motivation_reason %} — {{ item.motivation_reason }}{% endif %}
+	</p>
+	{% endif %}
+
+	{% if item.integrity_issues %}
+	<p style="margin: 8px 0 4px 0; font-weight: 600; color: #1f272e;">Integrity issues:</p>
+	{% for iss in item.integrity_issues %}
+	<div style="margin: 0 0 8px 12px;">
+		<p style="margin: 0; color: #b42318;">“{{ iss.quote }}”</p>
+		<p style="margin: 2px 0; color: #6b7280; font-size: 13px;">{{ iss.why }}</p>
+		<p style="margin: 2px 0; color: #067647; font-size: 13px;"><span style="font-weight: 600;">Better:</span> {{ iss.better_phrasing }}</p>
+	</div>
+	{% endfor %}
+	{% endif %}
+
+	{% if item.what_could_be_better %}
+	<p style="margin: 6px 0 2px 0; color: #1f272e;"><span style="font-weight: 600;">What could be better:</span> {{ item.what_could_be_better }}</p>
+	{% endif %}
+	{% if item.lead_status %}
+	<p style="margin: 2px 0; color: #6b7280; font-size: 13px;">Where the lead is at: {{ item.lead_status }}</p>
+	{% endif %}
+</div>
+{% endfor %}

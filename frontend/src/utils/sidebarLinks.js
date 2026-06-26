@@ -10,6 +10,18 @@ import CommentIcon from '@/components/Icons/CommentIcon.vue'
 import StepsIcon from '@/components/Icons/StepsIcon.vue'
 import LucideHeadphones from '~icons/lucide/headphones'
 
+// The Call Review tab (and its AI integrity notes) is restricted to Lance — he
+// runs the CRM as his own user and reviews calls himself. Mirrors the backend
+// CALL_REVIEW_USER gate in crm/api/reports.py.
+export const CALL_REVIEW_USER = 'lance.johnson@groundworkpro.com'
+
+// Read the logged-in user from the session cookie directly (no store import — the
+// session store imports the router, which imports this module → circular).
+export function currentUser() {
+  const cookies = new URLSearchParams(document.cookie.split('; ').join('&'))
+  return cookies.get('user_id')
+}
+
 // canonical module list for the left sidebar; admin-defined order/visibility
 // lives in FCRM Settings.custom_sidebar_items as [{label, hidden}]
 export const sidebarLinks = [
@@ -23,7 +35,12 @@ export const sidebarLinks = [
   { label: 'Call Logs', icon: PhoneIcon, to: 'Call Logs' },
   { label: 'Text Messages', icon: CommentIcon, to: 'Text Messages' },
   { label: 'Sequences', icon: StepsIcon, to: 'Sequences' },
-  { label: 'Call Review', icon: LucideHeadphones, to: 'Call Review' },
+  {
+    label: 'Call Review',
+    icon: LucideHeadphones,
+    to: 'Call Review',
+    condition: () => currentUser() === CALL_REVIEW_USER,
+  },
 ]
 
 // merge the saved [{label, hidden}] config with the canonical list:

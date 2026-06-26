@@ -203,6 +203,14 @@
                     :label="expanded[call.name] ? __('Hide summary') : __('AI summary')"
                     @click="toggle(call.name)"
                   />
+                  <Badge
+                    v-if="call.ai_review"
+                    :variant="'subtle'"
+                    :theme="aiFlagTheme(call.ai_review.overall_flag)"
+                    :label="aiFlagLabel(call.ai_review)"
+                    class="cursor-pointer"
+                    @click="toggleAi(call.name)"
+                  />
                   <Button
                     variant="ghost"
                     :label="call.my_review.notes ? __('Notes ✎') : __('Add note')"
@@ -237,6 +245,57 @@
                   class="whitespace-pre-wrap rounded bg-surface-gray-1 px-3 py-2 text-sm text-ink-gray-7"
                 >
                   {{ call.ai_summary }}
+                </div>
+
+                <!-- AI integrity review (Lance-only Call Review tab) -->
+                <div
+                  v-if="call.ai_review && aiOpen[call.name]"
+                  class="rounded border bg-surface-white px-3 py-2.5 text-sm text-ink-gray-7"
+                >
+                  <div class="mb-1.5 flex items-center gap-2">
+                    <Badge
+                      :variant="'subtle'"
+                      :theme="aiFlagTheme(call.ai_review.overall_flag)"
+                      :label="call.ai_review.overall_flag"
+                    />
+                    <span
+                      v-if="call.ai_review.motivation_score !== null"
+                      class="text-xs text-ink-gray-6"
+                    >
+                      {{ __('Motivation') }}: {{ call.ai_review.motivation_score }}/5
+                    </span>
+                  </div>
+                  <p
+                    v-if="call.ai_review.motivation_reason"
+                    class="mb-2 text-ink-gray-6"
+                  >
+                    {{ call.ai_review.motivation_reason }}
+                  </p>
+
+                  <div v-if="call.ai_review.integrity_issues.length" class="mb-2">
+                    <p class="mb-1 font-medium text-ink-gray-8">
+                      {{ __('Integrity issues') }}
+                    </p>
+                    <div
+                      v-for="(iss, i) in call.ai_review.integrity_issues"
+                      :key="i"
+                      class="mb-1.5 border-l-2 border-outline-red-2 pl-2"
+                    >
+                      <p class="text-ink-red-3">“{{ iss.quote }}”</p>
+                      <p class="text-xs text-ink-gray-6">{{ iss.why }}</p>
+                      <p class="text-xs text-ink-green-3">
+                        {{ __('Better') }}: {{ iss.better_phrasing }}
+                      </p>
+                    </div>
+                  </div>
+
+                  <p v-if="call.ai_review.what_could_be_better" class="mb-1">
+                    <span class="font-medium text-ink-gray-8">{{ __('What could be better') }}:</span>
+                    {{ call.ai_review.what_could_be_better }}
+                  </p>
+                  <p v-if="call.ai_review.lead_status" class="text-xs text-ink-gray-5">
+                    {{ __('Where the lead is at') }}: {{ call.ai_review.lead_status }}
+                  </p>
                 </div>
 
                 <!-- review panel: your notes + everyone else's marks -->
@@ -334,6 +393,7 @@ const rep = ref('')
 const minDuration = ref('0')
 const reviewFilter = ref('all')
 const expanded = reactive({})
+const aiOpen = reactive({})
 const transcriptOpen = reactive({})
 const notesOpen = reactive({})
 const noteDraft = reactive({})
@@ -433,6 +493,21 @@ function toggle(name) {
 
 function toggleTranscript(name) {
   transcriptOpen[name] = !transcriptOpen[name]
+}
+
+function toggleAi(name) {
+  aiOpen[name] = !aiOpen[name]
+}
+
+function aiFlagTheme(flag) {
+  return flag === 'serious' ? 'red' : flag === 'review' ? 'orange' : 'green'
+}
+
+function aiFlagLabel(ai) {
+  const n = ai.integrity_issues?.length || 0
+  if (ai.overall_flag === 'serious') return n ? `AI: serious (${n})` : 'AI: serious'
+  if (ai.overall_flag === 'review') return n ? `AI: review (${n})` : 'AI: review'
+  return 'AI: ok'
 }
 
 // Call times are stored as the rep's local (Chicago) wall-clock, NOT UTC, so

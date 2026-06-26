@@ -30,6 +30,14 @@ def get_call_transcript(call_log: str):
 	if not doc.has_permission("read"):
 		frappe.throw(_("Not permitted to read this call log."), frappe.PermissionError)
 
+	return _build_transcript(doc)
+
+
+def _build_transcript(doc):
+	"""Normalize a CRM Call Log's stored transcript into clean rep/lead dialogue
+	+ talk ratio + chapters. Pure (no whitelist/permission checks) so backend jobs
+	— the AI call-review bot — can reuse it; the whitelisted endpoint above wraps
+	this with the existence + permission gate."""
 	recording_path = (
 		f"/api/method/crm.integrations.api.get_recording_url?call_log_name={doc.name}"
 		if doc.get("recording_url")

@@ -8,6 +8,20 @@ image actually contains the crm app (their image CI is broken after it).
 server scripts, infra, and all operational context live in the ops repo:
 `../frappe-crm-deploy` (read its CLAUDE.md first).
 
+## Before starting a feature — check what else is in flight
+
+Lance often runs several Claude sessions/agents at once. **Before building anything,
+check that another agent isn't already on it** (this exact check surfaced an
+already-merged `feature/daily-call-review` branch and avoided rebuilding it):
+
+```bash
+git worktree list      # other agents' isolated worktrees
+git branch -a          # existing feature branches (incl. related-sounding ones)
+```
+
+If a related branch/worktree exists, read it first and build on it rather than
+duplicating. Work substantial features in a worktree of your own.
+
 ## Our changes vs upstream (keep this list current)
 
 - **Activity feed no longer auto-scrolls on every reload** — the Lead/Deal
@@ -246,6 +260,43 @@ server scripts, infra, and all operational context live in the ops repo:
   - `components/Activities/CallArea.vue` — dropped the Listen badge + `AudioPlayer`;
     Transcript badge → **Playback** (PlayIcon). `pages/CallReview.vue` — dropped the
     `<audio>` element; toggle label → **Playback** (keeps the "No recording" span).
+- **AI "Integrity Report" call-review bot** — a daily scheduler job that reviews
+  every recorded call from the prior day with Gemini (2.5 Flash) and emails Lance
+  one digest. Scores how well the rep got to the seller's **motivation** (0-5, or
+  null on follow-ups/voicemail) and flags **integrity** issues — anything not fully
+  honest or "salesy" instead of plainly clear (good: *"we're going to buy it and
+  resell it to a builder or homeowner as quickly as we can — we actually work on
+  getting it pre-sold right away"*; bad: *"we have multiple exit strategies like buy
+  and hold, fix and flip, or wholesale"*). Each issue = verbatim quote + why +
+  better phrasing. Also notes where the lead is at + what to do differently. First
+  LLM call in the app code (raw `requests` to the Gemini API, key in site_config
+  `gemini_api_key` — mirrored from the existing Infisical `GEMINI_API_KEY`, the same
+  key the ops chapter-gen uses; JSON response schema; model config-swappable via
+  `call_review_model`, e.g. `gemini-2.5-pro`). Per-call result stored in a new ops
+  doctype `CRM Call AI Review`, surfaced in the Lead/Deal-adjacent **Call Review**
+  tab — which is now **restricted to Lance only** (sidebar + route + backend gate).
+  - `crm/api/call_review_ai.py` — **new**: `run_daily_integrity_report` (daily_long),
+    `review_call_now` (whitelisted, Lance/System-Manager, on-demand + testing),
+    `_review_one`/`_build_llm_input`/`_lead_context`/`_call_claude`/`_persist_review`/
+    `_send_digest`. Scope = transcript + duration ≥ 60s; idempotent (one
+    `CRM Call AI Review` per call); loads lead context (status/tasks/comments/prior
+    AI summaries) into the prompt.
+  - `crm/api/call_transcript.py` — extracted pure `_build_transcript(doc)` helper
+    (endpoint is now a thin wrapper) so the bot reuses clean rep/lead dialogue.
+  - `crm/templates/emails/crm_call_review_report.html` — **new** digest template.
+  - `crm/hooks.py` — `run_daily_integrity_report` added to `daily_long`.
+  - `crm/api/reports.py` — `validate_access` now Lance/System-Manager only
+    (`CALL_REVIEW_USER`); `get_call_review` attaches `ai_review` per call from
+    `CRM Call AI Review` (guarded by `db.exists`).
+  - `frontend/src/utils/sidebarLinks.js` (`CALL_REVIEW_USER` + `currentUser()` +
+    Call Review `condition`), `router.js` (route guard), `pages/CallReview.vue`
+    (per-call AI panel: flag badge → expand → motivation, integrity issues, coaching).
+  - Ops (`../frappe-crm-deploy`): `scripts/setup_call_ai_review.py` creates the
+    `CRM Call AI Review` doctype (autoname by `call_log`; fields motivation_score/
+    motivation_reason/integrity_issues JSON/overall_flag/lead_status/
+    what_could_be_better/model/reviewed_at/reference_*); `bench set-config
+    gemini_api_key <key>` on prod, value pulled from the existing Infisical
+    `GEMINI_API_KEY` (same pattern as `documenso_api_token`).
 - `frontend/vite.config.js` — PWA service worker set `selfDestroying` (the
   precache served stale app bundles after deploys)
 - **Sequence real-time drainer** — `crm/api/sequence_drain.py` + `crm/hooks.py`
