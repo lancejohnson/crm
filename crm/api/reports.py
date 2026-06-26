@@ -179,13 +179,17 @@ def get_call_review(date: str = None, user: str = None):
 	# --- AI integrity review per call (CRM Call AI Review, ops-provisioned) ---
 	ai_by_call = {}
 	if call_names and frappe.db.exists("DocType", "CRM Call AI Review"):
+		ai_fields = [
+			"call_log", "motivation_score", "motivation_reason", "integrity_issues",
+			"lead_status", "what_could_be_better", "overall_flag", "reviewed_at",
+		]
+		has_feedback = frappe.get_meta("CRM Call AI Review").has_field("feedback")
+		if has_feedback:
+			ai_fields.append("feedback")
 		for ai in frappe.get_all(
 			"CRM Call AI Review",
 			filters={"call_log": ["in", call_names]},
-			fields=[
-				"call_log", "motivation_score", "motivation_reason", "integrity_issues",
-				"lead_status", "what_could_be_better", "overall_flag", "reviewed_at",
-			],
+			fields=ai_fields,
 		):
 			try:
 				issues = json.loads(ai.get("integrity_issues") or "[]")
@@ -206,6 +210,7 @@ def get_call_review(date: str = None, user: str = None):
 				"lead_status": ai.get("lead_status") or "",
 				"what_could_be_better": ai.get("what_could_be_better") or "",
 				"overall_flag": ai.get("overall_flag") or "ok",
+				"feedback": ai.get("feedback") or "",
 			}
 
 	# --- lead display name + current status (calls are lead-linked) ---

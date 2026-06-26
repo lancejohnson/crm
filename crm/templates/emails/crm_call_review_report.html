@@ -32,7 +32,7 @@
 	<p style="margin: 8px 0 4px 0; font-weight: 600; color: #1f272e;">Integrity issues:</p>
 	{% for iss in item.integrity_issues %}
 	<div style="margin: 0 0 8px 12px;">
-		<p style="margin: 0; color: #b42318;">“{{ iss.quote }}”</p>
+		<p style="margin: 0; color: #b42318;">{% if iss.link %}<a href="{{ iss.link }}" style="color: #b42318; text-decoration: none;">“{{ iss.quote }}”{% if iss.at_label %} <span style="color: #6b7280;">[{{ iss.at_label }} ▶]</span>{% endif %}</a>{% else %}“{{ iss.quote }}”{% endif %}</p>
 		<p style="margin: 2px 0; color: #6b7280; font-size: 13px;">{{ iss.why }}</p>
 		<p style="margin: 2px 0; color: #067647; font-size: 13px;"><span style="font-weight: 600;">Better:</span> {{ iss.better_phrasing }}</p>
 	</div>

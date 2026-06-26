@@ -232,6 +232,7 @@
                 >
                   <CallTranscript
                     :call-log-name="call.name"
+                    :seek-to="seekTarget[call.name]"
                     :link-target="
                       ld.reference_doctype === 'CRM Lead' && ld.reference_name
                         ? { type: 'leads', id: ld.reference_name }
@@ -281,7 +282,16 @@
                       :key="i"
                       class="mb-1.5 border-l-2 border-outline-red-2 pl-2"
                     >
-                      <p class="text-ink-red-3">“{{ iss.quote }}”</p>
+                      <p class="text-ink-red-3">
+                        “{{ iss.quote }}”
+                        <button
+                          v-if="iss.at_time !== null && iss.at_time !== undefined"
+                          class="ml-1 whitespace-nowrap text-xs text-ink-blue-3 hover:underline"
+                          @click="seekToTime(call, iss.at_time)"
+                        >
+                          ▶ {{ fmtTime(iss.at_time) }}
+                        </button>
+                      </p>
                       <p class="text-xs text-ink-gray-6">{{ iss.why }}</p>
                       <p class="text-xs text-ink-green-3">
                         {{ __('Better') }}: {{ iss.better_phrasing }}
@@ -296,6 +306,40 @@
                   <p v-if="call.ai_review.lead_status" class="text-xs text-ink-gray-5">
                     {{ __('Where the lead is at') }}: {{ call.ai_review.lead_status }}
                   </p>
+
+                  <!-- Reply to the AI: re-reviews this call + remembers for next time -->
+                  <div class="mt-3 border-t border-outline-gray-1 pt-2">
+                    <p
+                      v-if="call.ai_review.feedback"
+                      class="mb-1 text-xs text-ink-gray-5"
+                    >
+                      <span class="font-medium">{{ __('Your last reply') }}:</span>
+                      {{ call.ai_review.feedback }}
+                    </p>
+                    <p
+                      v-if="replyLearned[call.name] && replyLearned[call.name].length"
+                      class="mb-1 text-xs text-ink-green-3"
+                    >
+                      ✓ {{ __('Remembered') }}: {{ replyLearned[call.name].join('; ') }}
+                    </p>
+                    <FormControl
+                      type="textarea"
+                      :rows="2"
+                      v-model="replyDraft[call.name]"
+                      :placeholder="
+                        __('Reply to the AI — e.g. “this was a dispo partner call, not a seller.” It re-reviews this call and remembers for next time.')
+                      "
+                    />
+                    <div class="mt-1 flex justify-end">
+                      <Button
+                        variant="solid"
+                        :loading="replySaving[call.name]"
+                        :disabled="!replyDraft[call.name]"
+                        :label="__('Send to AI')"
+                        @click="submitReply(call)"
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 <!-- review panel: your notes + everyone else's marks -->
@@ -395,6 +439,10 @@ const reviewFilter = ref('all')
 const expanded = reactive({})
 const aiOpen = reactive({})
 const transcriptOpen = reactive({})
+const seekTarget = reactive({})
+const replyDraft = reactive({})
+const replySaving = reactive({})
+const replyLearned = reactive({})
 const notesOpen = reactive({})
 const noteDraft = reactive({})
 const saving = reactive({})
@@ -508,6 +556,46 @@ function aiFlagLabel(ai) {
   if (ai.overall_flag === 'serious') return n ? `AI: serious (${n})` : 'AI: serious'
   if (ai.overall_flag === 'review') return n ? `AI: review (${n})` : 'AI: review'
   return 'AI: ok'
+}
+
+function fmtTime(s) {
+  s = Math.max(0, Math.floor(Number(s) || 0))
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+}
+
+// Open the inline Playback and seek it to the integrity-issue's moment.
+function seekToTime(call, t) {
+  transcriptOpen[call.name] = true
+  seekTarget[call.name] = Number(t) || 0
+}
+
+// Reply to the AI on a call: re-reviews it honoring the feedback + remembers
+// lessons (global rules + per-contact facts) for future reviews.
+async function submitReply(call) {
+  const text = (replyDraft[call.name] || '').trim()
+  if (!text) return
+  replySaving[call.name] = true
+  try {
+    const res = await apiCall('crm.api.call_review_ai.reply_to_review', {
+      call_log: call.name,
+      feedback: text,
+    })
+    call.ai_review = {
+      motivation_score: res.motivation_score,
+      motivation_reason: res.motivation_reason,
+      integrity_issues: res.integrity_issues,
+      lead_status: res.lead_status,
+      what_could_be_better: res.what_could_be_better,
+      overall_flag: res.overall_flag,
+      feedback: text,
+    }
+    replyLearned[call.name] = res.learned || []
+    replyDraft[call.name] = ''
+  } catch (e) {
+    console.error('reply_to_review failed', e)
+  } finally {
+    replySaving[call.name] = false
+  }
 }
 
 // Call times are stored as the rep's local (Chicago) wall-clock, NOT UTC, so

@@ -31,7 +31,7 @@ import requests
 from frappe import _
 from frappe.utils import add_days, get_url, getdate, now_datetime, strip_html, today
 
-from crm.api.call_transcript import _build_transcript
+from crm.api.call_transcript import _build_transcript, _last10
 
 # --- config (model is swappable via site_config `call_review_model`) --------------
 # Gemini is used because Groundwork already has GEMINI_API_KEY in Infisical → mirror
@@ -55,6 +55,7 @@ DIGEST_RECIPIENT = "lance.johnson@groundworkpro.com"
 CALL_REVIEW_USER = "lance.johnson@groundworkpro.com"
 
 AI_REVIEW_DOCTYPE = "CRM Call AI Review"
+MEMORY_DOCTYPE = "CRM Call Review Memory"  # reviewer-taught rules + per-contact facts
 
 OVERALL_FLAGS = ("ok", "review", "serious")
 _FLAG_RANK = {"serious": 0, "review": 1, "ok": 2}
@@ -63,11 +64,15 @@ SYSTEM_PROMPT = """You review recorded sales calls for a real-estate WHOLESALING
 
 Return your assessment via the provided JSON schema. Judge ONLY what is in the transcript.
 
+Each transcript line is prefixed with its start time in whole seconds, like "[123] REP: ...". Use those numbers to locate moments precisely.
+
+If a section titled "GUIDANCE THE REVIEWER HAS TAUGHT YOU" is present, treat it as authoritative and apply it. It has general house rules and facts about this specific contact. For example, if it says this call is to a dispo partner (a fellow investor we sell deals to — not a homeowner selling their house), then normal investor shop-talk (assigning the deal, exit strategies, partners) is NOT an integrity issue, and motivation does not apply (set it null).
+
 1) INTEGRITY (the floor — assess on EVERY call)
 Flag anything that is not fully honest, is vague/jargony, or is "salesy" persuasion instead of plain clarity. The company wants reps to say plainly what they actually do.
 - BAD (vague menu-of-options jargon meant to sound impressive): "we have multiple exit strategies like buy and hold, fix and flip, or wholesale."
 - GOOD (plain, honest, concrete): "we're going to buy it and resell it to a builder or homeowner as quickly as we can — we actually work on getting it pre-sold right away."
-Also flag: overpromising, implying things that aren't true, hiding that the company resells the property, pressure tactics, or fuzzy answers to direct questions. For each issue give the rep's VERBATIM quote, why it's a problem, and a plain better_phrasing. If the call is clean, return an empty list — do not invent issues.
+Also flag: overpromising, implying things that aren't true, hiding that the company resells the property, pressure tactics, or fuzzy answers to direct questions. For each issue give the rep's VERBATIM quote, `at_time` (the [seconds] number from the start of the transcript line where the quote begins), why it's a problem, and a plain better_phrasing. If the call is clean, return an empty list — do not invent issues.
 
 2) MOTIVATION (score 0-5, or null)
 Score how well the rep uncovered WHY the seller wants to sell (the real situation/timeline/pain behind it), only when the call is the kind where that applies.
@@ -100,12 +105,12 @@ RESULT_SCHEMA = {
 			"items": {
 				"type": "OBJECT",
 				"properties": {
-					"quote": {"type": "STRING"},
+					"quote": {"type": "STRING"}, "at_time": {"type": "INTEGER", "nullable": True},
 					"why": {"type": "STRING"},
 					"better_phrasing": {"type": "STRING"},
 				},
-				"required": ["quote", "why", "better_phrasing"],
-				"propertyOrdering": ["quote", "why", "better_phrasing"],
+				"required": ["quote", "at_time", "why", "better_phrasing"],
+				"propertyOrdering": ["quote", "at_time", "why", "better_phrasing"],
 			},
 		},
 		"lead_status": {"type": "STRING"},
@@ -128,6 +133,30 @@ RESULT_SCHEMA = {
 		"what_could_be_better",
 		"overall_flag",
 	],
+}
+
+
+# When the reviewer replies, Gemini returns a revised review PLUS the lessons to
+# remember (global house rules and/or per-contact facts).
+REPLY_SCHEMA = {
+	"type": "OBJECT",
+	"properties": {
+		"review": RESULT_SCHEMA,
+		"memory_items": {
+			"type": "ARRAY",
+			"items": {
+				"type": "OBJECT",
+				"properties": {
+					"scope": {"type": "STRING", "enum": ["global", "contact"]},
+					"lesson": {"type": "STRING"},
+				},
+				"required": ["scope", "lesson"],
+				"propertyOrdering": ["scope", "lesson"],
+			},
+		},
+	},
+	"required": ["review", "memory_items"],
+	"propertyOrdering": ["review", "memory_items"],
 }
 
 
@@ -234,12 +263,16 @@ def _build_llm_input(doc, transcript):
 	if ctx:
 		parts.append("\n--- Where this lead is at ---\n" + ctx)
 
+	mem = _memory_section(doc)
+	if mem:
+		parts.append("\n--- GUIDANCE THE REVIEWER HAS TAUGHT YOU ---\n" + mem)
+
 	parts.append("\n--- Call transcript ---\n" + _render_dialogue(transcript.get("dialogue") or []))
 	return "\n".join(parts)
 
 
 def _render_dialogue(dialogue):
-	lines = [f"{'REP' if seg['speaker'] == 'rep' else 'LEAD'}: {seg['content']}" for seg in dialogue]
+	lines = [f"[{int(seg.get('start') or 0)}] {'REP' if seg['speaker'] == 'rep' else 'LEAD'}: {seg['content']}" for seg in dialogue]
 	text = "\n".join(lines)
 	if len(text) > MAX_DIALOGUE_CHARS:
 		half = MAX_DIALOGUE_CHARS // 2
@@ -305,9 +338,80 @@ def _lead_context(ref_doctype, ref_docname):
 
 
 # ---------------------------------------------------------------------------------
+# Reviewer-taught memory (global house rules + per-contact facts)
+# ---------------------------------------------------------------------------------
+def _other_party_last10(doc):
+	"""Last 10 digits of the non-rep party on the call — the per-contact key."""
+	their = doc.to if doc.get("type") == "Outgoing" else doc.get("from")
+	return _last10(their)
+
+
+def _memory_section(doc):
+	"""Render reviewer-taught guidance for this call: global house rules + facts
+	about this specific contact (matched by phone). '' if none / unprovisioned."""
+	if not frappe.db.exists("DocType", MEMORY_DOCTYPE):
+		return ""
+	bits = []
+	rules = [
+		(r.get("lesson") or "").strip()
+		for r in frappe.get_all(MEMORY_DOCTYPE, filters={"scope": "global"}, fields=["lesson"], order_by="creation asc")
+	]
+	rules = [r for r in rules if r]
+	if rules:
+		bits.append("General house rules:\n- " + "\n- ".join(rules))
+	phone = _other_party_last10(doc)
+	if phone:
+		facts = [
+			(f.get("lesson") or "").strip()
+			for f in frappe.get_all(MEMORY_DOCTYPE, filters={"scope": "contact", "phone": phone}, fields=["lesson"], order_by="creation asc")
+		]
+		facts = [f for f in facts if f]
+		if facts:
+			bits.append("About THIS contact:\n- " + "\n- ".join(facts))
+	return "\n\n".join(bits)
+
+
+def _record_memory(items, doc):
+	"""Persist memory_items from the reply call. contact-scoped items are keyed to
+	this call's other-party phone. Skips exact-duplicate lessons. Returns the
+	lessons newly remembered."""
+	if not items or not frappe.db.exists("DocType", MEMORY_DOCTYPE):
+		return []
+	phone = _other_party_last10(doc)
+	display = ""
+	if doc.get("reference_doctype") == "CRM Lead" and doc.get("reference_docname"):
+		display = frappe.db.get_value("CRM Lead", doc.reference_docname, "lead_name") or doc.reference_docname
+	learned = []
+	for it in items:
+		if not isinstance(it, dict):
+			continue
+		scope = it.get("scope")
+		lesson = (it.get("lesson") or "").strip()
+		if scope not in ("global", "contact") or not lesson:
+			continue
+		filters = {"scope": scope, "lesson": lesson}
+		if scope == "contact":
+			filters["phone"] = phone
+		if frappe.db.exists(MEMORY_DOCTYPE, filters):
+			continue
+		row = frappe.new_doc(MEMORY_DOCTYPE)
+		row.scope = scope
+		row.lesson = lesson
+		row.source_call = doc.name
+		if scope == "contact":
+			row.phone = phone
+			row.display_name = display
+			row.reference_doctype = doc.get("reference_doctype")
+			row.reference_docname = doc.get("reference_docname")
+		row.save(ignore_permissions=True)
+		learned.append(lesson)
+	return learned
+
+
+# ---------------------------------------------------------------------------------
 # Gemini call
 # ---------------------------------------------------------------------------------
-def _call_gemini(user_content: str):
+def _call_gemini(user_content, schema=RESULT_SCHEMA, system=SYSTEM_PROMPT):
 	"""POST to the Gemini API with a JSON response schema + the shared system
 	rubric. Returns the parsed JSON object. Raises on persistent failure."""
 	api_key = (frappe.conf.get("gemini_api_key") or "").strip()
@@ -317,11 +421,11 @@ def _call_gemini(user_content: str):
 	model = frappe.conf.get("call_review_model") or MODEL
 	url = GEMINI_URL.format(model=model)
 	body = {
-		"system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+		"system_instruction": {"parts": [{"text": system}]},
 		"contents": [{"role": "user", "parts": [{"text": user_content}]}],
 		"generationConfig": {
 			"responseMimeType": "application/json",
-			"responseSchema": RESULT_SCHEMA,
+			"responseSchema": schema,
 			"maxOutputTokens": MAX_OUTPUT_TOKENS,
 			"temperature": 0.2,
 		},
@@ -362,6 +466,28 @@ def _call_gemini(user_content: str):
 	raise Exception(f"Gemini call failed after {MAX_RETRIES} attempts: {last_err}")
 
 
+def _clean_issues(raw_issues):
+	"""Coerce each integrity issue to clean strings + an int|None at_time (seconds)."""
+	out = []
+	for it in raw_issues if isinstance(raw_issues, list) else []:
+		if not isinstance(it, dict):
+			continue
+		at = it.get("at_time")
+		try:
+			at = int(at) if at is not None else None
+		except (TypeError, ValueError):
+			at = None
+		if at is not None and at < 0:
+			at = None
+		out.append({
+			"quote": (it.get("quote") or "").strip(),
+			"at_time": at,
+			"why": (it.get("why") or "").strip(),
+			"better_phrasing": (it.get("better_phrasing") or "").strip(),
+		})
+	return out
+
+
 def _normalize_result(raw):
 	"""Defensive validation — the schema already constrains shape, but clamp the
 	score range (json_schema can't express min/max) and coerce the obvious bits."""
@@ -373,9 +499,7 @@ def _normalize_result(raw):
 			score = max(0, min(5, int(score)))
 		except (TypeError, ValueError):
 			score = None
-	issues = raw.get("integrity_issues") or []
-	if not isinstance(issues, list):
-		issues = []
+	issues = _clean_issues(raw.get("integrity_issues"))
 	flag = raw.get("overall_flag")
 	if flag not in OVERALL_FLAGS:
 		flag = "review" if issues else "ok"
@@ -400,7 +524,7 @@ def _parse_score(v):
 		return None
 
 
-def _persist_review(doc, result):
+def _persist_review(doc, result, feedback=None):
 	"""One CRM Call AI Review row per call. The doctype autonames by `call_log`,
 	so a duplicate insert is the idempotency guard."""
 	existing = frappe.db.get_value(AI_REVIEW_DOCTYPE, {"call_log": doc.name}, "name")
@@ -419,11 +543,21 @@ def _persist_review(doc, result):
 	row.what_could_be_better = result["what_could_be_better"]
 	row.overall_flag = result["overall_flag"]
 	row.model = frappe.conf.get("call_review_model") or MODEL
+	if feedback is not None and row.meta.has_field("feedback"):
+		row.feedback = feedback
 	row.reviewed_at = now_datetime()
 	try:
 		row.save(ignore_permissions=True)
 	except frappe.DuplicateEntryError:
 		frappe.db.rollback()  # a concurrent run won the race; fine — it's done
+
+
+def _mmss(seconds):
+	"""Seconds → m:ss label for the email/UI."""
+	if seconds is None:
+		return ""
+	s = int(seconds)
+	return f"{s // 60}:{s % 60:02d}"
 
 
 # ---------------------------------------------------------------------------------
@@ -470,6 +604,13 @@ def _send_digest(day, candidates, failed):
 			issues = json.loads(r.get("integrity_issues") or "[]")
 		except Exception:
 			issues = []
+		for iss in issues:
+			at = iss.get("at_time")
+			iss["link"] = (
+				get_url(f"/crm/{route}/{ref}?call={r['call_log']}&t={at}#activity")
+				if (ref and at is not None) else link
+			)
+			iss["at_label"] = _mmss(at)
 		items.append({
 			"flag": r.get("overall_flag") or "ok",
 			"lead_name": lead_disp.get(ref) or ref or _("Unknown lead"),
@@ -541,3 +682,53 @@ def _row_to_result(row):
 		"what_could_be_better": row.get("what_could_be_better") or "",
 		"overall_flag": row.get("overall_flag") or "ok",
 	}
+
+
+@frappe.whitelist()
+def reply_to_review(call_log: str, feedback: str):
+	"""The reviewer replies to the AI on a call. Re-reviews the call honoring the
+	reply, stores the reply, and remembers any lessons it teaches — global house
+	rules and/or facts about this specific contact — for future reviews.
+	Lance / System Manager only. Returns the revised review + `learned` lessons."""
+	if frappe.session.user != CALL_REVIEW_USER and "System Manager" not in frappe.get_roles():
+		frappe.throw(_("Not permitted."), frappe.PermissionError)
+	feedback = (feedback or "").strip()
+	if not feedback:
+		frappe.throw(_("Reply is empty."))
+	if not frappe.db.exists("CRM Call Log", call_log):
+		frappe.throw(_("Call {0} does not exist.").format(call_log), frappe.DoesNotExistError)
+	if not frappe.db.exists("DocType", AI_REVIEW_DOCTYPE):
+		frappe.throw(_("CRM Call AI Review is not provisioned yet."))
+
+	doc = frappe.get_doc("CRM Call Log", call_log)
+	transcript = _build_transcript(doc)
+	if not transcript.get("has_transcript"):
+		frappe.throw(_("No usable transcript for this call."))
+
+	prior = "(none)"
+	existing = frappe.db.get_value(AI_REVIEW_DOCTYPE, {"call_log": call_log}, "name")
+	if existing:
+		er = frappe.get_doc(AI_REVIEW_DOCTYPE, existing)
+		prior = (
+			f"overall_flag={er.get('overall_flag')}; motivation={er.get('motivation_score')}; "
+			f"reason={er.get('motivation_reason')}; what_could_be_better={er.get('what_could_be_better')}"
+		)
+
+	user_content = (
+		_build_llm_input(doc, transcript)
+		+ "\n\n--- YOUR PRIOR REVIEW ---\n" + prior
+		+ "\n\n--- THE REVIEWER'S REPLY (authoritative — apply it) ---\n" + feedback
+		+ "\n\nRevise your review of THIS call to honor the reply, then extract any reusable "
+		"lessons as memory_items: scope 'global' for general house rules that apply to all "
+		"calls, scope 'contact' for facts about this specific person/number (e.g. 'this is a "
+		"dispo partner, not a seller'). Return an empty memory_items list if the reply teaches "
+		"nothing reusable. Keep each lesson one concise sentence."
+	)
+	data = _call_gemini(user_content, schema=REPLY_SCHEMA)
+	review = _normalize_result(data.get("review") or {})
+	_persist_review(doc, review, feedback=feedback)
+	learned = _record_memory(data.get("memory_items") or [], doc)
+	frappe.db.commit()
+	out = dict(review)
+	out["learned"] = learned
+	return out
