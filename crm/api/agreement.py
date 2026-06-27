@@ -149,10 +149,6 @@ def _resolve_template_ids(want_aif: bool, want_two: bool):
 	return template_ids, title
 
 
-def _truthy(v) -> bool:
-	return str(v).strip().lower() in ("1", "2", "true", "yes", "on", "two", "novation", "aif")
-
-
 def _placeholder_email(given: str, lead: str, idx: int) -> str:
 	"""Signers need an email to complete; nobody is emailed (send_email:false)."""
 	given = (given or "").strip()
@@ -182,7 +178,10 @@ def create_docuseal_agreement(
 
 	leaddoc = frappe.get_doc("CRM Lead", lead)
 	want_aif = str(template).strip().lower() in ("novation", "aif")
-	want_two = _truthy(two_sellers)
+	# `two_sellers` arrives as a seller *count* ("1" / "2") from the modal, so
+	# "1" must mean one seller — don't run it through the generic `_truthy`
+	# (which treats "1" as true and wrongly demands a second seller).
+	want_two = str(two_sellers).strip().lower() in ("2", "two", "true", "yes", "on")
 
 	# Buyer = the session user (its own no-login link comes back regardless).
 	user = frappe.get_doc("User", frappe.session.user)
