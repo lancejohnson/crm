@@ -37,6 +37,7 @@ def get_users():
 			"language",
 			"custom_quo_number",
 			"custom_quick_comments",
+			"custom_notification_prefs",
 		],
 		order_by="full_name asc",
 		distinct=True,

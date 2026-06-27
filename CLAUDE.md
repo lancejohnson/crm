@@ -585,6 +585,41 @@ duplicating. Work substantial features in a worktree of your own.
     hash). The SA JSON was delivered into the backend `site_config` via `bench
     set-config` (not a script in the repo).
 
+- **Agreement activity notifications (text + email to the lead owner)** — when a
+  DocuSeal agreement is **viewed / started / signed**, the **lead owner** is
+  notified by text (from the dedicated "Notifications" Quo line **(952) 395-3833**,
+  to their own Quo number `User.custom_quo_number` by default) and by email. Fires
+  on **every** DocuSeal event (no dedupe — Lance's call). Each user controls it on
+  a new **Settings → User Configuration → Notifications** page: Text/Email channel
+  toggles, a "Text me at" number override, and per-event checkboxes (Viewed /
+  Started / Signed). Opt-out (everything on by default).
+  - **Trigger = the existing DocuSeal webhook**, not a doc hook: `crm/api/agreement.py`
+    `docuseal_webhook` calls `crm.api.agreement_notify.notify_event(agr, event, data)`
+    after saving each row (it has the exact `event_type` + submitter `data` there).
+    Wrapped in try/except so a notify failure never breaks the webhook's 200.
+  - `crm/api/agreement_notify.py` — **new**: `notify_event` maps
+    `form.viewed`/`form.started`/`form.completed`/`submission.completed` →
+    viewed/started/signed, resolves recipient = `CRM Lead.lead_owner` (fallback the
+    agreement creator), reads prefs, and sends. **Text goes straight to the
+    OpenPhone API** (`requests` to `/v1/messages`, key from site_config `quo_api_key`,
+    from `notifications_quo_number` default `+19523953833`) — it does NOT go through
+    the ops `send-text` script (that runs as the session user / role-gated; the
+    webhook is Guest) and does NOT create a `Quo Message` row (it's a rep alert, not
+    a lead-thread text). Email via `frappe.sendmail` + `crm_agreement_notification`
+    template.
+  - `crm/api/notification_prefs.py` — **new**: `set_notification_prefs` (session
+    user's own JSON, mirrors `set_user_quick_comments`) + `DEFAULT_PREFS` + `get_prefs`.
+    Stored on `User.custom_notification_prefs`; surfaced via `crm/api/session.py`
+    `get_users`.
+  - `frontend/src/components/Settings/NotificationsSettings.vue` (**new**) +
+    registered in `Settings/Settings.vue` under User Configuration.
+  - Ops (`../frappe-crm-deploy`): `scripts/setup_notification_prefs.py` adds the
+    `User.custom_notification_prefs` Long Text field; **`bench set-config quo_api_key
+    <Infisical QUO_API_KEY>`** on prod so app code can send the texts (the DocuSeal
+    webhook already subscribes to all the needed events). Verified live end-to-end
+    (gw123): viewing a seller link texted Lance "Notify Test viewed the Purchase
+    Agreement…" from 3833.
+
 The companion server-side pieces (custom doctypes, scheduler engine, webhook
 endpoints) are Server Scripts managed from the ops repo, NOT app code here. SMS
 specifically: the `Quo Message` doctype, the `send-text` and `list-quo-numbers`

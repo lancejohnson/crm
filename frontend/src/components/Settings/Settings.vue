@@ -44,6 +44,7 @@
 </template>
 <script setup>
 import LucideLayoutDashboard from '~icons/lucide/layout-dashboard'
+import LucideBell from '~icons/lucide/bell'
 import MonitorCogIcon from '~icons/lucide/monitor-cog'
 import PanelLeftIcon from '~icons/lucide/panel-left'
 import SlidersIcon from '@/components/Icons/SlidersIcon.vue'
@@ -59,6 +60,7 @@ import Users from '@/components/Settings/Users.vue'
 import InviteUserPage from '@/components/Settings/InviteUserPage.vue'
 import ProfilePage from '@/components/Settings/Profile/ProfilePage.vue'
 import PreferencesSettings from '@/components/Settings/PreferencesSettings.vue'
+import NotificationsSettings from '@/components/Settings/NotificationsSettings.vue'
 import WhatsAppSettings from '@/components/Settings/WhatsAppSettings.vue'
 import ERPNextSettings from '@/components/Settings/ERPNextSettings.vue'
 import LeadSyncSourcePage from '@/components/Settings/LeadSyncing/LeadSyncSourcePage.vue'
@@ -108,6 +110,11 @@ const tabs = computed(() => {
           label: __('Preferences'),
           icon: SlidersIcon,
           component: markRaw(PreferencesSettings),
+        },
+        {
+          label: __('Notifications'),
+          icon: LucideBell,
+          component: markRaw(NotificationsSettings),
         },
       ],
     },

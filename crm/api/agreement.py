@@ -425,6 +425,16 @@ def docuseal_webhook(secret: str = None):
 		agr.raw_last_payload = json.dumps(body)[:100000]
 		agr.save(ignore_permissions=True)
 
+		# Text/email the lead owner about this event (per their prefs). Never let
+		# a notification failure break the webhook — DocuSeal still gets its 200.
+		if event:
+			try:
+				from crm.api.agreement_notify import notify_event
+
+				notify_event(agr, event, data)
+			except Exception:
+				frappe.log_error(frappe.get_traceback(), "agreement notification failed")
+
 	return {"ok": True, "updated": len(rows)}
 
 
