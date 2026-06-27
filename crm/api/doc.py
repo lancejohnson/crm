@@ -899,6 +899,10 @@ def get_docs_with_due_tasks(doctype: str, scope: str = "today_overdue"):
 
 	names = frappe.get_all("CRM Task", filters=filters, pluck="reference_docname", distinct=True)
 	return list({n for n in names if n})
+
+
+@frappe.whitelist()
+def get_linked_docs_of_document(doctype: str, docname: str):
 	try:
 		doc = frappe.get_doc(doctype, docname)
 	except frappe.DoesNotExistError:
