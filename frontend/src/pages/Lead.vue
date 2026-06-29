@@ -170,6 +170,14 @@
           </div>
         </template>
       </FileUploader>
+      <!-- Single scroll container for the sidebar body: our custom cards
+           (First-Call Read / Tax / Agreements / Underwriting) used to sit
+           between the header and the editable fields as non-scrolling
+           siblings, pushing the Person/Property/Details fields below the fold
+           with no way to scroll to them. Wrapping the cards + fields in one
+           overflow-y-auto/min-h-0 region lets the whole body scroll while the
+           header above and the lead-id footer below stay fixed. -->
+      <div class="flex flex-1 flex-col overflow-y-auto min-h-0">
       <SLASection
         v-if="doc.sla_status"
         v-model="doc"
@@ -189,10 +197,7 @@
         :lead="leadId"
         @create="activities?.createUnderwriting()"
       />
-      <div
-        v-if="sections.data"
-        class="flex flex-1 flex-col justify-between overflow-hidden"
-      >
+      <div v-if="sections.data" class="flex flex-col">
         <SidePanelLayout
           :sections="sections.data"
           doctype="CRM Lead"
@@ -201,6 +206,7 @@
           @beforeFieldChange="beforeStatusChange"
           @afterFieldChange="reloadResources"
         />
+      </div>
       </div>
       <div
         class="flex cursor-copy items-center border-t px-5 py-2.5 text-sm text-ink-gray-5"
