@@ -71,6 +71,11 @@ export default defineConfig(async ({ mode }) => {
         'prosemirror-view',
         'lowlight',
         'interactjs',
+        // Pre-bundle reka-ui in dev: served unbundled, its TabsIndicator
+        // ResizeObserver fires against a null element and crashes the Lead/Deal
+        // detail pages (only under `yarn dev` — the prod Rollup build is fine).
+        // optimizeDeps is dev-only, so this is inert in `vite build`.
+        'reka-ui',
       ],
     },
     server: {
