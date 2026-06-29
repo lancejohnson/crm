@@ -25,8 +25,8 @@ Lead's Activity feed + Underwriting card refresh live — same pattern as
 """
 
 import json
+import re
 import time
-import urllib.parse
 
 import jwt
 import requests
@@ -47,6 +47,13 @@ CELL_TEAM_MEMBER = "ARV!B5"
 CELL_ZILLOW = "ARV!B9"
 
 DEFAULT_SUBJECT = "lance.johnson@groundworkpro.com"
+
+# The property API the sheet's comp custom functions use (key in site config,
+# same value hardcoded in the bound Apps Script). We hit it once at sheet
+# creation to resolve the subject's real Zillow *listing* URL from its address —
+# the comp functions only accept a homedetails URL, not a /homes/.._rb/ search.
+RAPIDAPI_HOST = "us-property-market1.p.rapidapi.com"
+
 TOKEN_URI = "https://oauth2.googleapis.com/token"
 SCOPES = (
 	"https://www.googleapis.com/auth/drive",
@@ -136,9 +143,43 @@ def _create_sheet(token: str, name: str, date_str: str, team_member: str, zillow
 	return sid, url
 
 
+def _zillow_search_url(address: str) -> str:
+	"""Zillow's canonical hyphenated search URL — hyphenates the address rather
+	than percent-encoding it ("84 Duck Pond Dr, West Saint Paul, MN 55118" →
+	`84-Duck-Pond-Dr-West-Saint-Paul-MN-55118`); the percent-encoded form
+	(spaces → %20, commas → %2C) resolves poorly and is ugly in the sheet."""
+	slug = re.sub(r"[^A-Za-z0-9]+", "-", address).strip("-")
+	return f"https://www.zillow.com/homes/{slug}_rb/"
+
+
+def _zillow_detail_url(address: str):
+	"""Resolve the property's real Zillow *listing* (homedetails) URL from its
+	address via the property API — or None on any miss. The API returns a
+	relative `url` like `/homedetails/.../<zpid>_zpid/`."""
+	key = frappe.conf.get("rapidapi_key")
+	if not key:
+		return None
+	try:
+		resp = requests.get(
+			f"https://{RAPIDAPI_HOST}/property",
+			params={"address": address},
+			headers={"x-rapidapi-key": key, "x-rapidapi-host": RAPIDAPI_HOST},
+			timeout=20,
+		)
+		resp.raise_for_status()
+		path = (resp.json() or {}).get("url")
+		if isinstance(path, str) and path.startswith("/"):
+			return f"https://www.zillow.com{path}"
+	except Exception:
+		frappe.log_error(title="Zillow detail URL lookup failed", message=frappe.get_traceback())
+	return None
+
+
 def _zillow_url(address: str) -> str:
-	"""Same Zillow search URL the lead's 'View on Zillow' action builds."""
-	return f"https://www.zillow.com/homes/{urllib.parse.quote(address, safe='')}_rb/"
+	"""Best Zillow link for the sheet's subject (B9): the property's real listing
+	URL when we can resolve it (so the subject row `=zAddress(B9)` … auto-fills),
+	else the canonical hyphenated search URL as a graceful fallback."""
+	return _zillow_detail_url(address) or _zillow_search_url(address)
 
 
 # ---------------------------------------------------------------------------

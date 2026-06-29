@@ -386,9 +386,9 @@ const moreActions = computed(() => {
     onClick: () =>
       d.property_address
         ? window.open(
-            `https://www.zillow.com/homes/${encodeURIComponent(
-              d.property_address,
-            )}_rb/`,
+            `https://www.zillow.com/homes/${d.property_address
+              .replace(/[^A-Za-z0-9]+/g, '-')
+              .replace(/^-+|-+$/g, '')}_rb/`,
             '_blank',
             'noopener',
           )

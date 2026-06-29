@@ -453,17 +453,20 @@
               </Tooltip>
             </div>
             <div
-              class="flex items-center justify-between gap-2 rounded-md bg-surface-gray-2 px-2.5 py-2 text-sm"
+              class="flex flex-col gap-1 rounded-md bg-surface-gray-2 px-2.5 py-2 text-sm"
             >
               <span class="truncate text-ink-gray-8">{{
                 activity.workbook.address || __('Underwriting sheet')
               }}</span>
-              <button
-                class="shrink-0 text-xs text-ink-gray-6 underline hover:text-ink-gray-9"
-                @click="openUnderwritingLink(activity.workbook.sheet_url)"
+              <a
+                v-if="activity.workbook.sheet_url"
+                :href="activity.workbook.sheet_url"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="truncate text-ink-blue-link hover:underline"
               >
-                {{ __('Open sheet') }}
-              </button>
+                {{ activity.workbook.sheet_url }}
+              </a>
             </div>
           </div>
           <div v-else class="mb-4 flex flex-col gap-2 py-1.5">
@@ -1046,10 +1049,6 @@ function get_underwriting_activities() {
     creation: w.workbook_created_at || w.creation,
     workbook: w,
   }))
-}
-
-function openUnderwritingLink(url) {
-  if (url) window.open(url, '_blank', 'noopener,noreferrer')
 }
 
 // open tasks pinned at the top of the Activity feed (Trello-style to-do list)
