@@ -134,6 +134,13 @@ duplicating. Work substantial features in a worktree of your own.
   - Ops (`../frappe-crm-deploy`): `scripts/setup_quick_comments.py` adds the
     `User.custom_quick_comments` Long Text custom field (no seeding — defaults
     live in the frontend)
+- **Inline lead-name editing (sidebar header)** — hovering the lead's name in
+  the Lead page sidebar shows a pencil; clicking swaps it for separate
+  First/Last name inputs (Tab moves first → last, Enter or clicking away
+  saves, Esc cancels). Saves `first_name`/`last_name`; the server's
+  `validate()` rebuilds `lead_name`, mirrored optimistically so the header
+  never flashes stale. First name required (matches the doctype). Pure
+  frontend. `frontend/src/pages/Lead.vue`.
 - `frontend/src/components/Kanban/KanbanCardField.vue` + `pages/Leads.vue`
   `#fields` slot — hover-only card affordances on the Leads Kanban: copy icon
   for phone/address fields, pencil-to-edit (inline popover, `frappe.client.set_value`

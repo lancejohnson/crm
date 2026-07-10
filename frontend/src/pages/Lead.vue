@@ -105,9 +105,42 @@
               </component>
             </div>
             <div class="flex flex-col gap-2.5 truncate">
-              <Tooltip :text="doc.lead_name || __('Set First Name')">
-                <div class="truncate text-2xl font-medium text-ink-gray-9">
-                  {{ title }}
+              <!-- Inline name edit: hover shows a pencil, click swaps the name
+                   for First/Last inputs (Tab moves between them; Enter or
+                   clicking away saves; Esc cancels). -->
+              <div
+                v-if="editingName"
+                ref="nameEditorRef"
+                class="flex items-center gap-1.5"
+                @focusout="onNameEditorFocusOut"
+                @keydown.enter.prevent="saveName"
+                @keydown.esc.prevent="cancelNameEdit"
+              >
+                <input
+                  ref="firstNameRef"
+                  v-model="nameDraft.first_name"
+                  type="text"
+                  :placeholder="__('First Name')"
+                  class="w-1/2 min-w-0 rounded border border-outline-gray-2 bg-surface-white px-1.5 py-0.5 text-xl font-medium text-ink-gray-9 placeholder:font-normal focus:border-outline-gray-4 focus:outline-none focus:ring-0"
+                />
+                <input
+                  v-model="nameDraft.last_name"
+                  type="text"
+                  :placeholder="__('Last Name')"
+                  class="w-1/2 min-w-0 rounded border border-outline-gray-2 bg-surface-white px-1.5 py-0.5 text-xl font-medium text-ink-gray-9 placeholder:font-normal focus:border-outline-gray-4 focus:outline-none focus:ring-0"
+                />
+              </div>
+              <Tooltip v-else :text="__('Click to edit name')">
+                <div
+                  class="group/name flex cursor-pointer items-center gap-1.5 truncate"
+                  @click="startNameEdit"
+                >
+                  <div class="truncate text-2xl font-medium text-ink-gray-9">
+                    {{ title }}
+                  </div>
+                  <EditIcon
+                    class="size-4 shrink-0 text-ink-gray-5 opacity-0 duration-200 group-hover/name:opacity-100"
+                  />
                 </div>
               </Tooltip>
               <a
@@ -265,6 +298,7 @@ import CameraIcon from '@/components/Icons/CameraIcon.vue'
 import LinkIcon from '@/components/Icons/LinkIcon.vue'
 import AttachmentIcon from '@/components/Icons/AttachmentIcon.vue'
 import AddressIcon from '@/components/Icons/AddressIcon.vue'
+import EditIcon from '@/components/Icons/EditIcon.vue'
 import LostReasonModal from '@/components/Modals/LostReasonModal.vue'
 import LayoutHeader from '@/components/LayoutHeader.vue'
 import Activities from '@/components/Activities/Activities.vue'
@@ -306,7 +340,15 @@ import {
   usePageMeta,
   toast,
 } from 'frappe-ui'
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import {
+  ref,
+  reactive,
+  computed,
+  watch,
+  nextTick,
+  onMounted,
+  onBeforeUnmount,
+} from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useActiveTabManager } from '@/composables/useActiveTabManager'
 
@@ -586,6 +628,66 @@ const sections = createResource({
 async function triggerStatusChange(value) {
   await triggerOnChange('status', value)
   setLostReason()
+}
+
+// Inline editing of the lead's name from the sidebar header.
+const editingName = ref(false)
+const nameEditorRef = ref(null)
+const firstNameRef = ref(null)
+const nameDraft = reactive({ first_name: '', last_name: '' })
+
+function startNameEdit() {
+  nameDraft.first_name = doc.value.first_name || ''
+  nameDraft.last_name = doc.value.last_name || ''
+  editingName.value = true
+  nextTick(() => firstNameRef.value?.focus())
+}
+
+function cancelNameEdit() {
+  editingName.value = false
+}
+
+function onNameEditorFocusOut(e) {
+  // Tabbing from First to Last also fires focusout — only save when focus
+  // actually leaves the editor.
+  if (nameEditorRef.value?.contains(e.relatedTarget)) return
+  saveName()
+}
+
+function saveName() {
+  if (!editingName.value) return
+  editingName.value = false
+  const first = nameDraft.first_name.trim()
+  const last = nameDraft.last_name.trim()
+  if (!first) {
+    toast.error(__('First name is required'))
+    return
+  }
+  if (
+    first == (doc.value.first_name || '') &&
+    last == (doc.value.last_name || '')
+  ) {
+    return
+  }
+  const old = {
+    first_name: doc.value.first_name,
+    last_name: doc.value.last_name,
+    lead_name: doc.value.lead_name,
+  }
+  doc.value.first_name = first
+  doc.value.last_name = last
+  // validate() rebuilds lead_name server-side; mirror it optimistically so
+  // the header doesn't show the stale name while the save round-trips.
+  doc.value.lead_name = [first, doc.value.middle_name, last]
+    .filter(Boolean)
+    .join(' ')
+  document.save.submit(null, {
+    onSuccess: () => (reload.value = true),
+    onError: (err) => {
+      Object.assign(doc.value, old)
+      toast.error(err.messages?.[0] || __('Error updating name'))
+    },
+  })
 }
 
 function updateField(name, value) {
