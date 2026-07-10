@@ -304,6 +304,29 @@ duplicating. Work substantial features in a worktree of your own.
     what_could_be_better/model/reviewed_at/reference_*); `bench set-config
     gemini_api_key <key>` on prod, value pulled from the existing Infisical
     `GEMINI_API_KEY` (same pattern as `documenso_api_token`).
+  - **2026-07-10 (gw127/gw128)**: (a) the daily job had NEVER fired — the
+    `daily_long` hook needs a **Scheduled Job Type row**, and `sync_jobs` never
+    ran after the gw118 deploy (the seqdrain gotcha again). Fixed on prod via
+    `bench execute frappe.core.…scheduled_job_type.sync_jobs` (running it from
+    `bench console` did NOT persist the row; use bench execute). Any future
+    scheduler-hook addition needs this. (b) Digest is now **exhaustive** — clean
+    calls get full detail rows (green border) after the flagged ones, not just a
+    count. (c) System prompt now enforces Lance's transparency talking points
+    (from the Jun 27 email to Dennis): approved exit-strategy script, banned
+    phrases ("OUR builders/partners", the three-exit-strategies menu,
+    "contractors/partners" for buyers), profit + multiple-visits disclosures
+    (missing-disclosure flags only on discovery/offer calls), and **novation
+    guardrails** (seller must understand: we just list it with an agent — they
+    could too; access for showings; they'll net LESS than listing themselves
+    even after agent fees; our value = simplicity/negotiations).
+  - **gw129/gw130: unknown-lead calls in the digest** — a call with no linked
+    lead now shows the other party's phone number ("Unknown (+1555…)") and
+    deep-links to the **Call Review page** (`/crm/reports/calls?date=&call=&t=`)
+    instead of nothing. `pages/CallReview.vue` honors those query params: sets
+    the date, auto-opens that call's Playback + AI panel, seeks to `t`, scrolls
+    the card into view (scroll-retry loop). NOTE the route path is
+    `/reports/calls` (route name "Call Review") — there is no `/call-review`
+    path; gw129 shipped the wrong URL and gw130 fixed it. Verified live.
 - `frontend/vite.config.js` — PWA service worker set `selfDestroying` (the
   precache served stale app bundles after deploys)
 - **Sequence real-time drainer** — `crm/api/sequence_drain.py` + `crm/hooks.py`
@@ -454,6 +477,26 @@ duplicating. Work substantial features in a worktree of your own.
     custom fields + Property side-panel layout), `site/server_scripts/
     pull_tax_info.py` + manifest entry, synced via `sync_server_scripts.py`.
 
+- **Acq Price + Dispo fields (lead sidebar)** — two sections in the lead side
+  panel (this CRM runs the whole deal lifecycle on CRM Lead; there are zero CRM
+  Deal records): **Deal** = `acq_price` (Currency), **Dispo** = `dispo_price`
+  (Currency, leads the section), `inspection_end_date`/`closing_date` (Date),
+  buyer assigned as at-a-glance fields (`buyer_name`/`buyer_phone` (Phone)/
+  `buyer_email` (Email)/`buyer_entity`/`buyer_em_amount` (Currency)/
+  `buyer_inspection_end_date` (Date)), and `list_price` (Currency). Custom
+  Fields + `CRM Lead-Side Panel` layout rows created by ops
+  `../frappe-crm-deploy/scripts/setup_dispo_fields.py` (idempotent, `--dry-run`;
+  enforces the canonical Dispo field order, keeping UI-added extras after ours).
+  The side panel renders them generically with inline editing. **The Deal
+  section renders ABOVE the feature cards** (First-Call Read / Tax / Agreements
+  / Underwriting), right under the sidebar header — `pages/Lead.vue` splits the
+  sections resource into `dealSections` (`name == 'deal_section'`, its own
+  `<SidePanelLayout>` before the cards) and `restSections` (everything else, in
+  the original spot) — Lance wanted Acq Price "all the way at the top, right
+  under contact info". Also **removed upstream's 300px max-height + internal
+  scroll on side-panel section columns** (`SidePanelLayout.vue` CSS) — it hid
+  fields past the fold (Lance couldn't see Buyer EM); the sidebar body is one
+  scroll region, so sections now grow naturally.
 - **Documenso "Create Purchase Agreement"** (Leads) — a header action (in the
   decluttered "More" menu next to the name) that spins up a pre-filled, editable
   Documenso e-sign draft of the wholesale purchase agreement and hands back a

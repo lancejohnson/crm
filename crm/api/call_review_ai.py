@@ -72,7 +72,29 @@ If a section titled "GUIDANCE THE REVIEWER HAS TAUGHT YOU" is present, treat it 
 Flag anything that is not fully honest, is vague/jargony, or is "salesy" persuasion instead of plain clarity. The company wants reps to say plainly what they actually do.
 - BAD (vague menu-of-options jargon meant to sound impressive): "we have multiple exit strategies like buy and hold, fix and flip, or wholesale."
 - GOOD (plain, honest, concrete): "we're going to buy it and resell it to a builder or homeowner as quickly as we can — we actually work on getting it pre-sold right away."
-Also flag: overpromising, implying things that aren't true, hiding that the company resells the property, pressure tactics, or fuzzy answers to direct questions. For each issue give the rep's VERBATIM quote, `at_time` (the [seconds] number from the start of the transcript line where the quote begins), why it's a problem, and a plain better_phrasing. If the call is clean, return an empty list — do not invent issues.
+Also flag: overpromising, implying things that aren't true, hiding that the company resells the property, pressure tactics, or fuzzy answers to direct questions.
+
+GROUNDWORK'S APPROVED FRAMING (the owner's talking points — hold reps to these):
+- Up-front wholesale disclosure: on a discovery or offer conversation, the rep should tell the seller plainly and EARLY that we buy the house and immediately resell it — to a builder or investor. The model answer: "We will buy your house and immediately resell it to a builder. Our contract with you lets us market it to builders and renovation experts before we buy it. Sometimes we own it for all of five minutes; sometimes the builder closes on your house and we never own it at all. The important thing is you get your number. And if after 7-10 days we realize we can't make the project work, we'll tell you what we got wrong." Flag it when a rep dances around, delays, or obscures this on a call where the process comes up.
+- Say we'll make a profit: when explaining how the deal works, the rep should plainly acknowledge we'll make a profit. Flag evasion when the seller asks or the topic naturally arises.
+- People visiting the house are "builders" or "investors" — the people we're looking to sell to. Flag calling them "contractors" or "partners" (usually not accurate).
+- Multiple visits: if visits come up, the rep should set the expectation honestly — "we might have to send multiple people to your house before we close, but we'll let you know beforehand; you don't have to have the house cleaned up."
+
+BANNED PHRASES (flag every use, regardless of call type):
+- "OUR builders / OUR investors / OUR partners" — we're virtually wholesaling and generally have no pre-existing relationship; the possessive implies one.
+- The old three-exit-strategies menu ("buy and hold, fix and flip, or assign/wholesale") — the real plan is a double-close; the menu is misdirection.
+- Describing prospective buyers who'll visit as "contractors" or "partners".
+
+NOVATIONS (tight guardrails — apply whenever a novation deal is pitched or discussed):
+A novation means we list the seller's house on the open market with a real-estate agent under our agreement. The seller must come away understanding all four of these, plainly stated — flag the call if the rep advances a novation while obscuring, skipping, or misrepresenting any of them:
+1. The work: we're just going to list it with an agent — and the seller could do that themselves.
+2. Access: we'll need access to the property and to come by for showings.
+3. The money: they'll make LESS money going this route with us than listing it themselves, even after accounting for agent fees.
+4. Our value: what they're paying for is simplicity — we work with the agent, handle the negotiations, and manage the process.
+
+Only flag a MISSING disclosure (wholesale up front, profit, multiple visits) when the call is the kind where it belonged — a discovery/offer/process conversation. Never ding a voicemail, scheduling call, or quick logistics touch for not covering them. A banned phrase, though, is a flag on any call.
+
+For each issue give the rep's VERBATIM quote, `at_time` (the [seconds] number from the start of the transcript line where the quote begins), why it's a problem, and a plain better_phrasing. (For a missing disclosure, quote the moment it should have happened — e.g. the seller's question that got the fuzzy answer — or use an empty quote with at_time null if there's no single moment.) If the call is clean, return an empty list — do not invent issues.
 
 2) MOTIVATION (score 0-5, or null)
 Score how well the rep uncovered WHY the seller wants to sell (the real situation/timeline/pain behind it), only when the call is the kind where that applies.
@@ -227,7 +249,7 @@ def _candidate_calls(start, end):
 		},
 		fields=[
 			"name", "type", "duration", "start_time",
-			"caller", "receiver", "reference_doctype", "reference_docname",
+			"caller", "receiver", "from", "to", "reference_doctype", "reference_docname",
 		],
 		order_by="start_time asc",
 	)
@@ -598,22 +620,30 @@ def _send_digest(day, candidates, failed):
 		cand = cand_by_name.get(r["call_log"], {})
 		ref = r.get("reference_docname")
 		route = "deals" if r.get("reference_doctype") == "CRM Deal" else "leads"
-		link = get_url(f"/crm/{route}/{ref}?call={r['call_log']}#activity") if ref else ""
+		# No lead on the call → deep-link the (Lance-only) Call Review page to this
+		# exact call instead, and label the item with the other party's number.
+		if ref:
+			link = get_url(f"/crm/{route}/{ref}?call={r['call_log']}#activity")
+		else:
+			link = get_url(f"/crm/reports/calls?date={day}&call={r['call_log']}")
 		rep_email = cand.get("caller") or cand.get("receiver") or ""
+		their_number = (cand.get("to") if cand.get("type") == "Outgoing" else cand.get("from")) or ""
 		try:
 			issues = json.loads(r.get("integrity_issues") or "[]")
 		except Exception:
 			issues = []
 		for iss in issues:
 			at = iss.get("at_time")
-			iss["link"] = (
-				get_url(f"/crm/{route}/{ref}?call={r['call_log']}&t={at}#activity")
-				if (ref and at is not None) else link
-			)
+			if at is None:
+				iss["link"] = link
+			elif ref:
+				iss["link"] = get_url(f"/crm/{route}/{ref}?call={r['call_log']}&t={at}#activity")
+			else:
+				iss["link"] = get_url(f"/crm/reports/calls?date={day}&call={r['call_log']}&t={at}")
 			iss["at_label"] = _mmss(at)
 		items.append({
 			"flag": r.get("overall_flag") or "ok",
-			"lead_name": lead_disp.get(ref) or ref or _("Unknown lead"),
+			"lead_name": lead_disp.get(ref) or ref or (their_number and _("Unknown ({0})").format(their_number)) or _("Unknown lead"),
 			"link": link,
 			"rep_name": rep_names.get(rep_email) or rep_email or _("Unassigned"),
 			"duration": int(cand.get("duration") or 0),
@@ -626,7 +656,7 @@ def _send_digest(day, candidates, failed):
 
 	items.sort(key=lambda x: (_FLAG_RANK.get(x["flag"], 3), -(x["motivation_score"] if x["motivation_score"] is not None else 99)))
 	attention = [i for i in items if i["flag"] in ("serious", "review")]
-	clean_count = sum(1 for i in items if i["flag"] == "ok")
+	clean = [i for i in items if i["flag"] == "ok"]
 
 	frappe.sendmail(
 		recipients=[DIGEST_RECIPIENT],
@@ -636,7 +666,8 @@ def _send_digest(day, candidates, failed):
 			"day": str(day),
 			"reviewed_count": len(items),
 			"attention": attention,
-			"clean_count": clean_count,
+			"clean": clean,
+			"clean_count": len(clean),
 			"failed_count": failed,
 		},
 		now=True,

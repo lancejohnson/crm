@@ -10,7 +10,7 @@
 	{% if failed_count %}<br><span style="color: #b42318;">{{ failed_count }} call(s) failed to review and will be retried tomorrow.</span>{% endif %}
 </p>
 
-{% if not attention %}
+{% if not attention and reviewed_count %}
 <p style="color: #1f272e;">No integrity or motivation concerns in yesterday's calls. 👍</p>
 {% endif %}
 
@@ -47,3 +47,26 @@
 	{% endif %}
 </div>
 {% endfor %}
+
+{% if clean %}
+<p style="margin: 24px 0 4px 0; font-weight: 600; color: #1f272e;">Clean calls</p>
+{% for item in clean %}
+<div style="margin: 12px 0; padding: 10px 16px; border-left: 4px solid #17b26a; background: #fafafa;">
+	<p style="margin: 0 0 4px 0;">
+		{% if item.link %}<a href="{{ item.link }}" style="font-weight: 600; color: #1f272e; text-decoration: none;">{{ item.lead_name }}</a>{% else %}<span style="font-weight: 600;">{{ item.lead_name }}</span>{% endif %}
+		<span style="color: #6b7280;"> · {{ item.rep_name }} · {{ (item.duration // 60) }}m {{ (item.duration % 60) }}s</span>
+	</p>
+	{% if item.motivation_score is not none %}
+	<p style="margin: 2px 0; color: #1f272e; font-size: 13px;">
+		<span style="font-weight: 600;">Motivation:</span> {{ item.motivation_score }}/5{% if item.motivation_reason %} — {{ item.motivation_reason }}{% endif %}
+	</p>
+	{% endif %}
+	{% if item.what_could_be_better %}
+	<p style="margin: 2px 0; color: #1f272e; font-size: 13px;"><span style="font-weight: 600;">What could be better:</span> {{ item.what_could_be_better }}</p>
+	{% endif %}
+	{% if item.lead_status %}
+	<p style="margin: 2px 0; color: #6b7280; font-size: 13px;">Where the lead is at: {{ item.lead_status }}</p>
+	{% endif %}
+</div>
+{% endfor %}
+{% endif %}
