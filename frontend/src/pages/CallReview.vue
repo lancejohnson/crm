@@ -146,6 +146,7 @@
               <div
                 v-for="call in ld.calls"
                 :key="call.name"
+                :id="'call-' + call.name"
                 class="flex flex-col gap-2 border-l-2 px-4 py-2.5"
                 :class="call.my_review.reviewed ? 'border-ink-green-3' : 'border-transparent'"
               >
@@ -421,9 +422,10 @@ import {
   call as apiCall,
 } from 'frappe-ui'
 import { ref, computed, reactive, watch, h } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 
 const router = useRouter()
+const route = useRoute()
 
 // local YYYY-MM-DD for "today" (browser tz; matches the user's working day)
 const todayStr = (() => {
@@ -432,7 +434,12 @@ const todayStr = (() => {
   return new Date(d.getTime() - off * 60000).toISOString().slice(0, 10)
 })()
 
-const date = ref(todayStr)
+// deep link from the digest email: ?date=YYYY-MM-DD&call=<name>&t=<seconds>
+const queryDate =
+  typeof route.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(route.query.date)
+    ? route.query.date
+    : ''
+const date = ref(queryDate || todayStr)
 const rep = ref('')
 const minDuration = ref('0')
 const reviewFilter = ref('all')
@@ -526,6 +533,34 @@ const displayTotals = computed(() => {
 })
 
 watch([date, rep], () => review.reload())
+
+// once the deep-linked call's card exists, open its Playback (+ AI panel) and
+// scroll it into view; retry the scroll since the list re-lays-out after mount
+let pendingCall = typeof route.query.call === 'string' ? route.query.call : ''
+watch(
+  () => review.data,
+  () => {
+    if (!pendingCall) return
+    const target = pendingCall
+    const found = reps.value.some((r) =>
+      r.leads.some((ld) => ld.calls.some((c) => c.name === target))
+    )
+    if (!found) return
+    pendingCall = ''
+    transcriptOpen[target] = true
+    aiOpen[target] = true
+    const t = Number(route.query.t)
+    if (Number.isFinite(t) && t > 0) seekTarget[target] = t
+    let tries = 0
+    const scroll = () => {
+      const el = document.getElementById('call-' + target)
+      if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' })
+      if (++tries < 5) setTimeout(scroll, 400)
+    }
+    setTimeout(scroll, 100)
+  },
+  { immediate: true }
+)
 
 function shiftDay(delta) {
   const d = new Date(date.value + 'T00:00:00')
