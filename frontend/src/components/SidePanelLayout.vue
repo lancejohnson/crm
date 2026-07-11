@@ -618,10 +618,10 @@ function firstVisibleIndex() {
   width: 0;
 }
 
+/* Upstream capped non-last section columns at 300px with internal scroll,
+   which hid fields past the fold (e.g. the Dispo section's buyer fields).
+   The sidebar body is one scroll region now, so let sections grow naturally. */
 .sections .section .column {
-  max-height: 300px;
-}
-.sections .section:last-of-type .column {
   max-height: none;
 }
 </style>

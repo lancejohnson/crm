@@ -477,26 +477,28 @@ duplicating. Work substantial features in a worktree of your own.
     custom fields + Property side-panel layout), `site/server_scripts/
     pull_tax_info.py` + manifest entry, synced via `sync_server_scripts.py`.
 
-- **Acq Price + Dispo fields (lead sidebar)** — two sections in the lead side
-  panel (this CRM runs the whole deal lifecycle on CRM Lead; there are zero CRM
-  Deal records): **Deal** = `acq_price` (Currency), **Dispo** = `dispo_price`
-  (Currency, leads the section), `inspection_end_date`/`closing_date` (Date),
-  buyer assigned as at-a-glance fields (`buyer_name`/`buyer_phone` (Phone)/
-  `buyer_email` (Email)/`buyer_entity`/`buyer_em_amount` (Currency)/
-  `buyer_inspection_end_date` (Date)), and `list_price` (Currency). Custom
-  Fields + `CRM Lead-Side Panel` layout rows created by ops
+- **Acq Price (header) + Dispo fields (lead sidebar)** — deal-lifecycle fields
+  on CRM Lead (this CRM runs the whole lifecycle on leads; there are zero CRM
+  Deal records). **Acq Price** = `acq_price` (Currency) lives in the sidebar
+  HEADER: a `$`-icon row (MoneyIcon, no label — `title` tooltip "Acq Price")
+  directly under the lead name/address in `pages/Lead.vue`, per Lance ("under
+  the lead name and just have the $ icon"). Custom inline editor: digits only
+  (non-digits stripped on input), live thousand separators (`toLocaleString`),
+  Enter/blur saves via `updateField('acq_price', n)`, Esc reverts; the
+  `doc.acq_price` watcher skips overwriting the draft while focused. **Dispo**
+  side-panel section = `dispo_price` (Currency, leads the section),
+  `inspection_end_date`/`closing_date` (Date), buyer assigned as at-a-glance
+  fields (`buyer_name`/`buyer_phone` (Phone)/`buyer_email` (Email)/
+  `buyer_entity`/`buyer_em_amount` (Currency)/`buyer_inspection_end_date`
+  (Date)), and `list_price` (Currency), rendered generically with inline
+  editing. Custom Fields + `CRM Lead-Side Panel` layout rows created by ops
   `../frappe-crm-deploy/scripts/setup_dispo_fields.py` (idempotent, `--dry-run`;
-  enforces the canonical Dispo field order, keeping UI-added extras after ours).
-  The side panel renders them generically with inline editing. **The Deal
-  section renders ABOVE the feature cards** (First-Call Read / Tax / Agreements
-  / Underwriting), right under the sidebar header — `pages/Lead.vue` splits the
-  sections resource into `dealSections` (`name == 'deal_section'`, its own
-  `<SidePanelLayout>` before the cards) and `restSections` (everything else, in
-  the original spot) — Lance wanted Acq Price "all the way at the top, right
-  under contact info". Also **removed upstream's 300px max-height + internal
-  scroll on side-panel section columns** (`SidePanelLayout.vue` CSS) — it hid
-  fields past the fold (Lance couldn't see Buyer EM); the sidebar body is one
-  scroll region, so sections now grow naturally.
+  enforces the canonical Dispo field order, keeps UI-added extras after ours,
+  and deletes retired sections via `REMOVED_SECTIONS` — the old `deal_section`
+  is gone). Also **removed upstream's 300px max-height + internal scroll on
+  side-panel section columns** (`SidePanelLayout.vue` CSS) — it hid fields past
+  the fold (Lance couldn't see Buyer EM); the sidebar body is one scroll
+  region, so sections now grow naturally.
 - **Documenso "Create Purchase Agreement"** (Leads) — a header action (in the
   decluttered "More" menu next to the name) that spins up a pre-filled, editable
   Documenso e-sign draft of the wholesale purchase agreement and hands back a

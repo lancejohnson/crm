@@ -154,6 +154,30 @@
                 <AddressIcon class="size-3.5 shrink-0" />
                 <span class="truncate">{{ doc.property_address }}</span>
               </a>
+              <!-- Acq price: just a $ icon + amount (no label), digits only,
+                   live thousand separators; Enter/blur saves. -->
+              <div
+                class="flex items-center gap-1.5 text-sm text-ink-gray-7"
+                :title="__('Acq Price')"
+              >
+                <MoneyIcon class="size-3.5 shrink-0" />
+                <input
+                  :value="acqPriceDraft"
+                  type="text"
+                  inputmode="numeric"
+                  autocomplete="off"
+                  :placeholder="__('Acq price')"
+                  class="w-32 border-none bg-transparent p-0 text-sm text-ink-gray-7 placeholder:text-ink-gray-4 focus:text-ink-gray-9 focus:outline-none focus:ring-0"
+                  @focus="acqPriceFocused = true"
+                  @input="onAcqPriceInput"
+                  @keydown.enter.prevent="$event.target.blur()"
+                  @keydown.esc.prevent="
+                    acqPriceDraft = formatAcqPrice(doc.acq_price);
+                    $event.target.blur()
+                  "
+                  @blur="saveAcqPrice"
+                />
+              </div>
               <div class="flex gap-1.5">
                 <Button
                   :tooltip="__('Call')"
@@ -624,6 +648,42 @@ const sections = createResource({
   params: { doctype: 'CRM Lead' },
   auto: true,
 })
+
+// Acq price inline editor in the header (under the name, $ icon only):
+// digits-only with live thousand separators; saves on Enter/blur.
+const acqPriceDraft = ref('')
+const acqPriceFocused = ref(false)
+
+function formatAcqPrice(n) {
+  return n ? Math.round(n).toLocaleString('en-US') : ''
+}
+
+watch(
+  () => doc.value?.acq_price,
+  (v) => {
+    if (!acqPriceFocused.value) acqPriceDraft.value = formatAcqPrice(v)
+  },
+  { immediate: true },
+)
+
+function onAcqPriceInput(e) {
+  const digits = e.target.value.replace(/\D/g, '').slice(0, 12)
+  const formatted = digits ? Number(digits).toLocaleString('en-US') : ''
+  acqPriceDraft.value = formatted
+  // the reformat can leave the ref unchanged (e.g. typing a letter), so sync
+  // the DOM input directly too
+  e.target.value = formatted
+}
+
+function saveAcqPrice() {
+  acqPriceFocused.value = false
+  const numeric = Number(acqPriceDraft.value.replace(/\D/g, '')) || 0
+  if (numeric === Math.round(doc.value.acq_price || 0)) {
+    acqPriceDraft.value = formatAcqPrice(doc.value.acq_price)
+    return
+  }
+  updateField('acq_price', numeric)
+}
 
 async function triggerStatusChange(value) {
   await triggerOnChange('status', value)
