@@ -75,6 +75,8 @@
             v-if="messages.data?.length"
             class="px-4"
             :messages="messages.data"
+            :contactName="selectedName"
+            :contactImage="selectedImage"
           />
           <div
             v-else-if="!messages.loading"
@@ -152,6 +154,11 @@ const messages = createResource({
 const selectedName = computed(() => {
   const c = conversations.data?.find((x) => x.lead === selected.value)
   return c?.lead_name || selected.value
+})
+
+const selectedImage = computed(() => {
+  const c = conversations.data?.find((x) => x.lead === selected.value)
+  return c?.image || ''
 })
 
 function selectConversation(lead) {

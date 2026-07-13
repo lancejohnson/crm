@@ -61,11 +61,30 @@ def validate_access(reference_doctype=None, reference_name=None, permtype="read"
 	return None
 
 
+def _last10(number):
+	return "".join(ch for ch in (number or "") if ch.isdigit())[-10:]
+
+
+def _sender_map():
+	"""Last-10-digit Quo number -> user, for attributing an outbound text to the
+	teammate whose line sent it (Quo Message stores only phone numbers)."""
+	if not frappe.db.has_column("User", "custom_quo_number"):
+		return {}
+	users = frappe.get_all(
+		"User",
+		filters={"enabled": 1, "custom_quo_number": ("is", "set")},
+		fields=["name", "full_name", "custom_quo_number"],
+	)
+	return {digits: u for u in users if (digits := _last10(u.custom_quo_number))}
+
+
 def _shape(rows):
 	"""Map raw Quo Message rows to the shape the thread component expects
 	(it speaks the WhatsApp message vocabulary: type / message / creation)."""
+	senders = _sender_map()
 	out = []
 	for m in rows:
+		sender = senders.get(_last10(m.get("from"))) if m.direction == "Outgoing" else None
 		out.append(
 			{
 				"name": m.name,
@@ -78,6 +97,8 @@ def _shape(rows):
 				"creation": m.message_date or m.creation,
 				"reference_doctype": m.reference_doctype,
 				"reference_name": m.reference_docname,
+				"sender": sender.name if sender else None,
+				"sender_name": sender.full_name if sender else None,
 			}
 		)
 	return out

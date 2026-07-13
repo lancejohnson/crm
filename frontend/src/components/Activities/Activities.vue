@@ -62,7 +62,12 @@
         />
       </div>
       <div v-else-if="title == 'SMS' && smsMessages.data?.length">
-        <SMSArea class="px-3 pt-3 sm:px-10" :messages="smsMessages.data" />
+        <SMSArea
+          class="px-3 pt-3 sm:px-10"
+          :messages="smsMessages.data"
+          :contactName="doc.lead_name || doc.first_name"
+          :contactImage="doc.image"
+        />
       </div>
       <div
         v-else-if="title == 'Notes'"
@@ -273,24 +278,35 @@
               activity.activity_type == 'incoming_text' ||
               activity.activity_type == 'outgoing_text'
             "
-            class="mb-4 flex flex-col gap-1 py-1.5"
+            class="mb-4 flex flex-col py-1.5"
+            :class="
+              activity.activity_type == 'outgoing_text'
+                ? 'items-end'
+                : 'items-start'
+            "
           >
-            <div class="flex items-center justify-between gap-2 text-base">
-              <span class="text-ink-gray-5">
+            <div
+              class="mb-1 flex items-baseline gap-1 px-0.5 text-xs text-ink-gray-5"
+            >
+              <span class="font-medium text-ink-gray-7">
                 {{
                   activity.activity_type == 'outgoing_text'
-                    ? __('Text sent')
-                    : __('Text received')
+                    ? activity.sender_name || __('Sent')
+                    : doc.lead_name || doc.first_name || __('Lead')
                 }}
               </span>
+              <span>·</span>
               <Tooltip :text="formatDate(activity.creation)">
-                <div class="text-sm text-ink-gray-5">
-                  {{ __(timeAgo(activity.creation)) }}
-                </div>
+                <span>{{ __(timeAgo(activity.creation)) }}</span>
               </Tooltip>
             </div>
             <div
-              class="max-w-2xl whitespace-pre-wrap rounded-md bg-surface-gray-2 px-2.5 py-1.5 text-ink-gray-8"
+              class="max-w-[78%] whitespace-pre-wrap rounded-lg px-2.5 py-1.5 text-base"
+              :class="
+                activity.activity_type == 'outgoing_text'
+                  ? 'bg-surface-blue-2 text-white'
+                  : 'bg-surface-gray-2 text-ink-gray-8'
+              "
             >
               <SMSMedia
                 v-if="activity.media?.length"
@@ -1005,6 +1021,8 @@ function get_text_activities() {
     creation: m.creation,
     message: m.message,
     media: m.media,
+    sender: m.sender,
+    sender_name: m.sender_name,
   }))
 }
 
