@@ -1,25 +1,18 @@
 <template>
   <div ref="rootEl">
-    <div class="mb-1 flex items-center justify-stretch gap-2 py-1 text-base">
+    <div class="mb-1 flex items-center justify-stretch gap-2 py-1 text-xs">
       <div class="inline-flex items-center flex-wrap gap-1 text-ink-gray-5">
-        <Avatar
-          :image="call._caller.image"
-          :label="call._caller.label"
-          size="md"
-        />
-        <span class="font-medium text-ink-gray-8 ml-1">
+        <span class="font-medium text-ink-gray-8">
           {{ formatPhone(call._caller.label) }}
         </span>
         <span>{{
-          call.type == 'Incoming'
-            ? __('has reached out')
-            : __('has made a call')
+          call.type == 'Incoming' ? __('called in') : __('made a call')
         }}</span>
       </div>
       <div class="ml-auto whitespace-nowrap">
         <Tooltip :text="formatDate(call.creation)">
-          <div class="text-sm text-ink-gray-5">
-            {{ __(timeAgo(call.creation)) }}
+          <div class="text-xs text-ink-gray-5">
+            {{ formatDate(call.creation, 'h:mm a') }}
           </div>
         </Tooltip>
       </div>
@@ -140,9 +133,9 @@ import FadedScrollableDiv from '@/components/FadedScrollableDiv.vue'
 import CallLogDetailModal from '@/components/Modals/CallLogDetailModal.vue'
 import CallLogModal from '@/components/Modals/CallLogModal.vue'
 import { statusLabelMap, statusColorMap } from '@/utils/callLog.js'
-import { formatDate, timeAgo } from '@/utils'
+import { formatDate } from '@/utils'
 import { formatPhone } from '@/utils/phoneFormat'
-import { Avatar, Badge, Tooltip, createResource } from 'frappe-ui'
+import { Badge, Tooltip, createResource } from 'frappe-ui'
 import { reactive, ref, computed, watch, onMounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 

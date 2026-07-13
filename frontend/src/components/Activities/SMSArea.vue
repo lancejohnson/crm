@@ -67,7 +67,7 @@
             >
               <Tooltip :text="formatDate(sms.creation, 'ddd, MMM D, YYYY')">
                 <div class="text-2xs">
-                  {{ formatDate(sms.creation, 'hh:mm a') }}
+                  {{ formatDate(sms.creation, 'h:mm a') }}
                 </div>
               </Tooltip>
               <div v-if="sms.type == 'Outgoing'">

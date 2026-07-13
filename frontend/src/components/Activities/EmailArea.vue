@@ -25,8 +25,8 @@
           :theme="status.color"
         />
         <Tooltip :text="formatDate(activity.communication_date)">
-          <div class="text-sm text-ink-gray-5">
-            {{ __(timeAgo(activity.communication_date)) }}
+          <div class="text-xs text-ink-gray-5">
+            {{ formatDate(activity.communication_date, 'h:mm a') }}
           </div>
         </Tooltip>
         <div class="flex gap-0.5">
@@ -82,7 +82,7 @@ import ReplyAllIcon from '@/components/Icons/ReplyAllIcon.vue'
 import AttachmentItem from '@/components/AttachmentItem.vue'
 import EmailContent from '@/components/Activities/EmailContent.vue'
 import { Badge, Tooltip } from 'frappe-ui'
-import { timeAgo, formatDate } from '@/utils'
+import { formatDate } from '@/utils'
 import { reactive, computed } from 'vue'
 
 const props = defineProps({

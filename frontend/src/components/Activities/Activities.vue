@@ -84,6 +84,18 @@
       <div v-else-if="title == 'Comments'" class="pb-5">
         <div v-for="(comment, i) in activities" :key="comment.name">
           <div
+            v-if="isNewDay(i)"
+            class="flex items-center gap-2.5 px-3 pb-3 sm:px-10"
+            :class="i == 0 ? 'pt-1' : 'pt-4'"
+          >
+            <span
+              class="text-2xs font-medium uppercase tracking-wider text-ink-gray-4"
+            >
+              {{ dayLabel(comment.creation) }}
+            </span>
+            <div class="h-px flex-1 bg-outline-gray-modals" />
+          </div>
+          <div
             class="activity grid grid-cols-[30px_minmax(auto,_1fr)] gap-2 px-3 sm:gap-4 sm:px-10"
           >
             <div
@@ -93,9 +105,9 @@
               "
             >
               <div
-                class="flex h-8 w-7 items-center justify-center bg-surface-white"
+                class="flex h-8 w-8 items-start justify-center bg-surface-white pt-0.5"
               >
-                <CommentIcon class="text-ink-gray-8" />
+                <TimelineAvatar v-bind="railProps(comment)" />
               </div>
             </div>
             <CommentArea
@@ -112,6 +124,18 @@
       <div v-else-if="title == 'Calls'" class="activity">
         <div v-for="(call, i) in activities" :key="call.name">
           <div
+            v-if="isNewDay(i)"
+            class="flex items-center gap-2.5 px-3 pb-3 sm:px-10"
+            :class="i == 0 ? 'pt-1' : 'pt-4'"
+          >
+            <span
+              class="text-2xs font-medium uppercase tracking-wider text-ink-gray-4"
+            >
+              {{ dayLabel(call.creation) }}
+            </span>
+            <div class="h-px flex-1 bg-outline-gray-modals" />
+          </div>
+          <div
             class="activity grid grid-cols-[30px_minmax(auto,_1fr)] gap-4 px-3 sm:px-10"
           >
             <div
@@ -121,19 +145,9 @@
               "
             >
               <div
-                class="flex h-8 w-7 items-center justify-center bg-surface-white text-ink-gray-8"
+                class="flex h-8 w-8 items-start justify-center bg-surface-white pt-0.5"
               >
-                <MissedCallIcon
-                  v-if="call.status == 'No Answer'"
-                  class="text-ink-red-4"
-                />
-                <DeclinedCallIcon v-else-if="call.status == 'Busy'" />
-                <component
-                  :is="
-                    call.type == 'Incoming' ? InboundCallIcon : OutboundCallIcon
-                  "
-                  v-else
-                />
+                <TimelineAvatar v-bind="railProps(call)" />
               </div>
             </div>
             <CallArea class="mb-4" :activity="call" />
@@ -150,69 +164,41 @@
         />
       </div>
       <template v-else>
-        <div
+        <template
           v-for="(activity, i) in activities"
           :key="activity.name"
-          class="activity px-3 sm:px-10"
-          :class="
-            ['Activity', 'Emails'].includes(title)
-              ? 'grid grid-cols-[30px_minmax(auto,_1fr)] gap-2 sm:gap-4'
-              : ''
-          "
         >
           <div
-            v-if="['Activity', 'Emails'].includes(title)"
+            v-if="isNewDay(i)"
+            class="flex items-center gap-2.5 px-3 pb-3 sm:px-10"
+            :class="i == 0 ? 'pt-1' : 'pt-4'"
+          >
+            <span
+              class="text-2xs font-medium uppercase tracking-wider text-ink-gray-4"
+            >
+              {{ dayLabel(activity.creation) }}
+            </span>
+            <div class="h-px flex-1 bg-outline-gray-modals" />
+          </div>
+          <div
+            class="activity px-3 sm:px-10"
+            :class="
+              ['Activity', 'Emails', 'Comments'].includes(title)
+                ? 'grid grid-cols-[30px_minmax(auto,_1fr)] gap-2 sm:gap-4'
+                : ''
+            "
+          >
+          <div
+            v-if="['Activity', 'Emails', 'Comments'].includes(title)"
             class="z-0 relative flex justify-center before:absolute before:left-[50%] before:-z-[1] before:top-0 before:border-l before:border-outline-gray-modals"
             :class="[
               i != activities.length - 1 ? 'before:h-full' : 'before:h-4',
             ]"
           >
             <div
-              class="flex h-7 w-7 items-center justify-center bg-surface-white"
-              :class="{
-                'mt-2.5': ['communication'].includes(activity.activity_type),
-                'bg-surface-white': ['added', 'removed', 'changed'].includes(
-                  activity.activity_type,
-                ),
-                'h-8': [
-                  'comment',
-                  'communication',
-                  'incoming_call',
-                  'outgoing_call',
-                ].includes(activity.activity_type),
-              }"
+              class="flex h-8 w-8 items-start justify-center bg-surface-white pt-0.5"
             >
-              <UserAvatar
-                v-if="activity.activity_type == 'communication'"
-                :user="activity.data.sender"
-                size="md"
-              />
-              <MissedCallIcon
-                v-else-if="
-                  ['incoming_call', 'outgoing_call'].includes(
-                    activity.activity_type,
-                  ) && activity.status == 'No Answer'
-                "
-                class="text-ink-red-4"
-              />
-              <DeclinedCallIcon
-                v-else-if="
-                  ['incoming_call', 'outgoing_call'].includes(
-                    activity.activity_type,
-                  ) && activity.status == 'Busy'
-                "
-              />
-              <component
-                :is="activity.icon"
-                v-else
-                :class="
-                  ['added', 'removed', 'changed'].includes(
-                    activity.activity_type,
-                  )
-                    ? 'text-ink-gray-4'
-                    : 'text-ink-gray-8'
-                "
-              />
+              <TimelineAvatar v-bind="railProps(activity)" />
             </div>
           </div>
           <div
@@ -233,7 +219,7 @@
             :id="activity.name"
             class="mb-4 flex flex-col gap-2 py-1.5"
           >
-            <div class="flex items-center justify-stretch gap-2 text-base">
+            <div class="flex items-center justify-stretch gap-2 text-xs">
               <div
                 class="inline-flex items-center flex-wrap gap-1.5 text-ink-gray-8 font-medium"
               >
@@ -257,8 +243,8 @@
               </div>
               <div class="ml-auto whitespace-nowrap">
                 <Tooltip :text="formatDate(activity.creation)">
-                  <div class="text-sm text-ink-gray-5">
-                    {{ __(timeAgo(activity.creation)) }}
+                  <div class="text-xs text-ink-gray-5">
+                    {{ shortTime(activity.creation) }}
                   </div>
                 </Tooltip>
               </div>
@@ -297,7 +283,7 @@
               </span>
               <span>·</span>
               <Tooltip :text="formatDate(activity.creation)">
-                <span>{{ __(timeAgo(activity.creation)) }}</span>
+                <span>{{ shortTime(activity.creation) }}</span>
               </Tooltip>
             </div>
             <div
@@ -318,7 +304,7 @@
           </div>
           <div
             v-else-if="activity.activity_type == 'task'"
-            class="mb-4 flex cursor-pointer items-center gap-2 py-1.5 text-base"
+            class="mb-4 flex cursor-pointer items-center gap-2 py-1.5 text-xs"
             @click="modalRef.showTask(activity.task)"
           >
             <span class="truncate text-ink-gray-5 line-through">
@@ -330,14 +316,14 @@
               }}
             </span>
             <Tooltip :text="formatDate(activity.creation)" class="ml-auto">
-              <div class="whitespace-nowrap text-sm text-ink-gray-5">
-                {{ __(timeAgo(activity.creation)) }}
+              <div class="whitespace-nowrap text-xs text-ink-gray-5">
+                {{ shortTime(activity.creation) }}
               </div>
             </Tooltip>
           </div>
           <div
             v-else-if="activity.activity_type == 'tax_pull'"
-            class="mb-4 flex flex-col gap-1.5 py-1.5 text-base"
+            class="mb-4 flex flex-col gap-1.5 py-1.5 text-xs"
           >
             <div class="flex items-center gap-1.5">
               <span class="font-medium text-ink-gray-8">{{
@@ -347,8 +333,8 @@
               <span class="text-ink-gray-4">·</span>
               <span class="text-ink-gray-5">$0.10</span>
               <Tooltip :text="formatDate(activity.creation)" class="ml-auto">
-                <div class="whitespace-nowrap text-sm text-ink-gray-5">
-                  {{ __(timeAgo(activity.creation)) }}
+                <div class="whitespace-nowrap text-xs text-ink-gray-5">
+                  {{ shortTime(activity.creation) }}
                 </div>
               </Tooltip>
             </div>
@@ -403,7 +389,7 @@
           </div>
           <div
             v-else-if="activity.activity_type == 'agreement'"
-            class="mb-4 flex flex-col gap-1.5 py-1.5 text-base"
+            class="mb-4 flex flex-col gap-1.5 py-1.5 text-xs"
           >
             <div class="flex items-center gap-1.5">
               <span class="font-medium text-ink-gray-8">{{
@@ -413,8 +399,8 @@
                 __('created a purchase agreement')
               }}</span>
               <Tooltip :text="formatDate(activity.creation)" class="ml-auto">
-                <div class="whitespace-nowrap text-sm text-ink-gray-5">
-                  {{ __(timeAgo(activity.creation)) }}
+                <div class="whitespace-nowrap text-xs text-ink-gray-5">
+                  {{ shortTime(activity.creation) }}
                 </div>
               </Tooltip>
             </div>
@@ -452,7 +438,7 @@
           </div>
           <div
             v-else-if="activity.activity_type == 'underwriting'"
-            class="mb-4 flex flex-col gap-1.5 py-1.5 text-base"
+            class="mb-4 flex flex-col gap-1.5 py-1.5 text-xs"
           >
             <div class="flex items-center gap-1.5">
               <span class="font-medium text-ink-gray-8">{{
@@ -463,8 +449,8 @@
                 __('created an underwriting sheet')
               }}</span>
               <Tooltip :text="formatDate(activity.creation)" class="ml-auto">
-                <div class="whitespace-nowrap text-sm text-ink-gray-5">
-                  {{ __(timeAgo(activity.creation)) }}
+                <div class="whitespace-nowrap text-xs text-ink-gray-5">
+                  {{ shortTime(activity.creation) }}
                 </div>
               </Tooltip>
             </div>
@@ -486,7 +472,7 @@
             </div>
           </div>
           <div v-else class="mb-4 flex flex-col gap-2 py-1.5">
-            <div class="flex items-center justify-stretch gap-2 text-base">
+            <div class="flex items-center justify-stretch gap-2 text-xs">
               <div
                 v-if="activity.other_versions"
                 class="inline-flex flex-wrap gap-1.5 text-ink-gray-8 font-medium"
@@ -564,8 +550,8 @@
 
               <div class="ml-auto whitespace-nowrap">
                 <Tooltip :text="formatDate(activity.creation)">
-                  <div class="text-sm text-ink-gray-5">
-                    {{ __(timeAgo(activity.creation)) }}
+                  <div class="text-xs text-ink-gray-5">
+                    {{ shortTime(activity.creation) }}
                   </div>
                 </Tooltip>
               </div>
@@ -580,7 +566,7 @@
                   ...activity.other_versions,
                 ])"
                 :key="a.creation"
-                class="flex items-start justify-stretch gap-2 py-1.5 text-base"
+                class="flex items-start justify-stretch gap-2 py-1.5 text-xs"
               >
                 <div class="inline-flex flex-wrap gap-1 text-ink-gray-5">
                   <span
@@ -641,15 +627,16 @@
 
                 <div class="ml-auto whitespace-nowrap">
                   <Tooltip :text="formatDate(a.creation)">
-                    <div class="text-sm text-ink-gray-5">
-                      {{ __(timeAgo(a.creation)) }}
+                    <div class="text-xs text-ink-gray-5">
+                      {{ shortTime(a.creation) }}
                     </div>
                   </Tooltip>
                 </div>
               </div>
             </div>
           </div>
-        </div>
+          </div>
+        </template>
       </template>
     </div>
     <div v-else-if="title == 'Data'" class="h-full flex flex-col px-3 sm:px-10">
@@ -742,6 +729,7 @@ import WhatsAppIcon from '@/components/Icons/WhatsAppIcon.vue'
 import WhatsAppArea from '@/components/Activities/WhatsAppArea.vue'
 import WhatsAppBox from '@/components/Activities/WhatsAppBox.vue'
 import SMSArea from '@/components/Activities/SMSArea.vue'
+import TimelineAvatar from '@/components/Activities/TimelineAvatar.vue'
 import SMSMedia from '@/components/Activities/SMSMedia.vue'
 import SMSBox from '@/components/Activities/SMSBox.vue'
 import LoadingIndicator from '@/components/Icons/LoadingIndicator.vue'
@@ -769,7 +757,7 @@ import { usersStore } from '@/stores/users'
 import { whatsappEnabled, smsEnabled } from '@/composables/settings'
 import { useDocument } from '@/data/document'
 import { useTelemetry } from 'frappe-ui/frappe'
-import { Button, Tooltip, createResource, toast } from 'frappe-ui'
+import { Button, Tooltip, createResource, toast, dayjs } from 'frappe-ui'
 import { useElementVisibility } from '@vueuse/core'
 import {
   ref,
@@ -1012,6 +1000,50 @@ function get_activities() {
   return [...all_activities.data.versions, ...all_activities.data.calls]
 }
 
+// who each feed entry is "by", for the avatar rail (type drives the badge)
+function railProps(activity) {
+  const t = activity.activity_type
+  if (t == 'incoming_text')
+    return {
+      image: doc.value.image,
+      label: doc.value.lead_name || doc.value.first_name,
+      type: t,
+    }
+  if (t == 'outgoing_text') return { user: activity.sender, type: t }
+  if (t == 'incoming_call' || t == 'outgoing_call')
+    return {
+      image: activity._caller?.image,
+      label: activity._caller?.label,
+      type: t,
+    }
+  if (t == 'communication') return { user: activity.data?.sender, type: t }
+  if (t == 'task') return { user: activity.task?.assigned_to, type: t }
+  if (t == 'tax_pull') return { user: activity.pull?.pulled_by, type: t }
+  if (t == 'agreement') return { user: activity.agreement?.owner, type: t }
+  if (t == 'underwriting')
+    return { user: activity.workbook?.created_by_user, type: t }
+  return { user: activity.owner, type: t }
+}
+
+// day dividers: the feed repeats "22 hours ago" on every row otherwise —
+// group by calendar day and let each row carry just a clock time
+function isNewDay(i) {
+  if (i == 0) return true
+  const day = (a) => dayjs(a.creation).format('YYYY-MM-DD')
+  return day(activities.value[i]) != day(activities.value[i - 1])
+}
+
+function dayLabel(date) {
+  const d = dayjs(date)
+  if (d.isSame(dayjs(), 'day')) return __('Today')
+  if (d.isSame(dayjs().subtract(1, 'day'), 'day')) return __('Yesterday')
+  return d.format(d.isSame(dayjs(), 'year') ? 'ddd, MMM D' : 'MMM D, YYYY')
+}
+
+function shortTime(date) {
+  return formatDate(date, 'h:mm a')
+}
+
 // texts as timeline entries, so they show in the unified Activity feed
 function get_text_activities() {
   if (!smsMessages.data) return []
@@ -1127,8 +1159,6 @@ const activities = computed(() => {
   }
 
   _activities.forEach((activity) => {
-    activity.icon = timelineIcon(activity.activity_type, activity.is_lead)
-
     if (
       activity.activity_type == 'incoming_call' ||
       activity.activity_type == 'outgoing_call' ||
@@ -1266,50 +1296,6 @@ const emptyTextIcon = computed(() => {
   }
   return h(icon, { class: 'text-ink-gray-4' })
 })
-
-function timelineIcon(activity_type, is_lead) {
-  let icon
-  switch (activity_type) {
-    case 'creation':
-      icon = is_lead ? LeadsIcon : DealsIcon
-      break
-    case 'deal':
-      icon = DealsIcon
-      break
-    case 'comment':
-      icon = CommentIcon
-      break
-    case 'incoming_call':
-      icon = InboundCallIcon
-      break
-    case 'outgoing_call':
-      icon = OutboundCallIcon
-      break
-    case 'attachment_log':
-      icon = AttachmentIcon
-      break
-    case 'incoming_text':
-    case 'outgoing_text':
-      icon = CommentIcon
-      break
-    case 'task':
-      icon = TaskIcon
-      break
-    case 'tax_pull':
-      icon = MoneyIcon
-      break
-    case 'agreement':
-      icon = DetailsIcon
-      break
-    case 'underwriting':
-      icon = DetailsIcon
-      break
-    default:
-      icon = DotIcon
-  }
-
-  return markRaw(icon)
-}
 
 const emailBox = ref(null)
 const whatsappBox = ref(null)

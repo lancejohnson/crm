@@ -1,15 +1,11 @@
 <template>
   <div :id="activity.name" class="group">
-    <div class="mb-1 flex items-center justify-stretch gap-2 py-1 text-base">
+    <div class="mb-1 flex items-center justify-stretch gap-2 py-1 text-xs">
       <div class="inline-flex items-center flex-wrap gap-1 text-ink-gray-5">
-        <UserAvatar class="mr-1" :user="activity.owner" size="md" />
         <span class="font-medium text-ink-gray-8">
           {{ activity.owner_name }}
         </span>
-        <span>{{ __('added a') }}</span>
-        <span class="max-w-xs truncate font-medium text-ink-gray-8">
-          {{ __('comment') }}
-        </span>
+        <span>{{ __('commented') }}</span>
       </div>
       <div class="ml-auto flex items-center gap-1 whitespace-nowrap">
         <Button
@@ -35,8 +31,8 @@
           </template>
         </Button>
         <Tooltip :text="formatDate(activity.creation)">
-          <div class="text-sm text-ink-gray-5">
-            {{ __(timeAgo(activity.creation)) }}
+          <div class="text-xs text-ink-gray-5">
+            {{ formatDate(activity.creation, 'h:mm a') }}
           </div>
         </Tooltip>
       </div>
@@ -103,13 +99,12 @@
   </div>
 </template>
 <script setup>
-import UserAvatar from '@/components/UserAvatar.vue'
 import AttachmentItem from '@/components/AttachmentItem.vue'
 import EditIcon from '@/components/Icons/EditIcon.vue'
 import LucideTrash2 from '~icons/lucide/trash-2'
 import { sessionStore } from '@/stores/session'
 import { usersStore } from '@/stores/users'
-import { timeAgo, formatDate, sanitizeHTML } from '@/utils'
+import { formatDate, sanitizeHTML } from '@/utils'
 import { Button, Tooltip, TextEditor, Dialog, call, toast } from 'frappe-ui'
 import { computed, ref } from 'vue'
 

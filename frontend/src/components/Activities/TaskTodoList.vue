@@ -52,7 +52,9 @@
         </Tooltip>
       </div>
 
-      <!-- Trello-style quick add: title + optional due date/time -->
+      <!-- one-row composer: type a title, Enter to add; the interval chips drop
+           a follow-up task due now + the interval (typed title or "Follow up");
+           the calendar icon reveals a full date/time picker on demand -->
       <div
         class="flex items-center gap-2 border-t border-outline-gray-1 px-3 py-1.5"
       >
@@ -64,38 +66,38 @@
           class="min-w-0 flex-1 bg-transparent text-base text-ink-gray-8 placeholder:text-ink-gray-4 focus:outline-none"
           @keydown.enter="submit"
         />
-        <DateTimePicker
-          v-model="newDue"
-          class="todo-datepicker w-40 shrink-0"
-          :placeholder="__('Due date')"
-          :format="getFormat('', '', true, true, false)"
-          input-class="border-none !bg-transparent text-sm"
-        />
-      </div>
-
-      <!-- One-tap follow-up: drops a task due now + the interval. Uses the typed
-           title if there is one, else "Follow up". Lands at the top of the feed,
-           right where you return after a Send Text / Log a Call modal closes. -->
-      <div
-        class="flex items-center gap-2 border-t border-outline-gray-1 px-3 py-1.5"
-      >
-        <span class="shrink-0 text-sm text-ink-gray-4">
-          {{ __('Follow up in') }}
-        </span>
-        <div class="flex flex-wrap items-center gap-1.5">
-          <Tooltip
-            v-for="f in followUps"
-            :key="f.label"
-            :text="dueTooltip(f)"
-          >
+        <div class="flex shrink-0 items-center gap-1.5">
+          <Tooltip v-for="f in followUps" :key="f.label" :text="dueTooltip(f)">
             <button
-              class="rounded-md border border-outline-gray-1 px-2 py-0.5 text-sm text-ink-gray-7 hover:bg-surface-gray-3"
+              class="rounded-md border border-outline-gray-1 px-1.5 py-0.5 text-xs text-ink-gray-5 hover:bg-surface-gray-3"
               @click="followUp(f)"
             >
               {{ f.label }}
             </button>
           </Tooltip>
+          <Tooltip :text="__('Pick a due date')">
+            <button
+              class="flex items-center text-ink-gray-4 hover:text-ink-gray-6"
+              :class="{ 'text-ink-gray-7': showDatePicker || newDue }"
+              @click="showDatePicker = !showDatePicker"
+            >
+              <LucideCalendar class="size-4" />
+            </button>
+          </Tooltip>
         </div>
+      </div>
+      <div
+        v-if="showDatePicker"
+        class="flex items-center gap-2 border-t border-outline-gray-1 px-3 py-1.5"
+      >
+        <span class="shrink-0 text-xs text-ink-gray-4">{{ __('Due') }}</span>
+        <DateTimePicker
+          v-model="newDue"
+          class="todo-datepicker flex-1"
+          :placeholder="__('Due date')"
+          :format="getFormat('', '', true, true, false)"
+          input-class="border-none !bg-transparent text-sm"
+        />
       </div>
     </div>
   </div>
@@ -103,6 +105,7 @@
 
 <script setup>
 import ListTodoIcon from '~icons/lucide/list-todo'
+import LucideCalendar from '~icons/lucide/calendar'
 import LucideCircle from '~icons/lucide/circle'
 import LucideCircleCheckBig from '~icons/lucide/circle-check-big'
 import LucidePlus from '~icons/lucide/plus'
@@ -118,6 +121,7 @@ const props = defineProps({
 
 const newTitle = ref('')
 const newDue = ref('')
+const showDatePicker = ref(false)
 
 // open tasks sorted by due date ascending (overdue first → today → future);
 // undated tasks sink to the bottom.
@@ -140,6 +144,7 @@ function submit() {
   const due = newDue.value
   newTitle.value = ''
   newDue.value = ''
+  showDatePicker.value = false
   props.modalRef.addTask(t, due)
 }
 
@@ -158,7 +163,7 @@ function dueAt(f) {
 }
 
 function dueTooltip(f) {
-  return formatDate(dueAt(f), 'ddd, MMM D, YYYY | hh:mm a')
+  return __('Follow up') + ' · ' + formatDate(dueAt(f), 'ddd, MMM D, YYYY | hh:mm a')
 }
 
 function followUp(f) {
