@@ -503,8 +503,28 @@ duplicating. Work substantial features in a worktree of your own.
   decluttered "More" menu next to the name) that spins up a pre-filled, editable
   Documenso e-sign draft of the wholesale purchase agreement and hands back a
   self-serve buyer signing link. A modal picks the agreement type (Standard vs
-  Novation/+AIF) and seller count; two sellers reveals a Seller 2 name/email (one
-  seller drops the Seller 2 fields). Mirrors the BatchData Fetch-Tax-Info wiring.
+  Novation/+AIF vs Amendment) and seller count; two sellers reveals a Seller 2
+  name/email (one seller drops the Seller 2 fields). Mirrors the BatchData
+  Fetch-Tax-Info wiring. (E-sign moved Documenso → **DocuSeal Cloud Pro** 2026-06:
+  backend is now app code `crm/api/agreement.py` `create_docuseal_agreement`,
+  templates resolved by NAME in the DocuSeal "Purchase Agreements" folder, newest
+  id wins — see the `docuseal-migration-project` memory.)
+  - **Amendment type (2026-07-14)** — "Amendment (price / closing date)" in the
+    type dropdown creates an Amendment-to-PSA envelope from the DocuSeal
+    templates `Amendment - One Seller` / `- Two Sellers` (ids 4996712/4996713,
+    built from Lance's Desktop DOCX via `POST /templates/docx` UNTAGGED + field
+    areas computed from the rendered PDF's underscore blanks and `PUT` back —
+    text-tags reflowed the layout, don't use them; area `page` is 0-indexed on
+    write despite the QUIRKS note). GOTCHA (bit us again): the freshly-built
+    templates 500'd on ANY `values` prefill — the known DocuSeal glitch; the fix
+    is CLONE the template (clone regenerates fields cleanly, accepts values) and
+    archive the original, hence the final ids. Buyer role prefills only
+    `Seller Name(s)` + `Property Address`; Binding Agreement Date, amended price
+    and amended closing date are left for the buyer on the signing page. Seller
+    name fields (`Seller Name` / `Seller 1 Name` / `Seller 2 Name`) match the
+    existing `_seller_values` superset so seller prefill just works.
+    `crm/api/agreement.py` (`want_amendment` + resolver branch) +
+    `CreateAgreementModal.vue` (third type option).
   - `components/Modals/CreateAgreementModal.vue` (chooser + success view: buyer
     link with copy/open + seller links), mounted in `Activities/AllModals.vue`
     (`createAgreement()` + expose), forwarded by `Activities/Activities.vue`.

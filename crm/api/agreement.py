@@ -2,7 +2,7 @@
 
 **DocuSeal** (current) — a user clicks **Create Purchase Agreement** on a lead →
 `create_docuseal_agreement()` resolves the right DocuSeal template (Standard vs
-Novation/+AIF × one/two sellers), prefills the buyer/seller fields, creates a
+Novation/+AIF vs Amendment × one/two sellers), prefills the buyer/seller fields, creates a
 submission with `send_email:false`, stores a **CRM Esign Agreement** row
 (`provider="docuseal"`) and hands back self-serve signing links. A DocuSeal
 webhook (`docuseal_webhook`) keeps the row's status current as recipients
@@ -104,16 +104,19 @@ def _docuseal_token() -> str:
 	return token
 
 
-def _resolve_template_ids(want_aif: bool, want_two: bool):
+def _resolve_template_ids(want_aif: bool, want_two: bool, want_amendment: bool = False):
 	"""Resolve the template id(s) for this deal; newest id wins per match.
 
 	Templates in the "Purchase Agreements" folder (one document each):
 	  Purchase Agreement - One Seller / - Two Sellers   (Buyer + Seller(s))
 	  AIF - One Seller / - Two Sellers                  (Seller(s) only)
+	  Amendment - One Seller / - Two Sellers            (Buyer + Seller(s))
 
 	A Standard deal is the Purchase Agreement template alone; a Novation deal
 	adds the matching AIF document into the SAME envelope at create time (via
 	`POST /submissions/pdf` `template_ids`) — no pre-merged templates to maintain.
+	An Amendment (price / closing-date change to an executed agreement) is its
+	own single-document envelope.
 	Returns (template_ids, display_title).
 	"""
 	token = _docuseal_token()
@@ -134,6 +137,12 @@ def _resolve_template_ids(want_aif: bool, want_two: bool):
 				if chosen is None or (t.get("id") or 0) > (chosen.get("id") or 0):
 					chosen = t
 		return chosen
+
+	if want_amendment:
+		amd = _best(lambda n: n.startswith("Amendment") and (("Two" in n) == want_two))
+		if not amd:
+			frappe.throw(_("No matching DocuSeal Amendment template was found."))
+		return [amd["id"]], amd["name"]
 
 	wpa = _best(lambda n: n.startswith("Purchase Agreement") and "AIF" not in n and (("Two" in n) == want_two))
 	if not wpa:
@@ -177,6 +186,7 @@ def create_docuseal_agreement(
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 
 	leaddoc = frappe.get_doc("CRM Lead", lead)
+	want_amendment = str(template).strip().lower() == "amendment"
 	want_aif = str(template).strip().lower() in ("novation", "aif")
 	# `two_sellers` arrives as a seller *count* ("1" / "2") from the modal, so
 	# "1" must mean one seller — don't run it through the generic `_truthy`
@@ -200,7 +210,7 @@ def create_docuseal_agreement(
 	if want_two and not seller2_name:
 		frappe.throw(_("Enter the second seller's name."))
 
-	template_ids, template_title = _resolve_template_ids(want_aif, want_two)
+	template_ids, template_title = _resolve_template_ids(want_aif, want_two, want_amendment)
 
 	addr = (leaddoc.get("property_address") or "").strip()
 	sellers_joined = seller1_name + ((" and " + seller2_name) if (want_two and seller2_name) else "")
@@ -210,22 +220,30 @@ def create_docuseal_agreement(
 
 	# Buyer-role prefill: identity pulled off the lead + standard defaults for the
 	# boilerplate terms (all still editable by the buyer on the signing page).
-	buyer_values = _clean({
-		# from the lead
-		"Seller Name(s)": sellers_joined,
-		"Property Address": addr,
-		"County": (leaddoc.get("property_county") or "").strip(),
-		"APN": (leaddoc.get("apn") or "").strip(),
-		"Governing State": _state_abbr(leaddoc.get("property_state")),
-		"Signer Name": buyer_name,
-		# standard defaults
-		"Earnest Money": "100",
-		"Due Diligence Days": "30",
-		"Occupancy": _OCCUPANCY_DEFAULT,
-		"Personal Property": "None.",
-		"Additional Terms": "None.",
-		"Disclosed Defects": "None known.",
-	})
+	# The Amendment only carries name/address; the amended price, closing date and
+	# Binding Agreement Date are the whole point of the document — buyer fills them.
+	if want_amendment:
+		buyer_values = _clean({
+			"Seller Name(s)": sellers_joined,
+			"Property Address": addr,
+		})
+	else:
+		buyer_values = _clean({
+			# from the lead
+			"Seller Name(s)": sellers_joined,
+			"Property Address": addr,
+			"County": (leaddoc.get("property_county") or "").strip(),
+			"APN": (leaddoc.get("apn") or "").strip(),
+			"Governing State": _state_abbr(leaddoc.get("property_state")),
+			"Signer Name": buyer_name,
+			# standard defaults
+			"Earnest Money": "100",
+			"Due Diligence Days": "30",
+			"Occupancy": _OCCUPANCY_DEFAULT,
+			"Personal Property": "None.",
+			"Additional Terms": "None.",
+			"Disclosed Defects": "None known.",
+		})
 
 	# Seller-role prefill. Field names differ across templates; pass the superset
 	# and DocuSeal ignores keys that don't exist on that submitter.
