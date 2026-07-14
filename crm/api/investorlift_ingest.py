@@ -17,9 +17,13 @@ in our own timeline.
 
 import json
 
+import requests
+
 import frappe
 from frappe import _
 from frappe.utils import now_datetime
+
+OPENPHONE = "https://api.openphone.com/v1"
 
 BUYER_DOCTYPE = "CRM Buyer"
 LEAD_BUYER_DOCTYPE = "CRM Lead Buyer"
@@ -251,6 +255,70 @@ def get_buyer(buyer):
 
 	doc["deals"] = deals
 	return doc
+
+
+def _e164(number):
+	"""Best-effort E164 for a US buyer phone ('(313) 502-6343' → '+13135026343')."""
+	d = "".join(c for c in (number or "") if c.isdigit())
+	if len(d) == 10:
+		return "+1" + d
+	if len(d) == 11 and d.startswith("1"):
+		return "+" + d
+	return ("+" + d) if d else ""
+
+
+@frappe.whitelist()
+def get_buyer_conversation(buyer):
+	"""Live Quo (OpenPhone) conversation for a buyer — every text + call between our
+	Quo lines and the buyer's number, merged and time-sorted. Fetched live from the
+	OpenPhone API (buyer numbers are regular E164, which the API returns), so it stays
+	current with no backfill to maintain. Powers the buyer page's activity timeline."""
+	if not any(r in ("System Manager", "Sales Manager", "Sales User") for r in frappe.get_roles()):
+		frappe.throw(_("Only sales users can view buyer activity."), frappe.PermissionError)
+	phone = frappe.db.get_value(BUYER_DOCTYPE, buyer, "phone")
+	e164 = _e164(phone)
+	if not e164:
+		return {"phone": None, "items": []}
+	key = (frappe.conf.get("quo_api_key") or "").strip()
+	if not key:
+		return {"phone": e164, "items": [], "error": "quo_api_key not set"}
+	h = {"Authorization": key, "User-Agent": "curl/8.1.0"}
+
+	try:
+		lines = requests.get(f"{OPENPHONE}/phone-numbers", headers=h, timeout=20).json().get("data", [])
+	except Exception:
+		return {"phone": e164, "items": [], "error": "openphone unreachable"}
+
+	items = []
+	for ln in lines:
+		pid, lname = ln.get("id"), ln.get("name")
+		params = {"phoneNumberId": pid, "participants": [e164], "maxResults": 50}
+		try:
+			for m in requests.get(f"{OPENPHONE}/messages", params=params, headers=h, timeout=20).json().get("data", []):
+				items.append({
+					"kind": "text",
+					"direction": m.get("direction"),
+					"text": m.get("text") or "",
+					"at": m.get("createdAt"),
+					"line": lname,
+				})
+		except Exception:
+			pass
+		try:
+			for c in requests.get(f"{OPENPHONE}/calls", params=params, headers=h, timeout=20).json().get("data", []):
+				items.append({
+					"kind": "call",
+					"direction": c.get("direction"),
+					"at": c.get("createdAt") or c.get("answeredAt") or c.get("completedAt"),
+					"duration": c.get("duration"),
+					"status": c.get("status"),
+					"line": lname,
+				})
+		except Exception:
+			pass
+
+	items.sort(key=lambda x: x.get("at") or "")
+	return {"phone": e164, "items": items}
 
 
 @frappe.whitelist()

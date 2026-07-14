@@ -105,6 +105,51 @@
         {{ __('Not engaged with any property yet.') }}
       </div>
     </div>
+
+    <!-- Quo conversation (live texts + calls with this buyer) -->
+    <div class="border-t px-6 py-5">
+      <div class="mb-3 flex items-center gap-2 text-base font-medium text-ink-gray-8">
+        <CommentIcon class="size-4 text-ink-gray-7" />
+        {{ __('Conversation') }}
+        <span v-if="convo.length" class="text-ink-gray-4">{{ convo.length }}</span>
+        <LoadingIndicator v-if="conversation.loading" class="size-3.5 text-ink-gray-4" />
+      </div>
+
+      <div v-if="convo.length" class="flex max-w-2xl flex-col gap-1.5">
+        <template v-for="(it, i) in convo" :key="i">
+          <!-- text -->
+          <div
+            v-if="it.kind === 'text'"
+            class="flex flex-col"
+            :class="isOut(it) ? 'items-end' : 'items-start'"
+          >
+            <div
+              class="max-w-[85%] rounded-2xl px-3 py-1.5 text-sm"
+              :class="isOut(it) ? 'bg-blue-500 text-white' : 'bg-surface-gray-3 text-ink-gray-8'"
+            >
+              {{ it.text }}
+            </div>
+            <div class="mt-0.5 px-1 text-xs text-ink-gray-4">
+              {{ isOut(it) ? it.line : '' }}
+              {{ formatDate(it.at, 'MMM D, h:mm a') }}
+            </div>
+          </div>
+          <!-- call -->
+          <div v-else class="my-1 flex items-center justify-center gap-2 text-xs text-ink-gray-5">
+            <PhoneIcon class="size-3" />
+            <span>
+              {{ it.direction === 'outgoing' ? __('Outgoing call') : __('Incoming call') }}
+              <template v-if="it.duration"> · {{ fmtDur(it.duration) }}</template>
+              · {{ formatDate(it.at, 'MMM D, h:mm a') }}
+              <span class="text-ink-gray-4"> · {{ it.line }}</span>
+            </span>
+          </div>
+        </template>
+      </div>
+      <div v-else-if="!conversation.loading" class="text-sm text-ink-gray-5">
+        {{ __('No Quo texts or calls with this buyer yet.') }}
+      </div>
+    </div>
   </div>
 </template>
 
@@ -113,11 +158,19 @@ import LayoutHeader from '@/components/LayoutHeader.vue'
 import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
 import Email2Icon from '@/components/Icons/Email2Icon.vue'
 import CopyIcon from '~icons/lucide/copy'
+import CommentIcon from '@/components/Icons/CommentIcon.vue'
 import BadgeCheckIcon from '~icons/lucide/badge-check'
 import HistoryIcon from '~icons/lucide/history'
 import DispoIcon from '~icons/lucide/columns-3'
-import { copyToClipboard, timeAgo } from '@/utils'
-import { Breadcrumbs, Avatar, Badge, createResource, usePageMeta } from 'frappe-ui'
+import { copyToClipboard, timeAgo, formatDate } from '@/utils'
+import {
+  Breadcrumbs,
+  Avatar,
+  Badge,
+  LoadingIndicator,
+  createResource,
+  usePageMeta,
+} from 'frappe-ui'
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 
@@ -139,6 +192,23 @@ const tags = computed(() =>
     .filter(Boolean),
 )
 const telDigits = computed(() => (data.value?.phone || '').replace(/[^\d+]/g, ''))
+
+// live Quo conversation (texts + calls) with this buyer
+const conversation = createResource({
+  url: 'crm.api.investorlift_ingest.get_buyer_conversation',
+  makeParams: () => ({ buyer: buyerId.value }),
+  auto: true,
+})
+const convo = computed(() => conversation.data?.items || [])
+function isOut(it) {
+  return it.direction === 'outgoing'
+}
+function fmtDur(secs) {
+  secs = Number(secs) || 0
+  const m = Math.floor(secs / 60)
+  const s = secs % 60
+  return m ? `${m}m ${s}s` : `${s}s`
+}
 
 const breadcrumbs = computed(() => [
   { label: __('Buyer') },
