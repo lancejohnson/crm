@@ -229,7 +229,12 @@ scheduler_events = {
 		# AI "Integrity Report": review yesterday's recorded calls + email Lance a digest
 		"crm.api.call_review_ai.run_daily_integrity_report",
 	],
-	"hourly_long": ["crm.lead_syncing.background_sync.sync_leads_from_sources_hourly"],
+	"hourly_long": [
+		"crm.lead_syncing.background_sync.sync_leads_from_sources_hourly",
+		# InvestorLift Tier-1: refresh marketing metrics for every lead linked to an
+		# IL property (needs `sync_jobs` on prod after deploy — see gw127/128).
+		"crm.api.investorlift.sync_all_marketing",
+	],
 	"monthly_long": ["crm.lead_syncing.background_sync.sync_leads_from_sources_monthly"],
 	"cron": {
 		# Single periodic driver for CRM Sequences: enqueue a drainer for every

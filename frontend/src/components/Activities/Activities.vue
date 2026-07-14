@@ -47,6 +47,10 @@
       "
       class="activities"
     >
+      <DispoHeaderBlock
+        v-if="title == 'Activity' && doctype == 'CRM Lead' && doc.il_property_id"
+        :lead="props.docname"
+      />
       <TaskTodoList
         v-if="title == 'Activity'"
         :tasks="openTasks"
@@ -714,6 +718,7 @@ import NoteArea from '@/components/Activities/NoteArea.vue'
 import TaskArea from '@/components/Activities/TaskArea.vue'
 import TaskTodoList from '@/components/Activities/TaskTodoList.vue'
 import QuickComments from '@/components/Activities/QuickComments.vue'
+import DispoHeaderBlock from '@/components/Activities/DispoHeaderBlock.vue'
 import AttachmentArea from '@/components/Activities/AttachmentArea.vue'
 import DataFields from '@/components/Activities/DataFields.vue'
 import UserAvatar from '@/components/UserAvatar.vue'

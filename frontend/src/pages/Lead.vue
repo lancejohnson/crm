@@ -254,6 +254,7 @@
         :lead="leadId"
         @create="activities?.createUnderwriting()"
       />
+      <InvestorLiftCard :lead="leadId" :address="doc.property_address" />
       <div v-if="sections.data" class="flex flex-col">
         <SidePanelLayout
           :sections="sections.data"
@@ -335,6 +336,7 @@ import FirstCallReadCard from '@/components/FirstCallReadCard.vue'
 import TaxInfoCard from '@/components/TaxInfoCard.vue'
 import AgreementsCard from '@/components/AgreementsCard.vue'
 import UnderwritingCard from '@/components/UnderwritingCard.vue'
+import InvestorLiftCard from '@/components/InvestorLiftCard.vue'
 import MoneyIcon from '@/components/Icons/MoneyIcon.vue'
 import {
   openWebsite,
