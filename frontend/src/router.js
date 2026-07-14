@@ -70,6 +70,18 @@ const routes = [
     props: true,
   },
   {
+    path: '/buyers/:buyerId',
+    name: 'Buyer',
+    component: () => import('@/pages/Buyer.vue'),
+    props: true,
+  },
+  {
+    path: '/dispo/:leadId?',
+    name: 'Dispo',
+    component: () => import('@/pages/Dispo.vue'),
+    props: true,
+  },
+  {
     alias: '/organizations',
     path: '/organizations/view/:viewType?',
     name: 'Organizations',

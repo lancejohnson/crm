@@ -61,6 +61,8 @@ import InviteUserPage from '@/components/Settings/InviteUserPage.vue'
 import ProfilePage from '@/components/Settings/Profile/ProfilePage.vue'
 import PreferencesSettings from '@/components/Settings/PreferencesSettings.vue'
 import NotificationsSettings from '@/components/Settings/NotificationsSettings.vue'
+import InvestorLiftSettings from '@/components/Settings/InvestorLiftSettings.vue'
+import LucideMegaphone from '~icons/lucide/megaphone'
 import WhatsAppSettings from '@/components/Settings/WhatsAppSettings.vue'
 import ERPNextSettings from '@/components/Settings/ERPNextSettings.vue'
 import LeadSyncSourcePage from '@/components/Settings/LeadSyncing/LeadSyncSourcePage.vue'
@@ -145,6 +147,11 @@ const tabs = computed(() => {
           label: __('Sidebar'),
           icon: PanelLeftIcon,
           component: markRaw(SidebarSettings),
+        },
+        {
+          label: __('InvestorLift'),
+          icon: LucideMegaphone,
+          component: markRaw(InvestorLiftSettings),
         },
       ],
       condition: () => isManager(),

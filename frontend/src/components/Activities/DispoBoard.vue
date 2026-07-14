@@ -1,0 +1,150 @@
+<template>
+  <div class="flex h-full overflow-x-auto px-2 py-3 sm:px-4">
+    <div
+      v-for="col in columns"
+      :key="col.stage"
+      class="flex min-w-72 w-72 flex-col gap-2.5 rounded-lg p-2.5"
+    >
+      <div class="flex items-center gap-2 px-1">
+        <IndicatorIcon :class="col.color" />
+        <div class="text-base text-ink-gray-9">{{ col.stage }}</div>
+        <div class="text-ink-gray-4">{{ col.buyers.length }}</div>
+      </div>
+
+      <div class="flex flex-col gap-3.5 overflow-y-auto">
+        <router-link
+          v-for="b in col.buyers"
+          :key="b.name"
+          :to="{ name: 'Buyer', params: { buyerId: b.buyer } }"
+          class="flex flex-col rounded-lg border bg-surface-white px-3.5 pb-2.5 pt-3 text-base text-ink-gray-9 hover:border-outline-gray-3"
+        >
+          <!-- title: name + verified + direction -->
+          <div class="flex items-center gap-1.5">
+            <span class="truncate font-medium">{{ b.buyer_name || '—' }}</span>
+            <BadgeCheckIcon
+              v-if="b.verified"
+              class="size-4 shrink-0 text-ink-blue-3"
+            />
+            <div class="flex-1" />
+            <Badge
+              v-if="b.direction"
+              :theme="b.direction === 'Inbound' ? 'green' : 'blue'"
+              variant="subtle"
+              size="sm"
+            >
+              {{ b.direction }}
+            </Badge>
+          </div>
+
+          <div class="my-2.5 h-px border-b" />
+
+          <!-- fields -->
+          <div class="flex flex-col gap-2 text-sm">
+            <div v-if="b.buyer_type" class="flex flex-wrap gap-1">
+              <span
+                v-for="t in tagList(b.buyer_type)"
+                :key="t"
+                class="rounded bg-surface-gray-2 px-1.5 py-0.5 text-xs text-ink-gray-7"
+              >
+                {{ t }}
+              </span>
+            </div>
+            <a
+              v-if="b.phone"
+              :href="telHref(b.phone)"
+              class="flex items-center gap-1.5 text-ink-gray-8 hover:text-ink-blue-3"
+              @click.stop
+            >
+              <PhoneIcon class="size-3.5 text-ink-gray-5" />
+              {{ b.phone }}
+            </a>
+            <div v-if="b.deal_history" class="flex items-center gap-1.5 text-ink-gray-6">
+              <HistoryIcon class="size-3.5 text-ink-gray-5" />
+              {{ b.deal_history }}
+            </div>
+          </div>
+
+          <div class="mb-2 mt-2.5 h-px border-b" />
+          <div class="flex items-center justify-between text-xs text-ink-gray-5">
+            <span>{{ b.last_active ? formatDate(b.last_active, '', true) : '' }}</span>
+            <span v-if="b.message_count" class="flex items-center gap-1">
+              <NoteIcon class="size-3" /> {{ b.message_count }}
+            </span>
+          </div>
+        </router-link>
+
+        <div v-if="!col.buyers.length" class="px-1 py-2 text-sm text-ink-gray-4">
+          {{ __('No buyers') }}
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import IndicatorIcon from '@/components/Icons/IndicatorIcon.vue'
+import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
+import NoteIcon from '@/components/Icons/NoteIcon.vue'
+import BadgeCheckIcon from '~icons/lucide/badge-check'
+import HistoryIcon from '~icons/lucide/history'
+import { formatDate, parseColor } from '@/utils'
+import { globalStore } from '@/stores/global'
+import { Badge, createResource } from 'frappe-ui'
+import { computed, onMounted, onBeforeUnmount } from 'vue'
+
+const props = defineProps({
+  lead: { type: String, required: true },
+})
+
+const { $socket } = globalStore()
+
+// Canonical stage order + column colors (mirrors the InvestorLift board).
+const STAGES = [
+  { stage: 'New', color: 'blue' },
+  { stage: 'Attempted to Contact', color: 'orange' },
+  { stage: 'Not Interested', color: 'gray' },
+  { stage: 'Interested', color: 'green' },
+  { stage: 'Offer Made', color: 'purple' },
+]
+
+const buyers = createResource({
+  url: 'crm.api.investorlift_ingest.get_deal_buyers',
+  params: { lead: props.lead },
+  cache: ['deal_buyers', props.lead],
+  auto: true,
+})
+
+const columns = computed(() => {
+  const rows = buyers.data || []
+  const byStage = {}
+  for (const s of STAGES) byStage[s.stage] = []
+  for (const r of rows) {
+    const stage = byStage[r.interest_stage] ? r.interest_stage : 'New'
+    byStage[stage].push(r)
+  }
+  return STAGES.map((s) => ({
+    stage: s.stage,
+    color: parseColor(s.color),
+    buyers: byStage[s.stage],
+  }))
+})
+
+function tagList(buyer_type) {
+  return (buyer_type || '')
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean)
+}
+
+function telHref(phone) {
+  return 'tel:' + (phone || '').replace(/[^\d+]/g, '')
+}
+
+function onBuyers(data) {
+  if (data.reference_doctype === 'CRM Lead' && data.reference_docname === props.lead) {
+    buyers.reload()
+  }
+}
+onMounted(() => $socket.on('crm_il_buyers', onBuyers))
+onBeforeUnmount(() => $socket.off('crm_il_buyers', onBuyers))
+</script>
