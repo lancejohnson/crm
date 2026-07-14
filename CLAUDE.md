@@ -507,8 +507,18 @@ duplicating. Work substantial features in a worktree of your own.
   name/email (one seller drops the Seller 2 fields). Mirrors the BatchData
   Fetch-Tax-Info wiring. (E-sign moved Documenso → **DocuSeal Cloud Pro** 2026-06:
   backend is now app code `crm/api/agreement.py` `create_docuseal_agreement`,
-  templates resolved by NAME in the DocuSeal "Purchase Agreements" folder, newest
-  id wins — see the `docuseal-migration-project` memory.)
+  templates resolved by NAME, newest id wins — see the `docuseal-migration-project`
+  memory.) The resolver considers ONLY the DocuSeal **"Purchase Agreements"
+  folder** (`TEMPLATE_FOLDER`) — the team builds one-off templates in the UI for
+  specific deals (they land in Default, with default First Party/Second Party
+  roles) and a one-off named "Amendment 17199 Hamburg Detroit" once won the
+  newest-name match and 422'd every CRM amendment (gw152). Keep canonical
+  templates in that folder and deal one-offs out of it. Prefill "Property
+  Address" is composed by `_full_property_address()` — street + city + state +
+  zip, each component appended only if not already inside `property_address`
+  (webhook leads carry the full string; manually-entered leads are street-only
+  with separate city/state/zip fields, which used to put just "123 Main St" on
+  agreements).
   - **Amendment type (2026-07-14)** — "Amendment (price / closing date)" in the
     type dropdown creates an Amendment-to-PSA envelope from the DocuSeal
     templates `Amendment - One Seller` / `- Two Sellers` (ids 4996712/4996713,

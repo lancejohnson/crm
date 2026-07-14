@@ -30,6 +30,10 @@ AGREEMENT_DOCTYPE = "CRM Esign Agreement"
 # DOCUSEAL_API_KEY mirrored in via `bench set-config`, like documenso_api_token).
 DOCUSEAL_API = "https://api.docuseal.com"
 
+# Our canonical e-sign templates live in this DocuSeal folder; templates anywhere
+# else (team one-offs in Default) are invisible to the resolver.
+TEMPLATE_FOLDER = "Purchase Agreements"
+
 # Documenso public API (legacy rows). Signed PDF lives behind the token, so we
 # proxy the bytes through the backend.
 DOCUMENSO_API = "https://sign.groundworkpro.com/api/v2"
@@ -67,6 +71,40 @@ def _state_abbr(state) -> str:
 	if len(s) == 2:
 		return s.upper()
 	return _STATE_ABBR.get(s.lower(), s)
+
+
+def _full_property_address(leaddoc) -> str:
+	"""The lead's property address as one full "street, city, ST zip" line.
+
+	Webhook-created leads usually already carry the full address in
+	`property_address`; manually-entered leads often have the street only, with
+	city/state/zip in their own fields. Append each component only if it isn't
+	already in the street string, so both shapes come out complete without
+	duplication. (Unit/apt "line 2" has no field of its own — when present it
+	lives inside `property_address` and passes through untouched.)
+	"""
+	street = (leaddoc.get("property_address") or "").strip().rstrip(",")
+	city = (leaddoc.get("property_city") or "").strip()
+	state = (leaddoc.get("property_state") or "").strip()
+	zipcode = (leaddoc.get("property_zip") or "").strip()
+
+	low = street.lower()
+	parts = [street] if street else []
+	if city and city.lower() not in low:
+		parts.append(city)
+
+	abbr = _state_abbr(state)
+	# The abbreviation is matched case-sensitively ("IN" shouldn't match "in").
+	has_state = bool(state) and (
+		bool(re.search(rf"\b{re.escape(abbr)}\b", street))
+		or (len(state) > 2 and bool(re.search(rf"\b{re.escape(state.lower())}\b", low)))
+	)
+	tail = abbr if (abbr and not has_state) else ""
+	if zipcode and zipcode not in street:
+		tail = f"{tail} {zipcode}".strip()
+	if tail:
+		parts.append(tail)
+	return ", ".join(parts)
 
 
 # --------------------------------------------------------------------------- #
@@ -117,16 +155,24 @@ def _resolve_template_ids(want_aif: bool, want_two: bool, want_amendment: bool =
 	`POST /submissions/pdf` `template_ids`) — no pre-merged templates to maintain.
 	An Amendment (price / closing-date change to an executed agreement) is its
 	own single-document envelope.
+
+	ONLY the "Purchase Agreements" folder is considered — the team makes one-off
+	templates in the DocuSeal UI for specific deals (e.g. "Amendment 17199
+	Hamburg Detroit", default First Party/Second Party roles) which land in the
+	Default folder and must never win the name match.
 	Returns (template_ids, display_title).
 	"""
 	token = _docuseal_token()
 	resp = requests.get(
 		f"{DOCUSEAL_API}/templates",
-		params={"limit": 100},
+		params={"limit": 100, "folder": TEMPLATE_FOLDER},
 		headers={"X-Auth-Token": token},
 		timeout=30,
 	)
-	items = (resp.json() or {}).get("data") or []
+	items = [
+		t for t in ((resp.json() or {}).get("data") or [])
+		if (t.get("folder_name") or "") == TEMPLATE_FOLDER
+	]
 
 	def _best(pred):
 		chosen = None
@@ -212,7 +258,7 @@ def create_docuseal_agreement(
 
 	template_ids, template_title = _resolve_template_ids(want_aif, want_two, want_amendment)
 
-	addr = (leaddoc.get("property_address") or "").strip()
+	addr = _full_property_address(leaddoc)
 	sellers_joined = seller1_name + ((" and " + seller2_name) if (want_two and seller2_name) else "")
 
 	def _clean(d):
