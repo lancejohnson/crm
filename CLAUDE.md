@@ -499,6 +499,15 @@ duplicating. Work substantial features in a worktree of your own.
   side-panel section columns** (`SidePanelLayout.vue` CSS) — it hid fields past
   the fold (Lance couldn't see Buyer EM); the sidebar body is one scroll
   region, so sections now grow naturally.
+- **InvestorLift dispo integration** — marketing dashboard on the lead
+  (`InvestorLiftCard.vue`) + address auto-matcher, top-level **Dispo** nav →
+  per-property buyer Kanban (`pages/Dispo.vue`) + buyer page w/ conversation
+  timeline (`pages/Buyer.vue`), automated buyer scraper with SMS-webhook 2FA
+  capture, auto-pull of new buyers from address-request notifications.
+  Backend `crm/api/investorlift*.py`; settings page
+  `Settings/InvestorLiftSettings.vue`. Full design doc:
+  `docs/investorlift-integration.md` (merged from
+  `feature/investorlift-dispo`, built in a parallel agent session).
 - **DD Expiration date** (Leads) — `dd_expiration_date` (Date custom field)
   shown as a calendar-icon row in the Lead sidebar HEADER directly under the
   Acq Price row (same minimal no-label formatting): displays
