@@ -206,6 +206,13 @@ doc_events = {
 	"CRM Underwriting Workbook": {
 		"after_insert": ["crm.api.underwriting.on_workbook_insert"],
 	},
+	# Sequence Events Log is where the OpenPhone `message.received` webhook lands
+	# every inbound text (ops repo). When one is an InvestorLift "address request"
+	# notification, pull that buyer onto the property's Dispo board in real time
+	# (webhook-driven, no polling). See crm/api/investorlift_ingest.on_sequence_event.
+	"Sequence Events Log": {
+		"after_insert": ["crm.api.investorlift_ingest.on_sequence_event"],
+	},
 	# Real-time drainer for sub-minute sequence steps. The sandboxed sequence
 	# engine can't sleep or enqueue cleanly into a worker, so the burst is driven
 	# from here (non-sandboxed): enqueue a worker that sleeps the real waits and
