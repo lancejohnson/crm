@@ -499,6 +499,18 @@ duplicating. Work substantial features in a worktree of your own.
   side-panel section columns** (`SidePanelLayout.vue` CSS) — it hid fields past
   the fold (Lance couldn't see Buyer EM); the sidebar body is one scroll
   region, so sections now grow naturally.
+- **DD Expiration date** (Leads) — `dd_expiration_date` (Date custom field)
+  shown as a calendar-icon row in the Lead sidebar HEADER directly under the
+  Acq Price row (same minimal no-label formatting): displays
+  "7/16/26 (2 days left)" — a day-granular countdown, red once past / amber on
+  the day (shared `ddExpiration()` helper in `frontend/src/utils/index.js`,
+  reuses `dueColor`). Click opens the native date picker (hidden
+  `<input type="date">` + `showPicker()`), hover ✕ clears. Also renderable as
+  a **Leads Kanban card field** (selectable in KanbanSettings automatically
+  since it's a real column; `dd_expiration_date` branches in `pages/Leads.vue`
+  template + `parseRows` render the same countdown + color). Deliberately NOT
+  in the side-panel Dispo section. `pages/Lead.vue` + `pages/Leads.vue` +
+  `utils/index.js`; ops: field added via `setup_dispo_fields.py`.
 - **Documenso "Create Purchase Agreement"** (Leads) — a header action (in the
   decluttered "More" menu next to the name) that spins up a pre-filled, editable
   Documenso e-sign draft of the wholesale purchase agreement and hands back a

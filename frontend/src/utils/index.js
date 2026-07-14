@@ -115,6 +115,21 @@ export function dueColor(date) {
   return ''
 }
 
+// DD (due diligence) expiration display: "7/16/26 (2 days left)". Shared by
+// the Lead header row and the Kanban card field so both read identically.
+// Day-granular like dueColor(): red once the date has passed, amber on the
+// day itself.
+export function ddExpiration(date) {
+  if (!date) return { label: '', color: '' }
+  const day = dayjs(date).startOf('day')
+  const diff = day.diff(dayjs().startOf('day'), 'day')
+  let left
+  if (diff === 0) left = 'today'
+  else if (diff > 0) left = diff === 1 ? '1 day left' : `${diff} days left`
+  else left = diff === -1 ? '1 day ago' : `${-diff} days ago`
+  return { label: `${day.format('M/D/YY')} (${left})`, color: dueColor(date) }
+}
+
 // Full-card background + border tint for the Leads kanban, keyed on the next
 // task's due color from dueColor() ('red' overdue / 'amber' due today / '' none).
 // Semi-transparent washes (not solid bg-*-50) so the tint reads on BOTH themes:

@@ -178,6 +178,47 @@
                   @blur="saveAcqPrice"
                 />
               </div>
+              <!-- DD expiration: calendar icon + date (no label), mirrors the
+                   acq-price row. Shows "(N days left)" beside the date (red
+                   past / amber today); click opens the native date picker,
+                   hover ✕ clears. -->
+              <div
+                class="group/dd flex items-center gap-1.5 text-sm text-ink-gray-7"
+                :title="__('DD Expiration')"
+              >
+                <CalendarIcon class="size-3.5 shrink-0" />
+                <div
+                  class="relative flex cursor-pointer items-center"
+                  @click="openDdPicker"
+                >
+                  <span
+                    :class="
+                      ddExp.color
+                        ? parseColor(ddExp.color)
+                        : doc.dd_expiration_date
+                          ? 'text-ink-gray-7'
+                          : 'text-ink-gray-4'
+                    "
+                  >
+                    {{ ddExp.label || __('DD expiration') }}
+                  </span>
+                  <input
+                    ref="ddDateInput"
+                    type="date"
+                    tabindex="-1"
+                    :value="doc.dd_expiration_date || ''"
+                    class="pointer-events-none absolute inset-0 h-full w-full opacity-0"
+                    @change="saveDdExpiration"
+                  />
+                </div>
+                <FeatherIcon
+                  v-if="doc.dd_expiration_date"
+                  name="x"
+                  class="size-3.5 shrink-0 cursor-pointer text-ink-gray-5 opacity-0 duration-200 hover:text-ink-gray-8 group-hover/dd:opacity-100"
+                  :title="__('Clear DD expiration')"
+                  @click.stop="updateField('dd_expiration_date', '')"
+                />
+              </div>
               <div class="flex gap-1.5">
                 <Button
                   :tooltip="__('Call')"
@@ -336,12 +377,15 @@ import TaxInfoCard from '@/components/TaxInfoCard.vue'
 import AgreementsCard from '@/components/AgreementsCard.vue'
 import UnderwritingCard from '@/components/UnderwritingCard.vue'
 import MoneyIcon from '@/components/Icons/MoneyIcon.vue'
+import CalendarIcon from '@/components/Icons/CalendarIcon.vue'
 import {
   openWebsite,
   setupCustomizations,
   copyToClipboard,
   validateIsImageFile,
   isTranslatable,
+  ddExpiration,
+  parseColor,
 } from '@/utils'
 import { getView } from '@/utils/view'
 import { callHref } from '@/utils/phoneFormat'
@@ -363,6 +407,7 @@ import {
   call,
   usePageMeta,
   toast,
+  FeatherIcon,
 } from 'frappe-ui'
 import {
   ref,
@@ -683,6 +728,29 @@ function saveAcqPrice() {
     return
   }
   updateField('acq_price', numeric)
+}
+
+// DD expiration inline editor in the header (under acq price, calendar icon
+// only): the visible text is the formatted date + "(N days left)"; a hidden
+// native date input supplies the picker (showPicker on click) and fires the
+// save on change.
+const ddDateInput = ref(null)
+const ddExp = computed(() => ddExpiration(doc.value?.dd_expiration_date))
+
+function openDdPicker() {
+  const el = ddDateInput.value
+  if (!el) return
+  try {
+    el.showPicker()
+  } catch {
+    el.focus()
+  }
+}
+
+function saveDdExpiration(e) {
+  const value = e.target.value || ''
+  if (value === (doc.value.dd_expiration_date || '')) return
+  updateField('dd_expiration_date', value)
 }
 
 async function triggerStatusChange(value) {

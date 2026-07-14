@@ -268,6 +268,21 @@
           </Tooltip>
         </div>
         <div
+          v-else-if="fieldName === 'dd_expiration_date'"
+          class="truncate text-base"
+        >
+          <div
+            v-if="getRow(itemName, fieldName).label"
+            :class="
+              getRow(itemName, fieldName).color
+                ? parseColor(getRow(itemName, fieldName).color)
+                : ''
+            "
+          >
+            {{ getRow(itemName, fieldName).label }}
+          </div>
+        </div>
+        <div
           v-else-if="fieldName === '_first_call'"
           class="truncate text-base"
         >
@@ -425,6 +440,7 @@ import {
   website,
   formatTime,
   dueColor,
+  ddExpiration,
   parseColor,
   firstCallRead,
 } from '@/utils'
@@ -760,7 +776,11 @@ function parseRows(rows, columns = []) {
         _rows[row] = formatPhone(lead[row])
       }
 
-      if (row == 'lead_name') {
+      if (row == 'dd_expiration_date') {
+        // "7/16/26 (2 days left)" + due color; overrides the generic Date
+        // formatting applied above.
+        _rows[row] = ddExpiration(lead[row])
+      } else if (row == 'lead_name') {
         _rows[row] = {
           label: lead.lead_name,
           image: lead.image,
