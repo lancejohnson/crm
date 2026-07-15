@@ -56,7 +56,7 @@
           />
           <FormControl
             type="email"
-            :label="__('Email')"
+            :label="__('Email (optional)')"
             v-model="seller2Email"
             :placeholder="__('name@example.com')"
           />
@@ -221,8 +221,8 @@ function copyAll() {
 async function createDraft() {
   const lead = props.referenceDoc?.name
   if (!lead || loading.value) return
-  if (sellerCount.value === '2' && (!seller2Name.value || !seller2Email.value)) {
-    error.value = __('Enter the second seller’s name and email.')
+  if (sellerCount.value === '2' && !seller2Name.value) {
+    error.value = __('Enter the second seller’s name.')
     return
   }
   loading.value = true

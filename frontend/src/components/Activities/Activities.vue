@@ -432,10 +432,12 @@
                 <a
                   v-if="activity.agreement.is_signed"
                   :href="signedAgreementUrl(activity.agreement)"
+                  target="_blank"
+                  rel="noopener"
                   class="flex items-center gap-1 self-start text-xs font-medium text-ink-green-3 hover:text-ink-green-2"
                 >
-                  <FeatherIcon name="download" class="size-3" />
-                  {{ __('Download signed PDF') }}
+                  <FeatherIcon name="external-link" class="size-3" />
+                  {{ __('Open signed PDF') }}
                 </a>
               </div>
             </div>

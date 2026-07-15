@@ -627,6 +627,10 @@ def download_signed_agreement(agreement: str):
 	frappe.local.response.filename = _signed_filename(agr)
 	frappe.local.response.filecontent = content
 	frappe.local.response.type = "download"
+	# render in the browser tab instead of forcing a download (the frontend opens
+	# this URL with target=_blank); right-click → Save still downloads it
+	frappe.local.response.display_content_as = "inline"
+	frappe.local.response.content_type = "application/pdf"
 
 
 def _docuseal_signed_pdf(agr) -> bytes:

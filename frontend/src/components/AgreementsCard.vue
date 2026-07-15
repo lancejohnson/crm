@@ -42,11 +42,13 @@
         <a
           v-if="a.is_signed"
           :href="signedUrl(a)"
+          target="_blank"
+          rel="noopener"
           class="mt-0.5 block"
         >
-          <Button class="w-full" size="sm" theme="green" :label="__('Download signed PDF')">
+          <Button class="w-full" size="sm" theme="green" :label="__('Open signed PDF')">
             <template #prefix>
-              <FeatherIcon name="download" class="size-3.5" />
+              <FeatherIcon name="external-link" class="size-3.5" />
             </template>
           </Button>
         </a>
