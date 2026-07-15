@@ -29,7 +29,7 @@
             class="flex items-center gap-1.5 text-ink-gray-8 hover:text-ink-blue-3"
           >
             <PhoneIcon class="size-3.5 text-ink-gray-5" />
-            {{ data.phone }}
+            {{ formatPhone(data.phone) }}
           </a>
           <button
             v-if="data.phone"
@@ -62,6 +62,10 @@
 
         <!-- deal history + last active -->
         <div class="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-ink-gray-6">
+          <span v-if="(data.metros || []).length" class="flex items-center gap-1.5">
+            <MapPinIcon class="size-3.5 text-ink-gray-5" />
+            {{ data.metros.join(' · ') }}
+          </span>
           <span v-if="data.deal_history" class="flex items-center gap-1.5">
             <HistoryIcon class="size-3.5 text-ink-gray-5" />
             {{ data.deal_history }}
@@ -69,9 +73,23 @@
           <span v-if="data.last_active">
             {{ __('Last active') }} {{ timeAgo(data.last_active) }}
           </span>
-          <span class="text-ink-gray-4">{{ __('via InvestorLift') }}</span>
+          <span v-if="data.il_buyer_id" class="text-ink-gray-4">
+            {{ __('via InvestorLift') }}
+          </span>
+        </div>
+
+        <!-- buybox (free-form until structured search) -->
+        <div
+          v-if="data.buybox"
+          class="mt-2.5 max-w-xl whitespace-pre-line rounded-lg bg-surface-gray-1 px-3 py-2 text-sm text-ink-gray-7"
+        >
+          <span class="mr-1.5 text-xs font-medium uppercase text-ink-gray-5">
+            {{ __('Buybox') }}
+          </span>
+          {{ data.buybox }}
         </div>
       </div>
+      <Button variant="outline" :label="__('Edit')" @click="showEdit = true" />
     </div>
 
     <!-- engaged properties -->
@@ -80,6 +98,14 @@
         <DispoIcon class="size-4 text-ink-gray-7" />
         {{ __('Engaged properties') }}
         <span class="text-ink-gray-4">{{ deals.length }}</span>
+        <Button
+          class="ml-auto"
+          variant="outline"
+          size="sm"
+          :label="__('Add to deal')"
+          iconLeft="plus"
+          @click="showAddToDeal = true"
+        />
       </div>
 
       <div v-if="deals.length" class="overflow-hidden rounded-lg border border-outline-gray-1">
@@ -106,76 +132,87 @@
       </div>
     </div>
 
-    <!-- Quo conversation (live texts + calls with this buyer) -->
+    <!-- Quo conversation: live texts + CRM Call Log calls (same card as a lead's
+         timeline — recording, Playback w/ waveform + transcript + comments) -->
     <div class="border-t px-6 py-5">
       <div class="mb-3 flex items-center gap-2 text-base font-medium text-ink-gray-8">
         <CommentIcon class="size-4 text-ink-gray-7" />
         {{ __('Conversation') }}
-        <span v-if="convo.length" class="text-ink-gray-4">{{ convo.length }}</span>
-        <LoadingIndicator v-if="conversation.loading" class="size-3.5 text-ink-gray-4" />
+        <span v-if="timeline.length" class="text-ink-gray-4">{{ timeline.length }}</span>
+        <LoadingIndicator
+          v-if="conversation.loading || calls.loading"
+          class="size-3.5 text-ink-gray-4"
+        />
       </div>
 
-      <div v-if="convo.length" class="flex max-w-2xl flex-col gap-1.5">
-        <template v-for="(it, i) in convo" :key="i">
+      <div v-if="timeline.length" class="flex max-w-2xl flex-col gap-1.5">
+        <template v-for="(it, i) in timeline" :key="i">
           <!-- text -->
           <div
             v-if="it.kind === 'text'"
             class="flex flex-col"
-            :class="isOut(it) ? 'items-end' : 'items-start'"
+            :class="isOut(it.item) ? 'items-end' : 'items-start'"
           >
             <div
               class="max-w-[85%] rounded-2xl px-3 py-1.5 text-sm"
-              :class="isOut(it) ? 'bg-blue-500 text-white' : 'bg-surface-gray-3 text-ink-gray-8'"
+              :class="isOut(it.item) ? 'bg-blue-500 text-white' : 'bg-surface-gray-3 text-ink-gray-8'"
             >
-              {{ it.text }}
+              {{ it.item.text }}
             </div>
             <div class="mt-0.5 px-1 text-xs text-ink-gray-4">
-              {{ isOut(it) ? it.line : '' }}
-              {{ formatDate(it.at, 'MMM D, h:mm a') }}
+              {{ isOut(it.item) ? it.item.line : '' }}
+              {{ formatDate(it.item.at, 'MMM D, h:mm a') }}
             </div>
           </div>
-          <!-- call -->
-          <div v-else class="my-1 flex items-center justify-center gap-2 text-xs text-ink-gray-5">
-            <PhoneIcon class="size-3" />
-            <span>
-              {{ it.direction === 'outgoing' ? __('Outgoing call') : __('Incoming call') }}
-              <template v-if="it.duration"> · {{ fmtDur(it.duration) }}</template>
-              · {{ formatDate(it.at, 'MMM D, h:mm a') }}
-              <span class="text-ink-gray-4"> · {{ it.line }}</span>
-            </span>
-          </div>
+          <!-- call — the lead timeline's call card -->
+          <CallArea v-else class="my-2" :activity="it.item" />
         </template>
       </div>
-      <div v-else-if="!conversation.loading" class="text-sm text-ink-gray-5">
+      <div v-else-if="!conversation.loading && !calls.loading" class="text-sm text-ink-gray-5">
         {{ __('No Quo texts or calls with this buyer yet.') }}
       </div>
     </div>
   </div>
+
+  <BuyerModal v-model="showEdit" :buyer="data" @saved="buyer.reload()" />
+  <AddBuyerToDealModal
+    v-model="showAddToDeal"
+    :buyer="buyerId"
+    @saved="buyer.reload()"
+  />
 </template>
 
 <script setup>
 import LayoutHeader from '@/components/LayoutHeader.vue'
+import BuyerModal from '@/components/Modals/BuyerModal.vue'
+import AddBuyerToDealModal from '@/components/Modals/AddBuyerToDealModal.vue'
+import CallArea from '@/components/Activities/CallArea.vue'
 import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
 import Email2Icon from '@/components/Icons/Email2Icon.vue'
 import CopyIcon from '~icons/lucide/copy'
 import CommentIcon from '@/components/Icons/CommentIcon.vue'
 import BadgeCheckIcon from '~icons/lucide/badge-check'
 import HistoryIcon from '~icons/lucide/history'
+import MapPinIcon from '~icons/lucide/map-pin'
 import DispoIcon from '~icons/lucide/columns-3'
 import { copyToClipboard, timeAgo, formatDate } from '@/utils'
+import { formatPhone } from '@/utils/phoneFormat'
 import {
   Breadcrumbs,
   Avatar,
   Badge,
+  Button,
   LoadingIndicator,
   createResource,
   usePageMeta,
 } from 'frappe-ui'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 const route = useRoute()
 const buyerId = computed(() => route.params.buyerId)
+const showEdit = ref(false)
+const showAddToDeal = ref(false)
 
 const buyer = createResource({
   url: 'crm.api.investorlift_ingest.get_buyer',
@@ -193,21 +230,31 @@ const tags = computed(() =>
 )
 const telDigits = computed(() => (data.value?.phone || '').replace(/[^\d+]/g, ''))
 
-// live Quo conversation (texts + calls) with this buyer
+// live Quo texts with this buyer (calls come from CRM Call Log below)
 const conversation = createResource({
   url: 'crm.api.investorlift_ingest.get_buyer_conversation',
   makeParams: () => ({ buyer: buyerId.value }),
   auto: true,
 })
-const convo = computed(() => conversation.data?.items || [])
+// CRM Call Log calls — same shape as the lead timeline's call entries
+const calls = createResource({
+  url: 'crm.api.buyers.get_buyer_calls',
+  makeParams: () => ({ buyer: buyerId.value }),
+  auto: true,
+})
+const timeline = computed(() => {
+  const items = []
+  for (const t of conversation.data?.items || []) {
+    if (t.kind !== 'text') continue
+    items.push({ kind: 'text', item: t, epoch: Date.parse(t.at) || 0 })
+  }
+  for (const c of calls.data || []) {
+    items.push({ kind: 'call', item: c, epoch: (c.at_epoch || 0) * 1000 })
+  }
+  return items.sort((a, b) => a.epoch - b.epoch)
+})
 function isOut(it) {
   return it.direction === 'outgoing'
-}
-function fmtDur(secs) {
-  secs = Number(secs) || 0
-  const m = Math.floor(secs / 60)
-  const s = secs % 60
-  return m ? `${m}m ${s}s` : `${s}s`
 }
 
 const breadcrumbs = computed(() => [

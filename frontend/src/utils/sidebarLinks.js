@@ -10,6 +10,7 @@ import CommentIcon from '@/components/Icons/CommentIcon.vue'
 import StepsIcon from '@/components/Icons/StepsIcon.vue'
 import LucideHeadphones from '~icons/lucide/headphones'
 import LucideColumns3 from '~icons/lucide/columns-3'
+import LucideUsersRound from '~icons/lucide/users-round'
 
 // The Call Review tab (and its AI integrity notes) is restricted to Lance — he
 // runs the CRM as his own user and reviews calls himself. Mirrors the backend
@@ -30,6 +31,7 @@ export const sidebarLinks = [
   { label: 'Leads', icon: LeadsIcon, to: 'Leads' },
   { label: 'Deals', icon: DealsIcon, to: 'Deals' },
   { label: 'Dispo', icon: LucideColumns3, to: 'Dispo' },
+  { label: 'Buyers', icon: LucideUsersRound, to: 'Buyers' },
   { label: 'Contacts', icon: ContactsIcon, to: 'Contacts' },
   { label: 'Organizations', icon: OrganizationsIcon, to: 'Organizations' },
   { label: 'Notes', icon: NoteIcon, to: 'Notes' },

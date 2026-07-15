@@ -51,18 +51,32 @@ def _last10(number):
 	return "".join(ch for ch in (number or "") if ch.isdigit())[-10:]
 
 
-def _find_buyer(email, phone):
-	"""Dedupe key: email first (stable per buyer), then last-10 phone digits."""
+def _find_buyer(email, phone, name=None):
+	"""Dedupe key: email first (stable per buyer), then last-10 phone digits.
+	Last resort: exact name match against a buyer that has NO email and NO phone —
+	those rows only come from the address-request webhook when the contact lookup
+	failed (e.g. Marcel Cohen), so an enrichment pass should merge into them
+	rather than create a duplicate."""
 	if email:
-		name = frappe.db.get_value(BUYER_DOCTYPE, {"email": email}, "name")
-		if name:
-			return name
+		buyer = frappe.db.get_value(BUYER_DOCTYPE, {"email": email}, "name")
+		if buyer:
+			return buyer
 	if phone:
 		last10 = _last10(phone)
 		if last10:
 			# no SQL LIKE on a computed suffix — scan the small buyer set by digits
 			for b in frappe.get_all(BUYER_DOCTYPE, filters={"phone": ("is", "set")}, fields=["name", "phone"]):
 				if _last10(b.phone) == last10:
+					return b.name
+	if name:
+		want = name.strip().lower()
+		if want:
+			for b in frappe.get_all(
+				BUYER_DOCTYPE,
+				filters={"email": ("is", "not set"), "phone": ("is", "not set")},
+				fields=["name", "buyer_name"],
+			):
+				if (b.buyer_name or "").strip().lower() == want:
 					return b.name
 	return None
 
@@ -89,7 +103,7 @@ def _upsert_buyer(row):
 	if row.get("il_buyer_id"):
 		fields["il_buyer_id"] = str(row["il_buyer_id"])
 
-	name = _find_buyer(email, phone)
+	name = _find_buyer(email, phone, full_name)
 	if name:
 		# only overwrite with non-empty values (never blank out on a sparse scrape)
 		update = {k: v for k, v in fields.items() if v not in (None, "")}
@@ -145,7 +159,9 @@ def ingest_deal_buyers(il_property_id, buyers):
 	for row in buyers or []:
 		try:
 			existed = _find_buyer(
-				(row.get("email") or "").strip().lower() or None, (row.get("phone") or "").strip() or None
+				(row.get("email") or "").strip().lower() or None,
+				(row.get("phone") or "").strip() or None,
+				(row.get("name") or "").strip() or None,
 			)
 			buyer = _upsert_buyer(row)
 			if existed:
@@ -246,6 +262,44 @@ def _lookup_signup(buyer_name):
 	return None, None
 
 
+def _inquiry_contact(il_property_id, buyer_name):
+	"""Look up an address-requester's contact info from the IL admin API: the
+	property's inquiries carry a customer_id; the customer record has the email +
+	SMS phone (+ verified). Returns {} on any failure — callers degrade to the
+	name-only row the webhook used to create."""
+	from crm.api import investorlift as il
+
+	want = (buyer_name or "").strip().lower()
+	if not (want and il_property_id):
+		return {}
+	try:
+		token = il.get_token()
+		h = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+		inquiries = requests.get(
+			f"{il.API_BASE}/properties/{il_property_id}/inquiries",
+			params={"per_page": 100}, headers=h, timeout=25,
+		).json().get("data", [])
+		for inq in inquiries:
+			cid = inq.get("customer_id")
+			if not cid:
+				continue
+			c = requests.get(f"{il.API_BASE}/customers/{cid}", headers=h, timeout=20).json()
+			cust = c.get("data") if isinstance(c, dict) and "data" in c else c
+			if not isinstance(cust, dict):
+				continue
+			if (cust.get("full_name") or "").strip().lower() != want:
+				continue
+			return {
+				"email": cust.get("email") or inq.get("from_email"),
+				"phone": (cust.get("unsubscribe_sms_data") or {}).get("phone") or inq.get("from_phone"),
+				"verified": bool(cust.get("is_id_verified")),
+				"il_buyer_id": cid,
+			}
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "IL inquiry-contact lookup failed")
+	return {}
+
+
 def _handle_address_request(buyer_name, address):
 	from crm.api import investorlift as il
 
@@ -268,6 +322,15 @@ def _handle_address_request(buyer_name, address):
 
 	email, phone = _lookup_signup(buyer_name)
 	row = {"name": buyer_name, "email": email, "phone": phone, "direction": "Inbound", "column": "NEW LEADS"}
+	if not (email and phone):
+		# no paired signup text (buyer signed up long ago / >40 events back) —
+		# pull contact info from the IL API instead (the Marcel Cohen case)
+		extra = _inquiry_contact(frappe.db.get_value("CRM Lead", lead, "il_property_id"), buyer_name)
+		if extra:
+			row["email"] = row["email"] or extra.get("email")
+			row["phone"] = row["phone"] or extra.get("phone")
+			row["verified"] = extra.get("verified")
+			row["il_buyer_id"] = extra.get("il_buyer_id")
 	buyer = _upsert_buyer(row)
 	_upsert_relationship(lead, buyer, row)
 	frappe.db.commit()
@@ -388,12 +451,14 @@ def get_buyer(buyer):
 	if not frappe.db.exists(BUYER_DOCTYPE, buyer):
 		frappe.throw(_("Buyer not found"), frappe.DoesNotExistError)
 
-	doc = frappe.db.get_value(
-		BUYER_DOCTYPE, buyer,
-		["name", "buyer_name", "first_name", "last_name", "phone", "email",
-		 "verified", "buyer_type", "deal_history", "last_active", "il_buyer_id"],
-		as_dict=True,
-	)
+	fields = ["name", "buyer_name", "first_name", "last_name", "phone", "email",
+	          "verified", "buyer_type", "deal_history", "last_active", "il_buyer_id"]
+	if frappe.get_meta(BUYER_DOCTYPE).has_field("metro_areas"):
+		fields += ["metro_areas", "buybox"]
+	doc = frappe.db.get_value(BUYER_DOCTYPE, buyer, fields, as_dict=True)
+	from crm.api.buyers import _parse_metros
+
+	doc["metros"] = _parse_metros(doc.get("metro_areas"))
 
 	deals = []
 	rels = frappe.get_all(
@@ -432,10 +497,11 @@ def _e164(number):
 
 @frappe.whitelist()
 def get_buyer_conversation(buyer):
-	"""Live Quo (OpenPhone) conversation for a buyer — every text + call between our
-	Quo lines and the buyer's number, merged and time-sorted. Fetched live from the
-	OpenPhone API (buyer numbers are regular E164, which the API returns), so it stays
-	current with no backfill to maintain. Powers the buyer page's activity timeline."""
+	"""Live Quo (OpenPhone) texts with a buyer, time-sorted. Fetched live from the
+	OpenPhone API (buyer numbers are regular E164, which the API returns), so it
+	stays current with no backfill to maintain. Calls are NOT fetched here anymore —
+	they come from CRM Call Log via crm.api.buyers.get_buyer_calls, which carries
+	recordings + transcripts and renders with the lead timeline's CallArea card."""
 	if not any(r in ("System Manager", "Sales Manager", "Sales User") for r in frappe.get_roles()):
 		frappe.throw(_("Only sales users can view buyer activity."), frappe.PermissionError)
 	phone = frappe.db.get_value(BUYER_DOCTYPE, buyer, "phone")
@@ -463,18 +529,6 @@ def get_buyer_conversation(buyer):
 					"direction": m.get("direction"),
 					"text": m.get("text") or "",
 					"at": m.get("createdAt"),
-					"line": lname,
-				})
-		except Exception:
-			pass
-		try:
-			for c in requests.get(f"{OPENPHONE}/calls", params=params, headers=h, timeout=20).json().get("data", []):
-				items.append({
-					"kind": "call",
-					"direction": c.get("direction"),
-					"at": c.get("createdAt") or c.get("answeredAt") or c.get("completedAt"),
-					"duration": c.get("duration"),
-					"status": c.get("status"),
 					"line": lname,
 				})
 		except Exception:

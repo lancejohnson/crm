@@ -56,7 +56,7 @@
               @click.stop
             >
               <PhoneIcon class="size-3.5 text-ink-gray-5" />
-              {{ b.phone }}
+              {{ formatPhone(b.phone) }}
             </a>
             <div v-if="b.deal_history" class="flex items-center gap-1.5 text-ink-gray-6">
               <HistoryIcon class="size-3.5 text-ink-gray-5" />
@@ -88,6 +88,7 @@ import NoteIcon from '@/components/Icons/NoteIcon.vue'
 import BadgeCheckIcon from '~icons/lucide/badge-check'
 import HistoryIcon from '~icons/lucide/history'
 import { formatDate, parseColor } from '@/utils'
+import { formatPhone } from '@/utils/phoneFormat'
 import { globalStore } from '@/stores/global'
 import { Badge, createResource } from 'frappe-ui'
 import { computed, onMounted, onBeforeUnmount } from 'vue'

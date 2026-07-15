@@ -25,6 +25,13 @@
       </div>
     </template>
     <template #right-header>
+      <Button
+        v-if="selectedLead"
+        variant="solid"
+        :label="__('Add buyer')"
+        iconLeft="plus"
+        @click="showAddBuyer = true"
+      />
       <router-link
         v-if="selectedLead"
         :to="{ name: 'Lead', params: { leadId: selectedLead } }"
@@ -35,7 +42,12 @@
   </LayoutHeader>
 
   <div class="flex flex-1 overflow-hidden">
-    <DispoBoard v-if="selectedLead" :key="selectedLead" :lead="selectedLead" class="w-full" />
+    <DispoBoard
+      v-if="selectedLead"
+      :key="selectedLead + '-' + boardKey"
+      :lead="selectedLead"
+      class="w-full"
+    />
     <div
       v-else
       class="flex flex-1 flex-col items-center justify-center gap-2 text-ink-gray-4"
@@ -50,11 +62,18 @@
       </span>
     </div>
   </div>
+
+  <AddBuyerToDealModal
+    v-model="showAddBuyer"
+    :lead="selectedLead || ''"
+    @saved="boardKey++"
+  />
 </template>
 
 <script setup>
 import LayoutHeader from '@/components/LayoutHeader.vue'
 import DispoBoard from '@/components/Activities/DispoBoard.vue'
+import AddBuyerToDealModal from '@/components/Modals/AddBuyerToDealModal.vue'
 import DispoIcon from '~icons/lucide/columns-3'
 import ChevronDownIcon from '~icons/lucide/chevron-down'
 import { Breadcrumbs, Button, Badge, Dropdown, createResource, usePageMeta } from 'frappe-ui'
@@ -71,6 +90,8 @@ const properties = createResource({
 const list = computed(() => properties.data || [])
 
 const selectedLead = ref(route.params.leadId || null)
+const showAddBuyer = ref(false)
+const boardKey = ref(0)
 
 function selectProperty(p, push = true) {
   selectedLead.value = p.lead

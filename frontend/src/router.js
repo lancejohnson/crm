@@ -70,6 +70,11 @@ const routes = [
     props: true,
   },
   {
+    path: '/buyers',
+    name: 'Buyers',
+    component: () => import('@/pages/Buyers.vue'),
+  },
+  {
     path: '/buyers/:buyerId',
     name: 'Buyer',
     component: () => import('@/pages/Buyer.vue'),
