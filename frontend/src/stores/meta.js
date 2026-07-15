@@ -50,14 +50,18 @@ export function getMeta(doctype) {
 
   function getCurrencyWithPrecision(fieldname, doc) {
     let df = doctypesMeta[doctype]?.fields.find((f) => f.fieldname == fieldname)
-    let precision = df?.precision || null
+    // whole-dollar display by default (Acq/Dispo prices etc.) — a docfield can
+    // still opt into decimals with an explicit precision
+    let precision = df?.precision || 0
     return formatCurrency(doc[fieldname], '', '', precision)
   }
 
   function getFormattedCurrency(fieldname, doc, parentDoc = null) {
     let currency = window.sysdefaults.currency || 'USD'
     let df = doctypesMeta[doctype]?.fields.find((f) => f.fieldname == fieldname)
-    let precision = df?.precision || null
+    // whole-dollar display by default (Acq/Dispo prices etc.) — a docfield can
+    // still opt into decimals with an explicit precision
+    let precision = df?.precision || 0
 
     if (df && df.options) {
       if (df.options.indexOf(':') != -1) {

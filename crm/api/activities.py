@@ -1,4 +1,5 @@
 import json
+import re
 
 import frappe
 from bs4 import BeautifulSoup
@@ -21,6 +22,15 @@ def get_activities(name: str):
 		frappe.throw(_("Document not found"), frappe.DoesNotExistError)
 
 
+def strip_currency_cents(val):
+	"""Version docs store currency changes as display strings ("$ 2,500.00");
+	show them whole-dollar in the timeline, like currency renders everywhere
+	else in the app."""
+	if isinstance(val, str):
+		return re.sub(r"\.\d+$", "", val)
+	return val
+
+
 def get_deal_activities(name: str):
 	if not frappe.has_permission("CRM Deal", "read", name):
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
@@ -29,7 +39,8 @@ def get_deal_activities(name: str):
 	docinfo = frappe.response["docinfo"]
 	deal_meta = frappe.get_meta("CRM Deal")
 	deal_fields = {
-		field.fieldname: {"label": field.label, "options": field.options} for field in deal_meta.fields
+		field.fieldname: {"label": field.label, "options": field.options, "fieldtype": field.fieldtype}
+		for field in deal_meta.fields
 	}
 	avoid_fields = [
 		"lead",
@@ -109,6 +120,10 @@ def get_deal_activities(name: str):
 				if data.get("old_value"):
 					data["old_value"] = _(data["old_value"])
 
+			if field.get("fieldtype") == "Currency":
+				data["value"] = strip_currency_cents(data.get("value"))
+				data["old_value"] = strip_currency_cents(data.get("old_value"))
+
 		activity = {
 			"activity_type": activity_type,
 			"creation": version.creation,
@@ -184,7 +199,8 @@ def get_lead_activities(name: str):
 	docinfo = frappe.response["docinfo"]
 	lead_meta = frappe.get_meta("CRM Lead")
 	lead_fields = {
-		field.fieldname: {"label": field.label, "options": field.options} for field in lead_meta.fields
+		field.fieldname: {"label": field.label, "options": field.options, "fieldtype": field.fieldtype}
+		for field in lead_meta.fields
 	}
 	avoid_fields = [
 		"converted",
@@ -250,6 +266,10 @@ def get_lead_activities(name: str):
 
 				if data.get("old_value"):
 					data["old_value"] = _(data["old_value"])
+
+			if field.get("fieldtype") == "Currency":
+				data["value"] = strip_currency_cents(data.get("value"))
+				data["old_value"] = strip_currency_cents(data.get("old_value"))
 
 		activity = {
 			"activity_type": activity_type,

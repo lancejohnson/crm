@@ -133,7 +133,7 @@
                 theme="green"
               />
               <span v-if="ld.mobile_no" class="text-xs text-ink-gray-4">
-                {{ ld.mobile_no }}
+                {{ formatPhone(ld.mobile_no) }}
               </span>
               <span class="ml-auto text-xs text-ink-gray-4">
                 {{ ld.calls.length }}
@@ -411,6 +411,7 @@
 import LayoutHeader from '@/components/LayoutHeader.vue'
 import CallTranscript from '@/components/Activities/CallTranscript.vue'
 import { formatDuration } from '@/utils'
+import { formatPhone } from '@/utils/phoneFormat'
 import { dayjs } from 'frappe-ui'
 import {
   Breadcrumbs,
