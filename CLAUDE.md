@@ -508,6 +508,56 @@ duplicating. Work substantial features in a worktree of your own.
   `Settings/InvestorLiftSettings.vue`. Full design doc:
   `docs/investorlift-integration.md` (merged from
   `feature/investorlift-dispo`, built in a parallel agent session).
+- **Buyer directory + manual buyer creation + metro areas** (gw158-gw165) — a
+  top-level **Buyers** nav (`/buyers`, `pages/Buyers.vue`): searchable directory
+  of every CRM Buyer (search + metro filter + "Active in" = metro or engaged
+  property cities + deal counts), a **New buyer** modal
+  (`Modals/BuyerModal.vue`, create/edit, dedupes by email→phone→name and offers
+  "Open" on a duplicate), and metro linkage: new ops doctype **CRM Metro Area**
+  seeded with the **393 Census MSAs** (July 2023 OMB delineation, vendored at
+  `../frappe-crm-deploy/scripts/data/us_metro_areas.txt`), plus
+  `CRM Buyer.metro_area` (Link) + `buybox` (Small Text, free-form until buybox
+  search is structured). Backend `crm/api/buyers.py` (get_buyers/create_buyer/
+  update_buyer/get_metro_areas/create_metro_area/get_buyer_calls). Buyer page
+  gained Edit (same modal), metro + buybox display. Ops:
+  `scripts/setup_buyer_directory.py` (idempotent; doctype + fields + metro seed).
+  - **Buyer activity parity with leads**: the buyer page's Conversation now
+    renders calls from **CRM Call Log** (matched by last-10 phone against
+    from/to) with the lead timeline's own `CallArea` card — recording, Playback
+    (waveform + transcript + comments), AI summary — merged time-sorted with the
+    live-fetched Quo texts. `get_buyer_calls` reuses `parse_call_log` and
+    substitutes the buyer's name for the "Unknown" contact side;
+    `get_buyer_conversation` (ingest) is texts-only now.
+  - **IL buyer contact enrichment (Marcel Cohen fix)**: the address-request
+    webhook now falls back to the IL admin API (property inquiries →
+    `/customers/{id}`) when the paired "New buyer signed up" text isn't found,
+    so buyers arrive with email/phone/verified/il_buyer_id instead of name-only;
+    `_find_buyer` gained a last-resort name match against email-less+phone-less
+    rows so enrichment merges instead of duplicating (`investorlift_ingest.py`).
+    Cleaned the two prod duplicates (Marcel Cohen, Illinois Land Investment).
+  - **Whole-dollar currency display**: `stores/meta.js` getFormattedCurrency/
+    getCurrencyWithPrecision default precision 0 (docfield precision still
+    wins), and `crm/api/activities.py` `strip_currency_cents()` drops the ".00"
+    Version docs bake into timeline "added Acq Price as $ 2,500.00" entries.
+  - **Signed agreement PDFs open inline**: `download_signed_agreement` sets
+    `display_content_as="inline"` + `content_type="application/pdf"`; the
+    AgreementsCard + timeline links are now "Open signed PDF" with
+    `target=_blank` (opens as a browser tab; right-click still saves).
+  - **Phone display formatting**: buyer surfaces (Buyer/Buyers/DispoBoard/
+    CallReview) render numbers via the existing `formatPhone` → (###) ###-####.
+  - **Metros are MULTI-select** (gw166): `CRM Buyer.metro_areas` (Small Text,
+    JSON array — metro names contain commas) supersedes the single `metro_area`
+    Link; BuyerModal uses a chips + Autocomplete picker (client-side over
+    `get_metro_areas`, single-line options — the stock Link control showed
+    name+title duplicated for metros — with a Create-"query" footer);
+    `get_buyers(metro=)` filters via a quoted-JSON LIKE; `active_in` = metros
+    joined " · " else engaged-property cities.
+  - **Manually add buyers to deals** (deals = leads): `add_buyer_to_lead(lead,
+    buyer, stage)` (idempotent, publishes `crm_il_buyers`) +
+    `Modals/AddBuyerToDealModal.vue` — mounted on the **Dispo page** header
+    ("Add buyer": pick/search a buyer or create one inline via
+    `BuyerModal :redirect="false"`, pick a stage) and on the **Buyer page**
+    ("Add to deal": pick a dispo property).
 - **DD Expiration date** (Leads) — `dd_expiration_date` (Date custom field)
   shown as a calendar-icon row in the Lead sidebar HEADER directly under the
   Acq Price row (same minimal no-label formatting): displays
