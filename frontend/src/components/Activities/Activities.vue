@@ -294,7 +294,7 @@
               class="max-w-[78%] whitespace-pre-wrap rounded-lg px-2.5 py-1.5 text-base"
               :class="
                 activity.activity_type == 'outgoing_text'
-                  ? 'bg-surface-blue-2 text-white'
+                  ? 'bg-blue-500 text-white'
                   : 'bg-surface-gray-2 text-ink-gray-8'
               "
             >

@@ -42,7 +42,7 @@
           class="group/message relative rounded-lg p-1.5 pl-2 text-base shadow-sm whitespace-pre-wrap"
           :class="
             sms.type == 'Outgoing'
-              ? 'bg-surface-blue-2 text-white'
+              ? 'bg-blue-500 text-white'
               : 'bg-surface-gray-2 text-ink-gray-9'
           "
         >
