@@ -2,7 +2,7 @@
 
 **DocuSeal** (current) — a user clicks **Create Purchase Agreement** on a lead →
 `create_docuseal_agreement()` resolves the right DocuSeal template (Standard vs
-Novation/+AIF vs Amendment × one/two sellers), prefills the buyer/seller fields, creates a
+Novation/+AIF vs Amendment vs Cancellation × one/two sellers), prefills the buyer/seller fields, creates a
 submission with `send_email:false`, stores a **CRM Esign Agreement** row
 (`provider="docuseal"`) and hands back self-serve signing links. A DocuSeal
 webhook (`docuseal_webhook`) keeps the row's status current as recipients
@@ -142,18 +142,22 @@ def _docuseal_token() -> str:
 	return token
 
 
-def _resolve_template_ids(want_aif: bool, want_two: bool, want_amendment: bool = False):
+def _resolve_template_ids(
+	want_aif: bool, want_two: bool, want_amendment: bool = False, want_cancellation: bool = False
+):
 	"""Resolve the template id(s) for this deal; newest id wins per match.
 
 	Templates in the "Purchase Agreements" folder (one document each):
 	  Purchase Agreement - One Seller / - Two Sellers   (Buyer + Seller(s))
 	  AIF - One Seller / - Two Sellers                  (Seller(s) only)
 	  Amendment - One Seller / - Two Sellers            (Buyer + Seller(s))
+	  Cancellation - One Seller / - Two Sellers         (Buyer + Seller(s))
 
 	A Standard deal is the Purchase Agreement template alone; a Novation deal
 	adds the matching AIF document into the SAME envelope at create time (via
 	`POST /submissions/pdf` `template_ids`) — no pre-merged templates to maintain.
-	An Amendment (price / closing-date change to an executed agreement) is its
+	An Amendment (price / closing-date change to an executed agreement) and a
+	Cancellation (cancel the contract + release the earnest money) are each their
 	own single-document envelope.
 
 	ONLY the "Purchase Agreements" folder is considered — the team makes one-off
@@ -189,6 +193,12 @@ def _resolve_template_ids(want_aif: bool, want_two: bool, want_amendment: bool =
 		if not amd:
 			frappe.throw(_("No matching DocuSeal Amendment template was found."))
 		return [amd["id"]], amd["name"]
+
+	if want_cancellation:
+		cxl = _best(lambda n: n.startswith("Cancellation") and (("Two" in n) == want_two))
+		if not cxl:
+			frappe.throw(_("No matching DocuSeal Cancellation template was found."))
+		return [cxl["id"]], cxl["name"]
 
 	wpa = _best(lambda n: n.startswith("Purchase Agreement") and "AIF" not in n and (("Two" in n) == want_two))
 	if not wpa:
@@ -233,6 +243,7 @@ def create_docuseal_agreement(
 
 	leaddoc = frappe.get_doc("CRM Lead", lead)
 	want_amendment = str(template).strip().lower() == "amendment"
+	want_cancellation = str(template).strip().lower() in ("cancellation", "cancel")
 	want_aif = str(template).strip().lower() in ("novation", "aif")
 	# `two_sellers` arrives as a seller *count* ("1" / "2") from the modal, so
 	# "1" must mean one seller — don't run it through the generic `_truthy`
@@ -256,7 +267,7 @@ def create_docuseal_agreement(
 	if want_two and not seller2_name:
 		frappe.throw(_("Enter the second seller's name."))
 
-	template_ids, template_title = _resolve_template_ids(want_aif, want_two, want_amendment)
+	template_ids, template_title = _resolve_template_ids(want_aif, want_two, want_amendment, want_cancellation)
 
 	addr = _full_property_address(leaddoc)
 	sellers_joined = seller1_name + ((" and " + seller2_name) if (want_two and seller2_name) else "")
@@ -268,7 +279,9 @@ def create_docuseal_agreement(
 	# boilerplate terms (all still editable by the buyer on the signing page).
 	# The Amendment only carries name/address; the amended price, closing date and
 	# Binding Agreement Date are the whole point of the document — buyer fills them.
-	if want_amendment:
+	# Same for the Cancellation: the contract date, escrow agent and earnest-money
+	# disbursement are per-deal facts the buyer fills on the signing page.
+	if want_amendment or want_cancellation:
 		buyer_values = _clean({
 			"Seller Name(s)": sellers_joined,
 			"Property Address": addr,

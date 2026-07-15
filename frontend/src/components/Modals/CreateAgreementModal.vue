@@ -16,6 +16,7 @@
             { label: __('Standard (no novation)'), value: 'standard' },
             { label: __('Novation (+ Attorney-in-Fact page)'), value: 'novation' },
             { label: __('Amendment (price / closing date)'), value: 'amendment' },
+            { label: __('Cancellation / release of earnest money'), value: 'cancellation' },
           ]"
         />
 

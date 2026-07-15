@@ -556,6 +556,22 @@ duplicating. Work substantial features in a worktree of your own.
     existing `_seller_values` superset so seller prefill just works.
     `crm/api/agreement.py` (`want_amendment` + resolver branch) +
     `CreateAgreementModal.vue` (third type option).
+  - **Cancellation type (2026-07-15)** — "Cancellation / release of earnest
+    money" in the type dropdown creates a Cancellation-of-Contract + Release-of-EMD
+    envelope from DocuSeal templates `Cancellation - One Seller` /
+    `- Two Sellers` (ids 5014844/5014850, built via `POST /templates/pdf` from
+    Lance's Desktop "Cancellation of Contract - Release of EMD.pdf" UNTAGGED +
+    `PUT` fields at coordinates computed from the PDF's rule lines with PyMuPDF;
+    cloned + originals archived per the values-prefill-500 gotcha). Buyer role
+    prefills only `Seller Name(s)` + `Property Address`; contract date, buyer
+    name(s), escrow agent, EM amount and the 4 disbursement rows are buyer-filled
+    on the signing page. Each signer has ONE signature + date field with areas in
+    BOTH sections (Cancellation block + Release block) — sign once, lands on
+    both. PDF quirk: disbursement rows 2-4 exist in the form's text layer but
+    render invisibly — filled values still print there, just without visible
+    $/to/Address labels (row 1 is the normal case).
+    `crm/api/agreement.py` (`want_cancellation` + resolver branch) +
+    `CreateAgreementModal.vue` (fourth type option).
   - `components/Modals/CreateAgreementModal.vue` (chooser + success view: buyer
     link with copy/open + seller links), mounted in `Activities/AllModals.vue`
     (`createAgreement()` + expose), forwarded by `Activities/Activities.vue`.
