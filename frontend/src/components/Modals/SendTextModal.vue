@@ -14,11 +14,14 @@
             {{ formatPhone(linkedNumber) }}
           </span>
         </div>
-        <div v-else class="flex flex-col gap-1">
-          <QuoFromSelect v-model="fromNumber" :label="__('Send from')" />
-          <div class="text-xs text-ink-gray-5">
-            {{ __('Pick the Quo number to text from — saved to your profile.') }}
-          </div>
+        <div v-else class="flex items-center justify-between gap-2">
+          <span class="text-xs text-ink-gray-5">
+            {{ __('No Quo number linked to your profile yet.') }}
+          </span>
+          <Button
+            :label="__('Select number')"
+            @click="showSelectNumber = true"
+          />
         </div>
         <div>
           <div class="mb-1.5 text-xs text-ink-gray-5">{{ __('Message') }}</div>
@@ -38,15 +41,19 @@
         variant="solid"
         :label="__('Send')"
         :loading="sending"
-        :disabled="!content.trim()"
+        :disabled="!content.trim() || !to.trim()"
         @click="sendSMS"
       />
     </template>
   </Dialog>
+  <SelectQuoNumberModal
+    v-model="showSelectNumber"
+    @saved="onNumberSaved"
+  />
 </template>
 
 <script setup>
-import QuoFromSelect from '@/components/QuoFromSelect.vue'
+import SelectQuoNumberModal from '@/components/Modals/SelectQuoNumberModal.vue'
 import { myQuoNumber, formatPhone } from '@/composables/quoSender'
 import {
   call,
@@ -72,9 +79,10 @@ const content = ref('')
 const sending = ref(false)
 const error = ref(null)
 // the sender's already-linked number (read once when the modal opens); if empty
-// the picker is shown and the chosen number is passed + saved on send
+// a modal asks them to pick their number from the Quo workspace list first
 const linkedNumber = ref('')
 const fromNumber = ref('')
+const showSelectNumber = ref(false)
 
 watch(
   show,
@@ -85,10 +93,16 @@ watch(
       error.value = null
       linkedNumber.value = myQuoNumber()
       fromNumber.value = linkedNumber.value
+      if (!linkedNumber.value) showSelectNumber.value = true
     }
   },
   { immediate: true },
 )
+
+function onNumberSaved(number) {
+  linkedNumber.value = number
+  fromNumber.value = number
+}
 
 // Texts are lead-scoped. On a deal, send to the originating lead.
 function leadName() {
@@ -110,6 +124,10 @@ async function sendSMS() {
   const lead = leadName()
   if (!lead) {
     error.value = __('No lead linked to text.')
+    return
+  }
+  if (!to.value.trim()) {
+    error.value = __("Enter the recipient's mobile number.")
     return
   }
   if (!fromNumber.value) {

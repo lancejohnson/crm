@@ -3,12 +3,14 @@
     <!-- shown only when the sender has no Quo number yet: pick one to text from -->
     <div
       v-if="!linkedNumber"
-      class="flex items-end gap-2 px-3 pt-2.5 sm:px-10"
+      class="flex items-center justify-between gap-2 px-3 pt-2.5 sm:px-10"
     >
-      <QuoFromSelect
-        v-model="fromNumber"
-        :label="__('Send from')"
-        class="w-full"
+      <span class="text-base text-ink-gray-6">
+        {{ __('No Quo number linked to your profile yet.') }}
+      </span>
+      <Button
+        :label="__('Select number')"
+        @click="showSelectNumber = true"
       />
     </div>
     <div class="flex items-end gap-2 px-3 py-2.5 sm:px-10">
@@ -32,10 +34,14 @@
       />
     </div>
   </div>
+  <SelectQuoNumberModal
+    v-model="showSelectNumber"
+    @saved="onNumberSaved"
+  />
 </template>
 
 <script setup>
-import QuoFromSelect from '@/components/QuoFromSelect.vue'
+import SelectQuoNumberModal from '@/components/Modals/SelectQuoNumberModal.vue'
 import { myQuoNumber } from '@/composables/quoSender'
 import { call, Textarea, Button, toast } from 'frappe-ui'
 import { ref, onMounted } from 'vue'
@@ -54,15 +60,22 @@ const content = ref('')
 const sending = ref(false)
 const placeholder = ref(__('Type your message here...'))
 
-// sender's linked Quo number; if empty, the picker above requires a choice,
-// which is passed on send and saved to the user's profile server-side
+// sender's linked Quo number; if empty, a modal asks them to pick their number
+// from the Quo workspace list (saved to their profile) before they can send
 const linkedNumber = ref('')
 const fromNumber = ref('')
+const showSelectNumber = ref(false)
 
 onMounted(() => {
   linkedNumber.value = myQuoNumber()
   fromNumber.value = linkedNumber.value
+  if (!linkedNumber.value) showSelectNumber.value = true
 })
+
+function onNumberSaved(number) {
+  linkedNumber.value = number
+  fromNumber.value = number
+}
 
 function show() {
   // nothing to focus until a number is chosen

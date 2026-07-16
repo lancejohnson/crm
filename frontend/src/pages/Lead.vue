@@ -231,18 +231,13 @@
                   "
                 />
 
+                <!-- no mobile guard: the modal's To field is editable, so a
+                     lead without a number can still be texted by typing one -->
                 <Button
                   v-if="smsEnabled"
                   :tooltip="__('Send a Text')"
                   :icon="CommentIcon"
-                  @click="
-                    () =>
-                      doc.mobile_no || doc.phone
-                        ? activities?.sendText()
-                        : toast.error(
-                            __('Please set a mobile number to send a text'),
-                          )
-                  "
+                  @click="activities?.sendText()"
                 />
 
                 <!-- Secondary actions live in a single menu so the row stays
