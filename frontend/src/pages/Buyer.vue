@@ -5,173 +5,218 @@
     </template>
   </LayoutHeader>
 
-  <div v-if="data" class="flex-1 overflow-y-auto">
-    <!-- profile header -->
-    <div class="flex items-start gap-4 border-b px-6 py-5">
-      <Avatar size="3xl" :label="data.buyer_name || '?'" />
-      <div class="flex-1">
-        <div class="flex items-center gap-2">
-          <h1 class="text-2xl font-semibold text-ink-gray-9">
-            {{ data.buyer_name || __('Unknown buyer') }}
-          </h1>
-          <BadgeCheckIcon
-            v-if="data.verified"
-            class="size-5 text-ink-blue-3"
-            :title="__('Verified')"
-          />
-        </div>
-
-        <!-- contact row -->
-        <div class="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-sm">
-          <a
-            v-if="data.phone"
-            :href="'tel:' + telDigits"
-            class="flex items-center gap-1.5 text-ink-gray-8 hover:text-ink-blue-3"
-          >
-            <PhoneIcon class="size-3.5 text-ink-gray-5" />
-            {{ formatPhone(data.phone) }}
-          </a>
-          <button
-            v-if="data.phone"
-            class="text-ink-gray-4 hover:text-ink-gray-7"
-            :title="__('Copy phone')"
-            @click="copyToClipboard(data.phone)"
-          >
-            <CopyIcon class="size-3.5" />
-          </button>
-          <a
-            v-if="data.email"
-            :href="'mailto:' + data.email"
-            class="flex items-center gap-1.5 text-ink-gray-8 hover:text-ink-blue-3"
-          >
-            <Email2Icon class="size-3.5 text-ink-gray-5" />
-            {{ data.email }}
-          </a>
-        </div>
-
-        <!-- type tags -->
-        <div v-if="tags.length" class="mt-2.5 flex flex-wrap gap-1">
-          <span
-            v-for="t in tags"
-            :key="t"
-            class="rounded bg-surface-gray-2 px-1.5 py-0.5 text-xs text-ink-gray-7"
-          >
-            {{ t }}
-          </span>
-        </div>
-
-        <!-- deal history + last active -->
-        <div class="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-ink-gray-6">
-          <span v-if="(data.metros || []).length" class="flex items-center gap-1.5">
-            <MapPinIcon class="size-3.5 text-ink-gray-5" />
-            {{ data.metros.join(' · ') }}
-          </span>
-          <span v-if="data.deal_history" class="flex items-center gap-1.5">
-            <HistoryIcon class="size-3.5 text-ink-gray-5" />
-            {{ data.deal_history }}
-          </span>
-          <span v-if="data.last_active">
-            {{ __('Last active') }} {{ timeAgo(data.last_active) }}
-          </span>
-          <span v-if="data.il_buyer_id" class="text-ink-gray-4">
-            {{ __('via InvestorLift') }}
-          </span>
-        </div>
-
-        <!-- buybox (free-form until structured search) -->
+  <div v-if="data" class="flex h-full overflow-hidden">
+    <Tabs
+      v-model="tabIndex"
+      :tabs="tabs"
+      class="flex flex-1 overflow-hidden flex-col [&_[role='tab']]:px-0 [&_[role='tab']]:shrink-0 [&_[role='tablist']]:px-5 [&_[role='tablist']::-webkit-scrollbar]:h-0 [&_[role='tablist']]:min-h-[45px] [&_[role='tablist']]:gap-7.5 [&_[role='tabpanel']:not([hidden])]:flex [&_[role='tabpanel']:not([hidden])]:grow"
+    >
+      <template #tab-panel>
+        <!-- Quo conversation: live texts + CRM Call Log calls. These are
+             phone-matched (not reference-linked), so they render outside the
+             Activities component. -->
         <div
-          v-if="data.buybox"
-          class="mt-2.5 max-w-xl whitespace-pre-line rounded-lg bg-surface-gray-1 px-3 py-2 text-sm text-ink-gray-7"
+          v-if="currentTab === 'Conversation'"
+          class="flex flex-1 flex-col overflow-y-auto px-3 py-4 sm:px-10"
         >
-          <span class="mr-1.5 text-xs font-medium uppercase text-ink-gray-5">
-            {{ __('Buybox') }}
-          </span>
-          {{ data.buybox }}
+          <div class="mb-3 flex items-center gap-2 text-base font-medium text-ink-gray-8">
+            {{ __('Conversation') }}
+            <span v-if="timeline.length" class="text-ink-gray-4">{{ timeline.length }}</span>
+            <LoadingIndicator
+              v-if="conversation.loading || calls.loading"
+              class="size-3.5 text-ink-gray-4"
+            />
+          </div>
+
+          <div v-if="timeline.length" class="flex max-w-2xl flex-col gap-1.5">
+            <template v-for="(it, i) in timeline" :key="i">
+              <!-- text -->
+              <div
+                v-if="it.kind === 'text'"
+                class="flex flex-col"
+                :class="isOut(it.item) ? 'items-end' : 'items-start'"
+              >
+                <div
+                  class="max-w-[85%] rounded-2xl px-3 py-1.5 text-sm"
+                  :class="isOut(it.item) ? 'bg-blue-500 text-white' : 'bg-surface-gray-3 text-ink-gray-8'"
+                >
+                  <SMSMedia
+                    v-if="it.item.media?.length"
+                    :media="it.item.media"
+                    class="my-1"
+                  />
+                  <span v-if="it.item.text">{{ it.item.text }}</span>
+                </div>
+                <div class="mt-0.5 px-1 text-xs text-ink-gray-4">
+                  {{ isOut(it.item) ? it.item.line : '' }}
+                  {{ formatDate(it.item.at, 'MMM D, h:mm a') }}
+                </div>
+              </div>
+              <!-- call — the lead timeline's call card -->
+              <CallArea v-else class="my-2" :activity="it.item" />
+            </template>
+          </div>
+          <div v-else-if="!conversation.loading && !calls.loading" class="text-sm text-ink-gray-5">
+            {{ __('No Quo texts or calls with this buyer yet.') }}
+          </div>
         </div>
-      </div>
-      <Button variant="outline" :label="__('Edit')" @click="showEdit = true" />
-    </div>
 
-    <!-- engaged properties -->
-    <div class="px-6 py-5">
-      <div class="mb-3 flex items-center gap-2 text-base font-medium text-ink-gray-8">
-        <DispoIcon class="size-4 text-ink-gray-7" />
-        {{ __('Engaged properties') }}
-        <span class="text-ink-gray-4">{{ deals.length }}</span>
-        <Button
-          class="ml-auto"
-          variant="outline"
-          size="sm"
-          :label="__('Add to deal')"
-          iconLeft="plus"
-          @click="showAddToDeal = true"
+        <!-- everything else (Activity / Comments / Tasks / Notes / Attachments)
+             rides the same Activities component leads and deals use -->
+        <Activities
+          v-else
+          ref="activities"
+          v-model:tabIndex="tabIndex"
+          doctype="CRM Buyer"
+          :docname="buyerId"
+          :tabs="tabs"
         />
-      </div>
+      </template>
+    </Tabs>
 
-      <div v-if="deals.length" class="overflow-hidden rounded-lg border border-outline-gray-1">
-        <router-link
-          v-for="d in deals"
-          :key="d.lead"
-          :to="{ name: 'Lead', params: { leadId: d.lead } }"
-          class="flex items-center gap-3 border-b border-outline-gray-1 px-4 py-3 last:border-b-0 hover:bg-surface-gray-1"
-        >
-          <div class="min-w-0 flex-1">
-            <div class="truncate text-base text-ink-gray-8">{{ d.label }}</div>
-            <div class="mt-0.5 flex items-center gap-2 text-xs text-ink-gray-5">
-              <span v-if="d.direction">{{ d.direction }}</span>
-              <span v-if="d.last_active">· {{ __('active') }} {{ timeAgo(d.last_active) }}</span>
+    <Resizer class="flex flex-col border-l" side="right">
+      <div class="flex h-full flex-col overflow-y-auto">
+        <!-- profile -->
+        <div class="flex flex-col gap-3 border-b p-5">
+          <div class="flex items-start gap-3">
+            <Avatar size="2xl" :label="data.buyer_name || '?'" />
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-1.5">
+                <div class="truncate text-lg font-semibold text-ink-gray-9">
+                  {{ data.buyer_name || __('Unknown buyer') }}
+                </div>
+                <BadgeCheckIcon
+                  v-if="data.verified"
+                  class="size-4 shrink-0 text-ink-blue-3"
+                  :title="__('Verified')"
+                />
+              </div>
+              <div v-if="data.il_buyer_id" class="text-xs text-ink-gray-4">
+                {{ __('via InvestorLift') }}
+              </div>
             </div>
+            <Button variant="outline" size="sm" :label="__('Edit')" @click="showEdit = true" />
           </div>
-          <Badge v-if="d.interest_stage" :theme="stageTheme(d.interest_stage)" variant="subtle">
-            {{ d.interest_stage }}
-          </Badge>
-        </router-link>
-      </div>
-      <div v-else class="text-sm text-ink-gray-5">
-        {{ __('Not engaged with any property yet.') }}
-      </div>
-    </div>
 
-    <!-- Quo conversation: live texts + CRM Call Log calls (same card as a lead's
-         timeline — recording, Playback w/ waveform + transcript + comments) -->
-    <div class="border-t px-6 py-5">
-      <div class="mb-3 flex items-center gap-2 text-base font-medium text-ink-gray-8">
-        <CommentIcon class="size-4 text-ink-gray-7" />
-        {{ __('Conversation') }}
-        <span v-if="timeline.length" class="text-ink-gray-4">{{ timeline.length }}</span>
-        <LoadingIndicator
-          v-if="conversation.loading || calls.loading"
-          class="size-3.5 text-ink-gray-4"
-        />
-      </div>
-
-      <div v-if="timeline.length" class="flex max-w-2xl flex-col gap-1.5">
-        <template v-for="(it, i) in timeline" :key="i">
-          <!-- text -->
-          <div
-            v-if="it.kind === 'text'"
-            class="flex flex-col"
-            :class="isOut(it.item) ? 'items-end' : 'items-start'"
-          >
-            <div
-              class="max-w-[85%] rounded-2xl px-3 py-1.5 text-sm"
-              :class="isOut(it.item) ? 'bg-blue-500 text-white' : 'bg-surface-gray-3 text-ink-gray-8'"
+          <!-- contact -->
+          <div class="flex flex-col gap-1.5 text-sm">
+            <div v-if="data.phone" class="flex items-center gap-1.5">
+              <PhoneIcon class="size-3.5 shrink-0 text-ink-gray-5" />
+              <a :href="'tel:' + telDigits" class="text-ink-gray-8 hover:text-ink-blue-3">
+                {{ formatPhone(data.phone) }}
+              </a>
+              <button
+                class="text-ink-gray-4 hover:text-ink-gray-7"
+                :title="__('Copy phone')"
+                @click="copyToClipboard(data.phone)"
+              >
+                <CopyIcon class="size-3.5" />
+              </button>
+            </div>
+            <a
+              v-if="data.email"
+              :href="'mailto:' + data.email"
+              class="flex items-center gap-1.5 text-ink-gray-8 hover:text-ink-blue-3"
             >
-              {{ it.item.text }}
-            </div>
-            <div class="mt-0.5 px-1 text-xs text-ink-gray-4">
-              {{ isOut(it.item) ? it.item.line : '' }}
-              {{ formatDate(it.item.at, 'MMM D, h:mm a') }}
-            </div>
+              <Email2Icon class="size-3.5 shrink-0 text-ink-gray-5" />
+              <span class="truncate">{{ data.email }}</span>
+            </a>
           </div>
-          <!-- call — the lead timeline's call card -->
-          <CallArea v-else class="my-2" :activity="it.item" />
-        </template>
+
+          <!-- type tags -->
+          <div v-if="tags.length" class="flex flex-wrap gap-1">
+            <span
+              v-for="t in tags"
+              :key="t"
+              class="rounded bg-surface-gray-2 px-1.5 py-0.5 text-xs text-ink-gray-7"
+            >
+              {{ t }}
+            </span>
+          </div>
+
+          <!-- metros + deal history + last active -->
+          <div class="flex flex-col gap-1 text-sm text-ink-gray-6">
+            <span v-if="(data.metros || []).length" class="flex items-center gap-1.5">
+              <MapPinIcon class="size-3.5 shrink-0 text-ink-gray-5" />
+              {{ data.metros.join(' · ') }}
+            </span>
+            <span v-if="data.deal_history" class="flex items-center gap-1.5">
+              <HistoryIcon class="size-3.5 shrink-0 text-ink-gray-5" />
+              {{ data.deal_history }}
+            </span>
+            <span v-if="data.last_active">
+              {{ __('Last active') }} {{ timeAgo(data.last_active) }}
+            </span>
+          </div>
+
+          <!-- buybox (free-form until structured search) -->
+          <div
+            v-if="data.buybox"
+            class="whitespace-pre-line rounded-lg bg-surface-gray-1 px-3 py-2 text-sm text-ink-gray-7"
+          >
+            <span class="mr-1.5 text-xs font-medium uppercase text-ink-gray-5">
+              {{ __('Buybox') }}
+            </span>
+            {{ data.buybox }}
+          </div>
+        </div>
+
+        <!-- engaged properties -->
+        <div class="px-5 py-3">
+          <div class="flex items-center gap-2 text-base font-medium text-ink-gray-8">
+            <DispoIcon class="size-4 text-ink-gray-7" />
+            {{ __('Engaged properties') }}
+            <span class="text-ink-gray-4">{{ deals.length }}</span>
+            <Button
+              class="ml-auto"
+              variant="ghost"
+              icon="plus"
+              :tooltip="__('Add to deal')"
+              @click="showAddToDeal = true"
+            />
+          </div>
+
+          <div
+            v-if="deals.length"
+            class="mt-2 overflow-hidden rounded-lg border border-outline-gray-1"
+          >
+            <router-link
+              v-for="d in deals"
+              :key="d.lead"
+              :to="{ name: 'Lead', params: { leadId: d.lead } }"
+              class="flex items-center gap-2 border-b border-outline-gray-1 px-3 py-2.5 last:border-b-0 hover:bg-surface-gray-1"
+            >
+              <div class="min-w-0 flex-1">
+                <div class="truncate text-sm text-ink-gray-8">{{ d.label }}</div>
+                <div class="mt-0.5 flex items-center gap-2 text-xs text-ink-gray-5">
+                  <span v-if="d.direction">{{ d.direction }}</span>
+                  <span v-if="d.last_active">· {{ __('active') }} {{ timeAgo(d.last_active) }}</span>
+                </div>
+              </div>
+              <Badge
+                v-if="d.interest_stage"
+                class="shrink-0"
+                :theme="stageTheme(d.interest_stage)"
+                variant="subtle"
+              >
+                {{ d.interest_stage }}
+              </Badge>
+            </router-link>
+          </div>
+          <div v-else class="mt-2 text-sm text-ink-gray-5">
+            {{ __('Not engaged with any property yet.') }}
+          </div>
+        </div>
+
+        <!-- e-sign agreements across the buyer's engaged properties -->
+        <BuyerAgreementsCard
+          ref="agreementsCard"
+          :buyer="buyerId"
+          :deals="deals"
+          @create="createAgreementFor"
+        />
       </div>
-      <div v-else-if="!conversation.loading && !calls.loading" class="text-sm text-ink-gray-5">
-        {{ __('No Quo texts or calls with this buyer yet.') }}
-      </div>
-    </div>
+    </Resizer>
   </div>
 
   <BuyerModal v-model="showEdit" :buyer="data" @saved="buyer.reload()" />
@@ -180,21 +225,40 @@
     :buyer="buyerId"
     @saved="buyer.reload()"
   />
+  <!-- Same create flow as the lead page; referenceDoc is the picked engaged
+       property's lead doc (agreements are property-keyed). -->
+  <CreateAgreementModal
+    v-if="showCreateAgreement"
+    v-model="showCreateAgreement"
+    :referenceDoc="agreementLeadDoc"
+    :buyer="buyerId"
+    :options="{ afterCreate: onAgreementCreated }"
+  />
 </template>
 
 <script setup>
 import LayoutHeader from '@/components/LayoutHeader.vue'
+import Activities from '@/components/Activities/Activities.vue'
+import Resizer from '@/components/Resizer.vue'
 import BuyerModal from '@/components/Modals/BuyerModal.vue'
 import AddBuyerToDealModal from '@/components/Modals/AddBuyerToDealModal.vue'
+import CreateAgreementModal from '@/components/Modals/CreateAgreementModal.vue'
+import BuyerAgreementsCard from '@/components/BuyerAgreementsCard.vue'
 import CallArea from '@/components/Activities/CallArea.vue'
+import SMSMedia from '@/components/Activities/SMSMedia.vue'
+import ActivityIcon from '@/components/Icons/ActivityIcon.vue'
+import CommentIcon from '@/components/Icons/CommentIcon.vue'
+import TaskIcon from '@/components/Icons/TaskIcon.vue'
+import NoteIcon from '@/components/Icons/NoteIcon.vue'
+import AttachmentIcon from '@/components/Icons/AttachmentIcon.vue'
 import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
 import Email2Icon from '@/components/Icons/Email2Icon.vue'
 import CopyIcon from '~icons/lucide/copy'
-import CommentIcon from '@/components/Icons/CommentIcon.vue'
 import BadgeCheckIcon from '~icons/lucide/badge-check'
 import HistoryIcon from '~icons/lucide/history'
 import MapPinIcon from '~icons/lucide/map-pin'
 import DispoIcon from '~icons/lucide/columns-3'
+import { useActiveTabManager } from '@/composables/useActiveTabManager'
 import { copyToClipboard, timeAgo, formatDate } from '@/utils'
 import { formatPhone } from '@/utils/phoneFormat'
 import {
@@ -202,17 +266,23 @@ import {
   Avatar,
   Badge,
   Button,
+  Tabs,
   LoadingIndicator,
   createResource,
+  call,
+  toast,
   usePageMeta,
 } from 'frappe-ui'
-import { computed, ref } from 'vue'
+import { globalStore } from '@/stores/global'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 const route = useRoute()
 const buyerId = computed(() => route.params.buyerId)
 const showEdit = ref(false)
 const showAddToDeal = ref(false)
+const activities = ref(null)
+const agreementsCard = ref(null)
 
 const buyer = createResource({
   url: 'crm.api.investorlift_ingest.get_buyer',
@@ -222,13 +292,26 @@ const buyer = createResource({
 
 const data = computed(() => buyer.data || null)
 const deals = computed(() => data.value?.deals || [])
-const tags = computed(() =>
-  (data.value?.buyer_type || '')
-    .split(',')
+// InvestorLift type tags + Quo contact tags (two-way synced), deduped
+const tags = computed(() => {
+  const all = [data.value?.buyer_type, data.value?.quo_tags]
+    .flatMap((raw) => (raw || '').split(','))
     .map((t) => t.trim())
-    .filter(Boolean),
-)
+    .filter(Boolean)
+  return [...new Set(all)]
+})
 const telDigits = computed(() => (data.value?.phone || '').replace(/[^\d+]/g, ''))
+
+const tabs = computed(() => [
+  { name: 'Activity', label: __('Activity'), icon: ActivityIcon },
+  { name: 'Conversation', label: __('Conversation'), icon: PhoneIcon },
+  { name: 'Comments', label: __('Comments'), icon: CommentIcon },
+  { name: 'Tasks', label: __('Tasks'), icon: TaskIcon },
+  { name: 'Notes', label: __('Notes'), icon: NoteIcon },
+  { name: 'Attachments', label: __('Attachments'), icon: AttachmentIcon },
+])
+const { tabIndex } = useActiveTabManager(tabs, 'lastBuyerTab')
+const currentTab = computed(() => tabs.value[tabIndex.value]?.name)
 
 // live Quo texts with this buyer (calls come from CRM Call Log below)
 const conversation = createResource({
@@ -246,7 +329,11 @@ const timeline = computed(() => {
   const items = []
   for (const t of conversation.data?.items || []) {
     if (t.kind !== 'text') continue
-    items.push({ kind: 'text', item: t, epoch: Date.parse(t.at) || 0 })
+    items.push({
+      kind: 'text',
+      item: t,
+      epoch: (t.at_epoch || 0) * 1000 || Date.parse(t.at) || 0,
+    })
   }
   for (const c of calls.data || []) {
     items.push({ kind: 'call', item: c, epoch: (c.at_epoch || 0) * 1000 })
@@ -257,8 +344,68 @@ function isOut(it) {
   return it.direction === 'outgoing'
 }
 
+// Live refresh: buyer texts are stored Quo Message rows now (webhook-mirrored),
+// so the thread updates in place; crm_buyer_update fires when the Quo-contact
+// pull sync changes this buyer (name/tags edited in the Quo app).
+const { $socket } = globalStore()
+
+function onQuoMessage(data) {
+  if (
+    data.reference_doctype === 'CRM Buyer' &&
+    data.reference_docname === buyerId.value
+  ) {
+    conversation.reload()
+  }
+}
+function onBuyerUpdate(data) {
+  if (data.buyer === buyerId.value) buyer.reload()
+}
+
+// Activities' unmount does a blanket $socket.off('quo_message') — and it
+// unmounts exactly when the Conversation tab opens — so (re)attach our
+// handler on every switch into Conversation instead of only on mount.
+watch(
+  currentTab,
+  (tab) => {
+    if (tab === 'Conversation') {
+      $socket.off('quo_message', onQuoMessage)
+      $socket.on('quo_message', onQuoMessage)
+    }
+  },
+  { immediate: true },
+)
+
+onMounted(() => {
+  $socket.on('crm_buyer_update', onBuyerUpdate)
+})
+onBeforeUnmount(() => {
+  $socket.off('quo_message', onQuoMessage)
+  $socket.off('crm_buyer_update', onBuyerUpdate)
+})
+
+// Create a purchase agreement for one of the buyer's engaged properties:
+// fetch that lead's doc (the modal prefills from property/seller fields).
+const showCreateAgreement = ref(false)
+const agreementLeadDoc = ref({})
+
+async function createAgreementFor(lead) {
+  try {
+    agreementLeadDoc.value = await call('frappe.client.get', {
+      doctype: 'CRM Lead',
+      name: lead,
+    })
+    showCreateAgreement.value = true
+  } catch (e) {
+    toast.error(e.messages?.[0] || __('Could not load the property'))
+  }
+}
+
+function onAgreementCreated() {
+  agreementsCard.value?.reload()
+}
+
 const breadcrumbs = computed(() => [
-  { label: __('Buyer') },
+  { label: __('Buyers'), route: { name: 'Buyers' } },
   { label: data.value?.buyer_name || __('Buyer') },
 ])
 

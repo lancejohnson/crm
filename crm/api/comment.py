@@ -38,11 +38,12 @@ def notify_mentions(doc):
 	doctype = doc.reference_doctype
 	if doctype.startswith("CRM "):
 		doctype = doctype[4:].lower()
-	name = (
-		reference_doc.get("lead_name")
-		if doctype == "lead"
-		else reference_doc.get("organization") or reference_doc.get("lead_name")
-	)
+	if doctype == "lead":
+		name = reference_doc.get("lead_name")
+	elif doctype == "buyer":
+		name = reference_doc.get("buyer_name")
+	else:
+		name = reference_doc.get("organization") or reference_doc.get("lead_name")
 	for mention in mentions:
 		notification_text = f"""
             <div class="mb-2 leading-5 text-ink-gray-5">
@@ -79,7 +80,7 @@ def email_mention(doc, mention, mentioned_by, record_label):
 	if not mention.email or mention.email == doc.owner:
 		return
 
-	route = "deals" if doc.reference_doctype == "CRM Deal" else "leads"
+	route = {"CRM Deal": "deals", "CRM Buyer": "buyers"}.get(doc.reference_doctype, "leads")
 	comment_link = frappe.utils.get_url(f"/crm/{route}/{doc.reference_name}#{doc.name}")
 
 	try:

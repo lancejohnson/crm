@@ -230,16 +230,21 @@ def create_docuseal_agreement(
 	seller1_email: str = None,
 	seller2_name: str = None,
 	seller2_email: str = None,
+	buyer: str = None,
 ):
 	"""Create a DocuSeal submission for a lead; return self-serve signing links.
 
 	The logged-in sales user is the Buyer (signs first, fields stay editable);
 	Seller 1 is the lead, Seller 2 is collected for two-seller deals.
+	`buyer` (optional) links the agreement to a CRM Buyer — set when the draft
+	is created from a buyer page, so it shows on that buyer's Agreements card.
 	"""
 	if not frappe.db.exists("CRM Lead", lead):
 		frappe.throw(_("Lead not found"), frappe.DoesNotExistError)
 	if not frappe.has_permission("CRM Lead", "write", lead):
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	if buyer and not frappe.db.exists("CRM Buyer", buyer):
+		frappe.throw(_("Buyer not found"), frappe.DoesNotExistError)
 
 	leaddoc = frappe.get_doc("CRM Lead", lead)
 	want_amendment = str(template).strip().lower() == "amendment"
@@ -386,7 +391,7 @@ def create_docuseal_agreement(
 		else:
 			seller_links.append({"name": s.get("name"), "link": link})
 
-	agr = frappe.get_doc({
+	row = {
 		"doctype": AGREEMENT_DOCTYPE,
 		"lead": lead,
 		"provider": "docuseal",
@@ -398,7 +403,10 @@ def create_docuseal_agreement(
 		"buyer_link": buyer_link,
 		"seller_links": json.dumps(seller_links),
 		"last_event": "created",
-	})
+	}
+	if buyer and frappe.db.has_column(AGREEMENT_DOCTYPE, "buyer"):
+		row["buyer"] = buyer
+	agr = frappe.get_doc(row)
 	agr.insert(ignore_permissions=True)
 	frappe.db.commit()
 
@@ -578,13 +586,61 @@ def get_agreements(lead: str):
 
 	rows = frappe.get_all(AGREEMENT_DOCTYPE, filters={"lead": lead}, fields=fields, order_by="creation desc")
 	for r in rows:
-		r["created_by_name"] = frappe.get_cached_value("User", r.owner, "full_name") if r.owner else None
-		try:
-			r["seller_links"] = json.loads(r.get("seller_links") or "[]")
-		except (ValueError, TypeError):
-			r["seller_links"] = []
-		r["provider"] = r.get("provider") or "documenso"
-		r["is_signed"] = _is_completed(r)
+		_shape_agreement(r)
+	return rows
+
+
+def _shape_agreement(r):
+	r["created_by_name"] = frappe.get_cached_value("User", r.owner, "full_name") if r.owner else None
+	try:
+		r["seller_links"] = json.loads(r.get("seller_links") or "[]")
+	except (ValueError, TypeError):
+		r["seller_links"] = []
+	r["provider"] = r.get("provider") or "documenso"
+	r["is_signed"] = _is_completed(r)
+	return r
+
+
+@frappe.whitelist()
+def get_buyer_agreements(buyer: str):
+	"""E-sign agreements linked to THIS buyer (via the agreement's `buyer` Link
+	field), most recent first — the buyer page's Agreements card. Deliberately
+	NOT every agreement on the buyer's engaged properties: those are usually
+	seller-side (e.g. the purchase agreement with the property's sellers). Each
+	row still carries `lead` + a display `property_label`."""
+	if not frappe.db.exists("DocType", "CRM Buyer") or not frappe.db.exists("CRM Buyer", buyer):
+		frappe.throw(_("Buyer not found"), frappe.DoesNotExistError)
+	if not frappe.has_permission("CRM Buyer", "read", buyer):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	if not frappe.db.exists("DocType", AGREEMENT_DOCTYPE) or not frappe.db.has_column(
+		AGREEMENT_DOCTYPE, "buyer"
+	):
+		return []
+
+	has_provider = frappe.db.has_column(AGREEMENT_DOCTYPE, "provider")
+	fields = [
+		"name", "lead", "document_id", "template_title", "agreement_status",
+		"signed_count", "total_signers", "buyer_link", "seller_links",
+		"last_event", "last_event_at", "creation", "owner",
+	]
+	if has_provider:
+		fields.append("provider")
+
+	rows = frappe.get_all(
+		AGREEMENT_DOCTYPE, filters={"buyer": buyer}, fields=fields, order_by="creation desc"
+	)
+	labels = {}
+	for r in rows:
+		_shape_agreement(r)
+		if r.lead not in labels:
+			info = (
+				frappe.db.get_value(
+					"CRM Lead", r.lead, ["property_address", "lead_name"], as_dict=True
+				)
+				or {}
+			)
+			labels[r.lead] = info.get("property_address") or info.get("lead_name") or r.lead
+		r["property_label"] = labels[r.lead]
 	return rows
 
 

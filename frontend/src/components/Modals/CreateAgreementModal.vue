@@ -163,6 +163,9 @@ import { ref, computed, watch } from 'vue'
 const props = defineProps({
   referenceDoc: { type: Object, default: () => ({}) },
   options: { type: Object, default: () => ({ afterCreate: () => {} }) },
+  // Optional CRM Buyer to link the agreement to (set when creating from a
+  // buyer page, so it shows on that buyer's Agreements card).
+  buyer: { type: String, default: '' },
 })
 
 const show = defineModel({ type: Boolean })
@@ -235,6 +238,7 @@ async function createDraft() {
       seller1_email: seller1Email.value,
       seller2_name: seller2Name.value,
       seller2_email: seller2Email.value,
+      buyer: props.buyer || undefined,
     })
     toast.success(__('Agreement draft created'))
     props.options.afterCreate?.()
