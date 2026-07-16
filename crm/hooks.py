@@ -206,6 +206,15 @@ doc_events = {
 	"CRM Underwriting Workbook": {
 		"after_insert": ["crm.api.underwriting.on_workbook_insert"],
 	},
+	# CRM Buyer is a custom doctype (ops repo). Buyers sync two-way with Quo
+	# (OpenPhone) contacts so every buyer's number shows their name on calls
+	# and texts: push on create/edit, tombstone-unlink on delete; the pull
+	# side is the sync_all cron below. See crm/api/quo_contacts.py.
+	"CRM Buyer": {
+		"after_insert": ["crm.api.quo_contacts.on_buyer_after_insert"],
+		"on_update": ["crm.api.quo_contacts.on_buyer_update"],
+		"on_trash": ["crm.api.quo_contacts.on_buyer_trash"],
+	},
 	# Sequence Events Log is where the OpenPhone `message.received` webhook lands
 	# every inbound text (ops repo). When one is an InvestorLift "address request"
 	# notification, pull that buyer onto the property's Dispo board in real time
@@ -249,7 +258,13 @@ scheduler_events = {
 		# favour of this). The drainer runs on the dedicated `seqdrain` queue.
 		"* * * * *": ["crm.api.sequence_drain.drain_due"],
 		"*/5 * * * *": ["crm.lead_syncing.background_sync.sync_leads_from_sources_5_minutes"],
-		"*/10 * * * *": ["crm.lead_syncing.background_sync.sync_leads_from_sources_10_minutes"],
+		"*/10 * * * *": [
+			"crm.lead_syncing.background_sync.sync_leads_from_sources_10_minutes",
+			# Buyer <-> Quo contact reconcile: pull team edits/tags from Quo,
+			# push unlinked buyers, import 'buyer'-tagged Quo contacts.
+			# (Needs `sync_jobs` on prod after deploy — see gw127/128.)
+			"crm.api.quo_contacts.sync_all",
+		],
 		"*/15 * * * *": ["crm.lead_syncing.background_sync.sync_leads_from_sources_15_minutes"],
 	},
 }

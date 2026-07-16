@@ -24,8 +24,6 @@ import frappe
 from frappe import _
 from frappe.utils import now_datetime
 
-OPENPHONE = "https://api.openphone.com/v1"
-
 BUYER_DOCTYPE = "CRM Buyer"
 LEAD_BUYER_DOCTYPE = "CRM Lead Buyer"
 
@@ -109,6 +107,11 @@ def _upsert_buyer(row):
 		update = {k: v for k, v in fields.items() if v not in (None, "")}
 		if update:
 			frappe.db.set_value(BUYER_DOCTYPE, name, update, update_modified=False)
+			# db.set_value fires no doc events — push identity changes to Quo here
+			if {"buyer_name", "first_name", "last_name", "phone", "email"} & set(update):
+				from crm.api.quo_contacts import enqueue_push
+
+				enqueue_push(name)
 		return name
 
 	doc = frappe.get_doc({"doctype": BUYER_DOCTYPE, **{k: v for k, v in fields.items() if v is not None}})
@@ -455,6 +458,8 @@ def get_buyer(buyer):
 	          "verified", "buyer_type", "deal_history", "last_active", "il_buyer_id"]
 	if frappe.get_meta(BUYER_DOCTYPE).has_field("metro_areas"):
 		fields += ["metro_areas", "buybox"]
+	if frappe.get_meta(BUYER_DOCTYPE).has_field("quo_tags"):
+		fields += ["quo_tags"]
 	doc = frappe.db.get_value(BUYER_DOCTYPE, buyer, fields, as_dict=True)
 	from crm.api.buyers import _parse_metros
 
@@ -497,45 +502,51 @@ def _e164(number):
 
 @frappe.whitelist()
 def get_buyer_conversation(buyer):
-	"""Live Quo (OpenPhone) texts with a buyer, time-sorted. Fetched live from the
-	OpenPhone API (buyer numbers are regular E164, which the API returns), so it
-	stays current with no backfill to maintain. Calls are NOT fetched here anymore —
-	they come from CRM Call Log via crm.api.buyers.get_buyer_calls, which carries
-	recordings + transcripts and renders with the lead timeline's CallArea card."""
+	"""Texts with a buyer, time-sorted — read from the stored **Quo Message**
+	rows referenced to the buyer (the sequence-events webhook mirrors buyer
+	texts now, and ops `backfill_buyer_texts.py` covered history), so the
+	thread is fast, complete, carries MMS media, and refreshes live via the
+	`quo_message` realtime event. Calls are NOT fetched here — they come from
+	CRM Call Log via crm.api.buyers.get_buyer_calls, which carries recordings
+	+ transcripts and renders with the lead timeline's CallArea card."""
 	if not any(r in ("System Manager", "Sales Manager", "Sales User") for r in frappe.get_roles()):
 		frappe.throw(_("Only sales users can view buyer activity."), frappe.PermissionError)
 	phone = frappe.db.get_value(BUYER_DOCTYPE, buyer, "phone")
 	e164 = _e164(phone)
-	if not e164:
-		return {"phone": None, "items": []}
-	key = (frappe.conf.get("quo_api_key") or "").strip()
-	if not key:
-		return {"phone": e164, "items": [], "error": "quo_api_key not set"}
-	h = {"Authorization": key, "User-Agent": "curl/8.1.0"}
+	if not frappe.db.exists("DocType", "Quo Message"):
+		return {"phone": e164 or None, "items": []}
 
-	try:
-		lines = requests.get(f"{OPENPHONE}/phone-numbers", headers=h, timeout=20).json().get("data", [])
-	except Exception:
-		return {"phone": e164, "items": [], "error": "openphone unreachable"}
+	from zoneinfo import ZoneInfo
 
+	from frappe.utils import get_datetime, get_system_timezone
+
+	from crm.api.sms import _media, _sender_map
+
+	rows = frappe.get_all(
+		"Quo Message",
+		filters={"reference_doctype": BUYER_DOCTYPE, "reference_docname": buyer},
+		fields=["name", "direction", "from", "to", "content", "media", "status",
+		        "message_date", "creation"],
+		order_by="message_date asc, creation asc",
+		limit_page_length=0,
+	)
+	senders = _sender_map()
+	tz = ZoneInfo(get_system_timezone())
 	items = []
-	for ln in lines:
-		pid, lname = ln.get("id"), ln.get("name")
-		params = {"phoneNumberId": pid, "participants": [e164], "maxResults": 50}
-		try:
-			for m in requests.get(f"{OPENPHONE}/messages", params=params, headers=h, timeout=20).json().get("data", []):
-				items.append({
-					"kind": "text",
-					"direction": m.get("direction"),
-					"text": m.get("text") or "",
-					"at": m.get("createdAt"),
-					"line": lname,
-				})
-		except Exception:
-			pass
-
-	items.sort(key=lambda x: x.get("at") or "")
-	return {"phone": e164, "items": items}
+	for m in rows:
+		out = m.direction == "Outgoing"
+		sender = senders.get(_last10(m.get("from"))) if out else None
+		at = m.message_date or m.creation
+		items.append({
+			"kind": "text",
+			"direction": "outgoing" if out else "incoming",
+			"text": m.content or "",
+			"media": _media(m.get("media")),
+			"at": at,
+			"at_epoch": get_datetime(at).replace(tzinfo=tz).timestamp() if at else 0,
+			"line": (sender.full_name if sender else None) or m.get("from"),
+		})
+	return {"phone": e164 or None, "items": items}
 
 
 @frappe.whitelist()

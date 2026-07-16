@@ -87,6 +87,11 @@
           />
         </div>
         <FormControl
+          v-model="form.quo_tags"
+          :label="__('Quo tags')"
+          :placeholder="__('Buyer, Chicago… (comma-separated, syncs to Quo)')"
+        />
+        <FormControl
           v-model="form.buybox"
           type="textarea"
           :label="__('Buybox')"
@@ -135,6 +140,7 @@ const blank = () => ({
   phone: '',
   email: '',
   buyer_type: '',
+  quo_tags: '',
   metro_areas: [],
   buybox: '',
 })
@@ -153,6 +159,7 @@ watch(show, (v) => {
         phone: props.buyer.phone || '',
         email: props.buyer.email || '',
         buyer_type: props.buyer.buyer_type || '',
+        quo_tags: props.buyer.quo_tags || '',
         metro_areas: [...(props.buyer.metros || [])],
         buybox: props.buyer.buybox || '',
       }

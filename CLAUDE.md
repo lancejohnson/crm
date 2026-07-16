@@ -578,6 +578,85 @@ duplicating. Work substantial features in a worktree of your own.
     ("Add buyer": pick/search a buyer or create one inline via
     `BuyerModal :redirect="false"`, pick a stage) and on the **Buyer page**
     ("Add to deal": pick a dispo property).
+- **Buyer activity parity (comments / to-dos / agreements on buyers)** (gw175) —
+  the Buyer page (`pages/Buyer.vue`) is now Lead-shaped: tabs on the left
+  (**Activity** with the To-do quick-add block + Quick-comment chips, mirroring
+  leads · **Conversation** (the bespoke live-Quo texts + phone-matched CRM Call
+  Log calls panel, moved into a tab — those aren't reference-linked, so they
+  stay outside Activities) · Comments · Tasks · Notes · Attachments), and a
+  right Resizer sidebar (profile + Engaged properties + a new **Agreements**
+  card). It mounts the SAME `<Activities doctype="CRM Buyer">` component leads
+  use — comments (`Comment`), tasks (`CRM Task`), notes (`FCRM Note`) and files
+  were already generically keyed by `reference_doctype`/`reference_name`, so
+  the whole modal/quick-add/realtime stack (incl. `crm_task_update`) just works.
+  - `crm/api/activities.py` — `get_activities` gained a CRM Buyer branch →
+    **`get_buyer_activities`** (mirrors the lead version; `avoid_fields` hides
+    the machine-churned `last_active`/`deal_history`/`il_buyer_id` versions).
+  - `crm/api/comment.py` — @-mention notifications/emails handle CRM Buyer
+    (name = `buyer_name`, deep-link route `/crm/buyers/...`).
+  - **Agreements: buyer-linked only** (gw176 — Lance: a property's seller-side
+    agreements must NOT appear on an engaged buyer). `CRM Esign Agreement`
+    gained an optional **`buyer` Link → CRM Buyer** (ops `setup_agreement.py`
+    `ensure_field(..., after="lead")`); the buyer card lists ONLY rows with
+    `buyer == this buyer` (`get_buyer_agreements`, has_column-guarded), each
+    still linking to its lead + `property_label` (rows shaped by the extracted
+    `_shape_agreement`). `components/BuyerAgreementsCard.vue` (**new**, modeled
+    on AgreementsCard: status badge, buyer link, signed-PDF link, `crm_esign`
+    listener). The **＋** is a dropdown of engaged properties → fetches that
+    lead's doc → the existing `CreateAgreementModal` (same prefill flow), which
+    passes its new optional `buyer` prop → `create_docuseal_agreement(buyer=)`
+    stamps the link, so the agreement lands on BOTH the lead's card/timeline
+    and this buyer's card. Lead-page creations have no buyer (unchanged).
+  - Tab state persists per-user as `lastBuyerTab` (`useActiveTabManager`).
+- **Buyer ↔ Quo two-way contact sync + buyer texts/calls sync** (gw177) — every
+  CRM Buyer is the peer of a Quo (OpenPhone) contact so buyer numbers show names
+  on calls/texts in the Quo apps (the team had been hand-typing "Manny - Chicago
+  Buyer" contacts), and buyer conversations are stored/live in the CRM.
+  - **`crm/api/quo_contacts.py`** (new) — the sync engine. Push: CRM Buyer
+    after_insert/on_update (or explicit `enqueue_push` from the `db.set_value`
+    paths in `buyers.py` / `investorlift_ingest.py`, which fire no doc events)
+    creates/updates the linked contact; on_trash tombstones `externalId`
+    (`deleted-<name>`, mirrors the lead-side unlink script). Pull: `sync_all`
+    (cron `*/10`, hooks.py) pages all contacts once and reconciles two-way by
+    comparing `contact.updatedAt` / `buyer.modified` against the
+    `quo_synced_at` watermark — adopts existing manual Quo contacts by last-10
+    phone (never duplicating them), renames junk "*- *-" import rows, pulls
+    team edits (name/tags/email-fill) back, creates contacts for unlinked
+    buyers, and IMPORTS a Quo-only contact as a new CRM Buyer when its name or
+    tag says "buyer" (word match) and its phone matches no lead. Conflict
+    policy: on first link a non-junk human-typed Quo name wins (pulled in);
+    both-sides-changed → Quo name wins, tags union. Link state on CRM Buyer:
+    `quo_contact_id` / `quo_synced_at` / `quo_tags` (ops
+    `setup_buyer_quo_sync.py`); key from site_config `quo_api_key`.
+  - **Quo tags**: the workspace's "Contact" multi-select custom field (created
+    by the team, renamed from "Tags" — resolved by key via
+    /v1/contact-custom-fields, matched case-insensitively against
+    Contact/Tags) mirrors two-way with `CRM Buyer.quo_tags` (comma-separated;
+    editable in BuyerModal as "Quo tags", shown merged with the IL
+    `buyer_type` chips on the buyer page). Engaged property addresses are
+    pushed one-way into the Quo "Property" multi-select. API values are
+    free-form (no predefined options needed).
+  - **OpenPhone contact-PATCH landmine** (cost us a test contact): a
+    `customFields`-only PATCH returns 200 but wipes `defaultFields` and the
+    phone-less contact is then garbage-collected (all later GETs 404). Every
+    PATCH must send the FULL merged `defaultFields` with item `id`s stripped.
+    Recorded in the Quo Bruno QUIRKS.md.
+  - **Buyer texts are stored now**: the ops `sequence-events` webhook mirrors
+    texts matching a CRM Buyer phone (leads keep priority) into `Quo Message`
+    with `reference_doctype: CRM Buyer`; history backfilled by ops
+    `backfill_buyer_texts.py` (fetches workspace lines live).
+    `get_buyer_conversation` reads those stored rows (fast, full history, MMS
+    media via `SMSMedia`, sender attribution) instead of live-fetching 50/line
+    from the API; `Buyer.vue` listens for `quo_message` (re-attached on every
+    switch into the Conversation tab, because Activities' unmount does a
+    blanket `$socket.off('quo_message')`) and `crm_buyer_update` (emitted by
+    the pull sync after changing a buyer).
+  - **Buyer calls**: the webhook's `call.completed` mirror stamps
+    `reference_doctype: CRM Buyer` when the external number matches a buyer
+    and no lead; history stamped by
+    `crm.api.quo_contacts.stamp_buyer_call_references` (bench execute,
+    dry_run default). The buyer page call list itself still matches by phone
+    (`get_buyer_calls`).
 - **DD Expiration date** (Leads) — `dd_expiration_date` (Date custom field)
   shown as a calendar-icon row in the Lead sidebar HEADER directly under the
   Acq Price row (same minimal no-label formatting): displays

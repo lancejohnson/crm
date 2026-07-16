@@ -22,7 +22,11 @@ SALES_ROLES = ("System Manager", "Sales Manager", "Sales User")
 EDITABLE_FIELDS = (
 	"first_name", "last_name", "phone", "email",
 	"buyer_type", "metro_areas", "buybox", "deal_history", "verified",
+	"quo_tags",  # Quo (OpenPhone) contact tags — synced two-way with Quo
 )
+
+# an edit to any of these re-pushes the buyer's Quo contact
+QUO_PUSH_FIELDS = {"first_name", "last_name", "buyer_name", "phone", "email", "quo_tags"}
 
 
 def _guard():
@@ -67,6 +71,8 @@ def get_buyers(search=None, metro=None):
 	          "buyer_type", "verified", "deal_history", "last_active", "il_buyer_id", "modified"]
 	if _has_market_fields():
 		fields += ["metro_areas", "buybox"]
+	if frappe.get_meta(BUYER_DOCTYPE).has_field("quo_tags"):
+		fields += ["quo_tags"]
 
 	filters = []
 	if metro and _has_market_fields():
@@ -118,7 +124,7 @@ def get_buyers(search=None, metro=None):
 
 @frappe.whitelist()
 def create_buyer(first_name, last_name=None, phone=None, email=None,
-                 buyer_type=None, metro_areas=None, buybox=None):
+                 buyer_type=None, metro_areas=None, buybox=None, quo_tags=None):
 	"""Create a buyer manually. Dedupes against existing buyers (email → phone);
 	on a duplicate, returns it instead of creating so the UI can open it."""
 	_guard()
@@ -147,6 +153,8 @@ def create_buyer(first_name, last_name=None, phone=None, email=None,
 		"buyer_type": (buyer_type or "").strip() or None,
 		**({"metro_areas": _metros_json(metro_areas), "buybox": (buybox or "").strip() or None}
 		   if _has_market_fields() else {}),
+		**({"quo_tags": (quo_tags or "").strip() or None}
+		   if frappe.get_meta(BUYER_DOCTYPE).has_field("quo_tags") else {}),
 	})
 	doc.insert()
 	return {"ok": True, "buyer": doc.name}
@@ -185,6 +193,11 @@ def update_buyer(buyer, updates):
 
 	if vals:
 		frappe.db.set_value(BUYER_DOCTYPE, buyer, vals)
+		# db.set_value fires no doc events — push identity/tag changes to Quo here
+		if QUO_PUSH_FIELDS & set(vals):
+			from crm.api.quo_contacts import enqueue_push
+
+			enqueue_push(buyer)
 	return {"ok": True}
 
 
