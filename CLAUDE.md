@@ -167,9 +167,15 @@ duplicating. Work substantial features in a worktree of your own.
     timeline (`Activities.vue`)
   - `SendTextModal.vue` + `AllModals.vue` + `ActivityHeader.vue` — "Send Text"
     quick action next to "Log a Call"
-  - per-user sending number on `User.custom_quo_number`: picker
-    `QuoFromSelect.vue` + `composables/quoSender.js`, admin assignment in
-    `Settings/Users.vue`; no default — the sender must pick a number
+  - per-user sending number on `User.custom_quo_number`: when a user with no
+    linked number opens a texting surface (SMS tab / `SendTextModal` / the
+    `/texts` inbox thread), `Modals/SelectQuoNumberModal.vue` auto-pops with
+    the Quo workspace lines (number + line name) — picking one saves to their
+    profile via `set_user_quo_number` and unblocks Send (a "Select number"
+    banner reopens it if dismissed). Replaced the old inline `QuoFromSelect`
+    "Send from" row in the compose surfaces (gw171; the component file remains,
+    now unused). Admin assignment still in `Settings/Users.vue`;
+    `composables/quoSender.js` has `quoNumbers`/`myQuoNumber`/`formatPhone`
   - `crm/api/sms.py` — read API (`get_sms_messages`, `get_sms_conversations`,
     `is_sms_enabled`) + `set_user_quo_number`; `crm/api/session.py` exposes
     `custom_quo_number`; `crm/hooks.py` — `Quo Message` after_insert publishes
@@ -337,6 +343,20 @@ duplicating. Work substantial features in a worktree of your own.
   "CRM Sequence Runner" cron is disabled. Full design + the two deploy gotchas
   (register the `seqdrain` queue in common_site_config; `migrate`/`sync_jobs` to
   register `drain_due`) live in `../frappe-crm-deploy/CLAUDE.md` → Sequences.
+  - **Fail-safe (gw173)**: the engine catches step exceptions internally and
+    leaves the enrollment Active-and-due, so a persistently failing send used to
+    retry forever — when Quo ran out of prepaid credits (Jul 8–15 2026) that
+    meant 275k Error Log rows and the stale backlog blasting out the moment
+    credits were topped up. `drain()` now snapshots
+    (current_step, next_run, modified) around `_run_core`; a due run that
+    advances nothing counts as a failure: the job returns (retries once per
+    drain_due tick, not 50×/job) and `fail_count` (Int on the enrollment, added
+    by ops `setup_sequence_failsafe.py`) increments; at
+    `MAX_CONSECUTIVE_FAILURES` (10 ≈ 10 min) the enrollment is set **Paused** +
+    `FAILSAFE_NOTIFY` (Lance) is emailed (resume = set Active on the sequence's
+    Enrollments list). Progress resets the counter; disabled sequences and a
+    missing `fail_count` column no-op (pre-provision safe). Quo billing itself:
+    auto-recharge is now ON (2026-07-15).
 - **Lead/Deal tasks as a Trello-style to-do list** — the existing `CRM Task`
   feature (its own Tasks tab + heavyweight `TaskModal`) is now surfaced in the
   **unified Activity timeline**: a pinned **"To-do"** block at the top of the
