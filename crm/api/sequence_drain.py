@@ -50,6 +50,17 @@ LOOKAHEAD_SECONDS = 60
 # safety cap on steps drained in one job (no real sequence chains this many
 # sub-minute steps; guards against a misconfigured loop holding a worker open)
 MAX_STEPS = 50
+# Fail-safe: the engine catches step exceptions internally (logs "CRM Sequence
+# Runner error") and leaves the enrollment Active-and-due, so before this
+# existed a failing send (e.g. Quo out of prepaid credits, Jul 2026) was
+# retried forever — flooding the Error Log and then blasting the whole stale
+# backlog the moment the upstream problem cleared. Now a due run that advances
+# nothing counts as a failure: the drain job stops (so retries happen once per
+# drain_due tick, not in a hot loop) and after this many consecutive failures
+# the enrollment is Paused and FAILSAFE_NOTIFY is emailed. Resume from the
+# sequence's Enrollments list once the cause is fixed.
+MAX_CONSECUTIVE_FAILURES = 10
+FAILSAFE_NOTIFY = "lance.johnson@groundworkpro.com"
 
 
 def _run_core(enrollment):
@@ -89,8 +100,90 @@ def drain(enrollment):
 				return  # long wait — drain_due re-enqueues this once it is due
 			if delta > 0:
 				time.sleep(delta)
+		before = (enr.current_step, str(enr.next_run), str(enr.modified))
 		_run_core(enrollment)
 		frappe.db.commit()
+		enr = frappe.get_doc("CRM Sequence Enrollment", enrollment)
+		if (enr.current_step, str(enr.next_run), str(enr.modified)) == before:
+			# a due run that advanced nothing = the step raised (the engine
+			# caught + logged it). Count it and stop this job — the next
+			# drain_due tick retries, so failures accrue once a minute.
+			if enr.status == "Active":
+				_record_failure(enr)
+			return
+		_reset_failures(enr)
+
+
+def _record_failure(enr):
+	"""Bump the enrollment's consecutive-failure count; pause + notify at the
+	threshold. No-ops when the fail_count field isn't provisioned yet, or when
+	the sequence is disabled (the engine idles on those by design)."""
+	if not frappe.db.has_column("CRM Sequence Enrollment", "fail_count"):
+		return
+	if not frappe.db.get_value("CRM Sequence", enr.sequence, "enabled"):
+		return
+	fails = (enr.get("fail_count") or 0) + 1
+	if fails < MAX_CONSECUTIVE_FAILURES:
+		frappe.db.set_value(
+			"CRM Sequence Enrollment", enr.name, "fail_count", fails, update_modified=False
+		)
+		frappe.db.commit()
+		return
+	frappe.db.set_value(
+		"CRM Sequence Enrollment",
+		enr.name,
+		{
+			"status": "Paused",
+			"fail_count": fails,
+			"last_log": "{0} PAUSED by fail-safe: step {1} failed {2} runs in a row "
+			"(see Error Log). Fix the cause, then set the enrollment back to Active.".format(
+				now_datetime(), (enr.current_step or 0) + 1, fails
+			),
+		},
+		update_modified=False,
+	)
+	frappe.db.commit()
+	_notify_pause(enr, fails)
+
+
+def _reset_failures(enr):
+	"""Progress happened — clear the consecutive-failure count (if any)."""
+	if enr.get("fail_count"):
+		frappe.db.set_value(
+			"CRM Sequence Enrollment", enr.name, "fail_count", 0, update_modified=False
+		)
+		frappe.db.commit()
+
+
+def _notify_pause(enr, fails):
+	"""Email the admin that an enrollment was paused. Never raises — a mail
+	failure must not break the drainer."""
+	try:
+		lead_name = frappe.db.get_value("CRM Lead", enr.lead, "lead_name") or enr.lead
+		lead_url = frappe.utils.get_url("/crm/leads/" + enr.lead)
+		frappe.sendmail(
+			recipients=[FAILSAFE_NOTIFY],
+			subject="Sequence paused: {0} — {1}".format(enr.sequence, lead_name),
+			message=(
+				"<p>The sequence enrollment <b>{0}</b> (<b>{1}</b> for lead "
+				'<a href="{2}">{3}</a>) was paused after step {4} failed '
+				"{5} runs in a row.</p>"
+				"<p>The step's error is in the site's Error Log (\"CRM Sequence "
+				"Runner error\"). Fix the cause — e.g. Quo out of prepaid credits — "
+				"then set the enrollment back to <b>Active</b> on the sequence's "
+				"Enrollments list to resume where it left off, or <b>Stopped</b> "
+				"if the queued messages are stale and shouldn't go out.</p>"
+			).format(
+				enr.name,
+				enr.sequence,
+				lead_url,
+				lead_name,
+				(enr.current_step or 0) + 1,
+				fails,
+			),
+		)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "sequence fail-safe: pause email failed")
 
 
 def drain_lead(lead):
