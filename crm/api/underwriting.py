@@ -38,13 +38,14 @@ WORKBOOK_DOCTYPE = "CRM Underwriting Workbook"
 
 # The underwriting template + the shared "Underwriting" Drive folder it's copied
 # into. Stable, but overridable via site config if they ever move.
-TEMPLATE_ID = "1GqjMgpKkZX18bfLy79y3YiiE9WKmyojz3Cqpzp1UTMg"
+TEMPLATE_ID = "11UKY7aommAKkElRvpA9SPDaLQTvGWHErF7HeNsXieko"
 FOLDER_ID = "11xzBIXcsTpx8E_Fi34DnCdnXcy4Kgba9"
 
-# The ARV tab's input block (A4=Date / A5=Team Member / B8=Subject, A9=Link → B9).
-CELL_DATE = "ARV!B4"
-CELL_TEAM_MEMBER = "ARV!B5"
-CELL_ZILLOW = "ARV!B9"
+# The "Cash Offer" tab's only input: the subject's Zillow link at C11 (the comps
+# block keys off it — C12 is `=zAddress(C11)&…`). This template carries no
+# date/team-member fields; the CRM records the creator + timestamp on the
+# workbook doctype instead.
+CELL_ZILLOW = "'Cash Offer'!C11"
 
 DEFAULT_SUBJECT = "lance.johnson@groundworkpro.com"
 
@@ -108,9 +109,9 @@ def _google_access_token() -> str:
 	return resp.json()["access_token"]
 
 
-def _create_sheet(token: str, name: str, date_str: str, team_member: str, zillow_url: str):
-	"""Copy the template into the shared folder (renamed), fill the ARV inputs,
-	return (spreadsheet_id, web_view_link)."""
+def _create_sheet(token: str, name: str, zillow_url: str):
+	"""Copy the template into the shared folder (renamed), fill the subject Zillow
+	link, return (spreadsheet_id, web_view_link)."""
 	headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
 	copy = requests.post(
@@ -130,8 +131,6 @@ def _create_sheet(token: str, name: str, date_str: str, team_member: str, zillow
 		json={
 			"valueInputOption": "USER_ENTERED",
 			"data": [
-				{"range": CELL_DATE, "values": [[date_str]]},
-				{"range": CELL_TEAM_MEMBER, "values": [[team_member]]},
 				{"range": CELL_ZILLOW, "values": [[zillow_url]]},
 			],
 		},
@@ -176,8 +175,8 @@ def _zillow_detail_url(address: str):
 
 
 def _zillow_url(address: str) -> str:
-	"""Best Zillow link for the sheet's subject (B9): the property's real listing
-	URL when we can resolve it (so the subject row `=zAddress(B9)` … auto-fills),
+	"""Best Zillow link for the sheet's subject (C11): the property's real listing
+	URL when we can resolve it (so the subject row `=zAddress(C11)` … auto-fills),
 	else the canonical hyphenated search URL as a graceful fallback."""
 	return _zillow_detail_url(address) or _zillow_search_url(address)
 
@@ -218,10 +217,9 @@ def create_underwriting_workbook(lead: str):
 	if not address:
 		frappe.throw(_("Set a property address before creating an underwriting sheet."))
 
-	team_member = frappe.utils.get_fullname(frappe.session.user)
 	try:
 		token = _google_access_token()
-		sid, url = _create_sheet(token, address, frappe.utils.today(), team_member, _zillow_url(address))
+		sid, url = _create_sheet(token, address, _zillow_url(address))
 	except Exception:
 		frappe.log_error(title="Underwriting workbook creation failed", message=frappe.get_traceback())
 		frappe.throw(_("Couldn't create the underwriting sheet (Google API error)."))
