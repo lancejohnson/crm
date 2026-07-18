@@ -26,32 +26,75 @@ _SOURCES = [
 			"phone",
 			"email",
 			"organization",
+			# address / location
 			"property_address",
 			"property_city",
 			"property_state",
+			"property_zip",
+			"property_county",
+			# property identity
+			"apn",
+			"property_owner",
+			"property_type",
+			# assigned (dispo) buyer
+			"buyer_name",
+			"buyer_entity",
 		],
 		"display": ["lead_name", "mobile_no", "phone", "email", "status"],
-		"subtitle": ["property_address", "mobile_no", "phone", "email"],
+		"subtitle": ["property_address", "property_city", "mobile_no", "phone", "email"],
 	},
 	{
 		"doctype": "CRM Buyer",
 		"route": "Buyer",
 		"param": "buyerId",
 		"title": "buyer_name",
-		"search": ["buyer_name", "phone", "email", "first_name", "last_name"],
-		"display": ["buyer_name", "phone", "email"],
-		"subtitle": ["phone", "email"],
+		"search": [
+			"buyer_name",
+			"phone",
+			"email",
+			"first_name",
+			"last_name",
+			# where they buy / what they want
+			"metro_areas",
+			"metro_area",
+			"buybox",
+			"buyer_type",
+			"quo_tags",
+		],
+		"display": ["buyer_name", "phone", "email", "metro_areas"],
+		"subtitle": ["phone", "email", "metro_areas"],
 	},
 	{
 		"doctype": "Contact",
 		"route": "Contact",
 		"param": "contactId",
 		"title": "full_name",
-		"search": ["full_name", "first_name", "last_name", "email_id", "mobile_no", "phone"],
+		"search": [
+			"full_name",
+			"first_name",
+			"last_name",
+			"email_id",
+			"mobile_no",
+			"phone",
+			"company_name",
+		],
 		"display": ["full_name", "email_id", "mobile_no"],
 		"subtitle": ["email_id", "mobile_no", "phone"],
 	},
 ]
+
+
+def _format_value(field, value):
+	"""Render a raw field value for the result subtitle. metro_areas is a JSON
+	array of metro names — join it readably instead of showing raw JSON."""
+	if field == "metro_areas" and isinstance(value, str) and value.strip().startswith("["):
+		try:
+			metros = frappe.parse_json(value)
+			if isinstance(metros, list) and metros:
+				return " · ".join(str(m) for m in metros[:2]) + ("…" if len(metros) > 2 else "")
+		except Exception:
+			pass
+	return value
 
 
 @frappe.whitelist()
@@ -113,7 +156,7 @@ def search(query, limit=8):
 			subtitle = ""
 			for f in src["subtitle"]:
 				if row.get(f):
-					subtitle = row.get(f)
+					subtitle = _format_value(f, row.get(f))
 					break
 			results.append(
 				{
