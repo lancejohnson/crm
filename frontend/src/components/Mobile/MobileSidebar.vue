@@ -103,49 +103,23 @@ import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
 import NotificationsIcon from '@/components/Icons/NotificationsIcon.vue'
 import SidebarLink from '@/components/SidebarLink.vue'
 import { viewsStore } from '@/stores/views'
+import { getSettings } from '@/stores/settings'
+import { applySidebarConfig } from '@/utils/sidebarLinks'
 import { unreadNotificationsCount } from '@/stores/notifications'
 import { computed, h } from 'vue'
 import { mobileSidebarOpened as sidebarOpened } from '@/composables/settings'
 
 const { getPinnedViews, getPublicViews } = viewsStore()
+const { settings } = getSettings()
 
-const links = [
-  {
-    label: 'Leads',
-    icon: LeadsIcon,
-    to: 'Leads',
-  },
-  {
-    label: 'Deals',
-    icon: DealsIcon,
-    to: 'Deals',
-  },
-  {
-    label: 'Contacts',
-    icon: ContactsIcon,
-    to: 'Contacts',
-  },
-  {
-    label: 'Organizations',
-    icon: OrganizationsIcon,
-    to: 'Organizations',
-  },
-  {
-    label: 'Notes',
-    icon: NoteIcon,
-    to: 'Notes',
-  },
-  {
-    label: 'Tasks',
-    icon: TaskIcon,
-    to: 'Tasks',
-  },
-  {
-    label: 'Call Logs',
-    icon: PhoneIcon,
-    to: 'Call Logs',
-  },
-]
+// same canonical module list + admin ordering/visibility as the desktop
+// AppSidebar (Dashboard, Dispo, Buyers, Text Messages, Sequences, Call
+// Review, …), so the mobile drawer stays in sync instead of a hardcoded subset
+const links = computed(() =>
+  applySidebarConfig(settings.value?.custom_sidebar_items).filter((link) =>
+    link.condition ? link.condition() : true,
+  ),
+)
 
 const allViews = computed(() => {
   let _views = [
@@ -153,7 +127,7 @@ const allViews = computed(() => {
       name: 'All Views',
       hideLabel: true,
       opened: true,
-      views: links,
+      views: links.value,
     },
   ]
   if (getPublicViews().length) {

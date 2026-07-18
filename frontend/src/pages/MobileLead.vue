@@ -65,16 +65,136 @@
       class="flex flex-1 overflow-auto flex-col [&_[role='tab']]:px-0 [&_[role='tab']]:shrink-0 [&_[role='tablist']]:px-3 [&_[role='tablist']]:min-h-[45px] [&_[role='tablist']]:gap-7.5 [&_[role='tabpanel']:not([hidden])]:flex [&_[role='tabpanel']:not([hidden])]:grow"
     >
       <template #tab-panel="{ tab }">
-        <div v-if="tab.name == 'Details'">
+        <div
+          v-if="tab.name == 'Details'"
+          class="flex flex-1 flex-col overflow-y-auto"
+        >
+          <!-- Compact header: avatar + name + address + the acq-price / DD
+               fields (which live only in the desktop sidebar header) + call /
+               text, so nothing from the desktop details is missing on mobile. -->
+          <div class="flex items-start gap-4 border-b p-4">
+            <Avatar size="2xl" class="shrink-0" :label="title" :image="doc.image" />
+            <div class="flex min-w-0 flex-col gap-1.5">
+              <div class="truncate text-lg font-medium text-ink-gray-9">
+                {{ title }}
+              </div>
+              <a
+                v-if="doc.property_address"
+                :href="`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(doc.property_address)}`"
+                target="_blank"
+                rel="noopener noreferrer"
+                :title="doc.property_address"
+                class="flex items-center gap-1.5 truncate text-sm text-ink-gray-7 hover:text-ink-gray-9 hover:underline"
+              >
+                <AddressIcon class="size-3.5 shrink-0" />
+                <span class="truncate">{{ doc.property_address }}</span>
+              </a>
+              <!-- Acq price (digits only, live thousand separators) -->
+              <div
+                class="flex items-center gap-1.5 text-sm text-ink-gray-7"
+                :title="__('Acq Price')"
+              >
+                <MoneyIcon class="size-3.5 shrink-0" />
+                <input
+                  :value="acqPriceDraft"
+                  type="text"
+                  inputmode="numeric"
+                  autocomplete="off"
+                  :placeholder="__('Acq price')"
+                  class="w-32 border-none bg-transparent p-0 text-sm text-ink-gray-7 placeholder:text-ink-gray-4 focus:text-ink-gray-9 focus:outline-none focus:ring-0"
+                  @focus="acqPriceFocused = true"
+                  @input="onAcqPriceInput"
+                  @keydown.enter.prevent="$event.target.blur()"
+                  @keydown.esc.prevent="
+                    acqPriceDraft = formatAcqPrice(doc.acq_price);
+                    $event.target.blur()
+                  "
+                  @blur="saveAcqPrice"
+                />
+              </div>
+              <!-- DD expiration: date + "(N days left)" countdown -->
+              <div
+                class="group/dd flex items-center gap-1.5 text-sm text-ink-gray-7"
+                :title="__('DD Expiration')"
+              >
+                <CalendarIcon class="size-3.5 shrink-0" />
+                <div
+                  class="relative flex cursor-pointer items-center"
+                  @click="openDdPicker"
+                >
+                  <span
+                    :class="
+                      ddExp.color
+                        ? parseColor(ddExp.color)
+                        : doc.dd_expiration_date
+                          ? 'text-ink-gray-7'
+                          : 'text-ink-gray-4'
+                    "
+                  >
+                    {{ ddExp.label || __('DD expiration') }}
+                  </span>
+                  <input
+                    ref="ddDateInput"
+                    type="date"
+                    tabindex="-1"
+                    :value="doc.dd_expiration_date || ''"
+                    class="pointer-events-none absolute inset-0 h-full w-full opacity-0"
+                    @change="saveDdExpiration"
+                  />
+                </div>
+                <FeatherIcon
+                  v-if="doc.dd_expiration_date"
+                  name="x"
+                  class="size-3.5 shrink-0 cursor-pointer text-ink-gray-5 opacity-0 duration-200 hover:text-ink-gray-8 group-hover/dd:opacity-100"
+                  :title="__('Clear DD expiration')"
+                  @click.stop="updateField('dd_expiration_date', '')"
+                />
+              </div>
+              <div class="mt-1 flex gap-1.5">
+                <Button
+                  :tooltip="__('Call')"
+                  :icon="PhoneIcon"
+                  @click="
+                    () =>
+                      doc.mobile_no || doc.phone
+                        ? dialNumber(doc.mobile_no || doc.phone)
+                        : toast.error(__('Please set a mobile number to call'))
+                  "
+                />
+                <Button
+                  v-if="smsEnabled"
+                  :tooltip="__('Send a Text')"
+                  :icon="CommentIcon"
+                  @click="detailModals?.sendText()"
+                />
+              </div>
+            </div>
+          </div>
+
           <SLASection
             v-if="doc.sla_status"
             v-model="doc"
             @updateField="updateField"
           />
-          <div
-            v-if="sections.data"
-            class="flex flex-1 flex-col justify-between overflow-hidden"
-          >
+          <FirstCallReadCard
+            :lead="leadId"
+            :motivated="doc.first_call_motivated"
+            :onPrice="doc.first_call_on_price"
+            :setBy="doc.first_call_by"
+            :setAt="doc.first_call_at"
+            @saved="document.reload()"
+          />
+          <TaxInfoCard :lead="leadId" @fetch="detailModals?.fetchTaxInfo()" />
+          <AgreementsCard
+            :lead="leadId"
+            @create="detailModals?.createAgreement()"
+          />
+          <UnderwritingCard
+            :lead="leadId"
+            @create="detailModals?.createUnderwriting()"
+          />
+          <InvestorLiftCard :lead="leadId" :address="doc.property_address" />
+          <div v-if="sections.data" class="flex flex-col">
             <SidePanelLayout
               :sections="sections.data"
               doctype="CRM Lead"
@@ -84,6 +204,15 @@
               @afterFieldChange="reloadAssignees"
             />
           </div>
+          <!-- Mobile Details has no always-mounted Activities (tabs are
+               mutually exclusive), so it hosts its own modals for the card
+               actions. `reloader` stands in for the activities reload target. -->
+          <AllModals
+            ref="detailModals"
+            doctype="CRM Lead"
+            :model-value="reloader"
+            :doc="doc"
+          />
         </div>
         <Activities
           v-else
@@ -137,26 +266,39 @@ import AttachmentIcon from '@/components/Icons/AttachmentIcon.vue'
 import WhatsAppIcon from '@/components/Icons/WhatsAppIcon.vue'
 import IndicatorIcon from '@/components/Icons/IndicatorIcon.vue'
 import LostReasonModal from '@/components/Modals/LostReasonModal.vue'
+import AddressIcon from '@/components/Icons/AddressIcon.vue'
+import MoneyIcon from '@/components/Icons/MoneyIcon.vue'
+import CalendarIcon from '@/components/Icons/CalendarIcon.vue'
 import LayoutHeader from '@/components/LayoutHeader.vue'
 import Activities from '@/components/Activities/Activities.vue'
+import AllModals from '@/components/Activities/AllModals.vue'
 import AssignTo from '@/components/AssignTo.vue'
 import SidePanelLayout from '@/components/SidePanelLayout.vue'
 import SLASection from '@/components/SLASection.vue'
 import CustomActions from '@/components/CustomActions.vue'
-import { setupCustomizations, isTranslatable } from '@/utils'
+import FirstCallReadCard from '@/components/FirstCallReadCard.vue'
+import TaxInfoCard from '@/components/TaxInfoCard.vue'
+import AgreementsCard from '@/components/AgreementsCard.vue'
+import UnderwritingCard from '@/components/UnderwritingCard.vue'
+import InvestorLiftCard from '@/components/InvestorLiftCard.vue'
+import { setupCustomizations, isTranslatable, ddExpiration, parseColor } from '@/utils'
 import { getView } from '@/utils/view'
+import { callHref } from '@/utils/phoneFormat'
+import { myQuoNumber } from '@/composables/quoSender'
 import { getSettings } from '@/stores/settings'
 import { globalStore } from '@/stores/global'
 import { statusesStore } from '@/stores/statuses'
 import { getMeta } from '@/stores/meta'
 import { useDocument } from '@/data/document'
-import { whatsappEnabled, isMobileView } from '@/composables/settings'
+import { whatsappEnabled, smsEnabled, isMobileView } from '@/composables/settings'
 import { useActiveTabManager } from '@/composables/useActiveTabManager'
 import {
   createResource,
+  Avatar,
   Dropdown,
   Tabs,
   Breadcrumbs,
+  FeatherIcon,
   call,
   usePageMeta,
   toast,
@@ -337,6 +479,77 @@ const sections = createResource({
   params: { doctype: 'CRM Lead' },
   auto: true,
 })
+
+// Details-tab modal host (tax / agreement / underwriting / text). Its reload
+// target just refreshes the doc + sidebar sections; the cards themselves also
+// self-refresh via their realtime events.
+const detailModals = ref(null)
+const reloader = {
+  reload: () => {
+    document.reload()
+    sections.reload()
+  },
+}
+
+// Acq price inline editor (digits only, live thousand separators) — mirrors the
+// desktop Lead sidebar header.
+const acqPriceDraft = ref('')
+const acqPriceFocused = ref(false)
+
+function formatAcqPrice(n) {
+  return n ? Math.round(n).toLocaleString('en-US') : ''
+}
+
+watch(
+  () => doc.value?.acq_price,
+  (v) => {
+    if (!acqPriceFocused.value) acqPriceDraft.value = formatAcqPrice(v)
+  },
+  { immediate: true },
+)
+
+function onAcqPriceInput(e) {
+  const digits = e.target.value.replace(/\D/g, '').slice(0, 12)
+  const formatted = digits ? Number(digits).toLocaleString('en-US') : ''
+  acqPriceDraft.value = formatted
+  e.target.value = formatted
+}
+
+function saveAcqPrice() {
+  acqPriceFocused.value = false
+  const numeric = Number(acqPriceDraft.value.replace(/\D/g, '')) || 0
+  if (numeric === Math.round(doc.value.acq_price || 0)) {
+    acqPriceDraft.value = formatAcqPrice(doc.value.acq_price)
+    return
+  }
+  updateField('acq_price', numeric)
+}
+
+// DD expiration inline editor (native date picker + countdown).
+const ddDateInput = ref(null)
+const ddExp = computed(() => ddExpiration(doc.value?.dd_expiration_date))
+
+function openDdPicker() {
+  const el = ddDateInput.value
+  if (!el) return
+  try {
+    el.showPicker()
+  } catch {
+    el.focus()
+  }
+}
+
+function saveDdExpiration(e) {
+  const value = e.target.value || ''
+  if (value === (doc.value.dd_expiration_date || '')) return
+  updateField('dd_expiration_date', value)
+}
+
+function dialNumber(number) {
+  const href = callHref(number, myQuoNumber())
+  if (!href) return
+  window.location.href = href
+}
 
 function updateField(name, value) {
   value = Array.isArray(name) ? '' : value
