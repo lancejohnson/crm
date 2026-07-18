@@ -1,5 +1,6 @@
 import { createResource } from 'frappe-ui'
 import { computed, ref } from 'vue'
+import { useStorage } from '@vueuse/core'
 
 export const whatsappEnabled = ref(false)
 export const isWhatsappInstalled = ref(false)
@@ -47,6 +48,10 @@ createResource({
 })
 
 export const mobileSidebarOpened = ref(false)
+
+// Left navigation sidebar collapsed state (desktop). Shared here so both the
+// AppSidebar and a toggle in the AppHeader drive the same persisted value.
+export const isSidebarCollapsed = useStorage('isSidebarCollapsed', false)
 
 export const isMobileView = computed(() => window.innerWidth < 768)
 

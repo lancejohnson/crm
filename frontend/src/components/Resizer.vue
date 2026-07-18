@@ -1,19 +1,48 @@
 <template>
-  <div class="relative" :style="{ width: `${sidebarWidth}px` }">
-    <slot v-bind="{ sidebarResizing, sidebarWidth }" />
+  <div class="relative flex h-full shrink-0">
+    <!-- Panel box: inherits the parent's classes (border/flex/width intent) and
+         holds the actual sidebar content. When collapsed its width goes to 0 and
+         the content is clipped (kept mounted so expanding is instant). -->
     <div
-      class="absolute z-10 h-full w-1 cursor-col-resize bg-surface-gray-4 opacity-0 transition-opacity hover:opacity-100"
-      :class="{
-        'opacity-100': sidebarResizing,
-        'left-0': side == 'right',
-        'right-0': side == 'left',
-      }"
-      @mousedown="startResize"
-    />
+      v-bind="$attrs"
+      class="relative h-full"
+      :class="{ 'overflow-hidden': collapsed }"
+      :style="{ width: (collapsed ? 0 : sidebarWidth) + 'px' }"
+    >
+      <slot v-bind="{ sidebarResizing, sidebarWidth }" />
+      <!-- drag-to-resize handle (hidden while collapsed) -->
+      <div
+        v-show="!collapsed"
+        class="absolute z-10 h-full w-1 cursor-col-resize bg-surface-gray-4 opacity-0 transition-opacity hover:opacity-100"
+        :class="{
+          'opacity-100': sidebarResizing,
+          'left-0': side == 'right',
+          'right-0': side == 'left',
+        }"
+        @mousedown="startResize"
+      />
+    </div>
+    <!-- Collapse / expand toggle pinned to the panel's content-side edge; always
+         reachable so a collapsed panel can be reopened. -->
+    <button
+      type="button"
+      class="absolute top-1/2 z-30 grid size-6 -translate-y-1/2 place-items-center rounded-full border bg-surface-white text-ink-gray-6 shadow-sm transition-colors hover:bg-surface-gray-2 hover:text-ink-gray-8"
+      :class="side == 'right' ? 'left-0 -translate-x-1/2' : 'right-0 translate-x-1/2'"
+      :title="collapsed ? __('Expand panel') : __('Collapse panel')"
+      @click="collapsed = !collapsed"
+    >
+      <FeatherIcon :name="toggleIcon" class="size-3.5" />
+    </button>
   </div>
 </template>
 <script setup>
-import { ref } from 'vue'
+import { FeatherIcon } from 'frappe-ui'
+import { computed, ref } from 'vue'
+import { useStorage } from '@vueuse/core'
+
+// The parent's class/attrs are applied to the inner panel box (not the wrapper),
+// so collapsing can shrink the box without disturbing the toggle button.
+defineOptions({ inheritAttrs: false })
 
 const props = defineProps({
   defaultWidth: { type: Number, default: 420 },
@@ -21,6 +50,17 @@ const props = defineProps({
   maxWidth: { type: Number, default: 36 * 16 },
   side: { type: String, default: 'left' },
   parent: { type: Object, default: null },
+})
+
+// Persist per side — the right detail panel (Lead/Deal/Buyer) and the left panel
+// (Contact/Organization) collapse independently.
+const collapsed = useStorage(`crmResizerCollapsed_${props.side}`, false)
+
+// Chevrons point the way the panel moves: outward to collapse, inward to expand.
+const toggleIcon = computed(() => {
+  if (props.side === 'right')
+    return collapsed.value ? 'chevrons-left' : 'chevrons-right'
+  return collapsed.value ? 'chevrons-right' : 'chevrons-left'
 })
 
 const sidebarResizing = ref(false)
