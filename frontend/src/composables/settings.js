@@ -1,5 +1,5 @@
 import { createResource } from 'frappe-ui'
-import { computed, ref } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
 import { useStorage } from '@vueuse/core'
 
 export const whatsappEnabled = ref(false)
@@ -52,6 +52,11 @@ export const mobileSidebarOpened = ref(false)
 // Left navigation sidebar collapsed state (desktop). Shared here so both the
 // AppSidebar and a toggle in the AppHeader drive the same persisted value.
 export const isSidebarCollapsed = useStorage('isSidebarCollapsed', false)
+
+// The detail-panel Resizer mounted on the current record page registers a
+// { toggle } here so a global shortcut (]) can collapse/expand whichever panel
+// is on screen, regardless of which side it's on. Null on pages without one.
+export const activeDetailPanel = shallowRef(null)
 
 export const isMobileView = computed(() => window.innerWidth < 768)
 

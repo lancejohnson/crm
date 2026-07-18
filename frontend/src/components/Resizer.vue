@@ -37,8 +37,9 @@
 </template>
 <script setup>
 import { FeatherIcon } from 'frappe-ui'
-import { computed, ref } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useStorage } from '@vueuse/core'
+import { activeDetailPanel } from '@/composables/settings'
 
 // The parent's class/attrs are applied to the inner panel box (not the wrapper),
 // so collapsing can shrink the box without disturbing the toggle button.
@@ -61,6 +62,13 @@ const toggleIcon = computed(() => {
   if (props.side === 'right')
     return collapsed.value ? 'chevrons-left' : 'chevrons-right'
   return collapsed.value ? 'chevrons-right' : 'chevrons-left'
+})
+
+// Expose this panel's toggle to the global `]` shortcut while mounted.
+const panelHandle = { toggle: () => (collapsed.value = !collapsed.value) }
+onMounted(() => (activeDetailPanel.value = panelHandle))
+onBeforeUnmount(() => {
+  if (activeDetailPanel.value === panelHandle) activeDetailPanel.value = null
 })
 
 const sidebarResizing = ref(false)
