@@ -150,7 +150,12 @@ const bulkRecipients = computed(() => {
   for (const b of dealBuyers.data || []) {
     if (b.buyer && !seen.has(b.buyer)) {
       seen.add(b.buyer)
-      out.push({ name: b.buyer, buyer_name: b.buyer_name, phone: b.phone })
+      out.push({
+        name: b.buyer,
+        buyer_name: b.buyer_name,
+        phone: b.phone,
+        stage: b.interest_stage,
+      })
     }
   }
   return out

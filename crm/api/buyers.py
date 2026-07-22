@@ -81,17 +81,20 @@ def get_buyers(search=None, metro=None, property=None):
 	if metro and _has_market_fields():
 		# metro_areas is a JSON array of names — match the quoted element
 		filters.append(["metro_areas", "like", f'%{json.dumps(metro)}%'])
+	stage_by_buyer = {}
 	if property and frappe.db.exists("DocType", LEAD_BUYER_DOCTYPE):
-		# restrict to buyers engaged on this property (the CRM Lead Buyer rel table).
-		# _next_task_due-style computed set → resolve to buyer names and filter by `in`.
-		engaged = {
-			r.buyer for r in frappe.get_all(
-				LEAD_BUYER_DOCTYPE, filters={"lead": property}, fields=["buyer"], limit_page_length=0
+		# restrict to buyers engaged on this property (the CRM Lead Buyer rel table)
+		# and capture each buyer's interest_stage on it (the per-property status), so
+		# the UI can show status + let the user avoid texting "Not Interested" buyers.
+		stage_by_buyer = {
+			r.buyer: r.interest_stage for r in frappe.get_all(
+				LEAD_BUYER_DOCTYPE, filters={"lead": property},
+				fields=["buyer", "interest_stage"], limit_page_length=0,
 			) if r.buyer
 		}
-		if not engaged:
+		if not stage_by_buyer:
 			return []
-		filters.append(["name", "in", list(engaged)])
+		filters.append(["name", "in", list(stage_by_buyer)])
 
 	or_filters = None
 	if search:
@@ -133,6 +136,9 @@ def get_buyers(search=None, metro=None, property=None):
 		metros = _parse_metros(b.get("metro_areas"))
 		b["metros"] = metros
 		b["active_in"] = " · ".join(metros) or ", ".join(sorted(cities.get(b.name, [])))
+		if stage_by_buyer:
+			# per-property interest stage (only present when filtered by property)
+			b["interest_stage"] = stage_by_buyer.get(b.name)
 	return buyers
 
 

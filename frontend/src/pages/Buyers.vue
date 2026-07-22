@@ -116,7 +116,7 @@
         <span>{{ __('Phone') }}</span>
         <span>{{ __('Email') }}</span>
         <span>{{ __('Type') }}</span>
-        <span>{{ __('Active in') }}</span>
+        <span>{{ propertyActive ? __('Status') : __('Active in') }}</span>
         <span class="text-right">{{ __('Deals') }}</span>
       </div>
 
@@ -152,7 +152,17 @@
           </span>
           <span v-if="!tagList(b.buyer_type).length" class="text-ink-gray-4">—</span>
         </span>
-        <span class="truncate text-ink-gray-6">{{ b.active_in || '—' }}</span>
+        <span v-if="propertyActive" class="flex min-w-0 items-center gap-1.5">
+          <template v-if="b.interest_stage">
+            <span
+              class="size-2 shrink-0 rounded-full"
+              :style="{ backgroundColor: stageColor(b.interest_stage) }"
+            />
+            <span class="truncate text-ink-gray-7">{{ b.interest_stage }}</span>
+          </template>
+          <span v-else class="text-ink-gray-4">—</span>
+        </span>
+        <span v-else class="truncate text-ink-gray-6">{{ b.active_in || '—' }}</span>
         <span class="text-right text-ink-gray-6">{{ b.deal_count || 0 }}</span>
       </component>
 
@@ -204,6 +214,19 @@ const bulkRecipients = ref([]) // recipients handed to BulkTextModal (set on ope
 const hasFilter = computed(
   () => !!(search.value || metroFilter.value || propertyFilter.value),
 )
+// when filtered by a property, each buyer carries a per-property interest_stage
+const propertyActive = computed(() => !!propertyFilter.value)
+
+const STAGE_COLOR = {
+  New: '#3b82f6',
+  'Attempted to Contact': '#f97316',
+  'Not Interested': '#ef4444',
+  Interested: '#22c55e',
+  'Offer Made': '#a855f7',
+}
+function stageColor(s) {
+  return STAGE_COLOR[s] || '#9ca3af'
+}
 
 const gridCols = computed(() => ({
   gridTemplateColumns:
@@ -231,6 +254,7 @@ function toRecipient(r) {
     buyer_name: r.buyer_name,
     phone: r.phone,
     first_name: r.first_name,
+    stage: r.interest_stage, // per-property status (only when property-filtered)
   }
 }
 // text everyone currently in the (filtered) list

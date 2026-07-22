@@ -725,6 +725,21 @@ duplicating. Work substantial features in a worktree of your own.
     (`textThese` = all `rows`, `textSelected` = the checked ones); the per-message
     confirm step still applies. Gated on `hasFilter` so it never blasts all
     ~354 buyers unfiltered.
+  - **Status column + status failsafe** (gw190): when filtered by property each
+    buyer carries its per-property **interest_stage** (`get_buyers` returns it from
+    the `CRM Lead Buyer` row when `property` is set). The property-filtered /buyers
+    list swaps its "Active in" column for a **Status** column (colored dot + stage).
+    `BulkTextModal` gained a **"Statuses to text"** chip row (shown whenever any
+    recipient carries a `stage` — i.e. the Dispo "Text buyers" and the
+    property-filtered "Text these"): one toggle chip per present stage (with a
+    count), and the recipient checklist + selection are scoped to the active
+    stages. **"Not Interested" is OFF by default** (`EXCLUDE_BY_DEFAULT`) so a
+    blast can't accidentally hit uninterested buyers; toggling a chip re-syncs the
+    selection to the now-visible set. Each checklist/review row also shows the
+    buyer's stage. Recipients get `stage` from `get_deal_buyers.interest_stage`
+    (Dispo) / `get_buyers.interest_stage` (property-filtered Buyers). Stage colors
+    (blue/orange/red/green/purple) live in JS in both `BulkTextModal.vue` and
+    `pages/Buyers.vue`.
 - **DD Expiration date** (Leads) — `dd_expiration_date` (Date custom field)
   shown as a calendar-icon row in the Lead sidebar HEADER directly under the
   Acq Price row (same minimal no-label formatting): displays

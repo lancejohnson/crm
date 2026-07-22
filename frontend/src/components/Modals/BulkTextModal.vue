@@ -15,11 +15,38 @@
           <Button :label="__('Select number')" @click="showSelectNumber = true" />
         </div>
 
+        <!-- status failsafe: pick which interest stages to text -->
+        <div v-if="hasStages">
+          <div class="mb-1.5 text-xs text-ink-gray-5">{{ __('Statuses to text') }}</div>
+          <div class="flex flex-wrap gap-1.5">
+            <button
+              v-for="s in stagesPresent"
+              :key="s"
+              type="button"
+              class="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors"
+              :class="stageActive(s)
+                ? 'border-outline-gray-3 bg-surface-gray-2 text-ink-gray-8'
+                : 'border-outline-gray-2 text-ink-gray-4'"
+              @click="toggleStage(s)"
+            >
+              <span
+                class="size-2 rounded-full"
+                :class="stageActive(s) ? '' : 'opacity-40'"
+                :style="{ backgroundColor: stageColor(s) }"
+              />
+              {{ s }} ({{ stageCount(s) }})
+            </button>
+          </div>
+          <div class="mt-1 text-xs text-ink-gray-4">
+            {{ __('“Not Interested” is off by default so you don’t text them. Click a status to include or exclude it.') }}
+          </div>
+        </div>
+
         <!-- recipients -->
         <div>
           <div class="mb-1.5 flex items-center justify-between">
             <span class="text-xs text-ink-gray-5">
-              {{ selectedCount }} {{ __('of') }} {{ textable.length }} {{ __('selected') }}
+              {{ selectedCount }} {{ __('of') }} {{ visible.length }} {{ __('selected') }}
               <span v-if="noPhone.length" class="text-ink-gray-4">
                 · {{ noPhone.length }} {{ __('without a phone') }}
               </span>
@@ -35,7 +62,7 @@
           </div>
           <div class="max-h-52 overflow-y-auto rounded border border-outline-gray-2">
             <label
-              v-for="r in textable"
+              v-for="r in visible"
               :key="r.name"
               class="flex cursor-pointer items-center gap-2.5 border-b border-outline-gray-1 px-3 py-2 text-sm last:border-b-0 hover:bg-surface-gray-1"
             >
@@ -48,13 +75,22 @@
               <span class="min-w-0 flex-1 truncate text-ink-gray-8">
                 {{ r.buyer_name || '—' }}
               </span>
+              <span
+                v-if="r.stage"
+                class="flex shrink-0 items-center gap-1 text-xs text-ink-gray-4"
+              >
+                <span class="size-1.5 rounded-full" :style="{ backgroundColor: stageColor(r.stage) }" />
+                {{ r.stage }}
+              </span>
               <span class="shrink-0 text-ink-gray-5">{{ formatPhone(r.phone) }}</span>
             </label>
             <div
-              v-if="!textable.length"
+              v-if="!visible.length"
               class="px-3 py-4 text-center text-sm text-ink-gray-4"
             >
-              {{ __('None of these buyers have a phone number on file.') }}
+              {{ hasStages
+                ? __('No buyers in the selected statuses.')
+                : __('None of these buyers have a phone number on file.') }}
             </div>
           </div>
           <div v-if="noPhone.length" class="mt-1 text-xs text-ink-gray-4">
@@ -93,8 +129,17 @@
         <!-- who this goes to -->
         <div class="flex items-center justify-between rounded border border-outline-gray-2 px-3 py-2">
           <div class="min-w-0">
-            <div class="truncate font-medium text-ink-gray-9">
-              {{ current.buyer_name || '—' }}
+            <div class="flex items-center gap-1.5">
+              <span class="truncate font-medium text-ink-gray-9">
+                {{ current.buyer_name || '—' }}
+              </span>
+              <span
+                v-if="current.stage"
+                class="flex shrink-0 items-center gap-1 text-xs text-ink-gray-5"
+              >
+                <span class="size-1.5 rounded-full" :style="{ backgroundColor: stageColor(current.stage) }" />
+                {{ current.stage }}
+              </span>
             </div>
             <div class="text-xs text-ink-gray-5">{{ formatPhone(current.phone) }}</div>
           </div>
@@ -176,11 +221,29 @@ import {
 import { ref, computed, watch } from 'vue'
 
 const props = defineProps({
-  // [{ name (CRM Buyer id), buyer_name, phone, first_name? }]
+  // [{ name (CRM Buyer id), buyer_name, phone, first_name?, stage? }]
+  // `stage` = the buyer's per-property interest stage (present in property-scoped
+  // contexts: Dispo board + property-filtered Buyers list). Drives the status
+  // failsafe below.
   recipients: { type: Array, default: () => [] },
   // shown in the dialog title, e.g. the property address
   contextLabel: { type: String, default: '' },
 })
+
+// interest stages, canonical order + colors (mirrors the Dispo board), and the
+// stage(s) excluded by default so a blast can't accidentally hit uninterested buyers
+const STAGE_ORDER = ['New', 'Attempted to Contact', 'Not Interested', 'Interested', 'Offer Made']
+const STAGE_COLOR = {
+  New: '#3b82f6',
+  'Attempted to Contact': '#f97316',
+  'Not Interested': '#ef4444',
+  Interested: '#22c55e',
+  'Offer Made': '#a855f7',
+}
+const EXCLUDE_BY_DEFAULT = new Set(['Not Interested'])
+function stageColor(s) {
+  return STAGE_COLOR[s] || '#9ca3af'
+}
 const emit = defineEmits(['sent'])
 
 const show = defineModel({ type: Boolean })
@@ -215,6 +278,37 @@ const textable = computed(() =>
 const noPhone = computed(() =>
   props.recipients.filter((r) => !(r.phone || '').trim()),
 )
+
+// ── status failsafe ──────────────────────────────────────────────────────────
+// stages present among the recipients (only property-scoped recipients carry one)
+const stagesPresent = computed(() => {
+  const set = new Set(props.recipients.map((r) => r.stage).filter(Boolean))
+  return STAGE_ORDER.filter((s) => set.has(s))
+})
+const hasStages = computed(() => stagesPresent.value.length > 0)
+const activeStages = ref(new Set())
+
+function stageActive(s) {
+  return activeStages.value.has(s)
+}
+function stageCount(s) {
+  return textable.value.filter((r) => r.stage === s).length
+}
+function toggleStage(s) {
+  const set = new Set(activeStages.value)
+  set.has(s) ? set.delete(s) : set.add(s)
+  activeStages.value = set
+  // re-sync the selection to whatever is now visible
+  selected.value = new Set(visible.value.map((r) => r.name))
+}
+
+// textable buyers that pass the status filter (buyers with no stage always pass)
+const visible = computed(() =>
+  textable.value.filter(
+    (r) => !hasStages.value || !r.stage || activeStages.value.has(r.stage),
+  ),
+)
+
 const selectedCount = computed(() => selected.value.size)
 
 function toggle(name) {
@@ -223,7 +317,7 @@ function toggle(name) {
   selected.value = s
 }
 function selectAll() {
-  selected.value = new Set(textable.value.map((r) => r.name))
+  selected.value = new Set(visible.value.map((r) => r.name))
 }
 function selectNone() {
   selected.value = new Set()
@@ -249,7 +343,7 @@ const skippedCount = computed(() => queue.value.filter((q) => q.status === 'skip
 const failedCount = computed(() => queue.value.filter((q) => q.status === 'failed').length)
 
 function startReview() {
-  const chosen = textable.value.filter((r) => selected.value.has(r.name))
+  const chosen = visible.value.filter((r) => selected.value.has(r.name))
   if (!chosen.length) return
   queue.value = chosen.map((r) => ({
     ...r,
@@ -318,7 +412,12 @@ watch(show, (open) => {
     idx.value = 0
     queue.value = []
     linkedNumber.value = myQuoNumber()
-    selected.value = new Set(textable.value.map((r) => r.name))
+    // status failsafe: default to every present stage EXCEPT "Not Interested"
+    // (fall back to all if that would leave nothing selectable)
+    let init = stagesPresent.value.filter((s) => !EXCLUDE_BY_DEFAULT.has(s))
+    if (!init.length) init = [...stagesPresent.value]
+    activeStages.value = new Set(init)
+    selected.value = new Set(visible.value.map((r) => r.name))
     if (!linkedNumber.value) showSelectNumber.value = true
   }
 })
