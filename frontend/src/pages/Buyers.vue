@@ -79,7 +79,7 @@
         <Button
           v-if="hasFilter && rows.length"
           variant="solid"
-          :label="__('Text these') + ' (' + rows.length + ')'"
+          :label="__('Text these') + ' (' + textTheseCount + ')'"
           iconLeft="message-circle"
           @click="textThese"
         />
@@ -227,6 +227,19 @@ const STAGE_COLOR = {
 function stageColor(s) {
   return STAGE_COLOR[s] || '#9ca3af'
 }
+
+// mirrors BulkTextModal's default: text everyone with a phone EXCEPT the
+// default-excluded status(es), so the "Text these (N)" button shows the count
+// that will actually be pre-selected (Not Interested is off by default).
+const EXCLUDE_BY_DEFAULT = new Set(['Not Interested'])
+const textTheseCount = computed(
+  () =>
+    rows.value.filter(
+      (r) =>
+        (r.phone || '').trim() &&
+        !(r.interest_stage && EXCLUDE_BY_DEFAULT.has(r.interest_stage)),
+    ).length,
+)
 
 const gridCols = computed(() => ({
   gridTemplateColumns:

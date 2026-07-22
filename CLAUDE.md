@@ -739,7 +739,11 @@ duplicating. Work substantial features in a worktree of your own.
     buyer's stage. Recipients get `stage` from `get_deal_buyers.interest_stage`
     (Dispo) / `get_buyers.interest_stage` (property-filtered Buyers). Stage colors
     (blue/orange/red/green/purple) live in JS in both `BulkTextModal.vue` and
-    `pages/Buyers.vue`.
+    `pages/Buyers.vue`. gw191: the **"Text these (N)"** button label now reflects
+    the **post-failsafe** count (`textTheseCount` — phone-present and not in
+    `EXCLUDE_BY_DEFAULT`), previewing what will actually be pre-selected (e.g.
+    "Text these (53)" for a 58-buyer property with 5 Not Interested); the header
+    "N buyers" still shows the true filtered total.
 - **DD Expiration date** (Leads) — `dd_expiration_date` (Date custom field)
   shown as a calendar-icon row in the Lead sidebar HEADER directly under the
   Acq Price row (same minimal no-label formatting): displays
