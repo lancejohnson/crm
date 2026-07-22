@@ -50,9 +50,30 @@
         </template>
       </Autocomplete>
       <div class="flex-1" />
-      <span class="text-sm text-ink-gray-5">
-        {{ rows.length }} {{ __('buyers') }}
-      </span>
+      <template v-if="!selectMode">
+        <span class="text-sm text-ink-gray-5">
+          {{ rows.length }} {{ __('buyers') }}
+        </span>
+        <Button
+          variant="ghost"
+          :label="__('Select to text')"
+          iconLeft="message-circle"
+          @click="enterSelect"
+        />
+      </template>
+      <template v-else>
+        <span class="text-sm text-ink-gray-5">
+          {{ selected.size }} {{ __('selected') }}
+        </span>
+        <Button variant="ghost" :label="__('Cancel')" @click="exitSelect" />
+        <Button
+          variant="solid"
+          :label="__('Text') + ' (' + selected.size + ')'"
+          iconLeft="message-circle"
+          :disabled="!selected.size"
+          @click="showBulkText = true"
+        />
+      </template>
     </div>
 
     <!-- list -->
@@ -61,6 +82,7 @@
         class="grid items-center gap-3 border-b px-4 py-2 text-xs font-medium uppercase text-ink-gray-5 sm:px-5"
         :style="gridCols"
       >
+        <span v-if="selectMode" />
         <span>{{ __('Name') }}</span>
         <span>{{ __('Phone') }}</span>
         <span>{{ __('Email') }}</span>
@@ -69,13 +91,22 @@
         <span class="text-right">{{ __('Deals') }}</span>
       </div>
 
-      <router-link
+      <component
+        :is="selectMode ? 'div' : 'router-link'"
         v-for="b in rows"
         :key="b.name"
-        :to="{ name: 'Buyer', params: { buyerId: b.name } }"
-        class="grid items-center gap-3 border-b border-outline-gray-1 px-4 py-2.5 text-sm text-ink-gray-8 hover:bg-surface-gray-1 sm:px-5"
+        :to="selectMode ? undefined : { name: 'Buyer', params: { buyerId: b.name } }"
+        class="grid cursor-pointer items-center gap-3 border-b border-outline-gray-1 px-4 py-2.5 text-sm text-ink-gray-8 hover:bg-surface-gray-1 sm:px-5"
         :style="gridCols"
+        @click="selectMode && toggle(b.name)"
       >
+        <span v-if="selectMode" class="flex items-center">
+          <input
+            type="checkbox"
+            class="pointer-events-none size-3.5 rounded border-outline-gray-3 accent-surface-gray-7"
+            :checked="selected.has(b.name)"
+          />
+        </span>
         <span class="flex min-w-0 items-center gap-1.5">
           <span class="truncate font-medium">{{ b.buyer_name || '—' }}</span>
           <BadgeCheckIcon v-if="b.verified" class="size-3.5 shrink-0 text-ink-blue-3" />
@@ -94,7 +125,7 @@
         </span>
         <span class="truncate text-ink-gray-6">{{ b.active_in || '—' }}</span>
         <span class="text-right text-ink-gray-6">{{ b.deal_count || 0 }}</span>
-      </router-link>
+      </component>
 
       <div
         v-if="!rows.length && !buyers.loading"
@@ -109,11 +140,13 @@
   </div>
 
   <BuyerModal v-model="showModal" @saved="buyers.reload()" />
+  <BulkTextModal v-model="showBulkText" :recipients="selectedRecipients" />
 </template>
 
 <script setup>
 import LayoutHeader from '@/components/LayoutHeader.vue'
 import BuyerModal from '@/components/Modals/BuyerModal.vue'
+import BulkTextModal from '@/components/Modals/BulkTextModal.vue'
 import SearchIcon from '~icons/lucide/search'
 import UsersIcon from '~icons/lucide/users-round'
 import BadgeCheckIcon from '~icons/lucide/badge-check'
@@ -132,9 +165,40 @@ const search = ref('')
 const metroFilter = ref('')
 const showModal = ref(false)
 
-const gridCols = {
-  gridTemplateColumns: 'minmax(10rem,1.4fr) 9rem minmax(10rem,1.4fr) minmax(8rem,1fr) minmax(8rem,1fr) 3.5rem',
+// bulk-text selection mode
+const selectMode = ref(false)
+const selected = ref(new Set())
+const showBulkText = ref(false)
+
+const gridCols = computed(() => ({
+  gridTemplateColumns:
+    (selectMode.value ? '1.5rem ' : '') +
+    'minmax(10rem,1.4fr) 9rem minmax(10rem,1.4fr) minmax(8rem,1fr) minmax(8rem,1fr) 3.5rem',
+}))
+
+function enterSelect() {
+  selectMode.value = true
+  selected.value = new Set()
 }
+function exitSelect() {
+  selectMode.value = false
+  selected.value = new Set()
+}
+function toggle(name) {
+  const s = new Set(selected.value)
+  s.has(name) ? s.delete(name) : s.add(name)
+  selected.value = s
+}
+const selectedRecipients = computed(() =>
+  rows.value
+    .filter((r) => selected.value.has(r.name))
+    .map((r) => ({
+      name: r.name,
+      buyer_name: r.buyer_name,
+      phone: r.phone,
+      first_name: r.first_name,
+    })),
+)
 
 const buyers = createResource({
   url: 'crm.api.buyers.get_buyers',

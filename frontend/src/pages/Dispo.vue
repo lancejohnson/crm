@@ -27,6 +27,13 @@
     <template #right-header>
       <Button
         v-if="selectedLead"
+        variant="ghost"
+        :label="__('Text buyers')"
+        iconLeft="message-circle"
+        @click="openBulkText"
+      />
+      <Button
+        v-if="selectedLead"
         variant="solid"
         :label="__('Add buyer')"
         iconLeft="plus"
@@ -68,12 +75,18 @@
     :lead="selectedLead || ''"
     @saved="boardKey++"
   />
+  <BulkTextModal
+    v-model="showBulkText"
+    :recipients="bulkRecipients"
+    :context-label="current?.label || ''"
+  />
 </template>
 
 <script setup>
 import LayoutHeader from '@/components/LayoutHeader.vue'
 import DispoBoard from '@/components/Activities/DispoBoard.vue'
 import AddBuyerToDealModal from '@/components/Modals/AddBuyerToDealModal.vue'
+import BulkTextModal from '@/components/Modals/BulkTextModal.vue'
 import DispoIcon from '~icons/lucide/columns-3'
 import ChevronDownIcon from '~icons/lucide/chevron-down'
 import { Breadcrumbs, Button, Badge, Dropdown, createResource, usePageMeta } from 'frappe-ui'
@@ -91,7 +104,31 @@ const list = computed(() => properties.data || [])
 
 const selectedLead = ref(route.params.leadId || null)
 const showAddBuyer = ref(false)
+const showBulkText = ref(false)
 const boardKey = ref(0)
+
+// buyers on the current deal's board — fed to the bulk-text modal. Fetched fresh
+// when the button is clicked (deduped to one row per buyer).
+const dealBuyers = createResource({
+  url: 'crm.api.investorlift_ingest.get_deal_buyers',
+  makeParams: () => ({ lead: selectedLead.value }),
+})
+const bulkRecipients = computed(() => {
+  const seen = new Set()
+  const out = []
+  for (const b of dealBuyers.data || []) {
+    if (b.buyer && !seen.has(b.buyer)) {
+      seen.add(b.buyer)
+      out.push({ name: b.buyer, buyer_name: b.buyer_name, phone: b.phone })
+    }
+  }
+  return out
+})
+async function openBulkText() {
+  if (!selectedLead.value) return
+  await dealBuyers.reload()
+  showBulkText.value = true
+}
 
 function selectProperty(p, push = true) {
   selectedLead.value = p.lead

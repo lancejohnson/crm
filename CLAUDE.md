@@ -673,6 +673,37 @@ duplicating. Work substantial features in a worktree of your own.
     and churn the reconcile) and `_upsert_buyer` only enqueues a push when an
     identity field actually changed — the IL scraper re-upserts every buyer
     each run and once flooded the short queue with 189 no-op pushes.
+- **Bulk-text buyers (per-message confirm)** (gw186/gw187) — text a picked group
+  of CRM Buyers, but with a **manual confirm on every message** so the rep
+  eyeballs each `{{first_name}}` substitution before it sends (Lance's explicit
+  ask). A `BulkTextModal.vue` stepper: **Compose** (pick recipients — a checklist,
+  all pre-checked = "text all", buyers with no phone auto-excluded + counted;
+  write a template with a `{{first_name}}` / `{{name}}` token; confirm the sending
+  Quo number) → **Review** (walks recipients ONE at a time: buyer + phone + the
+  fully-rendered message in an editable box; Send & next / Skip / Back; running
+  "N of M · X sent") → **Done** (sent/skipped/failed summary). Nothing sends
+  until the rep clicks — deliberately **one synchronous send per click**, no
+  background blast.
+  - Two entry points: the **Dispo board** header **"Text buyers"** button (seeded
+    with that deal's board buyers via `get_deal_buyers`, deduped) and a
+    **select-mode** on the **/buyers directory** ("Select to text" → a checkbox
+    column + "Text (N)"; in select mode a row is a `<div>`, not a `router-link`,
+    so a click toggles selection instead of navigating — `@click.prevent` on a
+    router-link loses the race with RouterLink's own nav handler).
+  - **Backend = app code** `crm/api/bulk_text.py` `send_buyer_text(buyer, content,
+    from_number)` — sends ONE text to one buyer, content verbatim (the rep already
+    confirmed it), buyer phone resolved server-side. Like `agreement_notify.py` it
+    POSTs OpenPhone directly with site_config `quo_api_key`, and stores the text as
+    a `Quo Message` referenced to **CRM Buyer** (so it threads on the buyer's
+    Conversation tab + fires the `quo_message` realtime via the existing
+    after_insert hook). No ops piece — reuses the `quo_api_key` already in
+    site_config and the existing Quo Message doctype. Sales-roles gated; a
+    first-time from-number pick is saved to the user (mirrors `send-text`).
+  - `frontend`: `components/Modals/BulkTextModal.vue` (**new**), mounted in
+    `pages/Dispo.vue` (button + `get_deal_buyers` resource) and `pages/Buyers.vue`
+    (select-mode). `{{first_name}}` renders client-side (falls back to the first
+    word of the buyer name, then "there") — and since every message is confirmed,
+    a bad substitution is caught before it sends.
 - **DD Expiration date** (Leads) — `dd_expiration_date` (Date custom field)
   shown as a calendar-icon row in the Lead sidebar HEADER directly under the
   Acq Price row (same minimal no-label formatting): displays
