@@ -18,6 +18,25 @@
       </div>
 
       <div class="flex items-center gap-2">
+        <Tooltip :text="__('Acquisition = New through Signed Contract')">
+          <div
+            class="inline-flex rounded-md bg-surface-gray-2 p-0.5 text-sm font-medium"
+          >
+            <button
+              v-for="s in ['acquisition', 'all']"
+              :key="s"
+              class="px-3 py-1 rounded transition-colors"
+              :class="
+                scope === s
+                  ? 'bg-surface-white text-ink-gray-9 shadow-sm'
+                  : 'text-ink-gray-6 hover:text-ink-gray-8'
+              "
+              @click="setScope(s)"
+            >
+              {{ s === 'acquisition' ? __('Acquisition') : __('All stages') }}
+            </button>
+          </div>
+        </Tooltip>
         <Tooltip
           :text="
             mode === 'cohort'
@@ -51,7 +70,7 @@
       {{ __('Loading…') }}
     </div>
     <div
-      v-else-if="!stages.length"
+      v-else-if="!visibleStages.length"
       class="px-4 py-10 text-center text-ink-gray-5"
     >
       {{
@@ -101,7 +120,7 @@
         </tr>
       </thead>
       <tbody>
-        <template v-for="row in stages" :key="row.stage">
+        <template v-for="row in visibleStages" :key="row.stage">
           <tr
             class="border-t border-outline-gray-1 hover:bg-surface-gray-1 cursor-pointer"
             @click="toggle(row.stage)"
@@ -261,6 +280,33 @@ const report = createResource({
 })
 
 const stages = computed(() => report.data?.stages || [])
+
+// Acquisition-phase statuses (New → Signed Contract). Dispo and parking/terminal
+// stages are hidden as rows in Acquisition scope but still show inside a row's
+// unfolded Came-from / Went-to flows (so leakage to Dead Lead etc. stays visible).
+const ACQ_STAGES = new Set([
+  'New',
+  'Called No Answer',
+  'Follow Up',
+  'Underwriting',
+  'Make Offer',
+  'Contract Sent',
+  'Signed Contract',
+])
+
+const scope = ref(localStorage.getItem('statusReportScope') || 'acquisition')
+
+const visibleStages = computed(() =>
+  scope.value === 'acquisition'
+    ? stages.value.filter((s) => ACQ_STAGES.has(s.stage))
+    : stages.value,
+)
+
+function setScope(s) {
+  if (scope.value === s) return
+  scope.value = s
+  localStorage.setItem('statusReportScope', s)
+}
 
 // Reload when the dashboard's date range / user changes.
 watch(

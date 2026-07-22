@@ -416,6 +416,16 @@ duplicating. Work substantial features in a worktree of your own.
     inflow/outflow) and `get_status_transition_leads` (drill-down name resolver)
   - `frontend/src/components/Dashboard/StatusChangeReport.vue` + `FlowEdge.vue`;
     integrated in `pages/LeadsDashboard.vue`
+  - **Acquisition scope toggle** (gw192): a second segmented control next to
+    Cohort/Flow — **Acquisition | All stages**, default Acquisition (persisted in
+    `localStorage['statusReportScope']`). Acquisition shows only the 7
+    acquisition-phase statuses (New → Signed Contract; `ACQ_STAGES` constant in
+    `StatusChangeReport.vue`); dispo + parking/terminal stages drop out as rows
+    but still appear inside a row's unfolded Came-from/Went-to flows. Pure
+    client-side filter over the already-returned stages — toggling is instant,
+    backend and drill-downs untouched. If a status is renamed, update
+    `ACQ_STAGES` (unmatched rows just fall out of Acquisition scope; All stages
+    always shows everything).
   - drill-down: `frontend/src/stores/leadDrilldown.js` holds an ad-hoc lead-name
     set; `pages/Leads.vue` injects it as a never-persisted `name in […]`
     default-filter (+ a dismissible banner); `components/ViewControls.vue` now
