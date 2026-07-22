@@ -717,6 +717,14 @@ duplicating. Work substantial features in a worktree of your own.
     a `property` param (a CRM Lead name) → resolves the `CRM Lead Buyer` rel rows
     to buyer names and adds a `["name","in",[...]]` filter; composes with
     search + metro + select-to-text.
+  - **"Text these (N)" on the filtered list** (gw189): when any filter is active
+    (search / metro / property) the /buyers toolbar shows a solid **"Text these
+    (N)"** button that opens `BulkTextModal` pre-loaded with the WHOLE current
+    filtered list (all pre-checked) — a one-click path vs "Select to text"'s
+    manual pick. Both now set a shared `bulkRecipients` ref at open time
+    (`textThese` = all `rows`, `textSelected` = the checked ones); the per-message
+    confirm step still applies. Gated on `hasFilter` so it never blasts all
+    ~354 buyers unfiltered.
 - **DD Expiration date** (Leads) — `dd_expiration_date` (Date custom field)
   shown as a calendar-icon row in the Lead sidebar HEADER directly under the
   Acq Price row (same minimal no-label formatting): displays

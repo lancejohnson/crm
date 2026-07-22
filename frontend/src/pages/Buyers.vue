@@ -77,6 +77,13 @@
           {{ rows.length }} {{ __('buyers') }}
         </span>
         <Button
+          v-if="hasFilter && rows.length"
+          variant="solid"
+          :label="__('Text these') + ' (' + rows.length + ')'"
+          iconLeft="message-circle"
+          @click="textThese"
+        />
+        <Button
           variant="ghost"
           :label="__('Select to text')"
           iconLeft="message-circle"
@@ -93,7 +100,7 @@
           :label="__('Text') + ' (' + selected.size + ')'"
           iconLeft="message-circle"
           :disabled="!selected.size"
-          @click="showBulkText = true"
+          @click="textSelected"
         />
       </template>
     </div>
@@ -162,7 +169,7 @@
   </div>
 
   <BuyerModal v-model="showModal" @saved="buyers.reload()" />
-  <BulkTextModal v-model="showBulkText" :recipients="selectedRecipients" />
+  <BulkTextModal v-model="showBulkText" :recipients="bulkRecipients" />
 </template>
 
 <script setup>
@@ -188,10 +195,15 @@ const metroFilter = ref('')
 const propertyFilter = ref('')
 const showModal = ref(false)
 
-// bulk-text selection mode
+// bulk-text: "Select to text" (manual pick) or "Text these" (whole filtered list)
 const selectMode = ref(false)
 const selected = ref(new Set())
 const showBulkText = ref(false)
+const bulkRecipients = ref([]) // recipients handed to BulkTextModal (set on open)
+
+const hasFilter = computed(
+  () => !!(search.value || metroFilter.value || propertyFilter.value),
+)
 
 const gridCols = computed(() => ({
   gridTemplateColumns:
@@ -212,16 +224,27 @@ function toggle(name) {
   s.has(name) ? s.delete(name) : s.add(name)
   selected.value = s
 }
-const selectedRecipients = computed(() =>
-  rows.value
+
+function toRecipient(r) {
+  return {
+    name: r.name,
+    buyer_name: r.buyer_name,
+    phone: r.phone,
+    first_name: r.first_name,
+  }
+}
+// text everyone currently in the (filtered) list
+function textThese() {
+  bulkRecipients.value = rows.value.map(toRecipient)
+  showBulkText.value = true
+}
+// text the manually-checked buyers (select mode)
+function textSelected() {
+  bulkRecipients.value = rows.value
     .filter((r) => selected.value.has(r.name))
-    .map((r) => ({
-      name: r.name,
-      buyer_name: r.buyer_name,
-      phone: r.phone,
-      first_name: r.first_name,
-    })),
-)
+    .map(toRecipient)
+  showBulkText.value = true
+}
 
 const buyers = createResource({
   url: 'crm.api.buyers.get_buyers',
