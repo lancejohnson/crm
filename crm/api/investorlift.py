@@ -423,6 +423,11 @@ def _run_match(dry_run=1, overwrite=0):
 			else:
 				frappe.db.set_value("CRM Lead", chosen.name, "il_property_id", pid, update_modified=False)
 				_sync_lead(chosen.name, pid)
+				# db.set_value fires no doc events — tag the lead's Quo contact
+				# with the property (Quo "Property" multi-select) explicitly
+				from crm.api.quo_contacts import enqueue_tag_lead_property
+
+				enqueue_tag_lead_property(chosen.name)
 				row["action"] = "linked"
 		results.append(row)
 

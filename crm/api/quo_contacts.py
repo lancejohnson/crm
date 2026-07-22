@@ -232,34 +232,48 @@ def _buyer_first_last(b):
 
 
 def _apply_contact_patch(contact, buyer, keys, set_name=True):
-	"""PATCH the contact from the buyer (merge, never wipe). Returns the id."""
+	"""PATCH the contact from the buyer (merge, never wipe). Skips the PATCH
+	entirely when nothing would change — blind PATCHes bump the contact's
+	updatedAt and churn the reconcile. Returns the id."""
 	cid = contact["id"]
+	dirty = False
 	df = _clean_default_fields(contact)
 	if set_name:
 		first, last = _buyer_first_last(buyer)
+		if (df.get("firstName") or "") != first or (df.get("lastName") or "") != last:
+			dirty = True
 		df["firstName"], df["lastName"] = first, last
 
 	e164 = _e164(buyer.get("phone"))
 	if e164 and _last10(e164) not in {_last10(p["value"]) for p in df["phoneNumbers"]}:
 		df["phoneNumbers"].append({"name": "primary", "value": e164})
+		dirty = True
 	if buyer.get("email") and not df["emails"]:
 		df["emails"].append({"name": "primary", "value": buyer["email"]})
+		dirty = True
 
 	body = {"defaultFields": df}
 	if not contact.get("externalId"):
 		body["externalId"] = buyer["name"]
+		dirty = True
 
 	custom = []
 	if keys.get("tag") is not None and frappe.db.has_column(BUYER_DOCTYPE, "quo_tags"):
-		custom.append({"key": keys["tag"], "value": _split_tags(buyer.get("quo_tags"))})
+		want = _split_tags(buyer.get("quo_tags"))
+		if {t.lower() for t in want} != {t.lower() for t in _contact_tags(contact, keys["tag"])}:
+			dirty = True
+		custom.append({"key": keys["tag"], "value": want})
 	if keys.get("property"):
 		props = _buyer_properties(buyer["name"])
 		if props:
+			if set(props) != set(_contact_tags(contact, keys["property"])):
+				dirty = True
 			custom.append({"key": keys["property"], "value": props})
 	if custom:
 		body["customFields"] = custom
 
-	_req("PATCH", f"/contacts/{cid}", json=body)
+	if dirty:
+		_req("PATCH", f"/contacts/{cid}", json=body)
 	return cid
 
 
@@ -362,15 +376,22 @@ def enqueue_push(buyer):
 	if not _enabled():
 		return
 	try:
+		# enqueue_after_commit: hook-driven pushes must not race the doc
+		# transaction — a push that runs pre-commit reads the OLD state (bit
+		# us on CRM Lead Buyer on_trash: the job recomputed property tags
+		# while the deleted row was still visible).
 		frappe.enqueue(
 			"crm.api.quo_contacts.push_buyer",
 			buyer=buyer,
 			queue="short",
 			job_id=f"quo-buyer-push-{buyer}",
 			deduplicate=True,
+			enqueue_after_commit=True,
 		)
 	except TypeError:  # older enqueue without deduplicate
-		frappe.enqueue("crm.api.quo_contacts.push_buyer", buyer=buyer, queue="short")
+		frappe.enqueue(
+			"crm.api.quo_contacts.push_buyer", buyer=buyer, queue="short", enqueue_after_commit=True
+		)
 
 
 # --------------------------------------------------------------------------- #
@@ -409,6 +430,111 @@ def on_buyer_trash(doc, method=None):
 			)
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), f"Quo buyer unlink failed: {doc.name}")
+
+
+# --------------------------------------------------------------------------- #
+# property tags: IL-linked properties in the Quo "Property" multi-select
+# --------------------------------------------------------------------------- #
+def _lead_property_label(row):
+	return (row.get("property_address") or row.get("lead_name") or row.get("name") or "").strip()
+
+
+def tag_lead_property(lead):
+	"""The moment a lead is linked to an InvestorLift property, tag its SELLER's
+	Quo contact with the property address in the 'Property' multi-select — that
+	both marks the deal in Quo and makes the tag value exist there for buyers
+	(OpenPhone has no API to define options; a value exists once a contact
+	carries it). Also re-pushes any already-engaged buyers (re-link case)."""
+	if not _api_key():
+		return
+	fields = ["name", "property_address", "lead_name"]
+	if frappe.db.has_column("CRM Lead", "quo_contact_id"):
+		fields.append("quo_contact_id")
+	if frappe.db.has_column("CRM Lead", "il_property_id"):
+		fields.append("il_property_id")
+	row = frappe.db.get_value("CRM Lead", lead, fields, as_dict=True)
+	if not row or not row.get("il_property_id"):
+		return
+	try:
+		keys = _custom_field_keys()
+		if not keys.get("property"):
+			return
+		cid = row.get("quo_contact_id")
+		if not cid:
+			found = _req("GET", "/contacts", params={"externalIds": lead, "maxResults": 2})
+			rows = found.get("data") or []
+			cid = rows[0]["id"] if rows else None
+		if cid:
+			contact = _data(_req("GET", f"/contacts/{cid}"))
+			label = _lead_property_label(row)
+			current = []
+			for cf in contact.get("customFields") or []:
+				if cf.get("key") == keys["property"]:
+					current = [str(v) for v in cf.get("value") or []]
+			if label and label not in current:
+				_req(
+					"PATCH",
+					f"/contacts/{cid}",
+					json={
+						"defaultFields": _clean_default_fields(contact),
+						"customFields": [{"key": keys["property"], "value": current + [label]}],
+					},
+				)
+		# buyers already on this property's board pick the tag up too
+		if frappe.db.exists("DocType", "CRM Lead Buyer"):
+			for rel in frappe.get_all("CRM Lead Buyer", filters={"lead": lead}, fields=["buyer"]):
+				enqueue_push(rel.buyer)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), f"Quo property tag failed: {lead}")
+
+
+def enqueue_tag_lead_property(lead):
+	if not _api_key():
+		return
+	try:
+		frappe.enqueue(
+			"crm.api.quo_contacts.tag_lead_property",
+			lead=lead,
+			queue="short",
+			job_id=f"quo-lead-prop-{lead}",
+			deduplicate=True,
+			enqueue_after_commit=True,
+		)
+	except TypeError:
+		frappe.enqueue(
+			"crm.api.quo_contacts.tag_lead_property", lead=lead, queue="short", enqueue_after_commit=True
+		)
+
+
+def on_lead_update(doc, method=None):
+	"""CRM Lead on_update — tag the Quo contact when the lead gets IL-linked
+	via a normal doc save. (The auto-matcher links via db.set_value, which
+	fires no hooks — investorlift._run_match calls enqueue_tag_lead_property
+	explicitly.)"""
+	if (
+		doc.meta.has_field("il_property_id")
+		and doc.get("il_property_id")
+		and doc.has_value_changed("il_property_id")
+	):
+		enqueue_tag_lead_property(doc.name)
+
+
+def on_lead_buyer_change(doc, method=None):
+	"""CRM Lead Buyer after_insert/on_trash — a buyer engaged (or left) a
+	property: re-push their Quo contact so the 'Property' multi-select
+	reflects current engagements (push recomputes it from live rows)."""
+	if doc.get("buyer"):
+		enqueue_push(doc.buyer)
+
+
+def tag_all_linked_leads():
+	"""One-shot backfill (bench execute): tag every IL-linked lead's contact."""
+	if not frappe.db.has_column("CRM Lead", "il_property_id"):
+		return {"ok": False, "reason": "not provisioned"}
+	leads = frappe.get_all("CRM Lead", filters={"il_property_id": ("is", "set")}, pluck="name")
+	for name in leads:
+		tag_lead_property(name)
+	return {"ok": True, "leads": len(leads)}
 
 
 # --------------------------------------------------------------------------- #

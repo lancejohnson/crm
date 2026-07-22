@@ -106,9 +106,16 @@ def _upsert_buyer(row):
 		# only overwrite with non-empty values (never blank out on a sparse scrape)
 		update = {k: v for k, v in fields.items() if v not in (None, "")}
 		if update:
+			# db.set_value fires no doc events — push identity changes to Quo,
+			# but only when a value ACTUALLY changed (the scraper re-upserts
+			# every buyer each run; blind enqueues flooded the short queue)
+			identity = {"buyer_name", "first_name", "last_name", "phone", "email"} & set(update)
+			changed = False
+			if identity:
+				current = frappe.db.get_value(BUYER_DOCTYPE, name, list(identity), as_dict=True) or {}
+				changed = any((current.get(k) or "") != update[k] for k in identity)
 			frappe.db.set_value(BUYER_DOCTYPE, name, update, update_modified=False)
-			# db.set_value fires no doc events — push identity changes to Quo here
-			if {"buyer_name", "first_name", "last_name", "phone", "email"} & set(update):
+			if changed:
 				from crm.api.quo_contacts import enqueue_push
 
 				enqueue_push(name)

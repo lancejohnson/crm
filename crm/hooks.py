@@ -215,6 +215,13 @@ doc_events = {
 		"on_update": ["crm.api.quo_contacts.on_buyer_update"],
 		"on_trash": ["crm.api.quo_contacts.on_buyer_trash"],
 	},
+	# CRM Lead Buyer (ops doctype) is the buyer↔property engagement row: on
+	# engage/disengage, re-push the buyer's Quo contact so its "Property"
+	# multi-select tags reflect current engagements.
+	"CRM Lead Buyer": {
+		"after_insert": ["crm.api.quo_contacts.on_lead_buyer_change"],
+		"on_trash": ["crm.api.quo_contacts.on_lead_buyer_change"],
+	},
 	# Sequence Events Log is where the OpenPhone `message.received` webhook lands
 	# every inbound text (ops repo). When one is an InvestorLift "address request"
 	# notification, pull that buyer onto the property's Dispo board in real time
@@ -232,7 +239,12 @@ doc_events = {
 		# controller rebuilds lead_name/title from the name parts in validate().
 		"before_validate": ["crm.api.name_format.normalize_lead_names"],
 		"after_insert": ["crm.api.sequence_drain.enqueue_for_lead"],
-		"on_update": ["crm.api.sequence_drain.enqueue_for_lead"],
+		"on_update": [
+			"crm.api.sequence_drain.enqueue_for_lead",
+			# lead newly linked to an InvestorLift property → tag its Quo
+			# contact with the property address ("Property" multi-select)
+			"crm.api.quo_contacts.on_lead_update",
+		],
 	},
 }
 

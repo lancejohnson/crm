@@ -657,6 +657,22 @@ duplicating. Work substantial features in a worktree of your own.
     `crm.api.quo_contacts.stamp_buyer_call_references` (bench execute,
     dry_run default). The buyer page call list itself still matches by phone
     (`get_buyer_calls`).
+  - **Property tags on IL-link + engagement** (gw178/gw179): when a lead gets
+    `il_property_id` (manual save → `on_lead_update` hook; the auto-matcher
+    links via `db.set_value`, so `investorlift._run_match` calls
+    `enqueue_tag_lead_property` explicitly), the SELLER's Quo contact gets the
+    property address added to the Quo "Property" multi-select — that also
+    makes the tag value exist in Quo (no API to define options; a value exists
+    once a contact carries it). A buyer engaging/leaving a property
+    (`CRM Lead Buyer` after_insert/on_trash → `on_lead_buyer_change`)
+    re-pushes their contact so its Property tags reflect current engagements
+    (recomputed from live rows; wholesale replace when non-empty — a
+    disengage-to-ZERO leaves the last tag, since pushing [] could wipe
+    hand-set values). Backfill: `tag_all_linked_leads` (bench execute).
+    gw179: `push_buyer` skips no-op PATCHes (blind PATCHes bump `updatedAt`
+    and churn the reconcile) and `_upsert_buyer` only enqueues a push when an
+    identity field actually changed — the IL scraper re-upserts every buyer
+    each run and once flooded the short queue with 189 no-op pushes.
 - **DD Expiration date** (Leads) — `dd_expiration_date` (Date custom field)
   shown as a calendar-icon row in the Lead sidebar HEADER directly under the
   Acq Price row (same minimal no-label formatting): displays
