@@ -49,6 +49,28 @@
           />
         </template>
       </Autocomplete>
+      <Autocomplete
+        :options="propertyOptions"
+        :modelValue="propertyFilter"
+        :placeholder="__('All properties')"
+        @update:modelValue="(v) => (propertyFilter = v?.value || '')"
+      >
+        <template #target="{ togglePopover }">
+          <Button variant="outline" iconRight="chevron-down" @click="togglePopover()">
+            <span class="max-w-56 truncate">{{ propertyLabel || __('All properties') }}</span>
+          </Button>
+        </template>
+        <template #footer="{ close }">
+          <Button
+            v-if="propertyFilter"
+            variant="ghost"
+            class="w-full !justify-start"
+            :label="__('Clear filter')"
+            iconLeft="x"
+            @click="propertyFilter = ''; close()"
+          />
+        </template>
+      </Autocomplete>
       <div class="flex-1" />
       <template v-if="!selectMode">
         <span class="text-sm text-ink-gray-5">
@@ -163,6 +185,7 @@ import { ref, computed, watch } from 'vue'
 
 const search = ref('')
 const metroFilter = ref('')
+const propertyFilter = ref('')
 const showModal = ref(false)
 
 // bulk-text selection mode
@@ -205,12 +228,13 @@ const buyers = createResource({
   makeParams: () => ({
     search: search.value || null,
     metro: metroFilter.value || null,
+    property: propertyFilter.value || null,
   }),
   auto: true,
 })
 const rows = computed(() => buyers.data || [])
 
-watch([search, metroFilter], () => buyers.reload())
+watch([search, metroFilter, propertyFilter], () => buyers.reload())
 
 const metros = createResource({
   url: 'crm.api.buyers.get_metro_areas',
@@ -218,6 +242,18 @@ const metros = createResource({
 })
 const metroOptions = computed(() =>
   (metros.data || []).map((m) => ({ label: m.metro_name, value: m.name })),
+)
+
+// dispo properties (leads linked to an IL property) for the Property filter
+const properties = createResource({
+  url: 'crm.api.investorlift_ingest.get_dispo_properties',
+  auto: true,
+})
+const propertyOptions = computed(() =>
+  (properties.data || []).map((p) => ({ label: p.label, value: p.lead })),
+)
+const propertyLabel = computed(
+  () => propertyOptions.value.find((p) => p.value === propertyFilter.value)?.label || '',
 )
 
 function tagList(buyer_type) {

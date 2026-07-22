@@ -59,10 +59,13 @@ def _parse_metros(raw):
 
 
 @frappe.whitelist()
-def get_buyers(search=None, metro=None):
+def get_buyers(search=None, metro=None, property=None):
 	"""The /buyers directory: every CRM Buyer + deal count + the area they're
 	active in (their metro if set, else the cities of the properties they've
-	engaged with)."""
+	engaged with).
+
+	`property` is a CRM Lead name (a dispo property) — when given, the list is
+	restricted to the buyers engaged on that property (CRM Lead Buyer rows)."""
 	_guard()
 	if not frappe.db.exists("DocType", BUYER_DOCTYPE):
 		return []
@@ -78,6 +81,17 @@ def get_buyers(search=None, metro=None):
 	if metro and _has_market_fields():
 		# metro_areas is a JSON array of names — match the quoted element
 		filters.append(["metro_areas", "like", f'%{json.dumps(metro)}%'])
+	if property and frappe.db.exists("DocType", LEAD_BUYER_DOCTYPE):
+		# restrict to buyers engaged on this property (the CRM Lead Buyer rel table).
+		# _next_task_due-style computed set → resolve to buyer names and filter by `in`.
+		engaged = {
+			r.buyer for r in frappe.get_all(
+				LEAD_BUYER_DOCTYPE, filters={"lead": property}, fields=["buyer"], limit_page_length=0
+			) if r.buyer
+		}
+		if not engaged:
+			return []
+		filters.append(["name", "in", list(engaged)])
 
 	or_filters = None
 	if search:

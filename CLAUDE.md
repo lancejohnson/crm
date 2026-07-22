@@ -704,6 +704,19 @@ duplicating. Work substantial features in a worktree of your own.
     (select-mode). `{{first_name}}` renders client-side (falls back to the first
     word of the buyer name, then "there") — and since every message is confirmed,
     a bad substitution is caught before it sends.
+  - **Dispo board list view + Buyers "by property" filter** (gw188): (a) the Dispo
+    board (`components/Activities/DispoBoard.vue`) gained a **Board/List** toggle
+    (segmented control in the `pages/Dispo.vue` header, persisted per-user in
+    `localStorage['dispoView']`, passed as a `view` prop). List = a flat,
+    stage-ordered table (Stage dot + label / Name / Type / Phone / Direction /
+    Last active / Msgs), same `get_deal_buyers` data + realtime as the Kanban.
+    (b) The **/buyers directory** gained an **"All properties"** filter (an
+    Autocomplete next to the metro filter, options from
+    `investorlift_ingest.get_dispo_properties`) that narrows the list to the
+    buyers engaged on that dispo property. `crm/api/buyers.py` `get_buyers` gained
+    a `property` param (a CRM Lead name) → resolves the `CRM Lead Buyer` rel rows
+    to buyer names and adds a `["name","in",[...]]` filter; composes with
+    search + metro + select-to-text.
 - **DD Expiration date** (Leads) — `dd_expiration_date` (Date custom field)
   shown as a calendar-icon row in the Lead sidebar HEADER directly under the
   Acq Price row (same minimal no-label formatting): displays

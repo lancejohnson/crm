@@ -1,5 +1,80 @@
 <template>
-  <div class="flex h-full overflow-x-auto px-2 py-3 sm:px-4">
+  <!-- LIST view -->
+  <div v-if="view === 'list'" class="flex-1 overflow-y-auto">
+    <div
+      class="grid items-center gap-3 border-b px-4 py-2 text-xs font-medium uppercase text-ink-gray-5 sm:px-5"
+      :style="listCols"
+    >
+      <span>{{ __('Stage') }}</span>
+      <span>{{ __('Name') }}</span>
+      <span>{{ __('Type') }}</span>
+      <span>{{ __('Phone') }}</span>
+      <span>{{ __('Direction') }}</span>
+      <span>{{ __('Last active') }}</span>
+      <span class="text-right">{{ __('Msgs') }}</span>
+    </div>
+
+    <router-link
+      v-for="b in flatBuyers"
+      :key="b.name"
+      :to="{ name: 'Buyer', params: { buyerId: b.buyer } }"
+      class="grid items-center gap-3 border-b border-outline-gray-1 px-4 py-2.5 text-sm text-ink-gray-8 hover:bg-surface-gray-1 sm:px-5"
+      :style="listCols"
+    >
+      <span class="flex min-w-0 items-center gap-1.5">
+        <IndicatorIcon :class="b._stageColor" />
+        <span class="truncate text-ink-gray-6">{{ b.interest_stage || 'New' }}</span>
+      </span>
+      <span class="flex min-w-0 items-center gap-1.5">
+        <span class="truncate font-medium">{{ b.buyer_name || '—' }}</span>
+        <BadgeCheckIcon v-if="b.verified" class="size-3.5 shrink-0 text-ink-blue-3" />
+      </span>
+      <span class="flex min-w-0 flex-wrap gap-1">
+        <span
+          v-for="t in tagList(b.buyer_type)"
+          :key="t"
+          class="rounded bg-surface-gray-2 px-1.5 py-0.5 text-xs text-ink-gray-7"
+        >
+          {{ t }}
+        </span>
+        <span v-if="!tagList(b.buyer_type).length" class="text-ink-gray-4">—</span>
+      </span>
+      <a
+        v-if="b.phone"
+        :href="telHref(b.phone)"
+        class="truncate text-ink-gray-6 hover:text-ink-blue-3"
+        @click.stop
+      >
+        {{ formatPhone(b.phone) }}
+      </a>
+      <span v-else class="text-ink-gray-4">—</span>
+      <span>
+        <Badge
+          v-if="b.direction"
+          :theme="b.direction === 'Inbound' ? 'green' : 'blue'"
+          variant="subtle"
+          size="sm"
+        >
+          {{ b.direction }}
+        </Badge>
+        <span v-else class="text-ink-gray-4">—</span>
+      </span>
+      <span class="truncate text-ink-gray-6">
+        {{ b.last_active ? formatDate(b.last_active, '', true) : '—' }}
+      </span>
+      <span class="text-right text-ink-gray-6">{{ b.message_count || 0 }}</span>
+    </router-link>
+
+    <div
+      v-if="!flatBuyers.length"
+      class="flex flex-col items-center justify-center gap-2 py-16 text-ink-gray-4"
+    >
+      <span class="text-base">{{ __('No buyers on this property yet.') }}</span>
+    </div>
+  </div>
+
+  <!-- BOARD (Kanban) view -->
+  <div v-else class="flex h-full overflow-x-auto px-2 py-3 sm:px-4">
     <div
       v-for="col in columns"
       :key="col.stage"
@@ -95,7 +170,13 @@ import { computed, onMounted, onBeforeUnmount } from 'vue'
 
 const props = defineProps({
   lead: { type: String, required: true },
+  view: { type: String, default: 'board' }, // 'board' | 'list'
 })
+
+const listCols = {
+  gridTemplateColumns:
+    'minmax(9rem,10rem) minmax(9rem,1.3fr) minmax(8rem,1.2fr) 9rem 6rem 8rem 3rem',
+}
 
 const { $socket } = globalStore()
 
@@ -129,6 +210,14 @@ const columns = computed(() => {
     buyers: byStage[s.stage],
   }))
 })
+
+// flat, stage-ordered list of buyers for the list view (each tagged with its
+// stage's indicator color so the Stage column matches the board's column dots)
+const flatBuyers = computed(() =>
+  columns.value.flatMap((c) =>
+    c.buyers.map((b) => ({ ...b, _stageColor: c.color })),
+  ),
+)
 
 function tagList(buyer_type) {
   return (buyer_type || '')

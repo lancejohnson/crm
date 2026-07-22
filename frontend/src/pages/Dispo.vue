@@ -25,6 +25,27 @@
       </div>
     </template>
     <template #right-header>
+      <div
+        v-if="selectedLead"
+        class="flex items-center gap-0.5 rounded-md bg-surface-gray-2 p-0.5"
+      >
+        <button
+          class="flex size-6 items-center justify-center rounded"
+          :class="viewMode === 'board' ? 'bg-surface-white shadow-sm text-ink-gray-8' : 'text-ink-gray-5'"
+          :title="__('Board view')"
+          @click="setView('board')"
+        >
+          <BoardIcon class="size-4" />
+        </button>
+        <button
+          class="flex size-6 items-center justify-center rounded"
+          :class="viewMode === 'list' ? 'bg-surface-white shadow-sm text-ink-gray-8' : 'text-ink-gray-5'"
+          :title="__('List view')"
+          @click="setView('list')"
+        >
+          <ListIcon class="size-4" />
+        </button>
+      </div>
       <Button
         v-if="selectedLead"
         variant="ghost"
@@ -53,6 +74,7 @@
       v-if="selectedLead"
       :key="selectedLead + '-' + boardKey"
       :lead="selectedLead"
+      :view="viewMode"
       class="w-full"
     />
     <div
@@ -88,6 +110,8 @@ import DispoBoard from '@/components/Activities/DispoBoard.vue'
 import AddBuyerToDealModal from '@/components/Modals/AddBuyerToDealModal.vue'
 import BulkTextModal from '@/components/Modals/BulkTextModal.vue'
 import DispoIcon from '~icons/lucide/columns-3'
+import BoardIcon from '~icons/lucide/columns-3'
+import ListIcon from '~icons/lucide/list'
 import ChevronDownIcon from '~icons/lucide/chevron-down'
 import { Breadcrumbs, Button, Badge, Dropdown, createResource, usePageMeta } from 'frappe-ui'
 import { ref, computed, watch } from 'vue'
@@ -106,6 +130,13 @@ const selectedLead = ref(route.params.leadId || null)
 const showAddBuyer = ref(false)
 const showBulkText = ref(false)
 const boardKey = ref(0)
+
+// board vs list view (persisted per-user across visits)
+const viewMode = ref(localStorage.getItem('dispoView') === 'list' ? 'list' : 'board')
+function setView(v) {
+  viewMode.value = v
+  localStorage.setItem('dispoView', v)
+}
 
 // buyers on the current deal's board — fed to the bulk-text modal. Fetched fresh
 // when the button is clicked (deduped to one row per buyer).
