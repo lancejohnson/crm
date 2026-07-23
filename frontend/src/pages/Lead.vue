@@ -240,6 +240,16 @@
                   @click="activities?.sendText()"
                 />
 
+                <!-- One-click: 2× Zillow + Google Maps for this property.
+                     Reuses the same Zillow slug / Maps query as the standalone
+                     actions so the opened pages match what More → View on
+                     Zillow and the address-row Maps link already produce. -->
+                <Button
+                  :tooltip="__('Open Research tabs')"
+                  :icon="ExternalLinkIcon"
+                  @click="openResearchTabs"
+                />
+
                 <!-- Secondary actions live in a single menu so the row stays
                      uncluttered: email / website / attach / tax / agreement. -->
                 <Dropdown :options="moreActions" placement="bottom-start">
@@ -349,6 +359,7 @@ import ActivityIcon from '@/components/Icons/ActivityIcon.vue'
 import EmailIcon from '@/components/Icons/EmailIcon.vue'
 import Email2Icon from '@/components/Icons/Email2Icon.vue'
 import CommentIcon from '@/components/Icons/CommentIcon.vue'
+import ExternalLinkIcon from '@/components/Icons/ExternalLinkIcon.vue'
 import DetailsIcon from '@/components/Icons/DetailsIcon.vue'
 import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
 import TaskIcon from '@/components/Icons/TaskIcon.vue'
@@ -451,6 +462,33 @@ const canDelete = computed(() => permissions.data?.permissions?.delete || false)
 
 const doc = computed(() => document.doc || {})
 
+// Same slug Zillow's /homes/<slug>_rb/ search expects — shared by the More
+// menu item and Open Research tabs so both land on the identical listing.
+function zillowUrl(address) {
+  const slug = address
+    .replace(/[^A-Za-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return `https://www.zillow.com/homes/${slug}_rb/`
+}
+
+function mapsUrl(address) {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
+}
+
+// Open 2 Zillow tabs + 1 Google Maps tab for this lead's property. All three
+// window.opens stay in the same click gesture so the popup blocker allows them.
+function openResearchTabs() {
+  const address = doc.value.property_address
+  if (!address) {
+    toast.error(__('Set a property address to open research tabs'))
+    return
+  }
+  const zUrl = zillowUrl(address)
+  window.open(zUrl, '_blank', 'noopener')
+  window.open(zUrl, '_blank', 'noopener')
+  window.open(mapsUrl(address), '_blank', 'noopener')
+}
+
 // Secondary header actions, collapsed into the "More" menu next to the name.
 const moreActions = computed(() => {
   const d = doc.value
@@ -493,13 +531,7 @@ const moreActions = computed(() => {
     icon: 'home',
     onClick: () =>
       d.property_address
-        ? window.open(
-            `https://www.zillow.com/homes/${d.property_address
-              .replace(/[^A-Za-z0-9]+/g, '-')
-              .replace(/^-+|-+$/g, '')}_rb/`,
-            '_blank',
-            'noopener',
-          )
+        ? window.open(zillowUrl(d.property_address), '_blank', 'noopener')
         : toast.error(__('Set a property address to view on Zillow')),
   })
   items.push({

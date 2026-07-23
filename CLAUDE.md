@@ -24,6 +24,14 @@ duplicating. Work substantial features in a worktree of your own.
 
 ## Our changes vs upstream (keep this list current)
 
+- **Open Research tabs (Lead header)** — a one-click button on the Lead page
+  header row (Call · Text · **Research** · ⋯ · Delete) that opens **two Zillow
+  tabs + one Google Maps tab** for the lead's `property_address`. Reuses the
+  same Zillow `/homes/<slug>_rb/` slug builder as More → View on Zillow and the
+  same Maps `api=1&query=` URL as the address-row link (extracted into shared
+  `zillowUrl`/`mapsUrl` helpers). Toasts if no address is set. Pure frontend.
+  `frontend/src/pages/Lead.vue`.
+
 - **Activity feed no longer auto-scrolls on every reload** — the Lead/Deal
   Activity timeline used to yank the viewport on every action (adding a
   comment/task, sending a text) and on every realtime reload from a teammate,
