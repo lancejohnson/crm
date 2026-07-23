@@ -478,7 +478,12 @@ duplicating. Work substantial features in a worktree of your own.
     `overflow-auto` so narrower screens scroll inside the card. NOTE: the
     Chrome-MCP extension pins the page viewport (innerWidth stays desktop-size
     regardless of OS window size), so phone layouts can't be visually verified
-    through it — verify responsive classes via DOM inspection or a real phone.
+    through it — verify responsive classes via DOM inspection or a real phone
+    (a freshly-created MCP window sometimes DOES render narrow — worth a try).
+    gw196: the Status Change Report table is wrapped in `overflow-x-auto` +
+    `min-w-[520px]` — unwrapped, its width forced the WHOLE PAGE to scroll
+    horizontally on phones, clipping the status names off-screen (Lance hit
+    this live). Wide dashboard tables must always scroll in-card.
 - **Collapse fleeting (<60s) status changes** — a status changed by mistake and
   quickly corrected no longer leaves a fleeting intermediate behind. A run of
   consecutive status changes where each intermediate was held <60s collapses to

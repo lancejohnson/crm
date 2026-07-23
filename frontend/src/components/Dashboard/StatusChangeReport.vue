@@ -80,8 +80,9 @@
       }}
     </div>
 
-    <!-- Table -->
-    <table v-else class="w-full text-sm border-t border-outline-gray-1">
+    <!-- Table (scrolls horizontally inside the card on narrow screens) -->
+    <div v-else class="overflow-x-auto">
+      <table class="w-full min-w-[520px] text-sm border-t border-outline-gray-1">
       <thead>
         <tr class="text-ink-gray-5 text-xs uppercase tracking-wide">
           <th class="text-left font-medium py-2 pl-4 pr-2">
@@ -238,7 +239,8 @@
           </tr>
         </template>
       </tbody>
-    </table>
+      </table>
+    </div>
   </div>
 </template>
 
