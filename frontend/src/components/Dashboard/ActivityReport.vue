@@ -1,237 +1,269 @@
 <template>
   <div class="rounded-md bg-surface-white shadow">
-    <!-- Header -->
+    <!-- Header: title + pipeline scope toggle -->
     <div class="flex items-start justify-between gap-4 flex-wrap px-4 pt-4 pb-3">
       <div>
         <div class="text-lg font-semibold text-ink-gray-9">
           {{ __('Activity') }}
         </div>
         <div class="text-sm text-ink-gray-5 mt-0.5">
-          {{ __('Leads reached by call, text, and agreement in this range') }}
+          {{ __('Everyone contacted in this range — calls, talk time, texts') }}
         </div>
       </div>
-
-      <!-- Quo talk time (call duration) -->
       <Tooltip
-        v-if="talkSecs.total"
         :text="
-          __('Outbound {0} · Inbound {1}', [
-            formatDuration(talkSecs.out) || '0s',
-            formatDuration(talkSecs.in) || '0s',
-          ])
+          __(
+            'Acq = New → Signed Contract · Dispo = Photos & Lockbox → Buyer Assigned · All = everyone, including dead and parked',
+          )
         "
       >
         <div
-          class="rounded-md border border-outline-gray-1 px-3 py-1.5 text-right"
+          class="inline-flex rounded-md bg-surface-gray-2 p-0.5 text-sm font-medium"
         >
-          <div class="text-xs uppercase tracking-wide text-ink-gray-5">
-            {{ __('Talk time') }}
-          </div>
-          <div class="text-lg font-semibold text-ink-gray-9 tabular-nums">
-            {{ formatDuration(talkSecs.total) }}
-          </div>
+          <button
+            v-for="s in SCOPES"
+            :key="s.key"
+            class="px-3 py-1 rounded transition-colors"
+            :class="
+              scope === s.key
+                ? 'bg-surface-white text-ink-gray-9 shadow-sm'
+                : 'text-ink-gray-6 hover:text-ink-gray-8'
+            "
+            @click="setScope(s.key)"
+          >
+            {{ s.label }}
+          </button>
         </div>
       </Tooltip>
     </div>
 
+    <!-- Scope totals -->
     <div
-      v-if="!rows.length"
-      class="px-4 py-10 text-center text-ink-gray-5 border-t border-outline-gray-1"
+      v-if="scoped.length"
+      class="flex items-end gap-8 flex-wrap px-4 pb-3"
     >
-      {{ __('No activity in this range') }}
+      <div>
+        <div class="text-xs uppercase tracking-wide text-ink-gray-5">
+          {{ __('Contacted') }}
+        </div>
+        <div class="text-lg font-semibold text-ink-gray-9 tabular-nums">
+          {{ fmt(scoped.length) }}
+        </div>
+      </div>
+      <div>
+        <div class="text-xs uppercase tracking-wide text-ink-gray-5">
+          {{ __('Calls') }}
+        </div>
+        <div class="text-lg font-semibold tabular-nums">
+          <span class="inline-flex items-center gap-0.5 text-ink-gray-9">
+            <LucideArrowUpRight class="size-4" />{{ fmt(totals.calls_out) }}
+          </span>
+          <span
+            class="inline-flex items-center gap-0.5 ml-3"
+            :class="totals.calls_in ? 'text-ink-green-3' : 'text-ink-gray-4'"
+          >
+            <LucideArrowDownLeft class="size-4" />{{ fmt(totals.calls_in) }}
+          </span>
+        </div>
+      </div>
+      <div>
+        <div class="text-xs uppercase tracking-wide text-ink-gray-5">
+          {{ __('Talk time') }}
+        </div>
+        <div class="text-lg font-semibold text-ink-gray-9 tabular-nums">
+          {{ formatDuration(totals.secs) || '0s' }}
+        </div>
+      </div>
+      <div>
+        <div class="text-xs uppercase tracking-wide text-ink-gray-5">
+          {{ __('Texts') }}
+        </div>
+        <div class="text-lg font-semibold tabular-nums">
+          <span class="inline-flex items-center gap-0.5 text-ink-gray-9">
+            <LucideArrowUpRight class="size-4" />{{ fmt(totals.texts_out) }}
+          </span>
+          <span
+            class="inline-flex items-center gap-0.5 ml-3"
+            :class="totals.texts_in ? 'text-ink-green-3' : 'text-ink-gray-4'"
+          >
+            <LucideArrowDownLeft class="size-4" />{{ fmt(totals.texts_in) }}
+          </span>
+        </div>
+      </div>
+      <div v-if="totals.agreements">
+        <div class="text-xs uppercase tracking-wide text-ink-gray-5">
+          {{ __('Agreements') }}
+        </div>
+        <div class="text-lg font-semibold text-ink-gray-9 tabular-nums">
+          {{ fmt(totals.agreements) }}
+        </div>
+      </div>
     </div>
 
-    <table v-else class="w-full text-sm border-t border-outline-gray-1">
-      <thead>
-        <tr class="text-ink-gray-5 text-xs uppercase tracking-wide">
-          <th rowspan="2" class="text-left font-medium py-2 pl-4 pr-2 align-bottom">
-            {{ __('Activity') }}
-          </th>
-          <th
-            colspan="2"
-            class="text-center font-medium pt-2 pb-1 px-2 border-l border-outline-gray-1"
-          >
-            <Tooltip :text="__('Distinct leads with this activity')">
-              <span>{{ __('Unique leads') }}</span>
-            </Tooltip>
-          </th>
-          <th
-            colspan="2"
-            class="text-center font-medium pt-2 pb-1 px-2 border-l border-outline-gray-1"
-          >
-            <Tooltip :text="__('Every call / text / agreement logged')">
-              <span>{{ __('Total actions') }}</span>
-            </Tooltip>
-          </th>
-        </tr>
-        <tr class="text-ink-gray-5 text-xs tracking-wide">
-          <th class="text-right font-normal pb-2 px-2 w-24 border-l border-outline-gray-1">
-            {{ __('Outbound') }}
-          </th>
-          <th class="text-right font-normal pb-2 px-2 w-24">
-            <Tooltip :text="__('Leads who replied (inbound)')">
-              <span>{{ __('Inbound') }}</span>
-            </Tooltip>
-          </th>
-          <th class="text-right font-normal pb-2 px-2 w-24 border-l border-outline-gray-1">
-            {{ __('Outbound') }}
-          </th>
-          <th class="text-right font-normal pb-2 pl-2 pr-4 w-24">
-            <Tooltip :text="__('Replies received (inbound)')">
-              <span>{{ __('Inbound') }}</span>
-            </Tooltip>
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        <template v-for="row in rows" :key="row.key">
-          <tr
-            class="border-t border-outline-gray-1 hover:bg-surface-gray-1 cursor-pointer"
-            @click="toggle(row.key)"
-          >
-            <td class="py-2.5 pl-4 pr-2">
-              <div class="flex items-center gap-2">
-                <LucideChevronRight
-                  class="size-3.5 text-ink-gray-5 transition-transform shrink-0"
-                  :class="expanded.has(row.key) ? 'rotate-90' : ''"
-                />
-                <component
-                  :is="iconFor(row.key)"
-                  class="size-4 text-ink-gray-5 shrink-0"
-                />
-                <span class="text-ink-gray-8">{{ row.title }}</span>
-              </div>
-            </td>
-            <!-- Unique leads: outbound / inbound (clickable → drill into Leads) -->
-            <td class="text-right py-2.5 px-2 tabular-nums border-l border-outline-gray-1">
-              <button
-                v-if="row.unique_out"
-                class="text-ink-gray-8 hover:text-ink-blue-3 hover:underline"
-                @click.stop="drill(row, 'out')"
-              >
-                {{ fmt(row.unique_out) }}
-              </button>
-              <span v-else class="text-ink-gray-4">–</span>
-            </td>
-            <td class="text-right py-2.5 px-2 tabular-nums">
-              <button
-                v-if="row.unique_in"
-                class="font-medium text-ink-green-3 hover:underline"
-                @click.stop="drill(row, 'in')"
-              >
-                {{ fmt(row.unique_in) }}
-              </button>
-              <span v-else class="text-ink-gray-4">–</span>
-            </td>
-            <!-- Total actions: outbound / inbound -->
-            <td class="text-right py-2.5 px-2 tabular-nums text-ink-gray-7 border-l border-outline-gray-1">
-              {{ row.total_out ? fmt(row.total_out) : '–' }}
-            </td>
-            <td class="text-right py-2.5 pl-2 pr-4 tabular-nums">
-              <span :class="row.total_in ? 'text-ink-green-3' : 'text-ink-gray-4'">
-                {{ row.total_in ? fmt(row.total_in) : '–' }}
-              </span>
-            </td>
-          </tr>
+    <!-- States -->
+    <div
+      v-if="contacted.loading"
+      class="px-4 py-10 text-center text-ink-gray-5 border-t border-outline-gray-1"
+    >
+      {{ __('Loading…') }}
+    </div>
+    <div
+      v-else-if="!scoped.length"
+      class="px-4 py-10 text-center text-ink-gray-5 border-t border-outline-gray-1"
+    >
+      {{ emptyText }}
+    </div>
 
-          <!-- Unfolded: the leads behind this activity -->
-          <tr v-if="expanded.has(row.key)" :key="row.key + '-leads'">
-            <td colspan="5" class="bg-surface-gray-1 px-4 py-3">
-              <div
-                v-if="unfold[row.key]?.loading"
-                class="text-ink-gray-5 text-sm py-2"
+    <!-- The ledger: one row per contacted lead -->
+    <template v-else>
+      <div class="border-t border-outline-gray-1 max-h-96 overflow-auto">
+        <table class="w-full text-sm">
+          <thead class="sticky top-0 bg-surface-white z-[1]">
+            <tr class="text-ink-gray-5 text-xs uppercase tracking-wide">
+              <th class="text-left font-medium py-2 pl-4 pr-2">
+                {{ __('Lead') }}
+              </th>
+              <th class="text-left font-medium py-2 px-2 w-44 hidden sm:table-cell">
+                {{ __('Status') }}
+              </th>
+              <th class="text-right font-medium py-2 px-2 w-28">
+                {{ __('Calls') }}
+              </th>
+              <th class="text-right font-medium py-2 px-2 w-24 hidden sm:table-cell">
+                {{ __('Talk time') }}
+              </th>
+              <th
+                class="text-right font-medium py-2 px-2 w-28"
+                :class="hasAgreements ? '' : 'pr-4'"
               >
-                {{ __('Loading…') }}
-              </div>
-              <div
-                v-else-if="!unfold[row.key]?.leads?.length"
-                class="text-ink-gray-5 text-sm py-2"
+                {{ __('Texts') }}
+              </th>
+              <th
+                v-if="hasAgreements"
+                class="text-right font-medium py-2 pl-2 pr-4 w-16"
               >
-                {{ __('No leads to show.') }}
-              </div>
-              <div v-else>
-                <div class="flex items-center justify-between mb-2">
-                  <div class="text-xs uppercase tracking-wide text-ink-gray-5">
-                    {{ __('Leads') }} ({{ unfold[row.key].count }})
-                  </div>
-                  <Button
-                    variant="ghost"
-                    :label="__('Open all in Leads')"
-                    @click="drill(row, 'any')"
+                {{ __('Agr') }}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="lead in scoped"
+              :key="lead.name"
+              class="border-t border-outline-gray-1 hover:bg-surface-gray-1 cursor-pointer"
+              @click="openLead(lead.name)"
+            >
+              <td class="py-2 pl-4 pr-2">
+                <span class="text-ink-gray-8 truncate block max-w-[7rem] sm:max-w-[16rem]">
+                  {{ lead.lead_name }}
+                </span>
+              </td>
+              <td class="py-2 px-2 hidden sm:table-cell">
+                <div class="flex items-center gap-1.5 min-w-0">
+                  <IndicatorIcon
+                    :class="statusColor(lead.status)"
+                    class="shrink-0"
+                  />
+                  <span class="text-xs text-ink-gray-6 truncate">
+                    {{ lead.status }}
+                  </span>
+                </div>
+              </td>
+              <td class="text-right py-2 px-2 whitespace-nowrap">
+                <template v-if="lead.calls_out || lead.calls_in">
+                  <span
+                    class="inline-flex items-center gap-0.5 tabular-nums text-ink-gray-7"
                   >
-                    <template #suffix>
-                      <LucideArrowRight class="size-3.5" />
-                    </template>
-                  </Button>
-                </div>
-                <div
-                  class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1 max-h-72 overflow-y-auto"
-                >
-                  <button
-                    v-for="lead in unfold[row.key].leads"
-                    :key="lead.name"
-                    class="group flex items-center gap-2 rounded-md border border-outline-gray-1 bg-surface-white px-2.5 py-1.5 text-sm hover:border-outline-gray-3 hover:bg-surface-gray-2 transition-colors text-left"
-                    @click="openLead(lead.name)"
+                    <LucideArrowUpRight class="size-3" />{{ lead.calls_out }}
+                  </span>
+                  <span
+                    class="inline-flex items-center gap-0.5 tabular-nums ml-2"
+                    :class="
+                      lead.calls_in
+                        ? 'text-ink-green-3 font-medium'
+                        : 'text-ink-gray-4'
+                    "
                   >
-                    <span class="truncate text-ink-gray-8 flex-1">{{
-                      lead.lead_name
-                    }}</span>
-                    <span
-                      v-if="row.key === 'calls' && lead.secs"
-                      class="shrink-0 tabular-nums text-ink-gray-4 text-xs"
-                      >{{ formatDuration(lead.secs) }}</span
-                    >
-                    <Tooltip :text="__('Outbound')">
-                      <span
-                        class="shrink-0 inline-flex items-center gap-0.5 tabular-nums text-ink-gray-5"
-                      >
-                        <LucideArrowUpRight class="size-3" />{{ lead.out }}
-                      </span>
-                    </Tooltip>
-                    <Tooltip :text="__('Inbound (replied)')">
-                      <span
-                        class="shrink-0 inline-flex items-center gap-0.5 tabular-nums"
-                        :class="lead.inb ? 'text-ink-green-3 font-medium' : 'text-ink-gray-4'"
-                      >
-                        <LucideArrowDownLeft class="size-3" />{{ lead.inb }}
-                      </span>
-                    </Tooltip>
-                    <LucideArrowRight
-                      class="size-3.5 text-ink-gray-4 shrink-0 opacity-0 group-hover:opacity-100"
-                    />
-                  </button>
-                </div>
-                <div
-                  v-if="unfold[row.key].truncated"
-                  class="text-xs text-ink-gray-5 mt-2"
-                >
-                  {{ __('Showing the first {0} leads.', [unfold[row.key].leads.length]) }}
-                </div>
-              </div>
-            </td>
-          </tr>
-        </template>
-      </tbody>
-    </table>
+                    <LucideArrowDownLeft class="size-3" />{{ lead.calls_in }}
+                  </span>
+                </template>
+                <span v-else class="text-ink-gray-4">–</span>
+              </td>
+              <td
+                class="text-right py-2 px-2 tabular-nums text-ink-gray-7 hidden sm:table-cell"
+              >
+                {{ lead.secs ? formatDuration(lead.secs) : '–' }}
+              </td>
+              <td
+                class="text-right py-2 px-2 whitespace-nowrap"
+                :class="hasAgreements ? '' : 'pr-4'"
+              >
+                <template v-if="lead.texts_out || lead.texts_in">
+                  <span
+                    class="inline-flex items-center gap-0.5 tabular-nums text-ink-gray-7"
+                  >
+                    <LucideArrowUpRight class="size-3" />{{ lead.texts_out }}
+                  </span>
+                  <span
+                    class="inline-flex items-center gap-0.5 tabular-nums ml-2"
+                    :class="
+                      lead.texts_in
+                        ? 'text-ink-green-3 font-medium'
+                        : 'text-ink-gray-4'
+                    "
+                  >
+                    <LucideArrowDownLeft class="size-3" />{{ lead.texts_in }}
+                  </span>
+                </template>
+                <span v-else class="text-ink-gray-4">–</span>
+              </td>
+              <td
+                v-if="hasAgreements"
+                class="text-right py-2 pl-2 pr-4 tabular-nums text-ink-gray-7"
+              >
+                {{ lead.agreements || '–' }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Footer: truncation note + drill into the Leads list -->
+      <div
+        class="flex items-center justify-between gap-4 px-4 py-2 border-t border-outline-gray-1"
+      >
+        <div class="text-xs text-ink-gray-5">
+          <template v-if="contacted.data?.truncated">
+            {{ __('Showing the first {0} leads.', [fmt(leads.length)]) }}
+          </template>
+        </div>
+        <Button
+          variant="ghost"
+          :label="__('Open all in Leads')"
+          @click="openAll"
+        >
+          <template #suffix>
+            <LucideArrowRight class="size-3.5" />
+          </template>
+        </Button>
+      </div>
+    </template>
   </div>
 </template>
 
 <script setup>
-import LucideChevronRight from '~icons/lucide/chevron-right'
+import IndicatorIcon from '@/components/Icons/IndicatorIcon.vue'
 import LucideArrowRight from '~icons/lucide/arrow-right'
 import LucideArrowUpRight from '~icons/lucide/arrow-up-right'
 import LucideArrowDownLeft from '~icons/lucide/arrow-down-left'
-import LucidePhone from '~icons/lucide/phone'
-import LucideMessageSquare from '~icons/lucide/message-square'
-import LucideFileSignature from '~icons/lucide/file-signature'
 import { leadDrilldownStore } from '@/stores/leadDrilldown'
+import { statusesStore } from '@/stores/statuses'
 import { formatDuration } from '@/utils'
 import { createResource, Button, Tooltip } from 'frappe-ui'
-import { ref, computed, reactive } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 const props = defineProps({
-  activity: { type: Array, default: () => [] },
   fromDate: { type: String, default: null },
   toDate: { type: String, default: null },
   user: { type: String, default: null },
@@ -239,104 +271,94 @@ const props = defineProps({
 
 const router = useRouter()
 const drilldown = leadDrilldownStore()
+const { getLeadStatus } = statusesStore()
 
-const expanded = ref(new Set())
-const unfold = reactive({}) // { [key]: { loading, leads, count, truncated } }
+const SCOPES = [
+  { key: 'acq', label: __('Acq') },
+  { key: 'dispo', label: __('Dispo') },
+  { key: 'all', label: __('All') },
+]
 
-// Only show rows that actually have data so an absent doctype (texts /
-// agreements not provisioned) silently drops out.
-const rows = computed(() =>
-  (props.activity || []).filter(
-    (r) => r.unique_out || r.unique_in || r.total_out || r.total_in,
+const scope = ref(localStorage.getItem('activityScope') || 'acq')
+
+function setScope(s) {
+  if (scope.value === s) return
+  scope.value = s
+  localStorage.setItem('activityScope', s)
+}
+
+const contacted = createResource({
+  url: 'crm.api.leads_dashboard.get_contacted_leads',
+  makeParams() {
+    return {
+      from_date: props.fromDate,
+      to_date: props.toDate,
+      user: props.user,
+    }
+  },
+  auto: true,
+})
+
+watch(
+  () => [props.fromDate, props.toDate, props.user],
+  () => contacted.reload(),
+)
+
+const leads = computed(() => contacted.data?.leads || [])
+
+// The toggle filters client-side over the single fetch, so switching is instant.
+const scoped = computed(() =>
+  scope.value === 'all'
+    ? leads.value
+    : leads.value.filter((l) => l.bucket === scope.value),
+)
+
+const totals = computed(() =>
+  scoped.value.reduce(
+    (acc, l) => {
+      acc.calls_out += l.calls_out
+      acc.calls_in += l.calls_in
+      acc.secs += l.secs
+      acc.texts_out += l.texts_out
+      acc.texts_in += l.texts_in
+      acc.agreements += l.agreements
+      return acc
+    },
+    { calls_out: 0, calls_in: 0, secs: 0, texts_out: 0, texts_in: 0, agreements: 0 },
   ),
 )
 
-// Quo talk time = total call duration (lives on the calls row), split out/in.
-const talkSecs = computed(() => {
-  const calls = (props.activity || []).find((r) => r.key === 'calls')
-  const out = calls?.secs_out || 0
-  const inb = calls?.secs_in || 0
-  return { out, in: inb, total: out + inb }
+const hasAgreements = computed(() => scoped.value.some((l) => l.agreements))
+
+const emptyText = computed(() => {
+  if (scope.value === 'acq')
+    return __('No acq-pipeline leads contacted in this range')
+  if (scope.value === 'dispo')
+    return __('No dispo leads contacted in this range')
+  return __('No contact activity in this range')
 })
 
-const icons = {
-  calls: LucidePhone,
-  texts: LucideMessageSquare,
-  agreements: LucideFileSignature,
-}
-function iconFor(key) {
-  return icons[key] || LucidePhone
+function statusColor(status) {
+  if (!status) return 'text-ink-gray-4'
+  return getLeadStatus(status)?.color || 'text-ink-gray-4'
 }
 
 function fmt(n) {
   return (n ?? 0).toLocaleString()
 }
 
-const resolver = createResource({
-  url: 'crm.api.leads_dashboard.get_activity_leads',
-})
-
-async function toggle(key) {
-  const next = new Set(expanded.value)
-  if (next.has(key)) {
-    next.delete(key)
-  } else {
-    next.add(key)
-    loadLeads(key)
-  }
-  expanded.value = next
-}
-
-async function loadLeads(key) {
-  // Cache per (key + range + user) so reopening is instant but a filter change refetches.
-  const stamp = `${props.fromDate}|${props.toDate}|${props.user}`
-  if (unfold[key] && unfold[key].stamp === stamp) return
-  unfold[key] = { loading: true, leads: [], count: 0, truncated: false, stamp }
-  const res = await resolver.submit({
-    activity: key,
-    scope: 'any',
-    from_date: props.fromDate,
-    to_date: props.toDate,
-    user: props.user,
-  })
-  if (!res) {
-    unfold[key] = { loading: false, leads: [], count: 0, truncated: false, stamp }
-    return
-  }
-  unfold[key] = {
-    loading: false,
-    leads: res.leads || [],
-    count: res.count || 0,
-    truncated: res.truncated,
-    stamp,
-  }
-}
-
-async function drill(row, scope) {
-  const res = await resolver.submit({
-    activity: row.key,
-    scope,
-    from_date: props.fromDate,
-    to_date: props.toDate,
-    user: props.user,
-  })
-  if (!res) return
-  const scopeLabel =
-    scope === 'out'
-      ? __('outbound')
-      : scope === 'in'
-        ? __('inbound')
-        : __('all')
-  drilldown.set({
-    names: res.names,
-    label: `${row.title} (${scopeLabel})`,
-    sub: `${props.fromDate} – ${props.toDate}`,
-    truncated: res.truncated,
-  })
-  router.push({ name: 'Leads', params: { viewType: 'list' } })
-}
-
 function openLead(name) {
   router.push({ name: 'Lead', params: { leadId: name } })
+}
+
+function openAll() {
+  const label = SCOPES.find((s) => s.key === scope.value)?.label || __('All')
+  drilldown.set({
+    names: scoped.value.map((l) => l.name),
+    label: `${__('Contacted')} (${label})`,
+    sub: `${props.fromDate} – ${props.toDate}`,
+    truncated: contacted.data?.truncated,
+  })
+  router.push({ name: 'Leads', params: { viewType: 'list' } })
 }
 </script>

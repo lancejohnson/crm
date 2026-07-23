@@ -42,7 +42,6 @@ def get_leads_dashboard(
 		"status_changes": _status_changes(from_date, to_date, user),
 		"leads_by_source": get_leads_by_source(from_date, to_date, user),
 		"summary": _summary(from_date, to_date, user),
-		"activity": _activity_summary(from_date, to_date, user),
 	}
 
 
@@ -686,6 +685,19 @@ def get_leads_by_source_names(
 # counts and the per-lead unfold/drill-down.
 
 
+# Acquisition-phase statuses (New → Signed Contract). Keep in sync with the
+# ACQ_STAGES constant in frontend/src/components/Dashboard/StatusChangeReport.vue.
+ACQ_STATUSES = (
+	"New",
+	"Called No Answer",
+	"Follow Up",
+	"Underwriting",
+	"Make Offer",
+	"Contract Sent",
+	"Signed Contract",
+)
+
+
 def _call_rows(from_date, to_date, user):
 	CL = DocType("CRM Call Log")
 	Lead = DocType("CRM Lead")
@@ -696,6 +708,7 @@ def _call_rows(from_date, to_date, user):
 		.select(
 			CL.reference_docname.as_("ref"),
 			CL.type.as_("dir"),
+			Lead.status.as_("status"),
 			Count("*").as_("c"),
 			Sum(CL.duration).as_("secs"),
 		)
@@ -704,11 +717,18 @@ def _call_rows(from_date, to_date, user):
 		)
 		.groupby(CL.reference_docname)
 		.groupby(CL.type)
+		.groupby(Lead.status)
 	)
 	if user:
 		q = q.where(Lead.lead_owner == user)
 	return [
-		{"ref": r.ref, "out": r.dir == "Outgoing", "c": r.c or 0, "secs": int(r.secs or 0)}
+		{
+			"ref": r.ref,
+			"out": r.dir == "Outgoing",
+			"c": r.c or 0,
+			"secs": int(r.secs or 0),
+			"status": r.status,
+		}
 		for r in q.run(as_dict=True)
 	]
 
@@ -722,16 +742,25 @@ def _text_rows(from_date, to_date, user):
 		frappe.qb.from_(QM)
 		.join(Lead)
 		.on(QM.reference_docname == Lead.name)
-		.select(QM.reference_docname.as_("ref"), QM.direction.as_("dir"), Count("*").as_("c"))
+		.select(
+			QM.reference_docname.as_("ref"),
+			QM.direction.as_("dir"),
+			Lead.status.as_("status"),
+			Count("*").as_("c"),
+		)
 		.where(
 			(QM.reference_doctype == "CRM Lead") & Date(QM.creation).between(from_date, to_date)
 		)
 		.groupby(QM.reference_docname)
 		.groupby(QM.direction)
+		.groupby(Lead.status)
 	)
 	if user:
 		q = q.where(Lead.lead_owner == user)
-	return [{"ref": r.ref, "out": r.dir == "Outgoing", "c": r.c or 0} for r in q.run(as_dict=True)]
+	return [
+		{"ref": r.ref, "out": r.dir == "Outgoing", "c": r.c or 0, "status": r.status}
+		for r in q.run(as_dict=True)
+	]
 
 
 def _agreement_rows(from_date, to_date, user):
@@ -743,14 +772,17 @@ def _agreement_rows(from_date, to_date, user):
 		frappe.qb.from_(AG)
 		.join(Lead)
 		.on(AG.lead == Lead.name)
-		.select(AG.lead.as_("ref"), Count("*").as_("c"))
+		.select(AG.lead.as_("ref"), Lead.status.as_("status"), Count("*").as_("c"))
 		.where(Date(AG.creation).between(from_date, to_date))
 		.groupby(AG.lead)
+		.groupby(Lead.status)
 	)
 	if user:
 		q = q.where(Lead.lead_owner == user)
 	# Agreements have no inbound direction — every one is outbound ("sent").
-	return [{"ref": r.ref, "out": True, "c": r.c or 0} for r in q.run(as_dict=True)]
+	return [
+		{"ref": r.ref, "out": True, "c": r.c or 0, "status": r.status} for r in q.run(as_dict=True)
+	]
 
 
 ACTIVITY_ROWS = {
@@ -772,13 +804,24 @@ def _tally(rows):
 		if not ref:
 			continue
 		secs = r.get("secs", 0)
-		d = per_lead.setdefault(ref, {"out": 0, "inb": 0, "secs_out": 0, "secs_in": 0})
+		d = per_lead.setdefault(
+			ref,
+			{
+				"out": 0,
+				"inb": 0,
+				"secs_out": 0,
+				"secs_in": 0,
+				# "acq" = the lead's CURRENT status is acquisition-phase.
+				"acq": r.get("status") in ACQ_STATUSES,
+			},
+		)
 		if r["out"]:
 			d["out"] += r["c"]
 			d["secs_out"] += secs
 		else:
 			d["inb"] += r["c"]
 			d["secs_in"] += secs
+	acq = [d for d in per_lead.values() if d["acq"]]
 	counts = {
 		"unique_out": sum(1 for d in per_lead.values() if d["out"]),
 		"unique_in": sum(1 for d in per_lead.values() if d["inb"]),
@@ -786,6 +829,12 @@ def _tally(rows):
 		"total_in": sum(d["inb"] for d in per_lead.values()),
 		"secs_out": sum(d["secs_out"] for d in per_lead.values()),
 		"secs_in": sum(d["secs_in"] for d in per_lead.values()),
+		"acq_unique_out": sum(1 for d in acq if d["out"]),
+		"acq_unique_in": sum(1 for d in acq if d["inb"]),
+		"acq_total_out": sum(d["out"] for d in acq),
+		"acq_total_in": sum(d["inb"] for d in acq),
+		"acq_secs_out": sum(d["secs_out"] for d in acq),
+		"acq_secs_in": sum(d["secs_in"] for d in acq),
 	}
 	return per_lead, counts
 
@@ -855,6 +904,7 @@ def get_activity_leads(
 				"secs_out": d["secs_out"],
 				"secs_in": d["secs_in"],
 				"secs": d["secs_out"] + d["secs_in"],
+				"acq": d["acq"],
 			}
 		)
 	# Sort by the scope's relevant count so the drilled set reads busiest-first.
@@ -890,3 +940,112 @@ def get_activity_leads(
 		"count": len(items),
 		"truncated": len(items) > DRILL_CAP,
 	}
+
+
+# ---------------------------------------------------------------------------
+# Contacted leads — the people-first Activity ledger
+# ---------------------------------------------------------------------------
+# One row per lead touched in the range (any call / text / agreement), with the
+# direction split, talk time, and the lead's CURRENT status bucketed into the
+# pipeline segment (acq / dispo / other). The dashboard scopes client-side
+# (Acq | Dispo | All), so a single fetch powers all three views.
+
+DISPO_STATUSES = (
+	"Photos & Lockbox In Progress",
+	"Needs Listing",
+	"Marketing to Buyer",
+	"Buyer Assigned",
+)
+
+
+def _stage_bucket(status):
+	if status in ACQ_STATUSES:
+		return "acq"
+	if status in DISPO_STATUSES:
+		return "dispo"
+	return "other"
+
+
+@frappe.whitelist()
+@sales_user_only
+def get_contacted_leads(
+	from_date: str | None = None, to_date: str | None = None, user: str | None = None
+):
+	"""Every lead contacted in the range, with per-lead activity + pipeline bucket."""
+	if not from_date or not to_date:
+		from_date = frappe.utils.get_first_day(from_date or frappe.utils.nowdate())
+		to_date = frappe.utils.get_last_day(to_date or frappe.utils.nowdate())
+	from_date = str(frappe.utils.getdate(from_date))
+	to_date = str(frappe.utils.getdate(to_date))
+
+	roles = frappe.get_roles(frappe.session.user)
+	is_sales_manager = "Sales Manager" in roles or "System Manager" in roles
+	if "Sales User" in roles and not is_sales_manager:
+		user = frappe.session.user
+
+	merged = {}
+
+	def slot(r):
+		ref = r.get("ref")
+		if not ref:
+			return None
+		status = r.get("status")
+		return merged.setdefault(
+			ref,
+			{
+				"name": ref,
+				"status": status,
+				"bucket": _stage_bucket(status),
+				"calls_out": 0,
+				"calls_in": 0,
+				"secs": 0,
+				"texts_out": 0,
+				"texts_in": 0,
+				"agreements": 0,
+			},
+		)
+
+	for r in _call_rows(from_date, to_date, user):
+		d = slot(r)
+		if d is None:
+			continue
+		d["calls_out" if r["out"] else "calls_in"] += r["c"]
+		d["secs"] += r.get("secs", 0)
+	for r in _text_rows(from_date, to_date, user):
+		d = slot(r)
+		if d is None:
+			continue
+		d["texts_out" if r["out"] else "texts_in"] += r["c"]
+	for r in _agreement_rows(from_date, to_date, user):
+		d = slot(r)
+		if d is None:
+			continue
+		d["agreements"] += r["c"]
+
+	# Busiest first: most touches, then most talk time.
+	items = sorted(
+		merged.values(),
+		key=lambda d: (
+			-(d["calls_out"] + d["calls_in"] + d["texts_out"] + d["texts_in"] + d["agreements"]),
+			-d["secs"],
+			d["name"],
+		),
+	)
+	capped = items[:DRILL_CAP]
+
+	name_map = {}
+	for chunk in _chunks([it["name"] for it in capped], 5000):
+		for r in frappe.get_all(
+			"CRM Lead",
+			filters={"name": ["in", chunk]},
+			fields=["name", "lead_name", "first_name", "last_name"],
+		):
+			name_map[r.name] = (
+				r.lead_name
+				or " ".join(x for x in [r.first_name, r.last_name] if x)
+				or r.name
+			)
+	for it in capped:
+		it["lead_name"] = name_map.get(it["name"], it["name"])
+
+	return {"leads": capped, "count": len(items), "truncated": len(items) > DRILL_CAP}

@@ -106,9 +106,8 @@
           </div>
         </div>
 
-        <!-- Activity: leads called / texted + agreements sent (unfold to leads) -->
+        <!-- Activity: everyone contacted (calls / talk time / texts), Acq|Dispo|All -->
         <ActivityReport
-          :activity="data.activity"
           :fromDate="fromDate"
           :toDate="toDate"
           :user="filters.user"

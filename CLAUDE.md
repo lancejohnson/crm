@@ -453,9 +453,32 @@ duplicating. Work substantial features in a worktree of your own.
     drill/unfold endpoint (per-lead counts + display names, `DRILL_CAP`). Quo
     Message / Esign Agreement are guarded by `frappe.db.exists` so an unprovisioned
     site just drops that row.
-  - `frontend/src/components/Dashboard/ActivityReport.vue` — **new**; mounted in
-    `pages/LeadsDashboard.vue` (between the summary cards and the New-leads chart),
-    fed `data.activity`; lazy-fetches the per-row lead list on unfold.
+  - **REDESIGNED as a people-first contact ledger** (gw194+gw195, replacing both the
+    original type-rows table and the short-lived gw193 "N acq" sub-numbers,
+    which Lance rejected): `ActivityReport.vue` is now ONE ROW PER CONTACTED
+    LEAD (name · current-status dot · calls ↗out/↙in · talk time · texts
+    ↗out/↙in · Agr column only when the scoped set has agreements), scoped by
+    an **Acq | Dispo | All** segmented toggle (default Acq, persisted in
+    `localStorage['activityScope']`); a totals strip (Contacted / Calls /
+    Talk time / Texts) sits above the table and reflects the active scope.
+    Inbound is green, outbound gray (the app's direction language). Sticky
+    table header in a max-h scroll; row click opens the lead; footer "Open all
+    in Leads" feeds the scoped names straight into `leadDrilldown` (no server
+    resolver). Backend: **`get_contacted_leads`** merges the three row fetchers
+    (which select `Lead.status` through their existing joins) into per-lead
+    rows with a `bucket` field — `acq` (`ACQ_STATUSES`, = the 7 acquisition
+    statuses; keep in sync with `ACQ_STAGES` in `StatusChangeReport.vue`),
+    `dispo` (`DISPO_STATUSES`), or `other` (dead/parked/won) — so ONE fetch
+    powers all three scopes client-side (toggle = instant). Bucketing is by
+    CURRENT status, not status at activity time. `get_leads_dashboard` no
+    longer returns `activity`; `_activity_summary`/`get_activity_leads` remain
+    in `leads_dashboard.py` but have no frontend consumer. Mobile (gw195):
+    below `sm` the Status + Talk-time columns hide, the name column caps at
+    7rem (≈376px total on a 390px phone), and the table wrapper is
+    `overflow-auto` so narrower screens scroll inside the card. NOTE: the
+    Chrome-MCP extension pins the page viewport (innerWidth stays desktop-size
+    regardless of OS window size), so phone layouts can't be visually verified
+    through it — verify responsive classes via DOM inspection or a real phone.
 - **Collapse fleeting (<60s) status changes** — a status changed by mistake and
   quickly corrected no longer leaves a fleeting intermediate behind. A run of
   consecutive status changes where each intermediate was held <60s collapses to
