@@ -127,16 +127,13 @@
                 {{ __('Status') }}
               </th>
               <th class="text-right font-medium py-2 px-2 w-28">
-                {{ __('Calls') }}
-              </th>
-              <th class="text-right font-medium py-2 px-2 w-24 hidden sm:table-cell">
-                {{ __('Talk time') }}
+                {{ __('Calls / Texts') }}
               </th>
               <th
-                class="text-right font-medium py-2 px-2 w-28"
+                class="text-right font-medium py-2 px-2 w-24"
                 :class="hasAgreements ? '' : 'pr-4'"
               >
-                {{ __('Texts') }}
+                {{ __('Talk time') }}
               </th>
               <th
                 v-if="hasAgreements"
@@ -170,52 +167,60 @@
                 </div>
               </td>
               <td class="text-right py-2 px-2 whitespace-nowrap">
-                <template v-if="lead.calls_out || lead.calls_in">
-                  <span
-                    class="inline-flex items-center gap-0.5 tabular-nums text-ink-gray-7"
+                <template v-if="hasContact(lead)">
+                  <div
+                    v-if="lead.calls_out || lead.calls_in"
+                    class="flex items-center justify-end gap-1"
                   >
-                    <LucideArrowUpRight class="size-3" />{{ lead.calls_out }}
-                  </span>
-                  <span
-                    class="inline-flex items-center gap-0.5 tabular-nums ml-2"
-                    :class="
-                      lead.calls_in
-                        ? 'text-ink-green-3 font-medium'
-                        : 'text-ink-gray-4'
-                    "
+                    <LucidePhone class="size-3 text-ink-gray-4 shrink-0" />
+                    <span
+                      class="inline-flex items-center gap-0.5 tabular-nums text-ink-gray-7"
+                    >
+                      <LucideArrowUpRight class="size-3" />{{ lead.calls_out }}
+                    </span>
+                    <span
+                      class="inline-flex items-center gap-0.5 tabular-nums"
+                      :class="
+                        lead.calls_in
+                          ? 'text-ink-green-3 font-medium'
+                          : 'text-ink-gray-4'
+                      "
+                    >
+                      <LucideArrowDownLeft class="size-3" />{{ lead.calls_in }}
+                    </span>
+                  </div>
+                  <div
+                    v-if="lead.texts_out || lead.texts_in"
+                    class="flex items-center justify-end gap-1"
+                    :class="lead.calls_out || lead.calls_in ? 'mt-0.5' : ''"
                   >
-                    <LucideArrowDownLeft class="size-3" />{{ lead.calls_in }}
-                  </span>
+                    <LucideMessageSquare
+                      class="size-3 text-ink-gray-4 shrink-0"
+                    />
+                    <span
+                      class="inline-flex items-center gap-0.5 tabular-nums text-ink-gray-7"
+                    >
+                      <LucideArrowUpRight class="size-3" />{{ lead.texts_out }}
+                    </span>
+                    <span
+                      class="inline-flex items-center gap-0.5 tabular-nums"
+                      :class="
+                        lead.texts_in
+                          ? 'text-ink-green-3 font-medium'
+                          : 'text-ink-gray-4'
+                      "
+                    >
+                      <LucideArrowDownLeft class="size-3" />{{ lead.texts_in }}
+                    </span>
+                  </div>
                 </template>
                 <span v-else class="text-ink-gray-4">–</span>
               </td>
               <td
-                class="text-right py-2 px-2 tabular-nums text-ink-gray-7 hidden sm:table-cell"
-              >
-                {{ lead.secs ? formatDuration(lead.secs) : '–' }}
-              </td>
-              <td
-                class="text-right py-2 px-2 whitespace-nowrap"
+                class="text-right py-2 px-2 tabular-nums text-ink-gray-7"
                 :class="hasAgreements ? '' : 'pr-4'"
               >
-                <template v-if="lead.texts_out || lead.texts_in">
-                  <span
-                    class="inline-flex items-center gap-0.5 tabular-nums text-ink-gray-7"
-                  >
-                    <LucideArrowUpRight class="size-3" />{{ lead.texts_out }}
-                  </span>
-                  <span
-                    class="inline-flex items-center gap-0.5 tabular-nums ml-2"
-                    :class="
-                      lead.texts_in
-                        ? 'text-ink-green-3 font-medium'
-                        : 'text-ink-gray-4'
-                    "
-                  >
-                    <LucideArrowDownLeft class="size-3" />{{ lead.texts_in }}
-                  </span>
-                </template>
-                <span v-else class="text-ink-gray-4">–</span>
+                {{ lead.secs ? formatDuration(lead.secs) : '–' }}
               </td>
               <td
                 v-if="hasAgreements"
@@ -256,6 +261,8 @@ import IndicatorIcon from '@/components/Icons/IndicatorIcon.vue'
 import LucideArrowRight from '~icons/lucide/arrow-right'
 import LucideArrowUpRight from '~icons/lucide/arrow-up-right'
 import LucideArrowDownLeft from '~icons/lucide/arrow-down-left'
+import LucidePhone from '~icons/lucide/phone'
+import LucideMessageSquare from '~icons/lucide/message-square'
 import { leadDrilldownStore } from '@/stores/leadDrilldown'
 import { statusesStore } from '@/stores/statuses'
 import { formatDuration } from '@/utils'
@@ -337,6 +344,10 @@ const emptyText = computed(() => {
     return __('No dispo leads contacted in this range')
   return __('No contact activity in this range')
 })
+
+function hasContact(lead) {
+  return lead.calls_out || lead.calls_in || lead.texts_out || lead.texts_in
+}
 
 function statusColor(status) {
   if (!status) return 'text-ink-gray-4'
