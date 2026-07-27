@@ -55,6 +55,7 @@
   <BuyerModal
     v-model="showNewBuyer"
     :redirect="false"
+    :with-property="false"
     @saved="(name) => (pickedBuyer = name)"
   />
 </template>

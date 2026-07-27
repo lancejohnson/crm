@@ -427,27 +427,57 @@ def pull_new_inquiries():
 
 @frappe.whitelist()
 def get_dispo_properties():
-	"""Active-dispo properties (leads linked to an IL property) for the Dispo page
-	property switcher: [{lead, label, il_property_id, il_status, buyer_count}]."""
+	"""Active-dispo properties for the Dispo page property switcher:
+	[{lead, label, il_property_id, il_status, buyer_count}].
+
+	A property qualifies two ways: it's linked to an InvestorLift property, OR it
+	has buyers on its board. The second case is what makes a manually imported
+	batch reachable — buyer_import can put buyers on any under-contract lead, and
+	most of those were never posted to IL, so an il_property_id-only list would
+	hide the very board the importer just filled."""
 	if not any(r in ("System Manager", "Sales Manager", "Sales User") for r in frappe.get_roles()):
 		frappe.throw(_("Only sales users can view dispo."), frappe.PermissionError)
-	if not frappe.get_meta("CRM Lead").has_field("il_property_id"):
+	has_il = frappe.get_meta("CRM Lead").has_field("il_property_id")
+	has_buyers = frappe.db.exists("DocType", LEAD_BUYER_DOCTYPE)
+
+	names = set()
+	if has_il:
+		names.update(
+			r.name
+			for r in frappe.get_all(
+				"CRM Lead", filters={"il_property_id": ("is", "set")},
+				fields=["name"], limit_page_length=0,
+			)
+		)
+	if has_buyers:
+		names.update(
+			r.lead
+			for r in frappe.get_all(
+				LEAD_BUYER_DOCTYPE, filters={"lead": ("is", "set")},
+				fields=["lead"], group_by="lead", limit_page_length=0,
+			)
+			if r.lead
+		)
+	if not names:
 		return []
+
+	fields = ["name", "lead_name", "property_address", "modified"]
+	if has_il:
+		fields += ["il_property_id", "il_status"]
 	leads = frappe.get_all(
 		"CRM Lead",
-		filters={"il_property_id": ("is", "set")},
-		fields=["name", "lead_name", "property_address", "il_property_id", "il_status", "modified"],
+		filters={"name": ("in", list(names))},
+		fields=fields,
 		order_by="modified desc",
 		limit_page_length=0,
 	)
-	has_buyers = frappe.db.exists("DocType", LEAD_BUYER_DOCTYPE)
 	out = []
 	for l in leads:
 		out.append({
 			"lead": l.name,
 			"label": l.property_address or l.lead_name or l.name,
-			"il_property_id": l.il_property_id,
-			"il_status": l.il_status,
+			"il_property_id": l.get("il_property_id"),
+			"il_status": l.get("il_status"),
 			"buyer_count": frappe.db.count(LEAD_BUYER_DOCTYPE, {"lead": l.name}) if has_buyers else 0,
 		})
 	return out

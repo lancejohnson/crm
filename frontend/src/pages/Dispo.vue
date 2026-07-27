@@ -55,6 +55,13 @@
       />
       <Button
         v-if="selectedLead"
+        variant="ghost"
+        :label="__('Import buyers')"
+        iconLeft="upload"
+        @click="showImport = true"
+      />
+      <Button
+        v-if="selectedLead"
         variant="solid"
         :label="__('Add buyer')"
         iconLeft="plus"
@@ -97,6 +104,12 @@
     :lead="selectedLead || ''"
     @saved="boardKey++"
   />
+  <ImportBuyersModal
+    v-if="showImport"
+    v-model="showImport"
+    :lead="selectedLead || ''"
+    @imported="onImported"
+  />
   <BulkTextModal
     v-model="showBulkText"
     :recipients="bulkRecipients"
@@ -108,6 +121,7 @@
 import LayoutHeader from '@/components/LayoutHeader.vue'
 import DispoBoard from '@/components/Activities/DispoBoard.vue'
 import AddBuyerToDealModal from '@/components/Modals/AddBuyerToDealModal.vue'
+import ImportBuyersModal from '@/components/Modals/ImportBuyersModal.vue'
 import BulkTextModal from '@/components/Modals/BulkTextModal.vue'
 import DispoIcon from '~icons/lucide/columns-3'
 import BoardIcon from '~icons/lucide/columns-3'
@@ -129,7 +143,15 @@ const list = computed(() => properties.data || [])
 const selectedLead = ref(route.params.leadId || null)
 const showAddBuyer = ref(false)
 const showBulkText = ref(false)
+const showImport = ref(false)
 const boardKey = ref(0)
+
+function onImported() {
+  // remount the board (new CRM Lead Buyer rows) and refresh the switcher's
+  // per-property buyer counts
+  boardKey.value++
+  properties.reload()
+}
 
 // board vs list view (persisted per-user across visits)
 const viewMode = ref(localStorage.getItem('dispoView') === 'list' ? 'list' : 'board')

@@ -4,12 +4,19 @@
       <Breadcrumbs :items="[{ label: __('Buyers') }]" />
     </template>
     <template #right-header>
-      <Button
-        variant="solid"
-        :label="__('New buyer')"
-        iconLeft="plus"
-        @click="showModal = true"
-      />
+      <div class="flex items-center gap-2">
+        <!-- bulk import lives in the "..." menu: an occasional list-drop
+             action, not a daily one (same placement as Leads) -->
+        <Dropdown :options="buyerListActions" placement="right">
+          <Button variant="ghost" icon="more-horizontal" />
+        </Dropdown>
+        <Button
+          variant="solid"
+          :label="__('New buyer')"
+          iconLeft="plus"
+          @click="showModal = true"
+        />
+      </div>
     </template>
   </LayoutHeader>
 
@@ -179,12 +186,18 @@
   </div>
 
   <BuyerModal v-model="showModal" @saved="buyers.reload()" />
+  <ImportBuyersModal
+    v-if="showImportModal"
+    v-model="showImportModal"
+    @imported="buyers.reload()"
+  />
   <BulkTextModal v-model="showBulkText" :recipients="bulkRecipients" />
 </template>
 
 <script setup>
 import LayoutHeader from '@/components/LayoutHeader.vue'
 import BuyerModal from '@/components/Modals/BuyerModal.vue'
+import ImportBuyersModal from '@/components/Modals/ImportBuyersModal.vue'
 import BulkTextModal from '@/components/Modals/BulkTextModal.vue'
 import SearchIcon from '~icons/lucide/search'
 import UsersIcon from '~icons/lucide/users-round'
@@ -194,6 +207,7 @@ import { formatPhone } from '@/utils/phoneFormat'
 import {
   Breadcrumbs,
   Button,
+  Dropdown,
   TextInput,
   createResource,
   usePageMeta,
@@ -204,6 +218,15 @@ const search = ref('')
 const metroFilter = ref('')
 const propertyFilter = ref('')
 const showModal = ref(false)
+const showImportModal = ref(false)
+
+const buyerListActions = computed(() => [
+  {
+    label: __('Import buyers'),
+    icon: 'upload',
+    onClick: () => (showImportModal.value = true),
+  },
+])
 
 // bulk-text: "Select to text" (manual pick) or "Text these" (whole filtered list)
 const selectMode = ref(false)
