@@ -55,23 +55,50 @@ TZ = ZoneInfo("America/Chicago")
 # or comma-separated string) without a code change.
 DEFAULT_RECIPIENTS = ["lance.johnson@groundworkpro.com"]
 
-# Statuses where a refund is irrelevant (deal is alive / closed-won). Still
-# shown in the "due today" list so dialing cadence isn't dropped mid-deal, but
-# excluded from the "money lost" tally when the window expires.
-# Pipeline statuses where a refund is irrelevant (deal is alive / closed-won).
-# Dropped from the due/uncalled lists AND from the newly-ineligible $ tally.
-ACTIVE_DEAL_STATUSES = {
+# --- status policy ------------------------------------------------------------
+# The real `CRM Lead Status` ladder, in pipeline order:
+#   New · Called No Answer · Follow Up · Underwriting · Make Offer · Contract Sent
+#   · Signed Contract · Photos & Lockbox In Progress · Needs Listing
+#   · Marketing to Buyer · Buyer Assigned · Future Follow Up · Dead Lead · Lost · Won
+#
+# Only leads we are still trying to REACH belong in this report. Once a lead is
+# in underwriting or beyond, the refund is moot (we got what we paid for); once
+# it's dead/lost/won, more dials are pointless.
+
+# Still chasing a conversation → the only statuses the report acts on.
+# "Future Follow Up" stays in: it's a deliberate callback-later state and those
+# leads still need the dials logged inside the 10-day window.
+WORKABLE_STATUSES = {
+	"New",
+	"Called No Answer",
+	"Follow Up",
+	"Future Follow Up",
+}
+
+# We reached them and the deal moved — underwriting through dispo. The lead did
+# its job; a refund is irrelevant. Never chased, never counted as a loss.
+IN_DEAL_STATUSES = {
 	"Underwriting",
 	"Make Offer",
+	"Contract Sent",
 	"Signed Contract",
-	"Closed",
-	"Won",
-	"Assigned",
-	"Dispo",
+	"Photos & Lockbox In Progress",
+	"Needs Listing",
 	"Marketing to Buyer",
-	"Offer Accepted",
-	"Under Contract",
+	"Buyer Assigned",
 }
+
+# Over, one way or another. No more dialing.
+CLOSED_STATUSES = {"Dead Lead", "Lost", "Won"}
+
+# A lead marked Dead/Lost without ever reaching a human is a judgment call we
+# can still question — if it also never earned the refund we paid twice. Those
+# are reported separately ("gave up early"), not as a chase list.
+# Longest single call ≥ this many seconds = we actually talked to someone.
+CONNECTED_SECONDS = 60
+
+# Back-compat: older callers referenced this name.
+ACTIVE_DEAL_STATUSES = IN_DEAL_STATUSES
 
 
 # ---------------------------------------------------------------------------------
@@ -153,15 +180,15 @@ def build_report(when: str = "morning", on_date=None) -> dict:
 	leads = _load_istl_leads(today)
 	rows = [_enrich(lead, today) for lead in leads]
 
-	# Operational lists skip active deals — refund cadence only matters for leads
-	# we might still want to return. Active deals still appear in newly_ineligible
-	# filtering via is_active_deal (excluded from $ loss).
+	# Only chase leads we're still trying to reach. In-deal (underwriting →
+	# dispo) means the lead already paid off; dead/lost/won means dialing is
+	# over. Both are excluded from the chase lists AND the $ tally.
 	in_window = [
 		r
 		for r in rows
 		if r["in_window"]
 		and r["double_dials"] < REQUIRED_DOUBLE_DIALS
-		and not r["is_active_deal"]
+		and r["is_workable"]
 	]
 	due = [r for r in in_window if r["due_today"]]
 	due_names = {r["name"] for r in due}
@@ -173,9 +200,12 @@ def build_report(when: str = "morning", on_date=None) -> dict:
 	# leads (prev_business_day is unchanged between morning and eod the same day).
 	if when == "morning":
 		newly_ineligible = _newly_ineligible(rows, today, prev_biz)
+		gave_up_early = _gave_up_early(rows, today, prev_biz)
 	else:
 		newly_ineligible = []
+		gave_up_early = []
 	lost_amount = sum(r["refund_amount"] for r in newly_ineligible)
+	gave_up_amount = sum(r["refund_amount"] for r in gave_up_early)
 
 	# Sort: fewest days left, then fewest dials, then oldest.
 	def _sort_key(r):
@@ -187,6 +217,7 @@ def build_report(when: str = "morning", on_date=None) -> dict:
 	called_today = [r for r in due if r["called_today"]]
 	called_today.sort(key=_sort_key)
 	newly_ineligible.sort(key=lambda r: r["window_end"], reverse=True)
+	gave_up_early.sort(key=lambda r: (r["double_dials"], r["lead_name"]))
 
 	return {
 		"when": when,
@@ -203,6 +234,9 @@ def build_report(when: str = "morning", on_date=None) -> dict:
 		"newly_ineligible": newly_ineligible,
 		"lost_amount": lost_amount,
 		"lost_count": len(newly_ineligible),
+		"gave_up_early": gave_up_early,
+		"gave_up_amount": gave_up_amount,
+		"gave_up_count": len(gave_up_early),
 	}
 
 
@@ -220,6 +254,7 @@ def _load_istl_leads(today) -> list[dict]:
 		"first_name",
 		"last_name",
 		"creation",
+		"modified",
 		"status",
 		"lead_cost",
 		"campaign_name",
@@ -230,7 +265,11 @@ def _load_istl_leads(today) -> list[dict]:
 	# lead_cost / campaign_name are custom — guard so an unprovisioned site
 	# still runs (just without those columns).
 	meta = frappe.get_meta("CRM Lead")
-	fields = [f for f in fields if f in ("name", "lead_name", "first_name", "last_name", "creation", "status", "mobile_no", "lead_owner") or meta.has_field(f)]
+	standard = (
+		"name", "lead_name", "first_name", "last_name", "creation",
+		"modified", "status", "mobile_no", "lead_owner",
+	)
+	fields = [f for f in fields if f in standard or meta.has_field(f)]
 
 	return frappe.get_all(
 		"CRM Lead",
@@ -255,6 +294,9 @@ def _enrich(lead: dict, today) -> dict:
 	clusters = _cluster_calls(calls)
 	double_dials = sum(1 for c in clusters if c["dials"] >= 2)
 	single_dials = sum(1 for c in clusters if c["dials"] == 1)
+	# Did we ever actually talk to someone? A 15s "call" is a voicemail bounce.
+	longest_call = max([c["duration"] for c in calls], default=0)
+	connected = longest_call >= CONNECTED_SECONDS
 	attempt_dates = [c["date"] for c in clusters if c["dials"] >= 2]
 	last_double_dial_date = max(attempt_dates) if attempt_dates else None
 	call_dates = sorted({getdate(c["start"]) for c in calls}) if calls else []
@@ -287,13 +329,20 @@ def _enrich(lead: dict, today) -> dict:
 		or " ".join(x for x in [lead.get("first_name"), lead.get("last_name")] if x)
 		or lead["name"]
 	)
+	status = lead.get("status") or ""
+	in_deal = status in IN_DEAL_STATUSES
+	is_closed = status in CLOSED_STATUSES
+	# Unknown//new statuses default to workable rather than silently dropping a
+	# lead we paid for (a renamed status shouldn't make it invisible).
+	is_workable = not in_deal and not is_closed
 
 	return {
 		"name": lead["name"],
 		"lead_name": display,
 		"link": _lead_url(lead["name"]),
-		"status": lead.get("status") or "",
+		"status": status,
 		"creation": str(lead.get("creation")),
+		"modified": str(lead.get("modified") or lead.get("creation")),
 		"created_date": str(created),
 		"age_days": age_days,
 		"days_left": days_left,
@@ -313,7 +362,13 @@ def _enrich(lead: dict, today) -> dict:
 		"campaign_name": lead.get("campaign_name") or "",
 		"property_address": lead.get("property_address") or "",
 		"lead_owner": lead.get("lead_owner") or "",
-		"is_active_deal": (lead.get("status") or "") in ACTIVE_DEAL_STATUSES,
+		"longest_call": longest_call,
+		"connected": connected,
+		"in_deal": in_deal,
+		"is_closed": is_closed,
+		"is_workable": is_workable,
+		# kept for back-compat with anything reading the old key
+		"is_active_deal": in_deal,
 	}
 
 
@@ -323,22 +378,94 @@ def _newly_ineligible(rows: list[dict], today, prev_biz) -> list[dict]:
 
 	Window ended on ``window_end`` (creation + 9 days); the first ineligible
 	day is the next calendar day. A Monday report (prev_biz=Friday) therefore
-	picks up Fri/Sat/Sun expiries. Active-deal statuses are dropped from the
-	$ tally (we wouldn't file a refund on an underwriting/closed lead).
-	EOD on the last eligible day still treats them as in-window — ineligible
-	only flips the morning after ``window_end``.
+	picks up Fri/Sat/Sun expiries. EOD on the last eligible day still treats
+	them as in-window — ineligible only flips the morning after ``window_end``.
+
+	Only counts leads that were still WORKABLE when the window closed. A lead
+	that reached underwriting/dispo got what we paid for, and one already
+	closed out (dead/lost/won) is covered by the separate "gave up early"
+	section — counting it here would double-bill the same $29.
 	"""
 	out = []
 	for r in rows:
 		if r["double_dials"] >= REQUIRED_DOUBLE_DIALS:
 			continue
-		if r["is_active_deal"]:
+		if not r["is_workable"]:
 			continue
 		window_end = getdate(r["window_end"])
 		if window_end < today and window_end >= prev_biz:
 			item = dict(r)
 			item["reason"] = _ineligible_reason(r)
 			out.append(item)
+	return out
+
+
+def _gave_up_early(rows: list[dict], today, prev_biz) -> list[dict]:
+	"""Leads marked Dead/Lost since the last business day that we never actually
+	talked to AND never dialed enough to earn the refund.
+
+	This is the expensive pattern: we paid for the lead, never reached a human,
+	gave up before the 5 double-dials, and forfeited the refund on the way out —
+	so we ate the cost twice. Won is excluded (a win is a win). It's a coaching
+	signal, not a chase list; the leads are already closed.
+	"""
+	candidates = [
+		r
+		for r in rows
+		if r["status"] in ("Dead Lead", "Lost")
+		and r["double_dials"] < REQUIRED_DOUBLE_DIALS
+		# Reached them and they said no → a legitimate close, not a give-up.
+		and not r["connected"]
+	]
+	if not candidates:
+		return []
+
+	# Report each lead once, on the day it was actually closed out. `modified`
+	# is useless for this (any later edit bumps it), so use the status log.
+	closed_at = _status_since([r["name"] for r in candidates])
+
+	out = []
+	for r in candidates:
+		closed_on = closed_at.get(r["name"])
+		if not closed_on:
+			continue
+		# Half-open [prev_biz, today), same as _newly_ineligible — an inclusive
+		# end would re-report the same lead on two consecutive days.
+		if closed_on < prev_biz or closed_on >= today:
+			continue
+		item = dict(r)
+		item["reason"] = _ineligible_reason(r)
+		item["closed_on"] = str(closed_on)
+		out.append(item)
+	return out
+
+
+def _status_since(lead_names: list[str]) -> dict:
+	"""``{lead: date the lead entered its CURRENT status}`` (Chicago dates).
+
+	Reads the open `CRM Status Change Log` row (the one with no `to`), whose
+	``from_date`` is when the lead landed in the status it's in now. Stored in
+	UTC while the rest of the app works in Chicago wall clock, so convert —
+	otherwise anything closed after 7pm CT lands on the wrong day.
+	"""
+	if not lead_names or not frappe.db.exists("DocType", "CRM Status Change Log"):
+		return {}
+	rows = frappe.get_all(
+		"CRM Status Change Log",
+		filters={
+			"parenttype": "CRM Lead",
+			"parent": ["in", lead_names],
+			"to": ["in", ["", None]],
+		},
+		fields=["parent", "from_date"],
+		limit_page_length=0,
+	)
+	out = {}
+	for r in rows:
+		if not r.get("from_date"):
+			continue
+		stamp = get_datetime(r["from_date"]).replace(tzinfo=ZoneInfo("UTC"))
+		out[r["parent"]] = stamp.astimezone(TZ).date()
 	return out
 
 
@@ -433,6 +560,8 @@ def _send_email(report: dict):
 	bits = []
 	if report["lost_count"]:
 		bits.append(f"${report['lost_amount']:.0f} lost")
+	if report.get("gave_up_count"):
+		bits.append(f"{report['gave_up_count']} gave up early")
 	if when == "morning" and report["due"]:
 		bits.append(f"{len(report['due'])} due")
 	if when == "eod" and report["uncalled_today"]:
@@ -470,6 +599,10 @@ def _template_args(report: dict) -> dict:
 		"lost_count": report["lost_count"],
 		"lost_amount": report["lost_amount"],
 		"lost_amount_fmt": f"${report['lost_amount']:,.0f}",
+		"gave_up_early": report.get("gave_up_early") or [],
+		"gave_up_count": report.get("gave_up_count") or 0,
+		"gave_up_amount_fmt": f"${(report.get('gave_up_amount') or 0):,.0f}",
+		"connected_seconds": CONNECTED_SECONDS,
 		"default_refund": report["default_refund_amount"],
 	}
 

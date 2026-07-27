@@ -11,6 +11,12 @@
 	webhook yet, so every ISTL lead is treated as refund-eligible.
 </p>
 
+<p style="color: #6b7280; margin: 0 0 16px 0; font-size: 13px;">
+	Only leads we're still trying to reach are listed — <span style="font-weight: 600;">New,
+	Called No Answer, Follow Up, Future Follow Up</span>. Once a lead hits Underwriting
+	or beyond it already paid for itself, and Dead / Lost / Won are done being dialed.
+</p>
+
 <p style="color: #1f272e; margin: 0 0 16px 0;">
 	<span style="font-weight: 600;">{{ in_window_count }}</span> lead{{ "s" if in_window_count != 1 }} still in the {{ window_days }}-day window and short of {{ required }} double-dials.
 	{% if when == "morning" %}
@@ -23,6 +29,13 @@
 		<span style="font-weight: 600; color: #b42318;">
 			{{ lost_count }} became ineligible since {{ prev_business_day }}
 			— {{ lost_amount_fmt }} left on the table.
+		</span>
+	{% endif %}
+	{% if gave_up_count %}
+		<br>
+		<span style="font-weight: 600; color: #b54708;">
+			{{ gave_up_count }} closed out without ever reaching the seller
+			— {{ gave_up_amount_fmt }}.
 		</span>
 	{% endif %}
 </p>
@@ -45,6 +58,33 @@
 		· {{ item.reason }}
 		· delivered {{ item.created_date }}
 		· window ended {{ item.window_end }}
+		{% if item.property_address %}<br>{{ item.property_address }}{% endif %}
+	</p>
+</div>
+{% endfor %}
+{% endif %}
+
+{% if gave_up_early %}
+<p style="margin: 20px 0 6px 0; font-weight: 600; color: #b54708;">
+	Marked Dead / Lost without ever reaching them — {{ gave_up_amount_fmt }}
+</p>
+<p style="margin: 0 0 8px 0; color: #6b7280; font-size: 13px;">
+	Closed out since {{ prev_business_day }}. No call over {{ connected_seconds }}s (so we never
+	actually talked to the seller) and short of {{ required }} double-dials — meaning we paid for
+	the lead and gave up the refund too. Worth a second look before these stay closed.
+</p>
+{% for item in gave_up_early %}
+<div style="margin: 8px 0; padding: 10px 14px; border-left: 4px solid #f79009; background: #fafafa;">
+	<p style="margin: 0 0 2px 0;">
+		<a href="{{ item.link }}" style="font-weight: 600; color: #1f272e; text-decoration: none;">{{ item.lead_name }}</a>
+		<span style="color: #6b7280;"> · {{ item.status }} · ${{ item.refund_amount | int }}</span>
+	</p>
+	<p style="margin: 0; color: #6b7280; font-size: 13px;">
+		{{ item.double_dials }}/{{ required }} double-dials
+		· {{ item.total_outbound_dials }} dial{{ "s" if item.total_outbound_dials != 1 }} total
+		· longest call {{ item.longest_call }}s
+		· delivered {{ item.created_date }}
+		{% if item.closed_on %} · closed {{ item.closed_on }}{% endif %}
 		{% if item.property_address %}<br>{{ item.property_address }}{% endif %}
 	</p>
 </div>
