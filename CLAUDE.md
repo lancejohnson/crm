@@ -845,9 +845,16 @@ duplicating. Work substantial features in a worktree of your own.
     Board stage + Assign to** row on create (skipped via `:with-property="false"`
     from `AddBuyerToDealModal`, which attaches the buyer itself). If the buyer
     already exists, the duplicate banner now also offers **Add to property**.
-  - `investorlift_ingest.get_dispo_properties` now lists leads that have buyers
-    but **no `il_property_id`** — without that an imported batch filled a board
-    the Dispo switcher didn't even show.
+  - **A dispo board no longer requires an `il_property_id`** (gw220). That was
+    never the right gate — a deal needs a buyer board the moment it's ours, and
+    most of ours are never posted to IL (three of the eight properties under
+    contract had no board at all). `get_dispo_properties` now lists a lead if
+    ANY of: its status is in **`DISPO_LEAD_STATUSES`** (the same five statuses
+    the importer's picker uses) · it already has buyers on its board (so a board
+    + its history survives the status moving on to Won/Dead) · it's IL-linked
+    (the old rule, kept). The status tuple lives in
+    `investorlift_ingest.DISPO_LEAD_STATUSES` and `buyer_import` imports it
+    (the other direction would cycle), so picker and switcher can't drift.
   - **Gotcha (bit the lead importer too, silently)**: `usersStore()` is a Pinia
     *setup* store, so `store.allUsers` is the UNWRAPPED array and
     `const { allUsers } = usersStore()` hands back a stale snapshot; `users` is
