@@ -39,6 +39,18 @@
           <span v-if="a.last_event" class="truncate">{{ eventLabel(a.last_event) }}</span>
         </div>
 
+        <!-- Built by hand in DocuSeal and matched back to this lead by the
+             webhook. Surfaced (with the matching evidence on hover) so an
+             auto-link is never mistaken for something the CRM itself sent. -->
+        <div
+          v-if="a.source === 'adopted'"
+          class="flex items-center gap-1 text-xs text-ink-amber-3"
+          :title="a.match_basis ? __('Matched by') + ': ' + a.match_basis : ''"
+        >
+          <FeatherIcon name="link" class="size-3" />
+          <span class="truncate">{{ __('Auto-linked from DocuSeal') }}</span>
+        </div>
+
         <a
           v-if="a.is_signed"
           :href="signedUrl(a)"
@@ -103,7 +115,7 @@
       :options="{
         title: __('Archive agreement?'),
         message: __(
-          'This removes the agreement from this lead and archives it in DocuSeal. The signing links will stop working.',
+          'This hides the agreement from this lead and archives it in DocuSeal. The signing links will stop working. The record is kept, so it can be restored if this was a mistake.',
         ),
         actions: [
           {

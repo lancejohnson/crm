@@ -478,7 +478,23 @@ def docuseal_webhook(secret: str = None):
 		fields=["name"],
 	)
 	if not rows:
-		return {"ok": True, "skipped": "no agreement"}
+		# Envelopes built by hand in the DocuSeal UI have no row yet. DocuSeal
+		# webhooks are account-wide, so this is our only notice they exist —
+		# try to work out which lead it belongs to rather than dropping it.
+		adopted = None
+		try:
+			from crm.api.agreement_adopt import adopt_submission
+
+			adopted = adopt_submission(sub_id)
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), "docuseal adoption failed")
+		if not adopted or adopted.get("status") != "adopted":
+			return {"ok": True, "skipped": "no agreement", "adoption": adopted}
+		rows = frappe.get_all(
+			AGREEMENT_DOCTYPE,
+			filters={"document_id": sub_id, "provider": "docuseal"},
+			fields=["name"],
+		)
 
 	status, signed, total = None, 0, 0
 	token = (frappe.conf.get("docuseal_api_token") or "").strip()
@@ -556,7 +572,15 @@ def archive_agreement(agreement: str):
 				pass
 
 	lead = agr.lead
-	frappe.delete_doc(AGREEMENT_DOCTYPE, agreement, ignore_permissions=True, force=True)
+	# Soft-archive rather than delete. Deleting lost the record entirely (a
+	# signed contract could vanish with one click) and, now that unknown
+	# submissions are auto-adopted, a later webhook event would recreate the row
+	# we just removed. Keeping a flagged row makes the archive both recoverable
+	# and a tombstone. Older sites without the column fall back to the delete.
+	if frappe.db.has_column(AGREEMENT_DOCTYPE, "is_archived"):
+		frappe.db.set_value(AGREEMENT_DOCTYPE, agreement, "is_archived", 1)
+	else:
+		frappe.delete_doc(AGREEMENT_DOCTYPE, agreement, ignore_permissions=True, force=True)
 	frappe.db.commit()
 	_publish(lead)
 	return {"ok": True}
@@ -575,19 +599,35 @@ def get_agreements(lead: str):
 	if not frappe.db.exists("DocType", AGREEMENT_DOCTYPE):
 		return []
 
-	has_provider = frappe.db.has_column(AGREEMENT_DOCTYPE, "provider")
+	filters = {"lead": lead}
+	filters.update(_live_filter())
+	rows = frappe.get_all(
+		AGREEMENT_DOCTYPE, filters=filters, fields=_agreement_fields(), order_by="creation desc"
+	)
+	for r in rows:
+		_shape_agreement(r)
+	return rows
+
+
+def _agreement_fields(extra=None):
+	"""Row fields, skipping any column this site has not been migrated to yet."""
 	fields = [
 		"name", "document_id", "template_title", "agreement_status",
 		"signed_count", "total_signers", "buyer_link", "seller_links",
 		"last_event", "last_event_at", "creation", "owner",
 	]
-	if has_provider:
-		fields.append("provider")
+	fields += list(extra or [])
+	for optional in ("provider", "source", "match_basis"):
+		if frappe.db.has_column(AGREEMENT_DOCTYPE, optional):
+			fields.append(optional)
+	return fields
 
-	rows = frappe.get_all(AGREEMENT_DOCTYPE, filters={"lead": lead}, fields=fields, order_by="creation desc")
-	for r in rows:
-		_shape_agreement(r)
-	return rows
+
+def _live_filter():
+	"""Hide archived rows (kept as tombstones) from the cards + timeline."""
+	if frappe.db.has_column(AGREEMENT_DOCTYPE, "is_archived"):
+		return {"is_archived": 0}
+	return {}
 
 
 def _shape_agreement(r):
@@ -617,17 +657,13 @@ def get_buyer_agreements(buyer: str):
 	):
 		return []
 
-	has_provider = frappe.db.has_column(AGREEMENT_DOCTYPE, "provider")
-	fields = [
-		"name", "lead", "document_id", "template_title", "agreement_status",
-		"signed_count", "total_signers", "buyer_link", "seller_links",
-		"last_event", "last_event_at", "creation", "owner",
-	]
-	if has_provider:
-		fields.append("provider")
-
+	filters = {"buyer": buyer}
+	filters.update(_live_filter())
 	rows = frappe.get_all(
-		AGREEMENT_DOCTYPE, filters={"buyer": buyer}, fields=fields, order_by="creation desc"
+		AGREEMENT_DOCTYPE,
+		filters=filters,
+		fields=_agreement_fields(extra=["lead"]),
+		order_by="creation desc",
 	)
 	labels = {}
 	for r in rows:
