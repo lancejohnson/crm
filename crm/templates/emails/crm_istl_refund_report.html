@@ -1,6 +1,6 @@
 <p>
 	<span style="font-weight: 600;">iSpeedToLead refund watch</span>
-	— {% if when == "morning" %}morning{% else %}end of day{% endif %}
+	— {% if when == "morning" %}morning{% else %}afternoon check{% endif %}
 	{{ date }}
 </p>
 
@@ -97,7 +97,7 @@
 		Due today — still not called ({{ uncalled_count }})
 	</p>
 	<p style="margin: 0 0 8px 0; color: #6b7280; font-size: 13px;">
-		No outbound call logged today. Call before end of day to keep the every-other-day cadence.
+		No outbound call logged today — still time this afternoon to keep the every-other-day cadence.
 	</p>
 	{% for item in uncalled_today %}
 	<div style="margin: 8px 0; padding: 10px 14px; border-left: 4px solid #d92d20; background: #fafafa;">

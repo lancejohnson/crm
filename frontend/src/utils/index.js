@@ -138,11 +138,15 @@ export function ddExpiration(date) {
 // surface + text show through and stay readable either way. Literal class
 // strings (not interpolated) so Tailwind's JIT keeps them; '' = no tint. `!`
 // overrides the card's `bg-surface-white`.
+// green = nothing needed right now (ISTL refund already earned, or today's
+// double-dial is logged). Kept lighter than amber/red so a board of handled
+// cards reads calm rather than shouting.
 export function dueTint(color) {
   return (
     {
       amber: '!bg-amber-400/25 !border-amber-600/60',
       red: '!bg-red-400/25 !border-red-600/70',
+      green: '!bg-green-400/20 !border-green-600/50',
     }[color] || ''
   )
 }

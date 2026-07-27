@@ -861,11 +861,25 @@ def getCounts(d, doctype):
 	# Calendar-day math in the site timezone (creation is stored site-tz).
 	d["_new_lead_color"] = ""
 	if doctype == "CRM Lead":
-		status, creation = frappe.db.get_value("CRM Lead", d.get("name"), ["status", "creation"]) or (
-			None,
-			None,
-		)
-		if status == "New" and creation:
+		status, creation, source = frappe.db.get_value(
+			"CRM Lead", d.get("name"), ["status", "creation", "source"]
+		) or (None, None, None)
+
+		# iSpeedToLead refund standing wins on ISTL leads: it's the same rule the
+		# twice-daily refund email uses (amber/red = needs a double-dial today,
+		# GREEN = handled or refund already earned), so the board and the email
+		# can't tell different stories. Best-effort — a failure here must never
+		# break the kanban.
+		if source == "iSpeedToLead":
+			try:
+				from crm.api.istl_refund_report import refund_card_color
+
+				d["_new_lead_color"] = refund_card_color(d.get("name"), status, creation, source)
+			except Exception:
+				frappe.log_error("ISTL refund card color failed", frappe.get_traceback())
+
+		# Untouched-new-lead age tint, for everything the refund rule didn't claim.
+		if not d["_new_lead_color"] and status == "New" and creation:
 			from frappe.utils import getdate
 
 			d["_new_lead_color"] = "red" if getdate(creation) < getdate() else "amber"

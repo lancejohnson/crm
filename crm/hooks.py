@@ -278,12 +278,15 @@ scheduler_events = {
 			"crm.api.quo_contacts.sync_all",
 		],
 		"*/15 * * * *": ["crm.lead_syncing.background_sync.sync_leads_from_sources_15_minutes"],
-		# iSpeedToLead refund-eligibility watch (America/Chicago wall clock).
-		# Mon–Fri 13:00 UTC ≈ 8am CDT morning due-list; 23:00 UTC ≈ 6pm CDT
-		# end-of-day uncalled list. Both include newly-ineligible $ loss since
-		# the prior business day. Needs `sync_jobs` on prod after deploy.
-		"0 13 * * 1-5": ["crm.api.istl_refund_report.run_morning_report"],
-		"0 23 * * 1-5": ["crm.api.istl_refund_report.run_eod_report"],
+		# iSpeedToLead refund-eligibility watch. Mon–Fri 8:00am (due-list +
+		# newly-ineligible $ loss) and 3:00pm (which of today's due leads are
+		# still uncalled, while there's afternoon left to fix it).
+		# NOTE: Frappe evaluates cron in the SITE timezone (System Settings =
+		# America/Chicago), not UTC — `is_event_due` compares against
+		# `now_datetime()`. So these are plain local times and DST takes care of
+		# itself. Needs `sync_jobs` on prod after deploy (gw127/128 gotcha).
+		"0 8 * * 1-5": ["crm.api.istl_refund_report.run_morning_report"],
+		"0 15 * * 1-5": ["crm.api.istl_refund_report.run_eod_report"],
 	},
 }
 

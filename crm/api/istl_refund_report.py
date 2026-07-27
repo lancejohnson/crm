@@ -6,11 +6,11 @@ operating cadence is one double-dial every other day for those ten days.
 
 This module emails a short digest twice on business days:
 
-  * **Morning** — which in-window leads are due / behind pace (call them today),
+  * **8:00am** — which in-window leads are due / behind pace (call them today),
     plus any leads that *became* refund-ineligible since the last business-day
     report and the $ lost on them.
-  * **End of day** — which of today's due leads still have no outbound call
-    logged today, plus the same newly-ineligible $ loss section.
+  * **3:00pm** — which of today's due leads still have no outbound call logged
+    today, while there's still afternoon left to fix it.
 
 Double-dial counting: outbound `CRM Call Log` rows on the lead are clustered
 when successive dials are ≤ ``DOUBLE_DIAL_GAP_SECONDS`` apart; a cluster of
@@ -21,13 +21,16 @@ Sale-balance purchases: the iSpeedToLead webhook does not currently flag
 them, so every `source=iSpeedToLead` lead is treated as refund-eligible.
 If that signal lands later, filter in ``_is_refund_eligible``.
 
-Scheduler (hooks.py cron, UTC → America/Chicago wall clock):
-  morning  13:00 UTC Mon–Fri  ≈ 8:00am CDT
-  eod      23:00 UTC Mon–Fri  ≈ 6:00pm CDT
+Scheduler (hooks.py cron): ``0 8 * * 1-5`` and ``0 15 * * 1-5``. Frappe
+evaluates cron in the SITE timezone (System Settings = America/Chicago) —
+``is_event_due`` compares against ``now_datetime()`` — so those are plain local
+times and DST handles itself. Do NOT pre-convert to UTC.
 
-After deploy: ``bench execute frappe.utils.scheduler.sync_jobs`` (or the
-scheduled_job_type.sync_jobs form) so the new cron rows land — same gotcha
-as the integrity-report / seqdrain hooks.
+After deploy:
+``bench execute frappe.core.doctype.scheduled_job_type.scheduled_job_type.sync_jobs``
+so the cron rows land — same gotcha as the integrity-report / seqdrain hooks.
+(`sync_jobs` rewrites frequency/cron on an existing row, so schedule changes do
+apply to already-registered jobs.)
 """
 
 from __future__ import annotations
@@ -112,7 +115,11 @@ def run_morning_report():
 
 
 def run_eod_report():
-	"""Weekday end-of-day cron: still-uncalled due leads + newly ineligible $ loss."""
+	"""Weekday 3pm cron: today's due leads that still have no call logged.
+
+	Name kept as `eod` (not `afternoon`) because the Scheduled Job Type row is
+	keyed on this dotted path — renaming it would orphan the registered job.
+	"""
 	_run_safe("eod")
 
 
@@ -440,6 +447,59 @@ def _gave_up_early(rows: list[dict], today, prev_biz) -> list[dict]:
 	return out
 
 
+# ---------------------------------------------------------------------------------
+# Kanban tint (shared with crm.api.doc.getCounts so the board and the email
+# can never disagree about who's in danger)
+# ---------------------------------------------------------------------------------
+def refund_card_color(lead_name: str, status: str, creation, source: str) -> str:
+	"""Refund standing of one ISTL lead, as a kanban tint.
+
+	``green``  refund already earned (5 double-dials), or today's dial is done
+	``red``    running out of runway — must dial every remaining day, or behind pace
+	``amber``  due for a double-dial today, still comfortably on track
+	``''``     not an ISTL lead / not workable / outside the window / nothing due
+
+	Deliberately mirrors ``_enrich`` so "in danger" on the board means exactly
+	what "due" means in the email.
+	"""
+	if source != SOURCE or not creation:
+		return ""
+	if status not in WORKABLE_STATUSES:
+		return ""
+
+	today = _today()
+	age_days = (today - getdate(creation)).days
+	if not (0 <= age_days < WINDOW_DAYS):
+		return ""
+
+	calls = _outbound_calls(lead_name)
+	clusters = _cluster_calls(calls)
+	double_dials = sum(1 for c in clusters if c["dials"] >= 2)
+
+	# Refund secured — nothing left to chase on this lead.
+	if double_dials >= REQUIRED_DOUBLE_DIALS:
+		return "green"
+
+	# A double-dial logged today = handled for the day.
+	if any(c["date"] == today for c in clusters if c["dials"] >= 2):
+		return "green"
+
+	days_left = max(0, WINDOW_DAYS - age_days)
+	remaining = REQUIRED_DOUBLE_DIALS - double_dials
+	attempt_dates = [c["date"] for c in clusters if c["dials"] >= 2]
+	last_dd = max(attempt_dates) if attempt_dates else None
+	days_since = (today - last_dd).days if last_dd else None
+	behind = double_dials < min(REQUIRED_DOUBLE_DIALS, age_days // 2)
+
+	due_today = days_since is None or days_since >= 2 or behind or remaining >= days_left
+	if not due_today:
+		return ""
+	# No slack left (or already behind) → this is the one that gets forfeited.
+	if remaining >= days_left or behind:
+		return "red"
+	return "amber"
+
+
 def _status_since(lead_names: list[str]) -> dict:
 	"""``{lead: date the lead entered its CURRENT status}`` (Chicago dates).
 
@@ -554,7 +614,7 @@ def _send_email(report: dict):
 	if when == "morning":
 		subject = _("ISTL refund watch — morning {0}").format(day)
 	else:
-		subject = _("ISTL refund watch — end of day {0}").format(day)
+		subject = _("ISTL refund watch — afternoon check {0}").format(day)
 
 	# Headline numbers in the subject when something needs attention.
 	bits = []
