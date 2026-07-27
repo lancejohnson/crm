@@ -925,6 +925,41 @@ duplicating. Work substantial features in a worktree of your own.
     `google_sa_json` pattern — app code can't read the server-scripts'
     `__INFISICAL:…__` placeholder). `frontend/src/components/AgreementsCard.vue` +
     `Activities/Activities.vue` (both build `/api/method/…download_signed_agreement?agreement=<name>`).
+  - **Adopting hand-built DocuSeal envelopes** — the team builds one-off templates
+    directly in the DocuSeal UI (deal-specific novations / amendments / AIFs) and
+    sends them by SMS. Those envelopes had no `CRM Esign Agreement` row, so
+    `docuseal_webhook` looked up `document_id`, found nothing and returned early —
+    a contract could be **fully signed with no trace on the lead** (that's how the
+    6787 N 200 E / Zurek purchase agreement went missing). DocuSeal webhooks are
+    **account-wide**, so the events already reached us; we were just dropping them.
+    `crm/api/agreement_adopt.py` (**new**) adds the missing branch: on an unknown
+    submission it matches back to a lead by **phone** (last-10, format-insensitive —
+    the primary key, since texted links mean every party has `email: None`), then
+    **email**, using **address** (street number + words, from the template name /
+    "Property Address" field) ONLY to break a multi-lead tie, never to link on its
+    own. Internal parties (our own users by login email, `custom_quo_number`, or
+    the site-config `docuseal_internal_numbers` list) are excluded first, or the
+    rep who signs every envelope would match whichever lead holds their number.
+    Anything not resolving to exactly one lead is **never guessed**: `_alert_unmatched`
+    emails/texts Lance once per submission with the `attach_submission` command to
+    link it by hand (`CRM Esign Agreement.lead` is `reqd`, so a row can't exist
+    without a confident match). Adopted rows are stamped `source=adopted` +
+    `match_basis` and re-owned to the lead owner. `backfill_adoptions(dry_run=1)`
+    sweeps all history (`docuseal_adopt_since`, default 2026-07-01, skips the
+    account's throwaway test envelopes). 5 rows adopted on prod so far.
+  - **Archiving is now soft** — `archive_agreement` sets `is_archived` instead of
+    `frappe.delete_doc`: deleting lost the record entirely (one click could vaporize
+    a signed contract) and, with adoption live, a later webhook event would just
+    recreate the row it removed. The flagged row is both recoverable and a
+    tombstone. Reads filter it out via a shared `_live_filter()`; `_agreement_fields()`
+    centralizes the `has_column` guards (`provider`/`source`/`match_basis`) so an
+    unmigrated site still works. `AgreementsCard.vue` shows an amber **"Auto-linked
+    from DocuSeal"** badge (match evidence in the `title` tooltip) so an adopted
+    envelope is never mistaken for one the CRM sent, and the archive confirm now
+    says the record is kept.
+  - Ops (`../frappe-crm-deploy`): `scripts/setup_agreement.py` adds `source`
+    (Select `crm\nadopted`), `match_basis` (Small Text) and `is_archived` (Check)
+    via `ensure_field` (idempotent). All three are live on prod.
 - **First-Call Read (2x2 lead qualification)** — after the first call a rep marks
   two yes/no reads that place the lead in a 2x2: **Motivated?** (is the seller
   motivated) x **On price?** (is their price realistic) → Motivated·On price /
