@@ -20,3 +20,7 @@ build
 /.worktrees/
 .claude/sites/
 .claude/worktrees/
+
+# editor scratch (todo plugin)
+TODO.todo
+.todo-media/
