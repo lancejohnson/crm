@@ -45,7 +45,20 @@ from frappe.utils import flt, get_datetime, get_url, getdate
 
 # --- config -------------------------------------------------------------------
 
+# The `CRM Lead Source` row every ISTL lead is stamped with (set by the
+# iSpeedToLead webhook). This report applies to NOTHING else — other vendors
+# (PropertyLeads, Red Panda) have no double-dial refund deal.
 SOURCE = "iSpeedToLead"
+
+
+def is_istl(source) -> bool:
+	"""Case/space-insensitive source match.
+
+	MariaDB compares with a ``_ci`` collation, so the SQL filter behind the email
+	matches 'ispeedtolead' too — but Python ``==`` would not, which would let the
+	board and the email disagree about the same lead. Normalize both sides.
+	"""
+	return str(source or "").strip().casefold() == SOURCE.casefold()
 WINDOW_DAYS = 10
 REQUIRED_DOUBLE_DIALS = 5
 # Successive outbound dials within this many seconds count as one double-dial
@@ -520,7 +533,7 @@ def refund_card_color(lead_name: str, status: str, creation, source: str) -> str
 	Deliberately mirrors ``_enrich`` so "in danger" on the board means exactly
 	what "due" means in the email.
 	"""
-	if source != SOURCE or not creation:
+	if not is_istl(source) or not creation:
 		return ""
 	if status not in WORKABLE_STATUSES:
 		return ""

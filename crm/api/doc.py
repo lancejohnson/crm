@@ -870,13 +870,13 @@ def getCounts(d, doctype):
 		# GREEN = handled or refund already earned), so the board and the email
 		# can't tell different stories. Best-effort — a failure here must never
 		# break the kanban.
-		if source == "iSpeedToLead":
-			try:
-				from crm.api.istl_refund_report import refund_card_color
+		try:
+			from crm.api.istl_refund_report import is_istl, refund_card_color
 
+			if is_istl(source):
 				d["_new_lead_color"] = refund_card_color(d.get("name"), status, creation, source)
-			except Exception:
-				frappe.log_error("ISTL refund card color failed", frappe.get_traceback())
+		except Exception:
+			frappe.log_error("ISTL refund card color failed", frappe.get_traceback())
 
 		# Untouched-new-lead age tint, for everything the refund rule didn't claim.
 		if not d["_new_lead_color"] and status == "New" and creation:
