@@ -278,6 +278,12 @@ scheduler_events = {
 			"crm.api.quo_contacts.sync_all",
 		],
 		"*/15 * * * *": ["crm.lead_syncing.background_sync.sync_leads_from_sources_15_minutes"],
+		# iSpeedToLead refund-eligibility watch (America/Chicago wall clock).
+		# Mon–Fri 13:00 UTC ≈ 8am CDT morning due-list; 23:00 UTC ≈ 6pm CDT
+		# end-of-day uncalled list. Both include newly-ineligible $ loss since
+		# the prior business day. Needs `sync_jobs` on prod after deploy.
+		"0 13 * * 1-5": ["crm.api.istl_refund_report.run_morning_report"],
+		"0 23 * * 1-5": ["crm.api.istl_refund_report.run_eod_report"],
 	},
 }
 

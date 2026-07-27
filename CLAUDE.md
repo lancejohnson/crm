@@ -341,6 +341,29 @@ duplicating. Work substantial features in a worktree of your own.
     the card into view (scroll-retry loop). NOTE the route path is
     `/reports/calls` (route name "Call Review") — there is no `/call-review`
     path; gw129 shipped the wrong URL and gw130 fixed it. Verified live.
+- **iSpeedToLead refund-eligibility watch** — twice on business days, emails
+  Lance a digest of ISTL leads at risk of losing the 5-double-dials-in-10-days
+  refund (≈$29/lead; uses `lead_cost` when set). Cadence target = every other
+  day for ten days. **Morning** (≈8am CT): leads due for a double-dial today
+  (never called / last double-dial ≥2 days ago / behind pace / must-call-daily
+  to finish) with deep links to each lead. **End of day** (≈6pm CT): which of
+  today's due leads still have no outbound call logged. Morning also lists
+  **newly ineligible since the last business day** (window closed short of 5
+  double-dials; Mon catches Fri–Sun) and the $ lost — EOD skips that section
+  so the same leads aren't re-emailed at 6pm. Active-deal statuses
+  (Underwriting / Make Offer / Signed / Marketing to Buyer / etc.) are
+  excluded from both the due list and the $ tally.
+  Double-dial = cluster of ≥2 outbound `CRM Call Log` rows within 3 minutes;
+  single dials are shown but don't count. Sale-balance purchases aren't flagged
+  by the webhook yet, so every `source=iSpeedToLead` lead is treated as
+  refund-eligible. No new doctype/ops piece.
+  - `crm/api/istl_refund_report.py` — `run_morning_report` / `run_eod_report`
+    (cron) + `build_report` + whitelisted `run_report_now(when, send_email,
+    on_date)` for backtests
+  - `crm/templates/emails/crm_istl_refund_report.html` — digest template
+  - `crm/hooks.py` — cron `0 13 * * 1-5` (morning) + `0 23 * * 1-5` (eod),
+    UTC → America/Chicago; needs `sync_jobs` on prod after deploy (gw127/128
+    gotcha). Recipients override via site_config `istl_report_recipients`.
 - `frontend/vite.config.js` — PWA service worker set `selfDestroying` (the
   precache served stale app bundles after deploys)
 - **Sequence real-time drainer** — `crm/api/sequence_drain.py` + `crm/hooks.py`
