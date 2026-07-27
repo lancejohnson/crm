@@ -15,6 +15,8 @@
 	Only leads we're still trying to reach are listed — <span style="font-weight: 600;">New,
 	Called No Answer, Follow Up, Future Follow Up</span>. Once a lead hits Underwriting
 	or beyond it already paid for itself, and Dead / Lost / Won are done being dialed.
+	<span style="font-weight: 600;">A lead drops off once we've actually spoken with them</span>
+	— read from the call transcript, so a voicemail (however long) doesn't count.
 </p>
 
 <p style="color: #1f272e; margin: 0 0 16px 0;">
@@ -69,9 +71,9 @@
 	Marked Dead / Lost without ever reaching them — {{ gave_up_amount_fmt }}
 </p>
 <p style="margin: 0 0 8px 0; color: #6b7280; font-size: 13px;">
-	Closed out since {{ prev_business_day }}. No call over {{ connected_seconds }}s (so we never
-	actually talked to the seller) and short of {{ required }} double-dials — meaning we paid for
-	the lead and gave up the refund too. Worth a second look before these stay closed.
+	Closed out since {{ prev_business_day }}. We never actually spoke with the seller — every call
+	went to voicemail or nobody answered — and we were short of {{ required }} double-dials, so we
+	paid for the lead and gave up the refund too. Worth a second look before these stay closed.
 </p>
 {% for item in gave_up_early %}
 <div style="margin: 8px 0; padding: 10px 14px; border-left: 4px solid #f79009; background: #fafafa;">

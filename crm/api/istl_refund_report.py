@@ -35,6 +35,7 @@ apply to already-registered jobs.)
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -94,11 +95,59 @@ IN_DEAL_STATUSES = {
 # Over, one way or another. No more dialing.
 CLOSED_STATUSES = {"Dead Lead", "Lost", "Won"}
 
-# A lead marked Dead/Lost without ever reaching a human is a judgment call we
-# can still question — if it also never earned the refund we paid twice. Those
-# are reported separately ("gave up early"), not as a chase list.
-# Longest single call ≥ this many seconds = we actually talked to someone.
-CONNECTED_SECONDS = 60
+# --- "did we actually have a CONVERSATION?" -------------------------------------
+# A voicemail is NOT a conversation. Call duration can't tell them apart: a
+# 90-second call can be a long voicemail greeting, and a genuine "we already
+# sold it, take me off your list" can be 13 seconds. So we read the diarized
+# transcript (`custom_transcript`, ~91% coverage on ISTL calls) and judge what
+# the OTHER PARTY actually said.
+#
+# Voicemail greetings play in the opening seconds, so the greeting patterns are
+# only matched inside GREETING_WINDOW. Matching the whole transcript produced
+# false negatives — e.g. an 841s call where a screening service answered first
+# and the seller then talked for minutes, and a call where the lead *described*
+# a voicemail ordeal mid-conversation. If a human keeps talking substantively
+# after the greeting, it counts as a conversation (screened, then reached).
+GREETING_WINDOW_SECONDS = 30.0
+
+_VOICEMAIL_PATTERNS = [
+	r"leave (me |a |your )?(brief |detailed )?message",
+	r"leave your (name|number|message)",
+	r"after the (tone|beep)", r"at the tone",
+	r"record your (name|message)",
+	r"i'?ll see if this person is available", r"call assistant",
+	r"is not available", r"can'?t take your call", r"can'?t get to (my|the) phone",
+	r"please (leave|record|state|press)",
+	r"voice ?mail", r"voice messaging", r"mailbox",
+	r"you have reached", r"you'?ve reached", r"the person you'?ve dialed",
+	r"subscriber at", r"is unavailable", r"missed your call",
+	r"no longer in service", r"forwarded to (an? )?(automated |)voice",
+	r"youmail", r"telephone number", r"press \d to", r"to connect your call",
+	# Spanish / Portuguese greetings seen in the live data
+	r"buz[oó]n", r"oprima", r"deixa", r"liga o message",
+]
+VOICEMAIL_RE = re.compile("|".join(_VOICEMAIL_PATTERNS), re.I)
+
+# Greetings and acknowledgements. A lead who only says these hasn't had a
+# conversation — it's the pickup-then-hangup / hold-please pattern.
+_FILLER_WORDS = {
+	"hello", "hi", "hey", "yes", "yeah", "yep", "no", "okay", "ok", "alright",
+	"mhmm", "uh-huh", "mm-hmm", "sure", "bye", "goodbye", "thanks", "thank",
+	"what", "huh", "speaking", "sorry", "for", "calling",
+	"a", "the", "i", "you", "it", "is", "and", "to", "that", "s", "t", "m",
+}
+
+# Below BOTH of these, the other party said nothing of substance.
+MIN_CONVERSATION_SECONDS = 8
+MIN_CONVERSATION_WORDS = 10
+# Substantive words spoken AFTER a voicemail greeting that still count as
+# "a screening service answered, then we reached a human".
+MIN_POST_GREETING_WORDS = 15
+
+# Fallback for calls with no transcript (~9%): only a long call is assumed to be
+# a conversation. Deliberately generous — we'd rather keep chasing a lead than
+# wrongly drop it off the list.
+NO_TRANSCRIPT_CONVERSATION_SECONDS = 120
 
 # Back-compat: older callers referenced this name.
 ACTIVE_DEAL_STATUSES = IN_DEAL_STATUSES
@@ -301,9 +350,15 @@ def _enrich(lead: dict, today) -> dict:
 	clusters = _cluster_calls(calls)
 	double_dials = sum(1 for c in clusters if c["dials"] >= 2)
 	single_dials = sum(1 for c in clusters if c["dials"] == 1)
-	# Did we ever actually talk to someone? A 15s "call" is a voicemail bounce.
+	# Did we ever actually TALK WITH them? Voicemails don't count, no matter how
+	# long. Short-circuits on the first hit so a lead we reached early costs one
+	# transcript read, not one per call.
 	longest_call = max([c["duration"] for c in calls], default=0)
-	connected = longest_call >= CONNECTED_SECONDS
+	connected = False
+	for call in calls:
+		if _had_conversation(call):
+			connected = True
+			break
 	attempt_dates = [c["date"] for c in clusters if c["dials"] >= 2]
 	last_double_dial_date = max(attempt_dates) if attempt_dates else None
 	call_dates = sorted({getdate(c["start"]) for c in calls}) if calls else []
@@ -339,9 +394,12 @@ def _enrich(lead: dict, today) -> dict:
 	status = lead.get("status") or ""
 	in_deal = status in IN_DEAL_STATUSES
 	is_closed = status in CLOSED_STATUSES
-	# Unknown//new statuses default to workable rather than silently dropping a
+	# Once we've had a real conversation the lead is off the chase list — we
+	# reached the seller, which is the whole point of the dials. (A voicemail is
+	# not a conversation, so those leads keep getting chased.)
+	# Unknown/new statuses default to workable rather than silently dropping a
 	# lead we paid for (a renamed status shouldn't make it invisible).
-	is_workable = not in_deal and not is_closed
+	is_workable = not in_deal and not is_closed and not connected
 
 	return {
 		"name": lead["name"],
@@ -454,7 +512,7 @@ def _gave_up_early(rows: list[dict], today, prev_biz) -> list[dict]:
 def refund_card_color(lead_name: str, status: str, creation, source: str) -> str:
 	"""Refund standing of one ISTL lead, as a kanban tint.
 
-	``green``  refund already earned (5 double-dials), or today's dial is done
+	``green``  reached them / refund already earned / today's dial is done
 	``red``    running out of runway — must dial every remaining day, or behind pace
 	``amber``  due for a double-dial today, still comfortably on track
 	``''``     not an ISTL lead / not workable / outside the window / nothing due
@@ -475,6 +533,10 @@ def refund_card_color(lead_name: str, status: str, creation, source: str) -> str
 	calls = _outbound_calls(lead_name)
 	clusters = _cluster_calls(calls)
 	double_dials = sum(1 for c in clusters if c["dials"] >= 2)
+
+	# We actually spoke with them — done chasing, regardless of dial count.
+	if any(_had_conversation(c) for c in calls):
+		return "green"
 
 	# Refund secured — nothing left to chase on this lead.
 	if double_dials >= REQUIRED_DOUBLE_DIALS:
@@ -589,6 +651,57 @@ def _cluster_calls(calls: list[dict]) -> list[dict]:
 	return clusters
 
 
+def _had_conversation(call: dict) -> bool:
+	"""True when the other party actually TALKED WITH the rep on this call.
+
+	A voicemail — however long — is not a conversation. Reads the diarized
+	transcript and judges the lead-side speech; falls back to duration only when
+	no transcript exists.
+	"""
+	try:
+		doc = frappe.get_cached_doc("CRM Call Log", call["name"])
+	except Exception:
+		return False
+
+	if not (doc.get("custom_transcript") or "").strip():
+		# No transcript to judge (~9% of calls) — only a long call is assumed to
+		# be a real conversation.
+		return int(call.get("duration") or 0) >= NO_TRANSCRIPT_CONVERSATION_SECONDS
+
+	try:
+		from crm.api.call_transcript import _build_transcript
+
+		data = _build_transcript(doc)
+	except Exception:
+		return int(call.get("duration") or 0) >= NO_TRANSCRIPT_CONVERSATION_SECONDS
+
+	their_lines = [d for d in (data.get("dialogue") or []) if d.get("speaker") == "lead"]
+	if not their_lines:
+		return False  # rep talked, nobody answered
+
+	opening = " ".join(
+		d["content"] for d in their_lines
+		if float(d.get("start") or 0) <= GREETING_WINDOW_SECONDS
+	)
+	if VOICEMAIL_RE.search(opening):
+		# A greeting played. Only a human talking substantively AFTER it rescues
+		# this (screening service / call assistant, then the seller picked up).
+		after = [d for d in their_lines if float(d.get("start") or 0) > GREETING_WINDOW_SECONDS]
+		return len(_substantive_words(after)) >= MIN_POST_GREETING_WORDS
+
+	seconds = (data.get("talk_ratio") or {}).get("lead_seconds") or 0
+	words = _substantive_words(their_lines)
+	# Both thresholds must fail to rule it out, so a terse but real answer
+	# ("we already sold it") still counts.
+	return seconds >= MIN_CONVERSATION_SECONDS or len(words) >= MIN_CONVERSATION_WORDS
+
+
+def _substantive_words(lines: list[dict]) -> list[str]:
+	"""Words that carry meaning — greetings/acknowledgements stripped out."""
+	text = " ".join(d.get("content") or "" for d in lines).lower()
+	return [w for w in re.findall(r"[a-z']+", text) if w not in _FILLER_WORDS]
+
+
 def _cluster_summary(group: list[dict]) -> dict:
 	return {
 		"dials": len(group),
@@ -662,7 +775,7 @@ def _template_args(report: dict) -> dict:
 		"gave_up_early": report.get("gave_up_early") or [],
 		"gave_up_count": report.get("gave_up_count") or 0,
 		"gave_up_amount_fmt": f"${(report.get('gave_up_amount') or 0):,.0f}",
-		"connected_seconds": CONNECTED_SECONDS,
+		"greeting_window": int(GREETING_WINDOW_SECONDS),
 		"default_refund": report["default_refund_amount"],
 	}
 
