@@ -72,6 +72,14 @@ TZ = ZoneInfo("America/Chicago")
 # or comma-separated string) without a code change.
 DEFAULT_RECIPIENTS = ["lance.johnson@groundworkpro.com"]
 
+# Mattermost incoming webhook (site_config `istl_mattermost_webhook`). Locked to
+# the #acq channel on the Mattermost side, so this can only ever post there.
+# Unset = no chat post, email only.
+MATTERMOST_WEBHOOK_KEY = "istl_mattermost_webhook"
+MATTERMOST_TIMEOUT = 15
+# Keep the post scannable on a phone; the rest is a click away in the CRM.
+MAX_CHAT_ROWS = 15
+
 # --- status policy ------------------------------------------------------------
 # The real `CRM Lead Status` ladder, in pipeline order:
 #   New · Called No Answer · Follow Up · Underwriting · Make Offer · Contract Sent
@@ -195,6 +203,7 @@ def _run_safe(when: str):
 			return
 		report = build_report(when=when, on_date=today)
 		_send_email(report)
+		_send_mattermost(report)
 		frappe.logger("istl_refund_report").info(
 			f"ISTL {when} report {today}: due={len(report['due'])} "
 			f"uncalled={len(report['uncalled_today'])} "
@@ -209,11 +218,19 @@ def _run_safe(when: str):
 
 
 @frappe.whitelist()
-def run_report_now(when: str = "morning", send_email: int = 1, on_date: str | None = None):
-	"""Manual / test entry. Sales User+; emails only when send_email=1.
+def run_report_now(
+	when: str = "morning",
+	send_email: int = 1,
+	on_date: str | None = None,
+	post_chat: int = 0,
+):
+	"""Manual / test entry. Sales User+.
 
-	``when`` = ``morning`` | ``eod``. ``on_date`` (YYYY-MM-DD) freezes "today"
-	for backtesting.
+	``when``      ``morning`` | ``eod``
+	``send_email`` 1 = actually email it
+	``post_chat``  1 = actually post to #acq (defaults OFF so a backtest can't
+	               spam the channel)
+	``on_date``    YYYY-MM-DD, freezes "today" for backtesting
 	"""
 	if not _can_run_manual():
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
@@ -224,8 +241,20 @@ def run_report_now(when: str = "morning", send_email: int = 1, on_date: str | No
 	report = build_report(when=when, on_date=day)
 	if int(send_email or 0):
 		_send_email(report)
+	if int(post_chat or 0):
+		_send_mattermost(report)
 	# Strip nothing sensitive; this is the same payload the email uses.
 	return report
+
+
+@frappe.whitelist()
+def preview_chat_post(when: str = "morning", on_date: str | None = None):
+	"""Exact text that WOULD be posted to #acq, without posting it."""
+	if not _can_run_manual():
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	when = (when or "morning").strip().lower()
+	day = getdate(on_date) if on_date else _today()
+	return _chat_text(build_report(when=when, on_date=day))
 
 
 def _can_run_manual() -> bool:
@@ -762,6 +791,116 @@ def _send_email(report: dict):
 		args=_template_args(report),
 		now=True,
 	)
+
+
+# ---------------------------------------------------------------------------------
+# Mattermost post (#acq)
+# ---------------------------------------------------------------------------------
+def _send_mattermost(report: dict):
+	"""Post the call list to #acq. Best-effort — chat is a convenience, so a
+	failure here must never take down the (authoritative) email.
+
+	The point of this post is ONE thing: who do we need to reach out to. Detail
+	that doesn't drive a call today stays in the email.
+	"""
+	url = (frappe.conf.get(MATTERMOST_WEBHOOK_KEY) or "").strip()
+	if not url:
+		return
+	try:
+		import requests
+
+		# username/icon overrides make the post read as the report bot rather than
+		# the human who happens to own the webhook (needs EnablePostUsernameOverride
+		# / EnablePostIconOverride on the Mattermost server — both enabled).
+		resp = requests.post(
+			url,
+			json={
+				"text": _chat_text(report),
+				"username": "ISTL Refund Watch",
+				"icon_emoji": ":telephone_receiver:",
+			},
+			timeout=MATTERMOST_TIMEOUT,
+		)
+		if resp.status_code >= 300:
+			frappe.log_error(
+				title="ISTL report: Mattermost post failed",
+				message=f"HTTP {resp.status_code}\n{resp.text[:500]}",
+			)
+	except Exception:
+		frappe.log_error(
+			title="ISTL report: Mattermost post failed",
+			message=frappe.get_traceback(),
+		)
+
+
+def _chat_text(report: dict) -> str:
+	"""The #acq message: a call list, in priority order."""
+	when = report["when"]
+	label = "Morning" if when == "morning" else "Afternoon check"
+	# Morning = everything still owed a dial today. Afternoon = only what's still
+	# not done, so the 3pm post is a genuinely shorter "these are left" list.
+	rows = report["due"] if when == "morning" else report["uncalled_today"]
+
+	lines = [f"#### iSpeedToLead — {label} · {report['date']}"]
+
+	if not rows:
+		lines.append(
+			"**Nobody to call.** Every ISTL lead in the 10-day window is on pace."
+			if when == "morning"
+			else "**All clear** — every lead due today has a call logged."
+		)
+	else:
+		headline = (
+			f"**Call these {len(rows)} today**"
+			if when == "morning"
+			else f"**{len(rows)} still not called today**"
+		)
+		lines.append(f"{headline} — each needs a double-dial (2 calls back-to-back).")
+		lines.append("")
+		lines.append("| Lead | Dials | Days left | Last try |")
+		lines.append("|:--|:--|:--|:--|")
+		for r in rows[:MAX_CHAT_ROWS]:
+			name = f"[{_md(r['lead_name'])}]({r['link']})"
+			# ⚠️ only when the window is about to shut. Flagging every behind-pace
+			# lead marked ~everything and turned the column into noise.
+			if r["days_left"] <= 2:
+				name = f"⚠️ {name}"
+			if r["days_left"] <= 1:
+				days = "**last day**"
+			else:
+				days = f"{r['days_left']} days"
+			last = r["last_double_dial_date"] or r["last_call_date"] or "never called"
+			lines.append(
+				f"| {name} | {r['double_dials']}/{REQUIRED_DOUBLE_DIALS} | {days} | {last} |"
+			)
+		if len(rows) > MAX_CHAT_ROWS:
+			lines.append(f"| _+{len(rows) - MAX_CHAT_ROWS} more — see email_ | | | |")
+
+	# Money notes: short, and only when there's something to say.
+	tail = []
+	if report.get("lost_count"):
+		tail.append(
+			f"💸 **{report['lost_count']} lost the refund** since "
+			f"{report['prev_business_day']} — ${report['lost_amount']:,.0f}"
+		)
+	if report.get("gave_up_count"):
+		tail.append(
+			f"🔎 **{report['gave_up_count']} closed without ever reaching them** "
+			f"— ${report['gave_up_amount']:,.0f}"
+		)
+	if tail:
+		lines.append("")
+		lines.extend(tail)
+
+	return "\n".join(lines)
+
+
+def _md(text) -> str:
+	"""Escape the markdown that breaks a table cell (pipes, brackets)."""
+	out = str(text or "")
+	for ch in ("|", "[", "]"):
+		out = out.replace(ch, "\\" + ch)
+	return out
 
 
 def _template_args(report: dict) -> dict:
