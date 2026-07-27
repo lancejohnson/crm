@@ -33,6 +33,35 @@
         </div>
 
         <div>
+          <div class="mb-1.5 text-xs text-ink-gray-5">
+            {{ __('Split between (optional)') }}
+          </div>
+          <div class="flex flex-wrap gap-1.5">
+            <button
+              v-for="u in callableUsers"
+              :key="u.name"
+              type="button"
+              class="rounded-full border px-2.5 py-1 text-xs transition"
+              :class="
+                assignees.includes(u.name)
+                  ? 'border-outline-gray-4 bg-surface-gray-3 text-ink-gray-8'
+                  : 'border-outline-gray-2 text-ink-gray-6 hover:bg-surface-gray-2'
+              "
+              @click="toggleAssignee(u.name)"
+            >
+              {{ u.full_name || u.name }}
+            </button>
+          </div>
+          <div v-if="assignees.length" class="mt-1 text-xs text-ink-gray-5">
+            {{
+              __('New leads are dealt out evenly, round-robin, between the')
+            }}
+            {{ assignees.length }}
+            {{ __('selected') }}.
+          </div>
+        </div>
+
+        <div>
           <div class="mb-1.5 flex items-center justify-between">
             <span class="text-xs text-ink-gray-5">
               {{ __('Paste rows (incl. header) or upload a CSV') }}
@@ -169,10 +198,26 @@
           </div>
         </div>
 
+        <div
+          v-if="Object.keys(result.assigned || {}).length"
+          class="flex flex-col gap-1"
+        >
+          <div class="text-xs text-ink-gray-5">{{ __('Assigned to call') }}</div>
+          <div class="flex flex-wrap gap-2 text-sm">
+            <span
+              v-for="(n, u) in result.assigned"
+              :key="u"
+              class="rounded bg-surface-gray-2 px-2 py-0.5 text-ink-gray-7"
+            >
+              {{ userLabel(u) }}: <span class="font-medium">{{ n }}</span>
+            </span>
+          </div>
+        </div>
+
         <div class="text-sm text-ink-gray-6">
           {{
             __(
-              'New leads are parked out of the main Leads view. Open the list below to work them.',
+              'New leads are parked out of the main Leads view. They move onto the main board automatically as soon as someone works one (status leaves “New”).',
             )
           }}
         </div>
@@ -234,6 +279,7 @@ import {
 } from 'frappe-ui'
 import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { usersStore } from '@/stores/users'
 
 const show = defineModel({ type: Boolean })
 const emit = defineEmits(['imported'])
@@ -249,6 +295,27 @@ const done = ref(0)
 const result = ref({})
 const parsed = ref({ headers: [], rows: [] })
 const mapping = ref([])
+const assignees = ref([])
+
+const { users: allUsers } = usersStore()
+
+// Everyone who can be handed leads to call (real teammates, not system rows).
+const callableUsers = computed(() =>
+  (allUsers.data || []).filter(
+    (u) => u.name && !['Administrator', 'Guest'].includes(u.name) && u.enabled !== 0,
+  ),
+)
+
+function userLabel(name) {
+  const u = (allUsers.data || []).find((x) => x.name === name)
+  return u?.full_name || name
+}
+
+function toggleAssignee(name) {
+  const i = assignees.value.indexOf(name)
+  if (i === -1) assignees.value.push(name)
+  else assignees.value.splice(i, 1)
+}
 
 const CHUNK = 200
 
@@ -493,15 +560,23 @@ async function runImport() {
     errors: [],
     error_count: 0,
     views: [],
+    assigned: {},
   }
 
   try {
+    // Carries the round-robin rotation across chunks so a split doesn't
+    // restart at the first person every 200 rows.
+    let offset = 0
     for (let i = 0; i < rows.length; i += CHUNK) {
       const chunk = rows.slice(i, i + CHUNK)
       const res = await call('crm.api.lead_import.import_leads', {
         list_name: listName.value.trim(),
         rows: JSON.stringify(chunk),
         source: source.value.trim() || null,
+        assign_to: assignees.value.length
+          ? JSON.stringify(assignees.value)
+          : null,
+        assign_offset: offset,
       })
       totals.created += res.created || 0
       totals.matched += res.matched || 0
@@ -509,6 +584,10 @@ async function runImport() {
       totals.error_count += res.error_count || 0
       if (res.errors?.length) totals.errors.push(...res.errors)
       if (res.views?.length) totals.views = res.views
+      for (const [u, n] of Object.entries(res.assigned || {})) {
+        totals.assigned[u] = (totals.assigned[u] || 0) + n
+      }
+      offset = res.assign_offset ?? offset
       done.value = Math.min(i + CHUNK, rows.length)
     }
     totals.errors = totals.errors.slice(0, 20)
@@ -549,5 +628,6 @@ watch(show, (v) => {
   result.value = {}
   parsed.value = { headers: [], rows: [] }
   mapping.value = []
+  assignees.value = []
 })
 </script>

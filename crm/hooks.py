@@ -244,6 +244,9 @@ doc_events = {
 			# lead newly linked to an InvestorLift property → tag its Quo
 			# contact with the property address ("Property" multi-select)
 			"crm.api.quo_contacts.on_lead_update",
+			# a parked bulk-imported lead that moves out of "New" has been
+			# worked, so un-park it onto the main board (see lead_import.py)
+			"crm.api.lead_import.on_lead_update",
 		],
 	},
 }

@@ -47,6 +47,30 @@
       @click="clearDrill"
     />
   </div>
+  <div
+    v-if="importList.parked > 0"
+    class="mx-3 mt-2 flex items-center gap-2 rounded bg-surface-amber-1 px-3 py-2 text-sm"
+  >
+    <LucideEyeOff class="size-4 shrink-0 text-ink-amber-3" />
+    <span class="text-ink-gray-8">
+      <span class="font-medium">{{ importList.parked }}</span>
+      {{
+        importList.parked === 1
+          ? __('lead in this list is parked off the main board')
+          : __('leads in this list are parked off the main board')
+      }}
+    </span>
+    <span class="text-ink-gray-5">
+      · {{ __('they move over automatically once worked') }}
+    </span>
+    <Button
+      class="ml-auto"
+      variant="subtle"
+      :label="__('Add all to main board')"
+      :loading="promoting"
+      @click="promoteList"
+    />
+  </div>
   <ViewControls
     ref="viewControls"
     v-model="leads"
@@ -463,7 +487,16 @@ import { formatPhone, callHref } from '@/utils/phoneFormat'
 import { myQuoNumber } from '@/composables/quoSender'
 import { Avatar, Tooltip, Dropdown, call } from 'frappe-ui'
 import { useRoute } from 'vue-router'
-import { ref, computed, reactive, h, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import {
+  ref,
+  computed,
+  reactive,
+  watch,
+  h,
+  nextTick,
+  onMounted,
+  onBeforeUnmount,
+} from 'vue'
 
 const { getFormattedPercent, getFormattedFloat, getFormattedCurrency } =
   getMeta('CRM Lead')
@@ -497,6 +530,61 @@ function onImported() {
   // won't change — but the new saved views need to show up in the switcher.
   viewsStore().reload()
 }
+
+// ── Import-list promote banner ───────────────────────────────────────
+// Only while an auto-created import view is open. That view's filter IS the
+// list tag, so the list name is read back out of it rather than tracked
+// separately.
+const importList = ref({ parked: 0, list_name: '' })
+const promoting = ref(false)
+
+const openImportList = computed(() => {
+  const v = viewsStore().getView(
+    route.query.view,
+    route.params.viewType,
+    'CRM Lead',
+  )
+  if (!v?.filters) return ''
+  try {
+    const f = typeof v.filters === 'string' ? JSON.parse(v.filters) : v.filters
+    const like = f?.import_lists
+    const val = Array.isArray(like) ? like[1] : like
+    const m = typeof val === 'string' ? val.match(/%"(.+)"%/) : null
+    return m ? m[1] : ''
+  } catch (e) {
+    return ''
+  }
+})
+
+async function refreshImportList() {
+  const name = openImportList.value
+  if (!name) {
+    importList.value = { parked: 0, list_name: '' }
+    return
+  }
+  try {
+    importList.value = await call('crm.api.lead_import.get_list_summary', {
+      list_name: name,
+    })
+  } catch (e) {
+    importList.value = { parked: 0, list_name: '' }
+  }
+}
+
+async function promoteList() {
+  promoting.value = true
+  try {
+    await call('crm.api.lead_import.unhide_leads', {
+      list_name: importList.value.list_name,
+    })
+    await refreshImportList()
+    viewControls.value?.reload?.()
+  } finally {
+    promoting.value = false
+  }
+}
+
+watch(openImportList, refreshImportList, { immediate: true })
 
 on('trigger_lead_create', (data) => {
   showLeadModal.value = Boolean(data)

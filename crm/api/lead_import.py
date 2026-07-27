@@ -35,12 +35,19 @@ import re
 
 import frappe
 from frappe import _
+from frappe.desk.form.assign_to import add as assign_todo
 
 LEAD = "CRM Lead"
 VIEW = "CRM View Settings"
 
 MAX_ROWS_PER_CALL = 500
 MAX_LIST_NAME = 100
+
+# A parked lead auto-promotes to the main board the moment it stops being
+# untouched. "New" is the first CRM Lead Status (the status every import lands
+# in); anything else means a rep has actually worked it — called it, set a
+# follow-up, booked it with Dennis — and at that point hiding it is wrong.
+UNWORKED_STATUS = "New"
 
 # Never let a spreadsheet column write these, whatever the mapping says.
 BLOCKED_FIELDS = {
@@ -191,11 +198,24 @@ def _ensure_views(list_name: str):
 
 
 @frappe.whitelist()
-def import_leads(list_name: str, rows, source: str | None = None, lead_owner: str | None = None):
+def import_leads(
+	list_name: str,
+	rows,
+	source: str | None = None,
+	lead_owner: str | None = None,
+	assign_to=None,
+	assign_offset: int = 0,
+):
 	"""Create/tag a batch of leads under `list_name`.
 
 	rows: list of dicts already keyed by CRM Lead fieldname (the frontend does
 	the CSV parse + column mapping, so the user can eyeball it first).
+
+	assign_to: optional list of users to split the NEW leads between, evenly and
+	deterministically (round-robin). `assign_offset` carries the rotation across
+	chunked calls so a 500-row import split between two reps doesn't restart at
+	rep #1 every chunk and hand one of them everything.
+
 	Returns a summary the modal renders.
 	"""
 	_validate_access()
@@ -237,7 +257,12 @@ def import_leads(list_name: str, rows, source: str | None = None, lead_owner: st
 		if k:
 			by_email.setdefault(k, lead["name"])
 
+	assignees = frappe.parse_json(assign_to) if assign_to else []
+	assignees = [u for u in assignees if frappe.db.exists("User", u)]
+	assign_i = int(assign_offset or 0)
+
 	created, matched, skipped, errors = [], [], 0, []
+	assigned_counts = {u: 0 for u in assignees}
 	seen_in_batch = set()
 
 	for idx, raw_row in enumerate(rows):
@@ -285,6 +310,16 @@ def import_leads(list_name: str, rows, source: str | None = None, lead_owner: st
 			if lead_owner and "lead_owner" in allowed:
 				row.setdefault("lead_owner", lead_owner)
 
+			# Round-robin owner. This MUST be set as lead_owner, not just bolted
+			# on afterwards: CRM Lead.after_insert assigns lead_owner, and that
+			# field otherwise falls back to a site default (Dennis today), so the
+			# lead would end up assigned to BOTH him and the intended caller.
+			turn_user = None
+			if assignees:
+				turn_user = assignees[assign_i % len(assignees)]
+				assign_i += 1
+				row["lead_owner"] = turn_user
+
 			doc = frappe.new_doc(LEAD)
 			doc.update(row)
 			if tag_lists:
@@ -292,6 +327,23 @@ def import_leads(list_name: str, rows, source: str | None = None, lead_owner: st
 			if tag_hidden:
 				doc.import_hidden = 1
 			doc.insert(ignore_permissions=True)
+
+			if turn_user:
+				# after_insert normally assigns lead_owner already; only step in if
+				# it didn't, and never double-assign.
+				current = frappe.parse_json(doc.get("_assign") or "[]")
+				if turn_user not in current:
+					try:
+						assign_todo(
+							{"assign_to": [turn_user], "doctype": LEAD, "name": doc.name},
+							ignore_permissions=True,
+						)
+					except Exception:
+						frappe.log_error(
+							f"lead_import assign {doc.name} -> {turn_user}",
+							frappe.get_traceback(),
+						)
+				assigned_counts[turn_user] = assigned_counts.get(turn_user, 0) + 1
 
 			created.append(doc.name)
 			if phone_k:
@@ -315,6 +367,8 @@ def import_leads(list_name: str, rows, source: str | None = None, lead_owner: st
 		"errors": errors[:20],
 		"error_count": len(errors),
 		"views": views,
+		"assigned": assigned_counts,
+		"assign_offset": assign_i,
 	}
 
 
@@ -329,6 +383,21 @@ def _add_to_list(lead_name: str, list_name: str):
 
 
 # ------------------------------------------------------------------ reads
+
+
+@frappe.whitelist()
+def get_list_summary(list_name: str):
+	"""Counts for the promote banner on an open import view."""
+	if not frappe.db.has_column(LEAD, "import_lists"):
+		return {"total": 0, "parked": 0}
+	like = {"import_lists": ["like", f'%"{list_name}"%']}
+	total = frappe.db.count(LEAD, like)
+	parked = (
+		frappe.db.count(LEAD, {**like, "import_hidden": 1})
+		if frappe.db.has_column(LEAD, "import_hidden")
+		else 0
+	)
+	return {"list_name": list_name, "total": total, "parked": parked}
 
 
 @frappe.whitelist()
@@ -386,6 +455,29 @@ def unhide_leads(list_name: str | None = None, leads=None):
 		frappe.db.set_value(LEAD, n, "import_hidden", 0, update_modified=False)
 	frappe.db.commit()
 	return {"updated": len(names)}
+
+
+def on_lead_update(doc, method=None):
+	"""Auto-promote a parked lead once someone actually works it.
+
+	The whole point of parking is to keep an unworked vendor batch off the main
+	board. The moment a rep moves it out of "New" — called it, set a follow-up,
+	booked it with Dennis — it belongs on the board with everything else, or it
+	would quietly progress somewhere nobody is looking.
+
+	db.set_value (not doc.save) so this can't recurse through on_update, and
+	update_modified=False so promoting doesn't reshuffle "recently modified".
+	"""
+	try:
+		if not doc.get("import_hidden"):
+			return
+		if (doc.get("status") or UNWORKED_STATUS) == UNWORKED_STATUS:
+			return
+		frappe.db.set_value(LEAD, doc.name, "import_hidden", 0, update_modified=False)
+		doc.import_hidden = 0
+	except Exception:
+		# Never let promotion break a lead save.
+		frappe.log_error(f"lead_import auto-promote {doc.name}", frappe.get_traceback())
 
 
 def apply_import_visibility(doctype: str, filters: dict):
