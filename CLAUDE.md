@@ -813,6 +813,48 @@ duplicating. Work substantial features in a worktree of your own.
     `EXCLUDE_BY_DEFAULT`), previewing what will actually be pre-selected (e.g.
     "Text these (53)" for a 58-buyer property with 5 Not Interested); the header
     "N buyers" still shows the true filtered total.
+- **Buyer import (bulk + single)** — buyers only ever arrived on their own (the
+  IL scraper + the address-request webhook); a bought cash-buyer list, a county
+  LLC export or a REIA spreadsheet had no way in but the one-at-a-time modal.
+  Mirrors the bulk **lead** importer (`crm/api/lead_import.py` +
+  `ImportLeadsModal.vue`, gw211-215) closely enough that the two read the same.
+  - **Bulk**: `crm/api/buyer_import.py` + `Modals/ImportBuyersModal.vue`, in the
+    "…" menu on **/buyers** and as **Import buyers** on the **Dispo** board
+    header (pre-seeded with the open board). Paste rows / upload a CSV → confirm
+    the auto-guessed column mapping → optionally pick a **property** and the
+    **reps** to split the batch between. 200-row chunks; `assign_offset` carries
+    the round-robin rotation across chunks.
+  - **Property picker** = leads in **Signed Contract, Photos & Lockbox In
+    Progress, Needs Listing, Marketing to Buyer, Buyer Assigned**
+    (`PROPERTY_STATUSES`; confirmed with Lance — "Contract Sent" isn't ours yet,
+    "Won" is done). Each buyer gets a `CRM Lead Buyer` row at the chosen stage;
+    one `crm_il_buyers` emit for the whole batch, not one per buyer.
+  - **Assignment = ownership** (Lance's call, over per-buyer call tasks): a
+    Frappe `_assign` ToDo on the CRM Buyer. A buyer someone already owns is
+    never re-assigned, and the rotation only advances on an assignment that
+    actually happened, so the reps who do get buyers get an even split.
+  - **Dedupe** = email → last-10 phone → name (the `_find_buyer` rule), but built
+    as ONE index up front — `_find_buyer` re-queries per lookup, which would
+    scan the whole buyer table once per row. A matched buyer is attached and
+    assigned but **never overwritten**: blank fields get filled in, curated
+    values stay. Re-import is therefore idempotent (verified on prod).
+  - Metro columns are **matched** against the Census list, never created;
+    unrecognised ones are reported back. Junk emails (alt numbers, "n/a") are
+    dropped rather than failing an otherwise good row.
+  - **Single**: `Modals/BuyerModal.vue` gained the same **Add to property +
+    Board stage + Assign to** row on create (skipped via `:with-property="false"`
+    from `AddBuyerToDealModal`, which attaches the buyer itself). If the buyer
+    already exists, the duplicate banner now also offers **Add to property**.
+  - `investorlift_ingest.get_dispo_properties` now lists leads that have buyers
+    but **no `il_property_id`** — without that an imported batch filled a board
+    the Dispo switcher didn't even show.
+  - **Gotcha (bit the lead importer too, silently)**: `usersStore()` is a Pinia
+    *setup* store, so `store.allUsers` is the UNWRAPPED array and
+    `const { allUsers } = usersStore()` hands back a stale snapshot; `users` is
+    the resource whose `.data` is `{allUsers, crmUsers}`, not an array. Both
+    spellings render an EMPTY rep-chip row — read `usersStoreRef.allUsers`
+    inside the computed. Fixed in `ImportLeadsModal.vue` as well.
+  - No ops script: every field written already exists.
 - **DD Expiration date** (Leads) — `dd_expiration_date` (Date custom field)
   shown as a calendar-icon row in the Lead sidebar HEADER directly under the
   Acq Price row (same minimal no-label formatting): displays

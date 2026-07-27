@@ -278,9 +278,14 @@ const propertyLabel = computed(
   () => (properties.data || []).find((p) => p.lead === property.value)?.label || '',
 )
 
-const { users: allUsers } = usersStore()
+// NOTE: read through the store object, don't destructure. Pinia setup-stores
+// unwrap computeds on access, so `const { allUsers } = usersStore()` hands back
+// a plain (and, at setup time, empty) array that never updates — which is why
+// the chip row rendered blank. `users` is the raw resource whose .data is
+// {allUsers, crmUsers}, not an array, so that's no good either.
+const usersStoreRef = usersStore()
 const userOptions = computed(() =>
-  (allUsers.data || [])
+  (usersStoreRef.allUsers || [])
     .filter((u) => u.name && !['Administrator', 'Guest'].includes(u.name) && u.enabled !== 0)
     .map((u) => ({ label: u.full_name || u.name, value: u.name })),
 )

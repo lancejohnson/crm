@@ -248,7 +248,7 @@
         <Button
           v-else-if="phase === 'map'"
           variant="solid"
-          :label="__('Import') + ' ' + parsed.rows.length + ' ' + __('leads')"
+          :label="importLabel"
           :loading="importing"
           @click="runImport"
         />
@@ -297,17 +297,22 @@ const parsed = ref({ headers: [], rows: [] })
 const mapping = ref([])
 const assignees = ref([])
 
-const { users: allUsers } = usersStore()
+// NOTE: read through the store object, don't destructure. Pinia setup-stores
+// unwrap computeds on access, so `const { allUsers } = usersStore()` hands back
+// a plain (and, at setup time, empty) array that never updates — which is why
+// the chip row rendered blank. `users` is the raw resource whose .data is
+// {allUsers, crmUsers}, not an array, so that's no good either.
+const usersStoreRef = usersStore()
 
 // Everyone who can be handed leads to call (real teammates, not system rows).
 const callableUsers = computed(() =>
-  (allUsers.data || []).filter(
+  (usersStoreRef.allUsers || []).filter(
     (u) => u.name && !['Administrator', 'Guest'].includes(u.name) && u.enabled !== 0,
   ),
 )
 
 function userLabel(name) {
-  const u = (allUsers.data || []).find((x) => x.name === name)
+  const u = (usersStoreRef.allUsers || []).find((x) => x.name === name)
   return u?.full_name || name
 }
 
@@ -336,6 +341,11 @@ const pct = computed(() =>
 )
 
 const mappedCount = computed(() => mapping.value.filter(Boolean).length)
+
+const importLabel = computed(() => {
+  const n = parsed.value.rows.length
+  return `${__('Import')} ${n} ${n === 1 ? __('lead') : __('leads')}`
+})
 
 /* ── field list: real CRM Lead fields, so custom ones (property_address,
       bedrooms, lead_cost…) are mappable without hardcoding a list here ── */
