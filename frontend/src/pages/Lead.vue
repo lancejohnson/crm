@@ -493,6 +493,21 @@ function openResearchTabs() {
 const moreActions = computed(() => {
   const d = doc.value
   const items = []
+  // Parked bulk-import lead: promotion to the main board is manual and
+  // per-lead, so the caller decides when this one is actually ready.
+  if (d?.import_hidden) {
+    items.push({
+      label: __('Add to main board'),
+      icon: 'eye',
+      onClick: async () => {
+        await call('crm.api.lead_import.unhide_leads', {
+          leads: JSON.stringify([d.name]),
+        })
+        toast.success(__('Added to the main board'))
+        document.reload()
+      },
+    })
+  }
   if (callEnabled.value) {
     items.push({
       label: __('Make a Call'),

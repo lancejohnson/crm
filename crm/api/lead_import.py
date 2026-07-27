@@ -43,11 +43,15 @@ VIEW = "CRM View Settings"
 MAX_ROWS_PER_CALL = 500
 MAX_LIST_NAME = 100
 
-# A parked lead auto-promotes to the main board the moment it stops being
-# untouched. "New" is the first CRM Lead Status (the status every import lands
-# in); anything else means a rep has actually worked it — called it, set a
-# follow-up, booked it with Dennis — and at that point hiding it is wrong.
-UNWORKED_STATUS = "New"
+# NOTE: promotion to the main board is deliberately MANUAL only.
+#
+# An earlier version auto-promoted a lead as soon as its status left "New".
+# That was wrong for how these lists are actually worked: the callers run a
+# vendor batch through many rounds of follow-up ON the import board, moving
+# leads through statuses the whole time, and none of that means the lead is
+# ready for the main board. So status changes never un-park a lead — someone
+# has to press the button (unhide_leads, from the import view's banner or the
+# lead's own "Add to main board" action).
 
 # Never let a spreadsheet column write these, whatever the mapping says.
 BLOCKED_FIELDS = {
@@ -105,6 +109,26 @@ def _clean(value) -> str:
 	if re.fullmatch(r"-?\d+\.0+", s):
 		s = s.split(".")[0]
 	return s
+
+
+def _dump(value) -> str:
+	"""ensure_ascii=False is REQUIRED, not cosmetic.
+
+	import_lists is stored as JSON text and matched with a raw SQL LIKE built
+	from the list name. Default json.dumps escapes non-ASCII, so a list called
+	"LeadPack — Jun 2026" is stored as "LeadPack \\u2014 Jun 2026" while the
+	filter looks for the literal em-dash — they never match, and every lead in
+	the list becomes invisible to its own view. Same trap for any accented name.
+	"""
+	return json.dumps(value, ensure_ascii=False)
+
+
+def _valid_email(value: str) -> bool:
+	"""Vendor sheets routinely put junk in the Email column — the ISTL LeadPack
+	ships semicolon-separated alt PHONE numbers there. Frappe rejects those at
+	insert and would fail the whole row, losing a perfectly good lead over a
+	field we don't even need, so an unusable address is dropped instead."""
+	return bool(re.fullmatch(r"[^@\s;,]+@[^@\s;,]+\.[A-Za-z]{2,}", (value or "").strip()))
 
 
 def _load_list_names(raw) -> list:
@@ -277,6 +301,16 @@ def import_leads(
 				if v:
 					row[key] = v
 
+		if row.get("email") and not _valid_email(row["email"]):
+			dropped_email = row.pop("email")
+			# Keep it visible rather than silently binning it: on these sheets it's
+			# usually alternate numbers, which is exactly what a caller wants.
+			note = f"Other contact: {dropped_email}"
+			if "lead_summary" in allowed:
+				row["lead_summary"] = (
+					f"{row['lead_summary']} · {note}" if row.get("lead_summary") else note
+				)
+
 		phone_k = _phone_key(row.get("mobile_no") or row.get("phone"))
 		email_k = _email_key(row.get("email"))
 
@@ -323,7 +357,7 @@ def import_leads(
 			doc = frappe.new_doc(LEAD)
 			doc.update(row)
 			if tag_lists:
-				doc.import_lists = json.dumps([list_name])
+				doc.import_lists = _dump([list_name])
 			if tag_hidden:
 				doc.import_hidden = 1
 			doc.insert(ignore_permissions=True)
@@ -379,7 +413,7 @@ def _add_to_list(lead_name: str, list_name: str):
 	current.append(list_name)
 	# db.set_value, not doc.save: tagging must not fire status/assignment side
 	# effects or bump `modified` into the rep's "recently touched" view.
-	frappe.db.set_value(LEAD, lead_name, "import_lists", json.dumps(current), update_modified=False)
+	frappe.db.set_value(LEAD, lead_name, "import_lists", _dump(current), update_modified=False)
 
 
 # ------------------------------------------------------------------ reads
@@ -455,29 +489,6 @@ def unhide_leads(list_name: str | None = None, leads=None):
 		frappe.db.set_value(LEAD, n, "import_hidden", 0, update_modified=False)
 	frappe.db.commit()
 	return {"updated": len(names)}
-
-
-def on_lead_update(doc, method=None):
-	"""Auto-promote a parked lead once someone actually works it.
-
-	The whole point of parking is to keep an unworked vendor batch off the main
-	board. The moment a rep moves it out of "New" — called it, set a follow-up,
-	booked it with Dennis — it belongs on the board with everything else, or it
-	would quietly progress somewhere nobody is looking.
-
-	db.set_value (not doc.save) so this can't recurse through on_update, and
-	update_modified=False so promoting doesn't reshuffle "recently modified".
-	"""
-	try:
-		if not doc.get("import_hidden"):
-			return
-		if (doc.get("status") or UNWORKED_STATUS) == UNWORKED_STATUS:
-			return
-		frappe.db.set_value(LEAD, doc.name, "import_hidden", 0, update_modified=False)
-		doc.import_hidden = 0
-	except Exception:
-		# Never let promotion break a lead save.
-		frappe.log_error(f"lead_import auto-promote {doc.name}", frappe.get_traceback())
 
 
 def apply_import_visibility(doctype: str, filters: dict):

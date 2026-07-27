@@ -61,7 +61,7 @@
       }}
     </span>
     <span class="text-ink-gray-5">
-      · {{ __('they move over automatically once worked') }}
+      · {{ __('work them here; move them over when they’re ready') }}
     </span>
     <Button
       class="ml-auto"
