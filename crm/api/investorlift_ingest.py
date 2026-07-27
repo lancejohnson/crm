@@ -27,6 +27,19 @@ from frappe.utils import now_datetime
 BUYER_DOCTYPE = "CRM Buyer"
 LEAD_BUYER_DOCTYPE = "CRM Lead Buyer"
 
+# A property is in disposition from the moment we're under contract on it — that
+# is when it needs a buyer board, whether or not it was ever posted to
+# InvestorLift. Confirmed with Lance (2026-07-27): "Contract Sent" isn't ours
+# yet and "Won" is closed. Single source of truth: crm.api.buyer_import imports
+# this for its property picker (importing the other way round would cycle).
+DISPO_LEAD_STATUSES = (
+	"Signed Contract",
+	"Photos & Lockbox In Progress",
+	"Needs Listing",
+	"Marketing to Buyer",
+	"Buyer Assigned",
+)
+
 # board column label -> CRM Lead Buyer.interest_stage option
 COLUMN_TO_STAGE = {
 	"new leads": "New",
@@ -430,17 +443,26 @@ def get_dispo_properties():
 	"""Active-dispo properties for the Dispo page property switcher:
 	[{lead, label, il_property_id, il_status, buyer_count}].
 
-	A property qualifies two ways: it's linked to an InvestorLift property, OR it
-	has buyers on its board. The second case is what makes a manually imported
-	batch reachable — buyer_import can put buyers on any under-contract lead, and
-	most of those were never posted to IL, so an il_property_id-only list would
-	hide the very board the importer just filled."""
+	A property qualifies three ways, in order of how it actually happens:
+
+	  1. it's under contract / in dispo (`DISPO_LEAD_STATUSES`) — the real rule.
+	     A deal needs a buyer board the moment it's ours, and most of ours are
+	     never posted to InvestorLift, so IL linkage was never the right gate.
+	  2. it has buyers on its board already (covers a lead whose status has since
+	     moved on — e.g. Won — without vanishing the board and its history).
+	  3. it's linked to an IL property (the original rule, kept for anything IL
+	     is tracking that isn't in one of the statuses above)."""
 	if not any(r in ("System Manager", "Sales Manager", "Sales User") for r in frappe.get_roles()):
 		frappe.throw(_("Only sales users can view dispo."), frappe.PermissionError)
 	has_il = frappe.get_meta("CRM Lead").has_field("il_property_id")
 	has_buyers = frappe.db.exists("DocType", LEAD_BUYER_DOCTYPE)
 
-	names = set()
+	names = set(
+		frappe.get_all(
+			"CRM Lead", filters={"status": ("in", DISPO_LEAD_STATUSES)},
+			pluck="name", limit_page_length=0,
+		)
+	)
 	if has_il:
 		names.update(
 			r.name

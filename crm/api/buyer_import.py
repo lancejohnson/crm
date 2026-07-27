@@ -37,21 +37,19 @@ from frappe import _
 from frappe.desk.form.assign_to import add as assign_todo
 
 from crm.api.buyers import INTEREST_STAGES, _guard, _has_market_fields, _metros_json
-from crm.api.investorlift_ingest import BUYER_DOCTYPE, LEAD_BUYER_DOCTYPE, _last10
+from crm.api.investorlift_ingest import (
+	BUYER_DOCTYPE,
+	DISPO_LEAD_STATUSES,
+	LEAD_BUYER_DOCTYPE,
+	_last10,
+)
 
 LEAD = "CRM Lead"
 
-# Which leads can receive buyers. A deal is only worth marketing once it's
-# actually ours, so the picker is "Signed Contract" onwards. Confirmed with
-# Lance (2026-07-27): "Contract Sent" (not signed yet) and "Won" (already
-# closed) are deliberately out.
-PROPERTY_STATUSES = (
-	"Signed Contract",
-	"Photos & Lockbox In Progress",
-	"Needs Listing",
-	"Marketing to Buyer",
-	"Buyer Assigned",
-)
+# Which leads can receive buyers = which leads have a dispo board. One list,
+# defined next to the board itself (crm.api.investorlift_ingest), so the picker
+# here can never drift from the Dispo switcher.
+PROPERTY_STATUSES = DISPO_LEAD_STATUSES
 
 MAX_ROWS_PER_CALL = 500
 
