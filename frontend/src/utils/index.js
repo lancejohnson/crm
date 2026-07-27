@@ -151,6 +151,21 @@ export function dueTint(color) {
   )
 }
 
+// Urgency order for card tints. A card carries several independent signals
+// (ISTL refund standing, next-task due, untouched-new-lead age) and must show
+// the MOST urgent one — never let a "nothing to do" green hide an overdue task.
+const TINT_URGENCY = { red: 3, amber: 2, green: 1 }
+
+// Most urgent of the given tints ('' when none apply). Green only survives when
+// nothing else is asking for attention.
+export function mostUrgentTint(...colors) {
+  let best = ''
+  for (const c of colors) {
+    if ((TINT_URGENCY[c] || 0) > (TINT_URGENCY[best] || 0)) best = c
+  }
+  return best
+}
+
 // First-Call Read 2x2: (motivated x on-price) -> quadrant metadata. motivated /
 // onPrice are each '' (unanswered) | 'Yes' | 'No'. Returns { answered, quad }
 // where quad is null until BOTH axes are answered. Shared by the lead-page

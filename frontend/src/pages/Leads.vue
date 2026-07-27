@@ -86,7 +86,7 @@
         query: { view: route.query.view, viewType: route.params.viewType },
       }),
       onNewClick: (column) => onNewClick(column),
-      cardColor: (row) => row._new_lead_color || dueColor(row._next_task_due),
+      cardColor: (row) => cardTint(row),
     }"
     @update="(data) => viewControls.updateKanbanSettings(data)"
     @loadMore="(columnName) => viewControls.loadMoreKanban(columnName)"
@@ -440,6 +440,7 @@ import {
   website,
   formatTime,
   dueColor,
+  mostUrgentTint,
   ddExpiration,
   parseColor,
   firstCallRead,
@@ -621,6 +622,16 @@ function getRawValue(name, field) {
 // when the grouping field changes) reflect the saved state.
 function reloadKanban() {
   leads.value?.reload?.()
+}
+
+// Kanban card tint. A card carries independent signals — the ISTL refund
+// standing / untouched-new-lead age (`_new_lead_color`) and the soonest open
+// task's due date (`_next_task_due`) — and must surface the MOST URGENT one.
+// This used to be `_new_lead_color || dueColor(...)`, which short-circuited: an
+// ISTL "handled" green hid a task due today or overdue on the same card. Green
+// now only survives when nothing else wants attention.
+function cardTint(row) {
+  return mostUrgentTint(row._new_lead_color, dueColor(row._next_task_due))
 }
 
 // A task changed somewhere (created/completed/deleted). The Kanban next-task-due
