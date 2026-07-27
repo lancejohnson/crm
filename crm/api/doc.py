@@ -299,6 +299,15 @@ def get_data(
 		default_filters = frappe.parse_json(default_filters)
 		filters.update(default_filters)
 
+	# Bulk-imported leads are parked: they carry import_hidden=1 and stay out of
+	# the main board/list until promoted. Applied here, on the merged filters, so
+	# the exclusion reaches list rows, kanban columns and total_count alike. Any
+	# query that filters on an import field (i.e. the auto-created import views)
+	# opts out and sees them.
+	from crm.api.lead_import import apply_import_visibility
+
+	apply_import_visibility(doctype, filters)
+
 	# "_next_task_due" is a computed pseudo-field (soonest open-task due date),
 	# not a DB column, so it can't reach a SQL order_by. Pull the requested
 	# direction out and neutralize order_by; the kanban path below re-derives the

@@ -14,6 +14,13 @@
         iconLeft="plus"
         @click="showLeadModal = true"
       />
+      <Dropdown :options="leadListActions" placement="right">
+        <Button variant="ghost" :tooltip="__('More')">
+          <template #icon>
+            <LucideMoreHorizontal class="size-4" />
+          </template>
+        </Button>
+      </Dropdown>
     </template>
   </LayoutHeader>
   <div
@@ -382,6 +389,11 @@
     name="Leads"
     :icon="LeadsIcon"
   />
+  <ImportLeadsModal
+    v-if="showImportModal"
+    v-model="showImportModal"
+    @imported="onImported"
+  />
   <LeadModal
     v-if="showLeadModal"
     v-model="showLeadModal"
@@ -420,6 +432,7 @@ import EmptyState from '@/components/ListViews/EmptyState.vue'
 import KanbanView from '@/components/Kanban/KanbanView.vue'
 import KanbanCardField from '@/components/Kanban/KanbanCardField.vue'
 import LeadModal from '@/components/Modals/LeadModal.vue'
+import ImportLeadsModal from '@/components/Modals/ImportLeadsModal.vue'
 import NoteModal from '@/components/Modals/NoteModal.vue'
 import TaskModal from '@/components/Modals/TaskModal.vue'
 import ViewControls from '@/components/ViewControls.vue'
@@ -429,6 +442,7 @@ import { usersStore } from '@/stores/users'
 import { statusesStore } from '@/stores/statuses'
 import { sessionStore } from '@/stores/session'
 import { leadDrilldownStore } from '@/stores/leadDrilldown'
+import { viewsStore } from '@/stores/views'
 import LucideFilter from '~icons/lucide/filter'
 import LucideCalendarClock from '~icons/lucide/calendar-clock'
 import LucideArrowDownUp from '~icons/lucide/arrow-down-up'
@@ -466,6 +480,23 @@ const route = useRoute()
 
 const leadsListView = ref(null)
 const showLeadModal = ref(false)
+const showImportModal = ref(false)
+
+// The "..." menu beside Create. Bulk import lives here rather than on the main
+// row: it's an occasional vendor-batch action, not a daily one.
+const leadListActions = computed(() => [
+  {
+    label: __('Import leads'),
+    icon: 'upload',
+    onClick: () => (showImportModal.value = true),
+  },
+])
+
+function onImported() {
+  // The imported batch is parked behind import_hidden, so the current list
+  // won't change — but the new saved views need to show up in the switcher.
+  viewsStore().reload()
+}
 
 on('trigger_lead_create', (data) => {
   showLeadModal.value = Boolean(data)
