@@ -1357,6 +1357,32 @@ are load-bearing and easy to undo by accident:
   all (it serves assets from the shared volume), so it deliberately runs an
   older image tag than the rest of the stack.
 
+### Fast loop for iterating on UI (HMR against prod)
+
+```bash
+cd frontend && CRM_DEV_TARGET=https://crm.groundworkpro.com yarn dev
+# then open http://localhost:8080/crm and log in ONCE at localhost:8080
+```
+
+Vite dev server (~1.5s start, instant HMR) serving your local `frontend/src`,
+with `/api|assets|files|private|login|app|desk` proxied to prod — so you get
+real prod data without deploying. `changeOrigin` is required (Frappe resolves
+the site from the Host header) and `cookieDomainRewrite` scopes prod's session
+cookie to localhost, hence logging in through the dev server rather than
+reusing your crm.groundworkpro.com tab. Unset the env var and everything
+behaves exactly as before; production builds are unaffected.
+
+**Two caveats.** You are hitting the real production database — anything you
+create, text or delete is real. And realtime almost certainly won't work:
+`socket.js` builds the socket URL from `window.location`, so on port 8080 it
+tries `localhost:9000` instead of going through the proxy. Live task/SMS
+updates won't fire; everything else does.
+
+**Don't try to make `yarn build` faster — it's irreducible.** Measured: baseline
+42s, `--minify false` 39s, `--sourcemap false` 39s, both 41s, dropping
+vite-plugin-pwa 38s. It's rollup over 353 components. `lucideIcons: false`
+just fails the build. The only real speedup is not building, hence the above.
+
 `scripts/verify_no_drift.py` (also run by `smoke_test.py`) asserts prod matches
 this repo file-for-file. It exists because the old `docker cp`-based deploy had
 no delete semantics, so files removed from the repo lived on in prod for over a

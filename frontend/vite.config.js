@@ -5,6 +5,21 @@ import path from 'path'
 import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vitejs.dev/config/
+// Point `yarn dev` at a REMOTE Frappe instead of a local bench:
+//
+//   CRM_DEV_TARGET=https://crm.groundworkpro.com yarn dev
+//
+// There is no local dev mirror (removed 2026-06-19, deliberately), so the only
+// way to exercise a UI change used to be a full deploy. `yarn build` is ~40s
+// and irreducible -- minify off, sourcemaps off and dropping the PWA plugin
+// each change it by ~2s -- so the only real speedup is not building at all.
+// This proxies API/asset/auth routes to the remote site, giving HMR against
+// real prod data. Log in once through the dev server itself (localhost:8080/
+// login) so the session cookie is scoped to localhost.
+//
+// Unset, everything below behaves exactly as before.
+const remoteTarget = process.env.CRM_DEV_TARGET
+
 export default defineConfig(async ({ mode }) => {
   const isDev = mode === 'development'
   const config = {
@@ -82,13 +97,30 @@ export default defineConfig(async ({ mode }) => {
       fs: {
         allow: [path.resolve(__dirname, '..')],
       },
+      // changeOrigin so Frappe resolves the site from the Host header (it 404s
+      // "localhost does not exist" otherwise); cookieDomainRewrite so the
+      // session cookie the remote sets is accepted on localhost.
+      ...(remoteTarget && {
+        port: 8080,
+        proxy: {
+          '^/(api|assets|files|private|login|app|desk|socket.io)': {
+            target: remoteTarget,
+            changeOrigin: true,
+            secure: true,
+            ws: true,
+            cookieDomainRewrite: '',
+          },
+        },
+      }),
     },
   }
 
   const frappeui = await importFrappeUIPlugin(isDev, config)
   config.plugins.unshift(
     frappeui({
-      frappeProxy: true,
+      // frappeProxy hardcodes a LOCAL bench (127.0.0.1:<webserver_port>), so
+      // it must be off when proxying to a remote site.
+      frappeProxy: !remoteTarget,
       lucideIcons: true,
       jinjaBootData: true,
       buildConfig: {
