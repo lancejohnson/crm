@@ -743,12 +743,10 @@ function reloadKanban() {
   leads.value?.reload?.()
 }
 
-// Kanban card tint. A card carries independent signals — the ISTL refund
-// standing / untouched-new-lead age (`_new_lead_color`) and the soonest open
-// task's due date (`_next_task_due`) — and must surface the MOST URGENT one.
-// This used to be `_new_lead_color || dueColor(...)`, which short-circuited: an
-// ISTL "handled" green hid a task due today or overdue on the same card. Green
-// now only survives when nothing else wants attention.
+// Kanban card tint. A card carries two independent signals — the
+// untouched-new-lead age (`_new_lead_color`) and the soonest open task's due
+// date (`_next_task_due`) — and must surface the MOST URGENT one (a `||` would
+// let a "created today" amber hide an overdue task on the same card).
 function cardTint(row) {
   return mostUrgentTint(row._new_lead_color, dueColor(row._next_task_due))
 }

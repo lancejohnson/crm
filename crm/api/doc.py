@@ -1029,13 +1029,11 @@ def _lead_card_meta(doctype, names):
 	from frappe.utils import getdate
 
 	has_first_call = frappe.db.has_column("CRM Lead", "first_call_motivated")
-	fields = ["name", "status", "creation", "source"]
+	fields = ["name", "status", "creation"]
 	if has_first_call:
 		fields += ["first_call_motivated", "first_call_on_price"]
 
 	leads = frappe.get_all("CRM Lead", filters={"name": ("in", names)}, fields=fields)
-
-	istl_color = _istl_card_colors(leads)
 
 	meta = {}
 	for lead in leads:
@@ -1043,46 +1041,13 @@ def _lead_card_meta(doctype, names):
 		if has_first_call:
 			first_call = f"{lead.get('first_call_motivated') or ''}|{lead.get('first_call_on_price') or ''}"
 
-		# iSpeedToLead refund standing wins on ISTL leads; everything it didn't
-		# claim falls through to the untouched-new-lead age tint.
-		color = istl_color.get(lead.name, "")
-		if not color and lead.status == "New" and lead.creation:
+		color = ""
+		if lead.status == "New" and lead.creation:
 			color = "red" if getdate(lead.creation) < getdate() else "amber"
 
 		meta[lead.name] = {"_first_call": first_call, "_new_lead_color": color}
 
 	return meta
-
-
-def _istl_card_colors(leads):
-	"""{lead: tint} for the iSpeedToLead refund standing.
-
-	It's the same rule the twice-daily refund email uses (amber/red = needs a
-	double-dial today, GREEN = handled or refund already earned), so the board
-	and the email can't tell different stories. Best-effort — a failure here must
-	never break the kanban.
-	"""
-	try:
-		from crm.api.istl_refund_report import is_istl, prefetch_outbound_calls, refund_card_color
-
-		istl = [lead for lead in leads if is_istl(lead.get("source"))]
-		if not istl:
-			return {}
-
-		calls_by_lead = prefetch_outbound_calls([lead.name for lead in istl])
-		return {
-			lead.name: refund_card_color(
-				lead.name,
-				lead.status,
-				lead.creation,
-				lead.source,
-				calls=calls_by_lead.get(lead.name, []),
-			)
-			for lead in istl
-		}
-	except Exception:
-		frappe.log_error("ISTL refund card color failed", frappe.get_traceback())
-		return {}
 
 
 def getCounts(d, doctype):
