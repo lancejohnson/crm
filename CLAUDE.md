@@ -1325,10 +1325,42 @@ cd ../frappe-crm-deploy && ./scripts/build_image.sh && python3 scripts/smoke_tes
 # commit here AND commit the compose pin bump in ../frappe-crm-deploy
 ```
 
-`build_image.sh` (~60s build) is the deploy step. It also takes
-`FORK=/path/to/worktree` to build+deploy straight from a worktree without
-merging first. Frontend has no tests upstream; `yarn build` succeeding is the
-gate. Don't run `bench run-tests` against the prod site.
+`build_image.sh` is the deploy step. It also takes `FORK=/path/to/worktree` to
+build+deploy straight from a worktree without merging first. Frontend has no
+tests upstream; `yarn build` succeeding is the gate. Don't run `bench run-tests`
+against the prod site.
+
+**Timings (measured, per-step timing prints as it runs).** Frontend change
+~75s; backend-only change ~30s, because the Dockerfile copies `crm/` BELOW
+`RUN yarn build` so Python edits hit the layer cache and skip the ~50s vite
+build. **User-visible downtime is ~2.4s**, the backend container swap.
+
+Rebuilt 2026-07-28 (was: 3m27s and minutes of downtime). Four things about it
+are load-bearing and easy to undo by accident:
+
+- **The image builds `FROM ghcr.io/frappe/crm:v1.67.0`, always.** It used to be
+  `docker commit` of the live prod container, which stacked a ~32 MB layer per
+  deploy and never removed anything — 256 layers / 14 GB by gw228, and
+  `docker commit` *pauses* the container it snapshots. Never reintroduce
+  commit-based layering.
+- **Layer order.** `frontend/` above `yarn build`, `crm/` below it, and
+  **`ARG GIT_REV` dead last** — BuildKit invalidates everything below an ARG
+  whose value changed, and GIT_REV changes every commit, so declaring it at the
+  top silently voids the cache on every deploy.
+- **`emptyOutDir: false`** (`frontend/vite.config.js`) plus the shared
+  `crm-assets` volume. Chunks are content-hashed and a one-line component edit
+  re-hashes ~124 of 127, so wiping the output dir deleted the exact files open
+  tabs were still lazily importing — they 404'd, the SPA threw, and users lost
+  unsaved notes. Old chunks are pruned by mtime after 7 days instead.
+- **Only `backend` goes in the deploy's critical window.** websocket and the
+  workers are recreated after, and the frontend container isn't recreated at
+  all (it serves assets from the shared volume), so it deliberately runs an
+  older image tag than the rest of the stack.
+
+`scripts/verify_no_drift.py` (also run by `smoke_test.py`) asserts prod matches
+this repo file-for-file. It exists because the old `docker cp`-based deploy had
+no delete semantics, so files removed from the repo lived on in prod for over a
+year — including an abandoned module with a live whitelisted endpoint.
 
 ## Upstream sync
 
