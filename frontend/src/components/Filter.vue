@@ -159,6 +159,7 @@
 import FilterIcon from '@/components/Icons/FilterIcon.vue'
 import Link from '@/components/Controls/Link.vue'
 import UserFilterSelect from '@/components/Controls/UserFilterSelect.vue'
+import MultiSelectFilter from '@/components/Controls/MultiSelectFilter.vue'
 import Autocomplete from '@/components/frappe-ui/Autocomplete.vue'
 import DurationInput from '@/components/Controls/DurationInput.vue'
 import RatingInput from '@/components/Controls/RatingInput.vue'
@@ -172,6 +173,9 @@ import {
 } from 'frappe-ui'
 import { h, ref, computed, watch, onMounted } from 'vue'
 import { isMobileView } from '@/composables/settings'
+import { usersStore } from '@/stores/users'
+
+const usersStoreRef = usersStore()
 
 const typeCheck = ['Check']
 const typeLink = ['Link', 'Dynamic Link']
@@ -198,6 +202,11 @@ const filterableFields = createResource({
 })
 
 onMounted(() => {
+  // Fetched here rather than lazily inside getValueControl — kicking off a
+  // resource from a render function risks re-entering the render it feeds.
+  if (props.doctype === 'CRM Lead' && !importLists.data?.length) {
+    importLists.fetch()
+  }
   if (filterableFields.data?.length) return
   filterableFields.fetch()
 })
@@ -261,6 +270,40 @@ function isUserField(field) {
   return typeLink.includes(field.fieldtype) && field.options === 'User'
 }
 
+// Import list names are generated ("ISTL LeadPack — Jun 2026") — nobody is
+// going to retype one, so this field only ever gets a picker.
+const importLists = createResource({
+  url: 'crm.api.lead_import.get_import_lists',
+  cache: 'importLists',
+  initialData: [],
+})
+
+// Fields that can offer a fixed option list, so "any of these" is a checklist
+// rather than a comma-separated text box.
+function multiSelectOptions(field) {
+  if (!field) return null
+  if (isUserField(field)) {
+    return (usersStoreRef.users?.data?.allUsers || []).map((user) => ({
+      label: user.full_name || user.email || user.name,
+      value: user.email || user.name,
+      description: user.email,
+    }))
+  }
+  if (field.fieldname === 'import_lists') {
+    return (importLists.data || []).map((l) => ({
+      label: l.list_name,
+      value: l.list_name,
+      description: __('{0} leads', [l.total]),
+    }))
+  }
+  if (typeSelect.includes(field.fieldtype)) {
+    return getSelectOptions(field.options || '')
+      .filter(Boolean)
+      .map((o) => ({ label: o, value: o }))
+  }
+  return null
+}
+
 const availableFilters = computed(() => {
   if (!filterableFields.data) return []
 
@@ -300,12 +343,29 @@ function convertFilters(data, allFilters) {
       f.push({
         field,
         fieldname: key,
-        operator: oppositeOperatorMap[value[0]],
+        operator: normalizeOperator(value[0]),
         value: value[1],
       })
     }
   }
   return new Set(f)
+}
+
+// Stored operators are not case-consistent: this popover writes 'LIKE', but
+// views created server-side write 'like' (crm/api/lead_import.py builds the
+// per-import-list views that way). An unrecognised operator used to come back
+// `undefined`, and the next apply() then threw on `f.operator.includes(...)` —
+// which killed the emit, so changing ANY filter on an import-list view did
+// nothing at all and the list never reloaded. Never return undefined here.
+function normalizeOperator(operator) {
+  if (operator === null || operator === undefined) return 'equals'
+  const key = String(operator)
+  return (
+    oppositeOperatorMap[key] ??
+    oppositeOperatorMap[key.toUpperCase()] ??
+    oppositeOperatorMap[key.toLowerCase()] ??
+    'equals'
+  )
 }
 
 function getOperators(fieldtype, fieldname) {
@@ -324,8 +384,24 @@ function getOperators(fieldtype, fieldname) {
     )
   }
   if (fieldname === '_assign') {
-    // TODO: make equals and not equals work
+    // `_assign` is a JSON array in a Text column, so equals can never match.
+    // `in`/`not in` are multi-user pickers, expanded server-side into an OR of
+    // LIKEs (crm.api.doc.expand_json_list_filters).
     options = [
+      { label: __('In'), value: 'in' },
+      { label: __('Not in'), value: 'not in' },
+      { label: __('Like'), value: 'like' },
+      { label: __('Not like'), value: 'not like' },
+      { label: __('Is'), value: 'is' },
+    ]
+  }
+  if (fieldname === 'import_lists') {
+    // Same JSON-array-in-Text shape as `_assign`. Like/Not like stay on the
+    // menu because the saved per-import-list views are written with LIKE — drop
+    // them and those views show an operator that isn't in their own dropdown.
+    options = [
+      { label: __('In'), value: 'in' },
+      { label: __('Not in'), value: 'not in' },
       { label: __('Like'), value: 'like' },
       { label: __('Not like'), value: 'not like' },
       { label: __('Is'), value: 'is' },
@@ -443,7 +519,14 @@ function getValueControl(f) {
       modelValue: f.value,
       'onUpdate:modelValue': (v) => updateValue(v, f),
     })
-  } else if (isUserField(field) && !['in', 'not in'].includes(operator)) {
+  } else if (['in', 'not in'].includes(operator) && multiSelectOptions(field)) {
+    // "Any of these" — a checklist beats asking for comma-separated values.
+    return h(MultiSelectFilter, {
+      value: f.value,
+      options: multiSelectOptions(field),
+      placeholder: placeholder(f),
+    })
+  } else if (isUserField(field)) {
     // `_assign` holds a JSON array, so it can only be matched with LIKE and the
     // value has to be stored as %email%; a plain Link to User stores the bare
     // email. The picker handles both and displays "First Last" either way.
@@ -505,7 +588,12 @@ function getDefaultValue(field) {
   return ''
 }
 
-function getDefaultOperator(fieldtype) {
+function getDefaultOperator(fieldtype, fieldname) {
+  // Fields with a picker default to "in" so you can pick several people / lists
+  // straight away — the common case is "any of these", not exactly one.
+  if (fieldname === '_assign' || fieldname === 'import_lists') {
+    return 'in'
+  }
   if (typeSelect.includes(fieldtype)) {
     return 'equals'
   }
@@ -540,7 +628,7 @@ function setfilter(data) {
       options: data.options,
     },
     fieldname: data.fieldname,
-    operator: getDefaultOperator(data.fieldtype),
+    operator: getDefaultOperator(data.fieldtype, data.fieldname),
     value: getDefaultValue(data),
   }
   filters.value.add(filter)
@@ -556,7 +644,7 @@ function updateFilter(data, index) {
   filters.value.delete(previous)
   const filter = {
     fieldname: data.fieldname,
-    operator: getDefaultOperator(data.fieldtype),
+    operator: getDefaultOperator(data.fieldtype, data.fieldname),
     value: getDefaultValue(data),
     field: {
       label: data.label,
@@ -626,7 +714,10 @@ function parseFilters(filters) {
       p[c.fieldname] =
         c.value == 'Yes' ? true : c.value == 'No' ? false : c.value
     } else {
-      p[c.fieldname] = [operatorMap[c.operator.toLowerCase()], c.value]
+      p[c.fieldname] = [
+        operatorMap[String(c.operator).toLowerCase()] || '=',
+        c.value,
+      ]
     }
     return p
   }, {})
@@ -635,6 +726,7 @@ function parseFilters(filters) {
 }
 
 function transformIn(f) {
+  f.operator = f.operator || 'equals'
   // Only strings need wildcard/CSV massaging — a date range arrives as an array
   // and a number as a number, and .includes/.split would throw on those.
   if (typeof f.value === 'string') {
@@ -652,6 +744,13 @@ function transformIn(f) {
 }
 
 function placeholder(f) {
+  // A picker gets a "pick something" prompt, not the comma-separated example
+  // the free-text `in` control needs.
+  if (['in', 'not in'].includes(f.operator) && multiSelectOptions(f.field)) {
+    if (isUserField(f.field)) return __('Select users')
+    if (f.field.fieldname === 'import_lists') return __('Select lists')
+    return __('Select options')
+  }
   if (f.operator === 'between') {
     return __('01/01/2022 to 01/31/2022')
   } else if (f.operator === 'in' || f.operator === 'not in') {

@@ -870,6 +870,43 @@ duplicating. Work substantial features in a worktree of your own.
   - `frontend/src/components/Controls/UserFilterSelect.vue` (**new**),
     `components/Filter.vue`, `components/ViewControls.vue`, `crm/api/doc.py`,
     `crm/api/istl_refund_report.py`. No ops piece, no schema change.
+  - **gw224/gw225 — an unmapped operator wedged the whole popover.** On the ISTL
+    LeadPack view, setting any filter did nothing: the value changed, the badge
+    counted it, the list never reloaded. `oppositeOperatorMap` is keyed on the
+    UPPERCASE `LIKE` that the popover itself writes, but the per-import-list
+    views are generated in `lead_import.py`, which wrote lowercase `like` — so
+    `convertFilters` produced `operator: undefined`, and the next `apply()` threw
+    on `f.operator.includes(...)`, killing the emit before it reached
+    `updateFilter`. **This was the original "filters aren't really working — I
+    noticed it on the ISTL import" report**; it survived gw222/gw223 because the
+    standard views all store `LIKE`. Fixed three ways: `normalizeOperator()`
+    resolves any case and never returns undefined; `transformIn`/`parseFilters`
+    tolerate a missing operator; and `lead_import.py` now writes `LIKE`. A prod
+    sweep normalized the 2 stored views and dropped a stale
+    `_assign: ["LIKE","%%"]` sitting on a personal kanban (it had been hiding
+    every unassigned lead on that board).
+  - **Multi-select filters** (`Controls/MultiSelectFilter.vue`, **new**) — a
+    compact summary button ("Dennis Szafran" / "2 selected" / "All (6)") opening
+    a searchable checkbox list with Select all / Clear. Renders as a summary
+    rather than chips because it has to fit the filter row beside two selects.
+    Used whenever the operator is `in`/`not in` and the field can offer options:
+    **users** (`_assign` + any Link→User, from the users store), **import lists**
+    (`crm.api.lead_import.get_import_lists`, with per-list lead counts — nobody
+    remembers a generated name like "ISTL LeadPack — Jun 2026"), and **Select**
+    fields. `_assign`/`import_lists` now default to the `in` operator.
+  - Backend `crm/api/doc.py` **`expand_json_list_filters`** — `_assign` and
+    `import_lists` are JSON arrays in a Text column, so "any of these" is an OR
+    of LIKEs, not a SQL IN. It resolves the OR to a concrete `name in [...]`
+    once, up front, because the same dict filter is reused by the kanban's
+    per-column queries, per-column counts and total count, none of which take
+    `or_filters`. Per-field needle shapes (`%email%` vs `%"list name"%`) live in
+    `JSON_LIST_FILTER_FIELDS`. `_constrain_names` **intersects** with an
+    existing `name` filter rather than overwriting it, so it composes with the
+    dashboard drill-down. **Must run AFTER `apply_import_visibility`**, which
+    opts a query out of the parked-lead exclusion by looking for the very
+    `import_lists` key this rewrites away. Verified on prod: single-value `in` ==
+    the old LIKE (256), multi-value == the union of LIKEs (698), empty == 0,
+    intersection with a 5-name drill == 5, `import_lists in [pack]` == 514.
 - **Lead import hardening + address repair** (gw221) — the Jun 2026 LeadPack
   (514 leads) went in with the address block scrambled on part of the batch and
   the importer said nothing: **88 leads had the whole street address sitting in

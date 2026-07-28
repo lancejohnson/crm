@@ -257,6 +257,79 @@ def update_in_standard_filter(fieldname, doctype, value):
 		)
 
 
+# Columns that hold a JSON array inside a Text field, with the LIKE needle each
+# one needs. A multi-value filter on these can't be a SQL IN — `_assign` is
+# '["a@b.com"]' and `import_lists` is '["LeadPack — Jun 2026"]', so "any of
+# these" is an OR of LIKEs. import_lists quotes the needle so "Jun 2026" can't
+# match "Jun 2026 (rerun)".
+JSON_LIST_FILTER_FIELDS = {
+	"_assign": "%{}%",
+	"import_lists": '%"{}"%',
+}
+
+
+def expand_json_list_filters(doctype: str, filters: dict):
+	"""Rewrite `field in [a, b]` on a JSON-array Text column to `name in [...]`.
+
+	Resolving the OR-of-LIKEs to a concrete name list once, up front, means the
+	rest of get_data keeps working with a plain dict filter — which matters
+	because those filters are reused by the kanban's per-column queries, the
+	per-column counts and the total count, none of which take or_filters.
+
+	Mutates `filters` in place. A no-op unless a multi-value filter is present.
+	"""
+	if not isinstance(filters, dict):
+		return
+
+	for field, needle in JSON_LIST_FILTER_FIELDS.items():
+		value = filters.get(field)
+		if not isinstance(value, list | tuple) or len(value) != 2:
+			continue
+		operator = str(value[0]).lower()
+		if operator not in ("in", "not in"):
+			continue
+
+		wanted = [v for v in frappe.parse_json(value[1]) or [] if v] if value[1] else []
+		del filters[field]
+		if not wanted:
+			# "in nothing" matches nothing; "not in nothing" constrains nothing.
+			if operator == "in":
+				filters["name"] = ("in", [])
+			continue
+
+		matches = frappe.get_all(
+			doctype,
+			or_filters=[[field, "like", needle.format(v)] for v in wanted],
+			pluck="name",
+			limit_page_length=0,
+		)
+		_constrain_names(filters, matches, exclude=(operator == "not in"))
+
+
+def _constrain_names(filters: dict, names: list, exclude: bool = False):
+	"""AND a `name in/not in [...]` constraint into `filters`.
+
+	`name` may already be spoken for — the dashboard drill-down injects one — so
+	an existing `in` list is intersected rather than overwritten.
+	"""
+	names = list(dict.fromkeys(names))
+	existing = filters.get("name")
+
+	if isinstance(existing, list | tuple) and len(existing) == 2:
+		prior_op = str(existing[0]).lower()
+		prior = frappe.parse_json(existing[1]) or []
+		if prior_op == "in":
+			if exclude:
+				blocked = set(names)
+				filters["name"] = ("in", [n for n in prior if n not in blocked])
+			else:
+				allowed = set(names)
+				filters["name"] = ("in", [n for n in prior if n in allowed])
+			return
+
+	filters["name"] = ("not in", names) if exclude else ("in", names)
+
+
 @frappe.whitelist()
 def get_data(
 	doctype: str,
@@ -308,6 +381,11 @@ def get_data(
 	from crm.api.lead_import import apply_import_visibility
 
 	apply_import_visibility(doctype, filters)
+
+	# Must run AFTER apply_import_visibility, which opts a query out of the
+	# parked-lead exclusion by looking for an `import_lists` key that this
+	# rewrites away.
+	expand_json_list_filters(doctype, filters)
 
 	# "_next_task_due" is a computed pseudo-field (soonest open-task due date),
 	# not a DB column, so it can't reach a SQL order_by. Pull the requested

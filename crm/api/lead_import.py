@@ -180,7 +180,10 @@ def _ensure_views(list_name: str):
 	if not _has("import_lists"):
 		return []
 
-	filters = {"import_lists": ["like", f'%"{list_name}"%']}
+	# Uppercase LIKE, matching what the filter popover itself writes — its
+	# operator map is keyed on the uppercase form, and a lowercase one used to
+	# come back as an undefined operator that broke the whole popover.
+	filters = {"import_lists": ["LIKE", f'%"{list_name}"%']}
 	views = []
 
 	for view_type, label in (("list", list_name), ("kanban", f"{list_name} (Board)")):
