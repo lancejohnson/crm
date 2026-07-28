@@ -889,7 +889,7 @@ function updateFilter(filters) {
   list.value.reload()
 
   if (!route.query.view) {
-    createOrUpdateStandardView()
+    persistStandardView()
   }
 }
 
@@ -1058,35 +1058,56 @@ function loadMoreKanban(columnName) {
   list.value.reload()
 }
 
+// Saving the standard view refetches the views store, which trips the getView
+// watcher below and fires a SECOND identical get_data. Persisting isn't urgent,
+// so debounce it — one save after the user stops adjusting filters, rather than
+// one per keystroke.
+const persistStandardView = useDebounceFn(
+  () => createOrUpdateStandardView(),
+  600,
+)
+
+// Guards the getView watcher against the view write we're about to make.
+const skipNextViewReload = ref(false)
+
 function createOrUpdateStandardView() {
   if (route.query.view) return
   view.value.doctype = props.doctype
+  skipNextViewReload.value = true
   call(
     'crm.fcrm.doctype.crm_view_settings.crm_view_settings.create_or_update_standard_view',
     {
       view: view.value,
     },
-  ).then(() => {
-    reloadView()
-    view.value = {
-      label: view.value.label,
-      type: view.value.type || 'list',
-      icon: view.value.icon,
-      name: view.value.name,
-      filters: defaultParams.value.filters,
-      order_by: defaultParams.value.order_by,
-      group_by_field: defaultParams.value.view?.group_by_field,
-      column_field: defaultParams.value.column_field,
-      title_field: defaultParams.value.title_field,
-      kanban_columns: defaultParams.value.kanban_columns,
-      kanban_fields: defaultParams.value.kanban_fields,
-      columns: defaultParams.value.columns,
-      rows: defaultParams.value.rows,
-      route_name: route.name,
-      load_default_columns: view.value.load_default_columns,
-    }
-    viewUpdated.value = false
-  })
+  )
+    .catch((e) => {
+      skipNextViewReload.value = false
+      throw e
+    })
+    .then(async () => {
+      await reloadView()
+      // The views store just changed, and watchers flush on the microtask queue —
+      // so release the guard on the next macrotask, once that flush has happened.
+      setTimeout(() => (skipNextViewReload.value = false), 0)
+      view.value = {
+        label: view.value.label,
+        type: view.value.type || 'list',
+        icon: view.value.icon,
+        name: view.value.name,
+        filters: defaultParams.value.filters,
+        order_by: defaultParams.value.order_by,
+        group_by_field: defaultParams.value.view?.group_by_field,
+        column_field: defaultParams.value.column_field,
+        title_field: defaultParams.value.title_field,
+        kanban_columns: defaultParams.value.kanban_columns,
+        kanban_fields: defaultParams.value.kanban_fields,
+        columns: defaultParams.value.columns,
+        rows: defaultParams.value.rows,
+        route_name: route.name,
+        load_default_columns: view.value.load_default_columns,
+      }
+      viewUpdated.value = false
+    })
 }
 
 function updatePageLength(value, loadMore = false) {
@@ -1395,6 +1416,10 @@ watch(
   () => getView(route.query.view, route.params.viewType, props.doctype),
   (value, old_value) => {
     if (_.isEqual(value, old_value)) return
+    // Ignore the echo of a view we just saved ourselves — we already fetched the
+    // matching data. Without this, every filter change ran get_data twice for an
+    // identical result, and the leads kanban pays for that twice over.
+    if (skipNextViewReload.value) return
     reload()
   },
   { deep: true },

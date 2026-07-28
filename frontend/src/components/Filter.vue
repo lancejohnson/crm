@@ -158,6 +158,7 @@
 <script setup>
 import FilterIcon from '@/components/Icons/FilterIcon.vue'
 import Link from '@/components/Controls/Link.vue'
+import UserFilterSelect from '@/components/Controls/UserFilterSelect.vue'
 import Autocomplete from '@/components/frappe-ui/Autocomplete.vue'
 import DurationInput from '@/components/Controls/DurationInput.vue'
 import RatingInput from '@/components/Controls/RatingInput.vue'
@@ -169,7 +170,7 @@ import {
   DateTimePicker,
   DateRangePicker,
 } from 'frappe-ui'
-import { h, computed, onMounted } from 'vue'
+import { h, ref, computed, watch, onMounted } from 'vue'
 import { isMobileView } from '@/composables/settings'
 
 const typeCheck = ['Check']
@@ -201,7 +202,9 @@ onMounted(() => {
   filterableFields.fetch()
 })
 
-const filters = computed(() => {
+// The filter rows the server is actually querying on, derived from the list's
+// params.
+const appliedFilters = computed(() => {
   if (!list.value?.data) return new Set()
   let allFilters =
     list.value?.params?.filters || list.value.data?.params?.filters
@@ -217,6 +220,46 @@ const filters = computed(() => {
   }
   return convertFilters(filterableFields.data, allFilters)
 })
+
+// What the popover shows: the applied rows, plus any row the user has added but
+// not yet given a value to. Those drafts are deliberately client-only — sending
+// a valueless row is what made merely *picking* a field narrow the list (an
+// empty `like` becomes `%%`, and `NULL LIKE '%%'` is NULL, so every record with
+// nothing in that field silently dropped off the board).
+const filters = ref(new Set())
+
+watch(
+  appliedFilters,
+  (applied) => {
+    const appliedNames = new Set(Array.from(applied).map((f) => f.fieldname))
+    const drafts = Array.from(filters.value).filter(
+      (f) => !hasValue(f) && !appliedNames.has(f.fieldname),
+    )
+    filters.value = new Set([...applied, ...drafts])
+  },
+  { immediate: true },
+)
+
+// A row is only worth sending once its value is filled in. Booleans and `0` are
+// real values; '' / null / undefined / an empty range are not.
+function hasValue(f) {
+  if (!f) return false
+  const value = f.value
+  if (Array.isArray(value))
+    return (
+      value.filter((v) => v !== '' && v !== null && v !== undefined).length > 0
+    )
+  if (typeof value === 'boolean' || typeof value === 'number') return true
+  return value !== '' && value !== null && value !== undefined
+}
+
+// Fields whose value is a user: `_assign` (a JSON blob of emails) and any plain
+// Link to User. Both are far more usable as a name picker than a raw email box.
+function isUserField(field) {
+  if (!field) return false
+  if (field.fieldname === '_assign') return true
+  return typeLink.includes(field.fieldtype) && field.options === 'User'
+}
 
 const availableFilters = computed(() => {
   if (!filterableFields.data) return []
@@ -400,6 +443,14 @@ function getValueControl(f) {
       modelValue: f.value,
       'onUpdate:modelValue': (v) => updateValue(v, f),
     })
+  } else if (isUserField(field) && !['in', 'not in'].includes(operator)) {
+    // `_assign` holds a JSON array, so it can only be matched with LIKE and the
+    // value has to be stored as %email%; a plain Link to User stores the bare
+    // email. The picker handles both and displays "First Last" either way.
+    return h(UserFilterSelect, {
+      value: f.value,
+      wildcard: ['like', 'not like'].includes(operator),
+    })
   } else if (['like', 'not like', 'in', 'not in'].includes(operator)) {
     return h(FormControl, { type: 'text' })
   } else if (typeSelect.includes(fieldtype) || typeCheck.includes(fieldtype)) {
@@ -464,6 +515,14 @@ function getDefaultOperator(fieldtype) {
   if (typeDate.includes(fieldtype)) {
     return 'between'
   }
+  // A Link field defaulting to `like` meant the value control fell through to a
+  // bare text box, so picking e.g. "Lead Owner" asked you to hand-type an email
+  // with wildcards even though a proper dropdown existed one branch further
+  // down. `equals` makes that dropdown the default; `like` is still selectable
+  // for partial matching.
+  if (typeLink.includes(fieldtype)) {
+    return 'equals'
+  }
   return 'like'
 }
 
@@ -473,7 +532,7 @@ function getSelectOptions(options) {
 
 function setfilter(data) {
   if (!data) return
-  filters.value.add({
+  const filter = {
     field: {
       label: data.label,
       fieldname: data.fieldname,
@@ -483,15 +542,19 @@ function setfilter(data) {
     fieldname: data.fieldname,
     operator: getDefaultOperator(data.fieldtype),
     value: getDefaultValue(data),
-  })
-  apply()
+  }
+  filters.value.add(filter)
+  // Select/Check fields come with a real default value, so they filter straight
+  // away. Everything else is a draft until the user fills it in — no round-trip.
+  if (hasValue(filter)) apply()
 }
 
 function updateFilter(data, index) {
   if (!data.fieldname) return
 
-  filters.value.delete(Array.from(filters.value)[index])
-  filters.value.add({
+  const previous = Array.from(filters.value)[index]
+  filters.value.delete(previous)
+  const filter = {
     fieldname: data.fieldname,
     operator: getDefaultOperator(data.fieldtype),
     value: getDefaultValue(data),
@@ -501,13 +564,16 @@ function updateFilter(data, index) {
       fieldtype: data.fieldtype,
       options: data.options,
     },
-  })
-  apply()
+  }
+  filters.value.add(filter)
+  if (hasValue(previous) || hasValue(filter)) apply()
 }
 
 function removeFilter(index) {
-  filters.value.delete(Array.from(filters.value)[index])
-  apply()
+  const removed = Array.from(filters.value)[index]
+  filters.value.delete(removed)
+  // A draft was never sent, so dropping it can't change the result set.
+  if (hasValue(removed)) apply()
 }
 
 function clearfilter(close) {
@@ -517,9 +583,13 @@ function clearfilter(close) {
 }
 
 function updateValue(value, filter) {
-  value = value.target ? value.target.value : value
+  // Date pickers emit null when cleared, so this can't assume an object.
+  value = value?.target ? value.target.value : value
   if (filter.operator === 'between') {
-    filter.value = [value.split(',')[0], value.split(',')[1]]
+    filter.value =
+      typeof value === 'string'
+        ? [value.split(',')[0], value.split(',')[1]]
+        : value
   } else {
     filter.value = value
   }
@@ -527,17 +597,19 @@ function updateValue(value, filter) {
 }
 
 function updateOperator(filter) {
+  const had = hasValue(filter)
   filter.value = getDefaultValue(filter.field)
 
   if (filter.operator === 'is' || filter.operator === 'is not') {
     filter.value = 'set'
   }
-  apply()
+  if (had || hasValue(filter)) apply()
 }
 
 function apply() {
   let _filters = []
   filters.value.forEach((f) => {
+    if (!hasValue(f)) return
     _filters.push({
       fieldname: f.fieldname,
       operator: f.operator,
@@ -563,11 +635,18 @@ function parseFilters(filters) {
 }
 
 function transformIn(f) {
-  if (f.operator.includes('like') && !f.value.includes('%')) {
-    f.value = `%${f.value}%`
-  }
-  if (['in', 'not in'].includes(f.operator) && typeof f.value === 'string') {
-    f.value = f.value.split(',').map((v) => v.trim())
+  // Only strings need wildcard/CSV massaging — a date range arrives as an array
+  // and a number as a number, and .includes/.split would throw on those.
+  if (typeof f.value === 'string') {
+    if (f.operator.includes('like') && !f.value.includes('%')) {
+      f.value = `%${f.value}%`
+    }
+    if (['in', 'not in'].includes(f.operator)) {
+      f.value = f.value
+        .split(',')
+        .map((v) => v.trim())
+        .filter(Boolean)
+    }
   }
   return f
 }

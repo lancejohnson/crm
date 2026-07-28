@@ -813,6 +813,63 @@ duplicating. Work substantial features in a worktree of your own.
     `EXCLUDE_BY_DEFAULT`), previewing what will actually be pre-selected (e.g.
     "Text these (53)" for a 58-buyer property with 5 Not Interested); the header
     "N buyers" still shows the true filtered total.
+- **Filters: user pickers, no phantom queries, and a 10x faster kanban**
+  (gw222/gw223) — Lance: "filters aren't really working… assigned to isn't
+  working really… adding filters in the gui is pretty laggy." Three distinct
+  causes, all in the list/kanban filter path.
+  - **`getValueControl` checked the operator before the fieldtype.** The
+    `like`/`not like`/`in`/`not in` branch sat above every fieldtype branch and
+    returned a bare `FormControl type=text`, so the perfectly good `Link`
+    dropdown one branch below was unreachable. Worse, `getDefaultOperator`
+    returned `like` for Link too — so **every** Link field (Lead Owner, Created
+    By…) and **Assigned To** opened as an empty text box. `_assign` stores
+    `["dennis.szafran@groundworkpro.com"]`, so the only thing that ever matched
+    was a substring of the login *email*: typing "Dennis Szafran" returned
+    nothing, which is exactly what "isn't working" meant.
+    Now `_assign` and any **Link → User** field render
+    `Controls/UserFilterSelect.vue` — an Autocomplete over the already-loaded
+    users store (`full_name` label, email as the sub-line, **zero network
+    calls**). It owns the `%email%` wrap/strip, so it emits a ready-to-store
+    value and Filter.vue's blanket `@change` handles it unchanged
+    (`inheritAttrs: false` keeps the template's `v-model`/`placeholder` off the
+    inner Autocomplete). `getDefaultOperator` now returns `equals` for
+    Link/Dynamic Link so the dropdown is the default; `like` is still selectable.
+  - **Picking a field immediately ran a query — with no value.** `setfilter`
+    called `apply()` straight away, so an empty `like` became `%%`, and since
+    `NULL LIKE '%%'` is NULL, merely *naming* a field silently dropped every
+    record with nothing in it (adding "Assigned To" hid all unassigned leads —
+    prod's saved kanban view was sitting in exactly that state). `filters` was
+    also a **computed whose Set got mutated**, so a row could only persist if the
+    server echoed it back. It's now a `ref` synced from a separate
+    `appliedFilters` computed, which keeps valueless rows as client-only
+    **drafts**: they show in the popover, never reach the server, and cost no
+    round-trip. `hasValue()` gates `apply()`/`setfilter`/`removeFilter`/
+    `updateOperator`. Also guarded `updateValue` against the `null` a cleared
+    DatePicker emits (`value.target` threw) and `transformIn` against non-strings.
+  - **Every filter change fetched the board twice.** `updateFilter` →
+    `list.reload()` **and** `createOrUpdateStandardView()` → `reloadView()` →
+    the `getView` deep watcher → `reload()` again, identical result. The view
+    write is now debounced 600ms (`persistStandardView`) and the watcher skips
+    the echo of our own write via `skipNextViewReload`, released on a
+    `setTimeout(…, 0)` after `reloadView()` — a macrotask, so it lands after the
+    microtask watcher flush. (Comparing `getParams()` to `list.params` does NOT
+    work: the response's resolved `columns`/`rows` differ from the view's.)
+  - **The real lag was `getCounts`: ~18 queries PER CARD.** A 104-card leads
+    kanban = ~2,600 round-trips and `get_data` took **2.6s** (the list view,
+    which skips it, takes 83ms). Replaced with `apply_counts(rows, doctype)` —
+    one grouped query per source (`_count_by_doc`/`_max_by_doc` via `frappe.qb`,
+    with a `split_field` for the direction splits), plus one `CRM Lead` fetch for
+    `_first_call`/`_new_lead_color` and `istl_refund_report.prefetch_outbound_calls`
+    for the ISTL tint (`refund_card_color` gained an optional `calls=` param).
+    Called once over every card on the board, after the column loop. `getCounts`
+    remains as a single-record wrapper. **Verified on prod against the old
+    per-card code: 0 mismatches on 150 and 400 leads, 51x and 114x faster;**
+    kanban `get_data` 2624ms → 253ms live.
+  - Net: one filter interaction went from 2 kanban fetches (~5s) to one ~250ms
+    fetch, and adding a filter field costs nothing until you fill it in.
+  - `frontend/src/components/Controls/UserFilterSelect.vue` (**new**),
+    `components/Filter.vue`, `components/ViewControls.vue`, `crm/api/doc.py`,
+    `crm/api/istl_refund_report.py`. No ops piece, no schema change.
 - **Lead import hardening + address repair** (gw221) — the Jun 2026 LeadPack
   (514 leads) went in with the address block scrambled on part of the batch and
   the importer said nothing: **88 leads had the whole street address sitting in

@@ -6,6 +6,7 @@ from frappe.custom.doctype.property_setter.property_setter import make_property_
 from frappe.desk.form.assign_to import set_status
 from frappe.model import no_value_fields
 from frappe.model.document import get_controller
+from frappe.query_builder.functions import Count, Max
 from frappe.utils import make_filter_tuple
 from pypika import Criterion
 
@@ -460,6 +461,8 @@ def get_data(
 			if row not in ("_last_comm", "_next_task_due", "_first_call", "_new_lead_color")
 		]
 
+		all_cards = []
+
 		for kc in kanban_columns:
 			column_filters = {column_field: kc.get("name")}
 			order = kc.get("order")
@@ -502,8 +505,7 @@ def get_data(
 				kc["all_count"] = all_count
 				kc["count"] = len(column_data)
 
-				for d in column_data:
-					getCounts(d, doctype)
+				all_cards.extend(column_data)
 
 			if order:
 				column_data = sorted(
@@ -512,6 +514,11 @@ def get_data(
 				)
 
 			data.append({"column": kc, "fields": kanban_fields, "data": column_data})
+
+		# One pass over every card on the board rather than per-column-per-card:
+		# the pseudo-field queries are grouped by record, so filling them for the
+		# whole board costs the same as filling them for a single column.
+		apply_counts(all_cards, doctype)
 
 	fields = frappe.get_meta(doctype).fields
 	fields = [field for field in fields if field.fieldtype not in no_value_fields]
@@ -748,150 +755,261 @@ def get_fields(doctype: str, allow_all_fieldtypes: bool = False):
 	return _fields
 
 
-def getCounts(d, doctype):
-	d["_email_count"] = (
-		frappe.db.count(
-			"Communication",
-			filters={
-				"reference_doctype": doctype,
-				"reference_name": d.get("name"),
-				"communication_type": "Communication",
-			},
-		)
-		or 0
+# ---------------------------------------------------------------------------
+# Per-card pseudo-fields (kanban badges).
+#
+# These used to be computed one card at a time: getCounts(d) fired ~18 separate
+# queries per record, so a 140-card Leads kanban cost ~2,600 round-trips and
+# get_data took ~2.6s (the list view, which skips this entirely, takes ~80ms).
+# Every filter keystroke paid that twice. Everything here keys off
+# reference_docname/reference_name, so one grouped query per source now serves
+# the whole board regardless of how many cards are on it.
+# ---------------------------------------------------------------------------
+
+# (result key, doctype, link field, extra filters) for the plain counts.
+_COUNT_SOURCES = (
+	("_comment_count", "Comment", "reference_name", {"comment_type": "Comment"}),
+	("_task_count", "CRM Task", "reference_docname", {}),
+	("_note_count", "FCRM Note", "reference_docname", {}),
+)
+
+
+def _count_by_doc(dt, link_field, doctype, names, extra=None, split_field=None):
+	"""{docname: count} — or {(docname, split_value): count} when `split_field`
+	is given — in a single grouped query."""
+	if not names:
+		return {}
+
+	table = frappe.qb.DocType(dt)
+	key = table[link_field]
+	query = frappe.qb.from_(table).where(
+		(table.reference_doctype == doctype) & key.isin(names)
 	)
-	d["_email_count"] = d["_email_count"] + frappe.db.count(
+	for field, value in (extra or {}).items():
+		query = query.where(table[field] == value)
+
+	if split_field:
+		split = table[split_field]
+		rows = (
+			query.select(key.as_("_key"), split.as_("_split"), Count("*").as_("_count"))
+			.groupby(key, split)
+			.run(as_dict=True)
+		)
+		return {(r["_key"], r["_split"]): r["_count"] for r in rows}
+
+	rows = query.select(key.as_("_key"), Count("*").as_("_count")).groupby(key).run(as_dict=True)
+	return {r["_key"]: r["_count"] for r in rows}
+
+
+def _max_by_doc(dt, link_field, doctype, names, value_field, extra=None):
+	"""{docname: max(value_field)} in a single grouped query."""
+	if not names:
+		return {}
+
+	table = frappe.qb.DocType(dt)
+	key = table[link_field]
+	query = frappe.qb.from_(table).where(
+		(table.reference_doctype == doctype) & key.isin(names)
+	)
+	for field, value in (extra or {}).items():
+		query = query.where(table[field] == value)
+
+	rows = (
+		query.select(key.as_("_key"), Max(table[value_field]).as_("_value"))
+		.groupby(key)
+		.run(as_dict=True)
+	)
+	return {r["_key"]: r["_value"] for r in rows if r["_value"]}
+
+
+def apply_counts(rows, doctype):
+	"""Fill the kanban pseudo-fields on a whole page of records at once.
+
+	Mutates `rows` in place (the caller holds the same dicts) and returns it.
+	"""
+	if not rows:
+		return rows
+
+	names = [d.get("name") for d in rows if d.get("name")]
+	if not names:
+		return rows
+
+	# Quo Message is a site-resident custom doctype — guard so a site without it
+	# doesn't 500 the kanban.
+	has_quo_message = bool(frappe.db.exists("DocType", "Quo Message"))
+
+	counts = {
+		key: _count_by_doc(dt, link_field, doctype, names, extra)
+		for key, dt, link_field, extra in _COUNT_SOURCES
+	}
+
+	# Emails: total spans Communication + Automated Message, but the
+	# outbound/inbound split counts real Communications only (an automated
+	# message has no meaningful sent_or_received for these badges).
+	email_by_type = _count_by_doc(
+		"Communication", "reference_name", doctype, names, split_field="communication_type"
+	)
+	email_by_direction = _count_by_doc(
 		"Communication",
+		"reference_name",
+		doctype,
+		names,
+		extra={"communication_type": "Communication"},
+		split_field="sent_or_received",
+	)
+	calls_by_type = _count_by_doc(
+		"CRM Call Log", "reference_docname", doctype, names, split_field="type"
+	)
+	texts_by_direction = (
+		_count_by_doc("Quo Message", "reference_docname", doctype, names, split_field="direction")
+		if has_quo_message
+		else {}
+	)
+
+	last_email = _max_by_doc(
+		"Communication",
+		"reference_name",
+		doctype,
+		names,
+		"communication_date",
+		extra={"communication_type": "Communication"},
+	)
+	last_call = _max_by_doc("CRM Call Log", "reference_docname", doctype, names, "start_time")
+	last_text = (
+		_max_by_doc("Quo Message", "reference_docname", doctype, names, "message_date")
+		if has_quo_message
+		else {}
+	)
+
+	# Soonest due date among each card's still-open tasks — drives the kanban
+	# "next task due" badge (frontend colors it red when overdue, amber today).
+	# Fetched ascending and first-seen-wins per card, mirroring
+	# get_next_task_due_order rather than adding a MIN() aggregate.
+	next_task_due = {}
+	for row in frappe.get_all(
+		"CRM Task",
 		filters={
 			"reference_doctype": doctype,
-			"reference_name": d.get("name"),
-			"communication_type": "Automated Message",
-		},
-	)
-	d["_comment_count"] = frappe.db.count(
-		"Comment",
-		filters={"reference_doctype": doctype, "reference_name": d.get("name"), "comment_type": "Comment"},
-	)
-	d["_task_count"] = frappe.db.count(
-		"CRM Task", filters={"reference_doctype": doctype, "reference_docname": d.get("name")}
-	)
-	d["_note_count"] = frappe.db.count(
-		"FCRM Note", filters={"reference_doctype": doctype, "reference_docname": d.get("name")}
-	)
-
-	# per-direction contact counts + last communication (calls, texts, emails)
-	# for kanban cards. Quo Message is a site-resident custom doctype — guard
-	# so a site without it doesn't 500 the kanban.
-	has_quo_message = frappe.db.exists("DocType", "Quo Message")
-	for key, call_type in (("_call_out_count", "Outgoing"), ("_call_in_count", "Incoming")):
-		d[key] = frappe.db.count(
-			"CRM Call Log",
-			filters={"reference_doctype": doctype, "reference_docname": d.get("name"), "type": call_type},
-		)
-	for key, text_dir in (("_text_out_count", "Outgoing"), ("_text_in_count", "Incoming")):
-		d[key] = (
-			frappe.db.count(
-				"Quo Message",
-				filters={"reference_doctype": doctype, "reference_docname": d.get("name"), "direction": text_dir},
-			)
-			if has_quo_message
-			else 0
-		)
-	for key, email_dir in (("_email_out_count", "Sent"), ("_email_in_count", "Received")):
-		d[key] = frappe.db.count(
-			"Communication",
-			filters={
-				"reference_doctype": doctype,
-				"reference_name": d.get("name"),
-				"communication_type": "Communication",
-				"sent_or_received": email_dir,
-			},
-		)
-
-	last_email = frappe.db.get_value(
-		"Communication",
-		{
-			"reference_doctype": doctype,
-			"reference_name": d.get("name"),
-			"communication_type": "Communication",
-		},
-		"communication_date",
-		order_by="communication_date desc",
-	)
-	last_call = frappe.db.get_value(
-		"CRM Call Log",
-		{"reference_doctype": doctype, "reference_docname": d.get("name")},
-		"start_time",
-		order_by="start_time desc",
-	)
-	last_text = (
-		frappe.db.get_value(
-			"Quo Message",
-			{"reference_doctype": doctype, "reference_docname": d.get("name")},
-			"message_date",
-			order_by="message_date desc",
-		)
-		if has_quo_message
-		else None
-	)
-	comm_dates = [dt for dt in (last_email, last_call, last_text) if dt]
-	d["_last_comm"] = max(comm_dates) if comm_dates else None
-
-	# soonest due date among this card's still-open tasks — drives the kanban
-	# "next task due" badge (frontend colors it red when overdue, amber today)
-	d["_next_task_due"] = frappe.db.get_value(
-		"CRM Task",
-		{
-			"reference_doctype": doctype,
-			"reference_docname": d.get("name"),
+			"reference_docname": ("in", names),
 			"status": ("not in", ["Done", "Canceled"]),
 			"due_date": (">", ""),
 		},
-		"due_date",
+		fields=["reference_docname", "due_date"],
 		order_by="due_date asc",
-	)
+	):
+		next_task_due.setdefault(row.reference_docname, row.due_date)
 
-	# First-Call Read 2x2 chip ("motivated|on_price", e.g. "Yes|No"); blank on
-	# either axis = not qualified yet. Fields live on CRM Lead only — guard so the
-	# Deals board (and a site pre-setup) doesn't error.
-	if doctype == "CRM Lead" and frappe.db.has_column("CRM Lead", "first_call_motivated"):
-		motivated, on_price = frappe.db.get_value(
-			"CRM Lead", d.get("name"), ["first_call_motivated", "first_call_on_price"]
-		) or ("", "")
-		d["_first_call"] = f"{motivated or ''}|{on_price or ''}"
-	else:
-		d["_first_call"] = "|"
+	lead_meta = _lead_card_meta(doctype, names)
 
-	# New-lead age tint (CRM Lead only): a lead sitting in the "New" status is
-	# colored purely by how long it's been there — yellow on the day it was
-	# created, red once it's a day or more old and STILL "New" — regardless of any
-	# contact activity or open tasks. Drives the kanban to flag untouched new
-	# leads. Empty for any other status (those cards keep the task-due tint).
-	# Calendar-day math in the site timezone (creation is stored site-tz).
-	d["_new_lead_color"] = ""
-	if doctype == "CRM Lead":
-		status, creation, source = frappe.db.get_value(
-			"CRM Lead", d.get("name"), ["status", "creation", "source"]
-		) or (None, None, None)
+	for d in rows:
+		name = d.get("name")
 
-		# iSpeedToLead refund standing wins on ISTL leads: it's the same rule the
-		# twice-daily refund email uses (amber/red = needs a double-dial today,
-		# GREEN = handled or refund already earned), so the board and the email
-		# can't tell different stories. Best-effort — a failure here must never
-		# break the kanban.
-		try:
-			from crm.api.istl_refund_report import is_istl, refund_card_color
+		d["_comment_count"] = counts["_comment_count"].get(name, 0)
+		d["_task_count"] = counts["_task_count"].get(name, 0)
+		d["_note_count"] = counts["_note_count"].get(name, 0)
+		d["_email_count"] = email_by_type.get((name, "Communication"), 0) + email_by_type.get(
+			(name, "Automated Message"), 0
+		)
+		d["_email_out_count"] = email_by_direction.get((name, "Sent"), 0)
+		d["_email_in_count"] = email_by_direction.get((name, "Received"), 0)
+		d["_call_out_count"] = calls_by_type.get((name, "Outgoing"), 0)
+		d["_call_in_count"] = calls_by_type.get((name, "Incoming"), 0)
+		d["_text_out_count"] = texts_by_direction.get((name, "Outgoing"), 0)
+		d["_text_in_count"] = texts_by_direction.get((name, "Incoming"), 0)
 
-			if is_istl(source):
-				d["_new_lead_color"] = refund_card_color(d.get("name"), status, creation, source)
-		except Exception:
-			frappe.log_error("ISTL refund card color failed", frappe.get_traceback())
+		comm_dates = [
+			dt
+			for dt in (last_email.get(name), last_call.get(name), last_text.get(name))
+			if dt
+		]
+		d["_last_comm"] = max(comm_dates) if comm_dates else None
 
-		# Untouched-new-lead age tint, for everything the refund rule didn't claim.
-		if not d["_new_lead_color"] and status == "New" and creation:
-			from frappe.utils import getdate
+		d["_next_task_due"] = next_task_due.get(name)
 
-			d["_new_lead_color"] = "red" if getdate(creation) < getdate() else "amber"
+		meta = lead_meta.get(name, {})
+		d["_first_call"] = meta.get("_first_call", "|")
+		d["_new_lead_color"] = meta.get("_new_lead_color", "")
+
+	return rows
+
+
+def _lead_card_meta(doctype, names):
+	"""{lead: {_first_call, _new_lead_color}} for CRM Lead cards.
+
+	_first_call is the First-Call Read 2x2 chip ("motivated|on_price", e.g.
+	"Yes|No"); blank on either axis = not qualified yet.
+
+	_new_lead_color is the age tint: a lead sitting in "New" is colored purely by
+	how long it's been there — amber on the day it was created, red once it's a
+	day or more old and STILL "New" — regardless of any contact activity or open
+	tasks. Empty for any other status (those cards keep the task-due tint).
+	Calendar-day math in the site timezone (creation is stored site-tz).
+	"""
+	if doctype != "CRM Lead" or not names:
+		return {}
+
+	from frappe.utils import getdate
+
+	has_first_call = frappe.db.has_column("CRM Lead", "first_call_motivated")
+	fields = ["name", "status", "creation", "source"]
+	if has_first_call:
+		fields += ["first_call_motivated", "first_call_on_price"]
+
+	leads = frappe.get_all("CRM Lead", filters={"name": ("in", names)}, fields=fields)
+
+	istl_color = _istl_card_colors(leads)
+
+	meta = {}
+	for lead in leads:
+		first_call = "|"
+		if has_first_call:
+			first_call = f"{lead.get('first_call_motivated') or ''}|{lead.get('first_call_on_price') or ''}"
+
+		# iSpeedToLead refund standing wins on ISTL leads; everything it didn't
+		# claim falls through to the untouched-new-lead age tint.
+		color = istl_color.get(lead.name, "")
+		if not color and lead.status == "New" and lead.creation:
+			color = "red" if getdate(lead.creation) < getdate() else "amber"
+
+		meta[lead.name] = {"_first_call": first_call, "_new_lead_color": color}
+
+	return meta
+
+
+def _istl_card_colors(leads):
+	"""{lead: tint} for the iSpeedToLead refund standing.
+
+	It's the same rule the twice-daily refund email uses (amber/red = needs a
+	double-dial today, GREEN = handled or refund already earned), so the board
+	and the email can't tell different stories. Best-effort — a failure here must
+	never break the kanban.
+	"""
+	try:
+		from crm.api.istl_refund_report import is_istl, prefetch_outbound_calls, refund_card_color
+
+		istl = [lead for lead in leads if is_istl(lead.get("source"))]
+		if not istl:
+			return {}
+
+		calls_by_lead = prefetch_outbound_calls([lead.name for lead in istl])
+		return {
+			lead.name: refund_card_color(
+				lead.name,
+				lead.status,
+				lead.creation,
+				lead.source,
+				calls=calls_by_lead.get(lead.name, []),
+			)
+			for lead in istl
+		}
+	except Exception:
+		frappe.log_error("ISTL refund card color failed", frappe.get_traceback())
+		return {}
+
+
+def getCounts(d, doctype):
+	"""Single-record wrapper around apply_counts (kept for external callers)."""
+	apply_counts([d], doctype)
 	return d
 
 

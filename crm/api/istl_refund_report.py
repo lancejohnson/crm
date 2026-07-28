@@ -548,10 +548,52 @@ def _gave_up_early(rows: list[dict], today, prev_biz) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------------
-# Kanban tint (shared with crm.api.doc.getCounts so the board and the email
+# Kanban tint (shared with crm.api.doc.apply_counts so the board and the email
 # can never disagree about who's in danger)
 # ---------------------------------------------------------------------------------
-def refund_card_color(lead_name: str, status: str, creation, source: str) -> str:
+def prefetch_outbound_calls(lead_names: list[str]) -> dict[str, list[dict]]:
+	"""``{lead: outbound calls}`` for many leads in one query.
+
+	Same shape ``_outbound_calls`` returns per lead — it exists so the kanban can
+	color a whole board of ISTL leads without one call-log query per card. Pass
+	the result into ``refund_card_color(..., calls=...)``.
+	"""
+	if not lead_names:
+		return {}
+
+	rows = frappe.get_all(
+		"CRM Call Log",
+		filters={
+			"reference_doctype": "CRM Lead",
+			"reference_docname": ("in", lead_names),
+			"type": "Outgoing",
+		},
+		fields=["name", "reference_docname", "start_time", "creation", "duration", "status"],
+		order_by="creation asc",
+		limit_page_length=0,
+	)
+
+	by_lead: dict[str, list[dict]] = {}
+	for r in rows:
+		start = r.get("start_time") or r.get("creation")
+		if not start:
+			continue
+		by_lead.setdefault(r["reference_docname"], []).append(
+			{
+				"name": r["name"],
+				"start": get_datetime(start),
+				"duration": int(r.get("duration") or 0),
+				"status": r.get("status") or "",
+			}
+		)
+	for calls in by_lead.values():
+		calls.sort(key=lambda c: c["start"])
+	return by_lead
+
+
+def refund_card_color(
+	lead_name: str, status: str, creation, source: str, calls: list[dict] | None = None
+) -> str:
 	"""Refund standing of one ISTL lead, as a kanban tint.
 
 	``green``  reached them / refund already earned / today's dial is done
@@ -560,7 +602,9 @@ def refund_card_color(lead_name: str, status: str, creation, source: str) -> str
 	``''``     not an ISTL lead / not workable / outside the window / nothing due
 
 	Deliberately mirrors ``_enrich`` so "in danger" on the board means exactly
-	what "due" means in the email.
+	what "due" means in the email. ``calls`` lets a caller coloring many leads
+	supply pre-fetched outbound calls (see ``prefetch_outbound_calls``) instead of
+	paying a query per lead.
 	"""
 	if not is_istl(source) or not creation:
 		return ""
@@ -572,7 +616,8 @@ def refund_card_color(lead_name: str, status: str, creation, source: str) -> str
 	if not (0 <= age_days < WINDOW_DAYS):
 		return ""
 
-	calls = _outbound_calls(lead_name)
+	if calls is None:
+		calls = _outbound_calls(lead_name)
 	clusters = _cluster_calls(calls)
 	double_dials = sum(1 for c in clusters if c["dials"] >= 2)
 
