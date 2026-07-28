@@ -28,9 +28,26 @@ ARG APP=/home/frappe/frappe-bench/apps/crm
 # `docker cp`, which has no delete semantics -- an abandoned module (and a
 # debug script holding a real buyer's PII) sat in prod for over a year.
 #
-# There is deliberately no `yarn install`: node_modules comes from the base and
-# the fork has never changed package.json or yarn.lock. If that ever changes,
-# add an install step keyed on those two files so the layer cache still works.
+# The fork pins its own vite/plugin versions (Vite 8 + Rolldown, see below), so
+# node_modules can no longer be inherited unchanged from the base image. Keyed
+# on package.json + yarn.lock ONLY and placed above the source copy, so it is
+# cached on every build where dependencies did not change -- which is nearly all
+# of them. When it does miss, expect ~150s instead of ~20s.
+COPY --chown=frappe:frappe frontend/package.json frontend/yarn.lock ${APP}/frontend/
+RUN cd ${APP}/frontend && yarn install --frozen-lockfile
+
+# Vite 8 (Rolldown) rather than the Vite 5 upstream still ships. Roughly halves
+# the bundle step: measured 36s -> 18s best case, ~40s -> ~25s median, and it is
+# markedly more consistent under load. Upstream frappe/crm is still on vite
+# ^5.4.21 and frappe-ui's develop only reached vite ^7, with no Rolldown work in
+# flight, so this will not arrive on its own.
+#
+# vite-plugin-pwa MUST stay >= 1.x here. The 0.21.x we used to pin writes to the
+# `bundle` variable in generateBundle, which Rolldown ignores -- the build still
+# succeeds but silently drops registerSW.js and manifest.webmanifest, so the
+# self-destroying service worker never registers and users keep being served
+# stale bundles from an old SW. That is the exact bug selfDestroying exists to
+# prevent, and it is invisible unless you diff the output.
 COPY --chown=frappe:frappe frontend/ ${APP}/frontend/
 
 # src/socket.js does a BUILD-TIME `import { socketio_port } from
