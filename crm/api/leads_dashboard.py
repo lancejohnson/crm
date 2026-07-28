@@ -21,6 +21,24 @@ from crm.api.dashboard import get_leads_by_source
 from crm.utils import sales_user_only
 
 
+def live(query, Lead):
+	"""Drop parked, bulk-imported leads (`import_hidden`) from a dashboard query.
+
+	The Leads board already hides a freshly imported batch until someone promotes
+	it (crm.api.lead_import.apply_import_visibility). The dashboard has to agree:
+	otherwise a 500-row LeadPack that nobody is allowed to see on the board still
+	lands on the landing page the day it's imported, spiking "New leads",
+	inventing a status cohort and burying the real numbers.
+
+	Guarded by has_column so this is safe before the ops script adds the field.
+	NULL is treated as visible — an older lead predating the custom field is not
+	a parked one.
+	"""
+	if not frappe.db.has_column("CRM Lead", "import_hidden"):
+		return query
+	return query.where(Lead.import_hidden.isnull() | (Lead.import_hidden != 1))
+
+
 @frappe.whitelist()
 @sales_user_only
 def get_leads_dashboard(
@@ -53,6 +71,7 @@ def _summary(from_date, to_date, user):
 		.select(Count("*").as_("count"))
 		.where(Date(Lead.creation).between(from_date, to_date))
 	)
+	leads_q = live(leads_q, Lead)
 	if user:
 		leads_q = leads_q.where(Lead.lead_owner == user)
 	new_leads = (leads_q.run(as_dict=True)[0].count) or 0
@@ -70,6 +89,7 @@ def _summary(from_date, to_date, user):
 			& (Date(SCL.to_date).between(from_date, to_date))
 		)
 	)
+	changes_q = live(changes_q, Lead)
 	if user:
 		changes_q = changes_q.where(Lead.lead_owner == user)
 	status_changes = (changes_q.run(as_dict=True)[0].count) or 0
@@ -98,6 +118,7 @@ def _new_leads_trend(from_date, to_date, user):
 		.groupby(Date(Lead.creation))
 		.orderby(Date(Lead.creation))
 	)
+	query = live(query, Lead)
 	if user:
 		query = query.where(Lead.lead_owner == user)
 
@@ -166,6 +187,8 @@ def _status_changes(from_date, to_date, user):
 		.where(base_cond & (scl_from.isnotnull()) & (scl_from != ""))
 		.groupby(scl_from)
 	)
+	entered_q = live(entered_q, Lead)
+	exited_q = live(exited_q, Lead)
 	if user:
 		entered_q = entered_q.where(Lead.lead_owner == user)
 		exited_q = exited_q.where(Lead.lead_owner == user)
@@ -334,6 +357,7 @@ def _cohort_table(from_date, to_date, user):
 		.select(Lead.name, Lead.status)
 		.where(Date(Lead.creation).between(from_date, to_date))
 	)
+	lq = live(lq, Lead)
 	if user:
 		lq = lq.where(Lead.lead_owner == user)
 	leads = lq.run(as_dict=True)
@@ -385,6 +409,7 @@ def _flow_table(from_date, to_date, user):
 
 	# Current occupancy of every status (the "now" anchor for snapshots).
 	cq = frappe.qb.from_(Lead).select(Lead.status, Count("*").as_("c")).groupby(Lead.status)
+	cq = live(cq, Lead)
 	if user:
 		cq = cq.where(Lead.lead_owner == user)
 	now_count = {r.status: r.c for r in cq.run(as_dict=True) if r.status}
@@ -399,6 +424,7 @@ def _flow_table(from_date, to_date, user):
 			.groupby(scl_from)
 			.groupby(SCL.to)
 		)
+		q = live(q, Lead)
 		if user:
 			q = q.where(Lead.lead_owner == user)
 		return {(r.f or "", r.t): r.c for r in q.run(as_dict=True)}
@@ -457,6 +483,7 @@ def _created_initial(from_date, to_date, user):
 		.select(Lead.name, Lead.status, Date(Lead.creation).as_("created"))
 		.where(Date(Lead.creation) >= from_date)
 	)
+	lq = live(lq, Lead)
 	if user:
 		lq = lq.where(Lead.lead_owner == user)
 	leads = lq.run(as_dict=True)
@@ -587,6 +614,7 @@ def _transition_leads(from_stage, to_stage, from_date, to_date, user, mode):
 		q = q.where(Date(SCL.to_date).between(from_date, to_date))
 	else:
 		q = q.where(Date(Lead.creation).between(from_date, to_date))
+	q = live(q, Lead)
 	if user:
 		q = q.where(Lead.lead_owner == user)
 	return [r.name for r in q.run(as_dict=True)]
@@ -600,6 +628,7 @@ def _created_into_leads(to_stage, from_date, to_date, user):
 		.select(Lead.name, Lead.status)
 		.where(Date(Lead.creation).between(from_date, to_date))
 	)
+	lq = live(lq, Lead)
 	if user:
 		lq = lq.where(Lead.lead_owner == user)
 	leads = lq.run(as_dict=True)
@@ -617,6 +646,7 @@ def _occupancy_leads(to_stage, from_date, to_date, user, mode):
 	q = frappe.qb.from_(Lead).select(Lead.name).where(Lead.status == to_stage)
 	if mode == "cohort":
 		q = q.where(Date(Lead.creation).between(from_date, to_date))
+	q = live(q, Lead)
 	if user:
 		q = q.where(Lead.lead_owner == user)
 	return [r.name for r in q.run(as_dict=True)]
@@ -657,6 +687,7 @@ def get_leads_by_source_names(
 		q = q.where((Lead.source.isnull()) | (Lead.source == ""))
 	else:
 		q = q.where(Lead.source == source)
+	q = live(q, Lead)
 	if user:
 		q = q.where(Lead.lead_owner == user)
 
@@ -719,6 +750,7 @@ def _call_rows(from_date, to_date, user):
 		.groupby(CL.type)
 		.groupby(Lead.status)
 	)
+	q = live(q, Lead)
 	if user:
 		q = q.where(Lead.lead_owner == user)
 	return [
@@ -755,6 +787,7 @@ def _text_rows(from_date, to_date, user):
 		.groupby(QM.direction)
 		.groupby(Lead.status)
 	)
+	q = live(q, Lead)
 	if user:
 		q = q.where(Lead.lead_owner == user)
 	return [
@@ -777,6 +810,7 @@ def _agreement_rows(from_date, to_date, user):
 		.groupby(AG.lead)
 		.groupby(Lead.status)
 	)
+	q = live(q, Lead)
 	if user:
 		q = q.where(Lead.lead_owner == user)
 	# Agreements have no inbound direction — every one is outbound ("sent").

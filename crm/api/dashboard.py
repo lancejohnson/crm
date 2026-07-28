@@ -974,6 +974,12 @@ def get_leads_by_source(from_date: str | None = None, to_date: str | None = None
 		.orderby(Count("*"), order=frappe.qb.desc)
 	)
 
+	# Parked bulk-import leads are hidden on the Leads board, so they stay off the
+	# donut too — otherwise a 500-row LeadPack owns the whole chart on import day.
+	from crm.api.leads_dashboard import live
+
+	query = live(query, CRMLead)
+
 	if user:
 		query = query.where(CRMLead.lead_owner == user)
 
