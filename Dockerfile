@@ -45,7 +45,23 @@ COPY --chown=frappe:frappe frontend/ ${APP}/frontend/
 COPY --from=prev --chown=frappe:frappe \
      ${APP}/crm/public/frontend/assets/ ${APP}/crm/public/frontend/assets/
 
+# src/socket.js does a BUILD-TIME `import { socketio_port } from
+# '../../../../sites/common_site_config.json'`, so rollup needs that key to
+# exist or the build dies with "socketio_port is not exported by". At runtime
+# sites/ is a named volume holding the real config, but during `docker build`
+# there is no volume and the base image ships `{}` — which is exactly why the
+# old in-container build worked and this one didn't. Seed the key for the build
+# and put the original file back, all in one RUN so nothing leaks into the
+# image (the volume would shadow it anyway).
+#
+# The value is inert in production: socket.js only uses it when
+# window.location.port is set, i.e. when served on an explicit port in dev.
+#
 # vite.config.js sets emptyOutDir:false, so this adds the new content-hashed
 # chunks alongside the carried-forward ones instead of replacing them.
-RUN cd ${APP}/frontend \
- && NODE_OPTIONS=--max-old-space-size=2048 yarn build
+RUN CSC=/home/frappe/frappe-bench/sites/common_site_config.json \
+ && cp "$CSC" /tmp/csc.orig \
+ && python3 -c "import json,sys;p=sys.argv[1];d=json.load(open(p));d.setdefault('socketio_port',9000);json.dump(d,open(p,'w'))" "$CSC" \
+ && cd ${APP}/frontend \
+ && NODE_OPTIONS=--max-old-space-size=2048 yarn build \
+ && cp /tmp/csc.orig "$CSC" && rm /tmp/csc.orig
