@@ -199,10 +199,12 @@ def get_quick_filters(doctype: str, cached: bool = True):
 		)
 
 	if doctype == "CRM Lead":
-		# Curated Leads quick filters: drop `converted` (internal flag) and the
+		# Curated Leads quick filters: drop `converted` (internal flag), the
 		# Email/Organization fields (rarely searched here; freed for the To-do
-		# "Tasks due" control that now lives in the view-controls row).
-		_hidden = {"converted", "email", "organization"}
+		# "Tasks due" control that now lives in the view-controls row) and
+		# `source` (asked for by Lance — the full Filter popover covers it, and
+		# the row is tight now that Save-as-new sits there).
+		_hidden = {"converted", "email", "organization", "source"}
 		quick_filters = [filter for filter in quick_filters if filter.get("fieldname") not in _hidden]
 
 	return quick_filters

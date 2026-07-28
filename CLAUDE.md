@@ -872,6 +872,20 @@ duplicating. Work substantial features in a worktree of your own.
     sweep normalized the 2 stored views and dropped a stale
     `_assign: ["LIKE","%%"]` sitting on a personal kanban (it had been hiding
     every unassigned lead on that board).
+  - **gw229 — "Save as new" + Source quick filter dropped.** The only way to
+    keep an ad-hoc filtered set was "Save Changes", which writes back over the
+    view you opened (destructive on a shared/public one like the LeadPack), or
+    the buried views-dropdown → Create View. A **Save as new** button now sits
+    in the view-controls row: it snapshots the live params into a fresh
+    `CRM View Settings` via the existing `ViewModal` in `create` mode, then
+    navigates to it. Shown whenever `viewUpdated` OR any filter is active —
+    the second half matters because on a *standard* view
+    `createOrUpdateStandardView` flips `viewUpdated` back to false within a
+    second, so a `viewUpdated`-only gate would flicker. Cancel/Save Changes keep
+    their original stricter gate (saved view + not public-unless-manager).
+    `saveAsNewView()` + `canSaveAsNew` in `ViewControls.vue`, both toolbars.
+    Also dropped **`source`** from the Leads quick-filter row (`_hidden` in
+    `get_quick_filters`) — the Filter popover covers it and the row was tight.
   - **Multi-select filters** (`Controls/MultiSelectFilter.vue`, **new**) — a
     compact summary button ("Dennis Szafran" / "2 selected" / "All (6)") opening
     a searchable checkbox list with Select all / Clear. Renders as a summary

@@ -51,11 +51,24 @@
         </div>
       </div>
       <div
-        v-if="viewUpdated && route.query.view && (!view.public || isManager())"
+        v-if="canSaveAsNew"
         class="flex flex-row-reverse items-center gap-2 border-r pr-2"
       >
-        <Button :label="__('Cancel')" @click="cancelChanges" />
-        <Button :label="__('Save Changes')" @click="saveView" />
+        <Button
+          v-if="
+            viewUpdated && route.query.view && (!view.public || isManager())
+          "
+          :label="__('Cancel')"
+          @click="cancelChanges"
+        />
+        <Button
+          v-if="
+            viewUpdated && route.query.view && (!view.public || isManager())
+          "
+          :label="__('Save Changes')"
+          @click="saveView"
+        />
+        <Button :label="__('Save as new')" @click="saveAsNewView" />
       </div>
     </div>
   </div>
@@ -147,12 +160,22 @@
     </FadedScrollableDiv>
     <div class="-ml-2 h-[70%] border-l" />
     <div class="flex items-center gap-2">
-      <div
-        v-if="viewUpdated && route.query.view && (!view.public || isManager())"
-        class="flex items-center gap-2 border-r pr-2"
-      >
-        <Button :label="__('Cancel')" @click="cancelChanges" />
-        <Button :label="__('Save Changes')" @click="saveView" />
+      <div v-if="canSaveAsNew" class="flex items-center gap-2 border-r pr-2">
+        <Button
+          v-if="
+            viewUpdated && route.query.view && (!view.public || isManager())
+          "
+          :label="__('Cancel')"
+          @click="cancelChanges"
+        />
+        <Button
+          v-if="
+            viewUpdated && route.query.view && (!view.public || isManager())
+          "
+          :label="__('Save Changes')"
+          @click="saveView"
+        />
+        <Button :label="__('Save as new')" @click="saveAsNewView" />
       </div>
       <div class="flex items-center gap-2">
         <Button
@@ -1321,6 +1344,41 @@ function cancelChanges() {
   reload()
   viewUpdated.value = false
 }
+
+// Snapshot whatever is on screen right now as a brand-new saved view, instead
+// of writing it back over the one you opened. The whole point is to keep a
+// filtered set you built ad hoc without disturbing a shared/public view.
+function saveAsNewView() {
+  const params = defaultParams.value || getParams()
+  view.value = {
+    label: '',
+    type: view.value.type || route.params.viewType || 'list',
+    icon: '',
+    name: '',
+    filters: params.filters,
+    order_by: params.order_by,
+    group_by_field: params.view?.group_by_field,
+    column_field: params.column_field,
+    title_field: params.title_field,
+    kanban_columns: params.kanban_columns,
+    kanban_fields: params.kanban_fields,
+    columns: params.columns,
+    rows: params.rows,
+    route_name: route.name,
+    load_default_columns: view.value.load_default_columns,
+  }
+  viewModalObj.value = view.value
+  viewModalObj.value.mode = 'create'
+  showViewModal.value = true
+}
+
+// Offered whenever there's something worth naming: pending edits to a saved
+// view, or any filter built on a standard view (where edits persist silently,
+// so `viewUpdated` flickers off too fast to hang a button on).
+const canSaveAsNew = computed(() => {
+  if (viewUpdated.value) return true
+  return Object.keys(list.value?.params?.filters || {}).length > 0
+})
 
 function saveView() {
   view.value = {
