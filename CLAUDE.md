@@ -813,6 +813,57 @@ duplicating. Work substantial features in a worktree of your own.
     `EXCLUDE_BY_DEFAULT`), previewing what will actually be pre-selected (e.g.
     "Text these (53)" for a 58-buyer property with 5 Not Interested); the header
     "N buyers" still shows the true filtered total.
+- **Lead import hardening + address repair** (gw221) — the Jun 2026 LeadPack
+  (514 leads) went in with the address block scrambled on part of the batch and
+  the importer said nothing: **88 leads had the whole street address sitting in
+  `property_zip`** with `property_address` empty, **31 had the seller's EMAIL in
+  Property Address / Property City**, and **122 had 3-4 digit ZIPs** (MA/NJ/RI
+  leading zero eaten by the spreadsheet). Pattern = the pasted sheet was a
+  concatenation of vendor exports with different column layouts under one header
+  row; the importer wrote every cell wherever the mapping pointed and reported
+  "514 created, 0 errors".
+  - **Repair** — `crm/api/lead_import.py` `repair_import_addresses(list_name,
+    dry_run=1)` (bench-executable, whitelisted, idempotent). `_repair_one(doc)`
+    is the pure per-lead rule: rescue an email out of an address field onto
+    `email` (a second one goes to `lead_summary` as "Other contact:"), drop
+    vendor placeholders ("Not Provided"), then treat a **complete address as
+    authoritative wherever it turns up** — `FULL_ADDR_RE` (plus a `, USA` tail
+    strip) re-seeds address/city/state/ZIP in one go — and finally zero-pad the
+    ZIP. **Invariant: a value is only ever cleared if it has been written
+    somewhere else, or is a placeholder.** `_looks_like_street` is deliberately
+    strict (house-number-led or comma-bearing) because it gates lifting a value
+    out of the City column, where a bare town name legitimately lives. Ran on
+    prod 2026-07-28: 222 leads changed, 0 values dropped, re-run is a no-op.
+  - **Same rule now runs at import time** — `import_leads` calls `_repair_one`
+    on each built row, so the address lands right whichever column it arrived
+    in. A correctly-shaped row passes through untouched.
+  - **Pre-flight warnings in the map step** (`ImportLeadsModal.vue` `warnings`
+    computed, amber block above the mapping table — warns, never blocks): rows
+    whose cell count ≠ the header's (the classic whole-batch-one-column-over
+    cause); two columns mapped to the same field (`buildRows` keeps only the
+    last non-empty, silently); a column whose sampled values don't match the
+    field it's mapped to (email/full-address/ZIP/phone shape vs `EXPECTED`); and
+    columns that have data but no field selected. Verified live against a
+    synthetic sheet — all four fire.
+  - **Dead aliases fixed**: `sellermotivation`/`reasonforselling` and
+    `howfasttheywanttosell` pointed at `property_reason_for_sell` /
+    `property_duration_to_sell`, which are **not fields on CRM Lead** (the real
+    ones have no `property_` prefix). `guessField` only accepts an alias the
+    field list offers, so those columns were silently dropped on *every* import
+    ever run — all 514 leads have `reason_for_sell`/`duration_to_sell` null.
+  - Done-screen copy no longer claims leads auto-promote when status leaves
+    "New" — promotion has been manual-only since gw215.
+- **Parked import leads are hidden from the dashboard too** (gw221) — the Leads
+  board hid a fresh batch (`import_hidden`) but `/dashboard` still counted it,
+  so 2026-07-27 read **518 new leads instead of 4**, with the LeadPack owning
+  the source donut and inventing a status cohort. `crm/api/leads_dashboard.py`
+  gained `live(query, Lead)` (`import_hidden IS NULL OR != 1`, `has_column`
+  guarded — NULL is visible, since a lead predating the field isn't parked),
+  applied at all 15 CRM Lead query sites (summary, trend, status changes, cohort
+  + flow tables, every drill-down resolver, and the call/text/agreement activity
+  fetchers). `crm/api/dashboard.py` `get_leads_by_source` imports it **inside
+  the function** — `leads_dashboard` already imports `dashboard` at module
+  level, so a top-level import would cycle.
 - **Buyer import (bulk + single)** — buyers only ever arrived on their own (the
   IL scraper + the address-request webhook); a bought cash-buyer list, a county
   LLC export or a REIA spreadsheet had no way in but the one-at-a-time modal.
