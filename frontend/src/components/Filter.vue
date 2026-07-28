@@ -278,6 +278,21 @@ const importLists = createResource({
   initialData: [],
 })
 
+// Operators whose value is "one or more of these", so a picker applies.
+const MULTI_OPERATORS = ['in', 'not in', 'like', 'not like']
+
+// Saved views store single-value `like` filters (the per-import-list views are
+// `import_lists LIKE '%"Some List"%'`), so the picker has to be able to read one
+// back: unwrap the SQL wildcards and the JSON quoting to recover the plain
+// value the option list is keyed on.
+function multiSelectValue(f) {
+  const value = f.value
+  if (Array.isArray(value)) return value
+  if (typeof value !== 'string' || !value) return []
+  const bare = value.replace(/^%+|%+$/g, '').replace(/^"|"$/g, '')
+  return bare ? [bare] : []
+}
+
 // Fields that can offer a fixed option list, so "any of these" is a checklist
 // rather than a comma-separated text box.
 function multiSelectOptions(field) {
@@ -519,21 +534,20 @@ function getValueControl(f) {
       modelValue: f.value,
       'onUpdate:modelValue': (v) => updateValue(v, f),
     })
-  } else if (['in', 'not in'].includes(operator) && multiSelectOptions(field)) {
-    // "Any of these" — a checklist beats asking for comma-separated values.
+  } else if (MULTI_OPERATORS.includes(operator) && multiSelectOptions(field)) {
+    // "Any of these" — a checklist beats asking for comma-separated values, or
+    // for a hand-typed `%"ISTL LeadPack — Jun 2026"%`. `like` is in the list
+    // because that is how the saved import-list views are stored; picking from
+    // the checklist promotes the operator to `in` (see updateValue).
     return h(MultiSelectFilter, {
-      value: f.value,
+      value: multiSelectValue(f),
       options: multiSelectOptions(field),
       placeholder: placeholder(f),
     })
   } else if (isUserField(field)) {
-    // `_assign` holds a JSON array, so it can only be matched with LIKE and the
-    // value has to be stored as %email%; a plain Link to User stores the bare
-    // email. The picker handles both and displays "First Last" either way.
-    return h(UserFilterSelect, {
-      value: f.value,
-      wildcard: ['like', 'not like'].includes(operator),
-    })
+    // Single-value operators (equals / not equals) on a Link to User: one
+    // person, shown by name instead of as a raw email.
+    return h(UserFilterSelect, { value: f.value, wildcard: false })
   } else if (['like', 'not like', 'in', 'not in'].includes(operator)) {
     return h(FormControl, { type: 'text' })
   } else if (typeSelect.includes(fieldtype) || typeCheck.includes(fieldtype)) {
@@ -673,6 +687,12 @@ function clearfilter(close) {
 function updateValue(value, filter) {
   // Date pickers emit null when cleared, so this can't assume an object.
   value = value?.target ? value.target.value : value
+  // A multi-select answers a single-value `like` filter with a list — promote
+  // the operator so the two agree. This is the path a saved import-list view
+  // takes the moment you touch its picker.
+  if (Array.isArray(value) && ['like', 'not like'].includes(filter.operator)) {
+    filter.operator = filter.operator === 'not like' ? 'not in' : 'in'
+  }
   if (filter.operator === 'between') {
     filter.value =
       typeof value === 'string'
@@ -746,7 +766,7 @@ function transformIn(f) {
 function placeholder(f) {
   // A picker gets a "pick something" prompt, not the comma-separated example
   // the free-text `in` control needs.
-  if (['in', 'not in'].includes(f.operator) && multiSelectOptions(f.field)) {
+  if (MULTI_OPERATORS.includes(f.operator) && multiSelectOptions(f.field)) {
     if (isUserField(f.field)) return __('Select users')
     if (f.field.fieldname === 'import_lists') return __('Select lists')
     return __('Select options')
