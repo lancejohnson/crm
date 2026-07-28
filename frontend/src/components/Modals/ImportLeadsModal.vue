@@ -117,6 +117,23 @@
           />
         </div>
 
+        <div
+          v-if="warnings.length"
+          class="flex flex-col gap-1 rounded-md bg-surface-amber-1 px-3 py-2.5"
+        >
+          <div class="flex items-center gap-2 text-xs font-medium text-ink-amber-3">
+            <AlertIcon class="size-3.5 shrink-0" />
+            {{ __('Check the mapping before importing') }}
+          </div>
+          <div
+            v-for="(w, i) in warnings"
+            :key="i"
+            class="pl-5 text-xs leading-relaxed text-ink-gray-7"
+          >
+            {{ w }}
+          </div>
+        </div>
+
         <div class="max-h-[22rem] overflow-auto rounded border border-outline-gray-2">
           <table class="w-full text-sm">
             <thead class="sticky top-0 bg-surface-gray-2">
@@ -217,7 +234,7 @@
         <div class="text-sm text-ink-gray-6">
           {{
             __(
-              'New leads are parked out of the main Leads view. They move onto the main board automatically as soon as someone works one (status leaves “New”).',
+              'New leads are parked out of the main Leads view and off the dashboard. Work them on their own list; use “Add to main board” on the list banner or the lead itself when one is ready to join the main board.',
             )
           }}
         </div>
@@ -267,6 +284,7 @@
 
 <script setup>
 import CircleCheckIcon from '~icons/lucide/circle-check'
+import AlertIcon from '~icons/lucide/triangle-alert'
 import {
   call,
   createResource,
@@ -421,10 +439,22 @@ const ALIASES = {
   squarefeet: 'square_footage',
   yearofconstruction: 'year_built',
   yearbuilt: 'year_built',
-  sellermotivation: 'property_reason_for_sell',
-  reasonforselling: 'property_reason_for_sell',
-  howfasttheywanttosell: 'property_duration_to_sell',
+  // These four used to point at property_reason_for_sell /
+  // property_duration_to_sell, which are not fields on CRM Lead — so guessField
+  // rejected them (it only accepts an alias the field list offers) and every
+  // Seller Motivation / Timeline column was silently dropped on every import to
+  // date. The real fieldnames have no `property_` prefix.
+  sellermotivation: 'reason_for_sell',
+  reasonforselling: 'reason_for_sell',
+  motivation: 'reason_for_sell',
+  howfasttheywanttosell: 'duration_to_sell',
+  timeline: 'duration_to_sell',
+  timelinetosell: 'duration_to_sell',
+  ownershipduration: 'duration_of_ownership',
+  howlonghavetheyowned: 'duration_of_ownership',
   anyonelivinginthehouse: 'property_occupied_by',
+  occupiedby: 'property_occupied_by',
+  askingprice: 'asking_price',
   leadcost: 'lead_cost',
   cost: 'lead_cost',
   notes: 'lead_summary',
@@ -521,6 +551,129 @@ function sampleFor(i) {
   const r = parsed.value.rows.find((r) => String(r[i] || '').trim())
   return r ? String(r[i]).slice(0, 40) : '—'
 }
+
+/* ── pre-flight checks on the mapping ──────────────────────────────────────
+   The Jun 2026 LeadPack went in with 88 whole street addresses in the ZIP
+   column and 31 seller emails in Property Address, and the importer said
+   nothing — it wrote every cell wherever the mapping pointed and reported
+   "514 created". These checks read the actual values against the field each
+   column is mapped to and say so BEFORE anything is written. They warn, they
+   never block: a vendor sheet is always a bit odd somewhere, and the person
+   looking at it knows more than the heuristic does. ── */
+
+const SHAPE = {
+  email: /^[^@\s;,]+@[^@\s;,]+\.[A-Za-z]{2,}$/,
+  // "56 Mary Ln Apt 5, Bridgewater, MA 02324"
+  fullAddress: /^.+,\s*[^,]+,\s*[A-Za-z]{2}\.?\s+\d{5}(-\d{4})?$/,
+  zip: /^\d{3,5}(-\d{4})?$/,
+  phone: /^[+(]?\d[\d\s().-]{7,}$/,
+}
+
+function shapeOf(v) {
+  if (SHAPE.email.test(v)) return 'email'
+  if (SHAPE.fullAddress.test(v)) return 'fullAddress'
+  if (SHAPE.zip.test(v)) return 'zip'
+  if (SHAPE.phone.test(v)) return 'phone'
+  return 'text'
+}
+
+// What each field can legitimately hold. Anything not listed is unconstrained.
+const EXPECTED = {
+  email: ['email'],
+  mobile_no: ['phone'],
+  phone: ['phone'],
+  property_address: ['fullAddress', 'text'],
+  property_city: ['text'],
+  property_state: ['text'],
+  property_zip: ['zip'],
+  property_county: ['text'],
+  first_name: ['text'],
+  last_name: ['text'],
+}
+
+function fieldLabel(v) {
+  return fieldOptions.value.find((f) => f.value === v)?.label || v
+}
+
+// Majority shape of a column's first 60 non-empty values.
+function columnShape(i) {
+  const seen = {}
+  let n = 0
+  for (const r of parsed.value.rows) {
+    const v = String(r[i] ?? '').trim()
+    if (!v) continue
+    seen[shapeOf(v)] = (seen[shapeOf(v)] || 0) + 1
+    if (++n >= 60) break
+  }
+  if (!n) return null
+  const [top, count] = Object.entries(seen).sort((a, b) => b[1] - a[1])[0]
+  return { shape: top, share: count / n, total: n }
+}
+
+const warnings = computed(() => {
+  const out = []
+  const headers = parsed.value.headers
+  if (!headers.length) return out
+
+  // 1. Rows whose cell count doesn't match the header — the classic cause of a
+  //    whole batch landing one column over.
+  const ragged = parsed.value.rows.filter((r) => r.length !== headers.length).length
+  if (ragged) {
+    out.push(
+      `${ragged} ${__('of')} ${parsed.value.rows.length} ${__(
+        'rows have a different number of columns than the header row — their values will land in the wrong fields. Check the file for a second header row or a stray delimiter.',
+      )}`,
+    )
+  }
+
+  // 2. Two columns writing the same field: only the last non-empty one survives.
+  const byField = {}
+  mapping.value.forEach((f, i) => {
+    if (f) (byField[f] ||= []).push(headers[i] || `#${i + 1}`)
+  })
+  for (const [f, cols] of Object.entries(byField)) {
+    if (cols.length > 1) {
+      out.push(
+        `${__('Columns')} “${cols.join('”, “')}” ${__(
+          'all import as',
+        )} “${fieldLabel(f)}” — ${__('only the last non-empty value is kept.')}`,
+      )
+    }
+  }
+
+  // 3. A column whose values don't look like the field it's mapped to.
+  mapping.value.forEach((f, i) => {
+    if (!f || !EXPECTED[f]) return
+    const s = columnShape(i)
+    if (!s || s.share < 0.6 || EXPECTED[f].includes(s.shape)) return
+    const what = {
+      email: __('email addresses'),
+      fullAddress: __('full street addresses'),
+      zip: __('ZIP codes'),
+      phone: __('phone numbers'),
+      text: __('plain text'),
+    }[s.shape]
+    out.push(
+      `${__('Column')} “${headers[i] || `#${i + 1}`}” ${__('holds')} ${what} ${__(
+        'but is mapped to',
+      )} “${fieldLabel(f)}”.`,
+    )
+  })
+
+  // 4. Columns with data that nothing is being done with.
+  const ignored = headers
+    .map((h, i) => (!mapping.value[i] && columnShape(i) ? h || `#${i + 1}` : null))
+    .filter(Boolean)
+  if (ignored.length) {
+    out.push(
+      `${__('Not imported')}: “${ignored.join('”, “')}” — ${__(
+        'these columns have data but no field selected.',
+      )}`,
+    )
+  }
+
+  return out
+})
 
 function onFile(e) {
   const file = e.target.files?.[0]

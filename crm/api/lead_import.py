@@ -311,6 +311,15 @@ def import_leads(
 					f"{row['lead_summary']} · {note}" if row.get("lead_summary") else note
 				)
 
+		# Put the address block straight even when the sheet didn't. Vendor packs
+		# mix layouts within one file — the Jun 2026 LeadPack landed 88 whole
+		# street addresses in the ZIP column and 31 seller emails in Property
+		# Address / Property City — and column mapping alone can't catch that,
+		# because it varies row by row. `_repair_one` only ever moves a value it
+		# can positively identify (and restores ZIPs whose leading zero the
+		# spreadsheet ate), so a correctly-shaped row passes through untouched.
+		row.update({k: v for k, v in _repair_one(row).items() if k in allowed})
+
 		phone_k = _phone_key(row.get("mobile_no") or row.get("phone"))
 		email_k = _email_key(row.get("email"))
 
@@ -489,6 +498,212 @@ def unhide_leads(list_name: str | None = None, leads=None):
 		frappe.db.set_value(LEAD, n, "import_hidden", 0, update_modified=False)
 	frappe.db.commit()
 	return {"updated": len(names)}
+
+
+# ---------------------------------------------------------------- repair
+#
+# The Jun 2026 LeadPack came in with the address block scrambled on part of the
+# batch: 88 leads had the whole street address sitting in `property_zip` with
+# `property_address` empty (or holding the seller's EMAIL), and every
+# leading-zero ZIP (MA/NJ/RI/CT) had arrived as a 4-digit number because the
+# source cells were numeric.
+#
+# The damage is self-describing — a full address carries its own city/state/ZIP
+# — so it can be undone deterministically rather than re-imported. Everything
+# below only ever moves a value that is provably in the wrong field; a value
+# that already looks right for its field is never touched.
+
+# "1218 Tobin Ct, Waukegan, IL 60085" / "56 Mary Ln Apt 5, Bridgewater, MA 02324"
+FULL_ADDR_RE = re.compile(
+	r"^(?P<street>.+?),\s*(?P<city>[^,]+),\s*(?P<state>[A-Za-z]{2})\.?\s+(?P<zip>\d{5})(?:-\d{4})?$"
+)
+# Some rows carry a Google-style ", USA" tail ("Mill St, Marion, MA 02738, USA")
+# which would otherwise defeat the match above and strand the address.
+COUNTRY_TAIL_RE = re.compile(r",\s*(usa|us|united states)\.?$", re.I)
+ZIP_RE = re.compile(r"^\d{5}(-\d{4})?$")
+
+ADDRESS_FIELDS = (
+	"property_address",
+	"property_city",
+	"property_state",
+	"property_zip",
+	"property_county",
+)
+
+# Placeholders vendors use for "we don't have this".
+NULL_TEXT = {"not provided", "n/a", "na", "none", "null", "-", "--"}
+
+
+def _looks_like_zip(value: str) -> bool:
+	return bool(ZIP_RE.fullmatch(value))
+
+
+def _looks_like_street(value: str) -> bool:
+	"""House-number-led ("7005 156th Ave NW") or comma-separated.
+
+	Deliberately strict, because this is what decides whether a value may be
+	lifted out of the City column — and a bare town name ("Waukegan") belongs
+	there, so it must not qualify.
+	"""
+	return bool(re.match(r"^\d+\S*\s+\S", value)) or "," in value
+
+
+def _pad_zip(value: str) -> str:
+	"""02324 arrives as 2324 whenever the sheet stored the ZIP as a number.
+
+	Only 3- and 4-digit runs are padded: those are unambiguous (no US ZIP has
+	fewer than 5 digits), whereas a longer run is something else entirely and is
+	left alone for a human to look at.
+	"""
+	if re.fullmatch(r"\d{3,4}", value):
+		return value.zfill(5)
+	return value
+
+
+def _repair_one(doc: dict) -> dict:
+	"""Return {field: corrected_value} for one lead — empty when nothing is wrong.
+
+	The one rule this must never break: a value is only ever cleared out of a
+	field if it has been written somewhere else, or it is a placeholder. A cell
+	we can't classify stays exactly where it is for a human to look at — a wrong
+	address is recoverable, a deleted one isn't.
+	"""
+	vals = {f: str(doc.get(f) or "").strip() for f in ADDRESS_FIELDS}
+	desired = dict(vals)
+	email = str(doc.get("email") or "").strip()
+	summary = str(doc.get("lead_summary") or "").strip()
+	new_email, spare_emails = None, []
+
+	# 1. An email that landed in an address field. Rescue it onto `email` when
+	#    the lead has none, then clear it out of where it doesn't belong. A
+	#    second address the lead can't hold is parked in the summary rather than
+	#    binned (same as the importer does with junk Email cells).
+	for f in ADDRESS_FIELDS:
+		v = desired[f]
+		if v and _valid_email(v):
+			if not email and not new_email:
+				new_email = v.lower()
+			else:
+				spare_emails.append(v)
+			desired[f] = ""
+
+	# 2. Drop vendor placeholders so they don't survive as a "value".
+	for f in ADDRESS_FIELDS:
+		if desired[f].lower() in NULL_TEXT:
+			desired[f] = ""
+
+	# 3. A complete address is authoritative wherever it turns up: it re-seeds
+	#    address/city/state/ZIP in one go. Prefer the one already in
+	#    property_address so a correct lead is a no-op.
+	match, src, full = None, None, None
+	for f in ("property_address", "property_zip", "property_city", "property_county"):
+		candidate = COUNTRY_TAIL_RE.sub("", desired[f]).strip()
+		m = FULL_ADDR_RE.match(candidate)
+		if m:
+			match, src, full = m, f, candidate
+			break
+
+	if match:
+		if src != "property_address":
+			desired[src] = ""
+		desired["property_address"] = full
+		city = match.group("city").strip()
+		state = match.group("state").upper()
+		zip_code = match.group("zip")
+		# The parsed parts win over a blank or a demonstrably wrong cell only —
+		# a city the team may have corrected by hand is left as it is.
+		if not desired["property_city"] or desired["property_city"] == full:
+			desired["property_city"] = city
+		if not desired["property_state"]:
+			desired["property_state"] = state
+		if not _looks_like_zip(_pad_zip(desired["property_zip"])):
+			desired["property_zip"] = zip_code
+	elif not desired["property_address"]:
+		# No parseable full address, but a street line may still be sitting in
+		# the ZIP or City column with nothing in the address field. Anything in
+		# the ZIP column that isn't a ZIP is misfiled by definition; the City
+		# column needs the stricter test so a real town name stays put.
+		leftover = desired["property_zip"]
+		if leftover and not _looks_like_zip(_pad_zip(leftover)):
+			desired["property_address"] = leftover
+			desired["property_zip"] = ""
+		elif desired["property_city"] and _looks_like_street(desired["property_city"]):
+			desired["property_address"] = desired["property_city"]
+			desired["property_city"] = ""
+
+	# 4. Restore a ZIP's stripped leading zero. Anything still left in there that
+	#    isn't a ZIP is left alone — step 3 already moved out everything we could
+	#    identify, so what remains is unknown, not junk.
+	desired["property_zip"] = _pad_zip(desired["property_zip"])
+
+	changes = {f: v for f, v in desired.items() if v != vals[f]}
+	if new_email:
+		changes["email"] = new_email
+	if spare_emails:
+		note = "Other contact: " + ", ".join(spare_emails)
+		changes["lead_summary"] = f"{summary} · {note}" if summary else note
+	return changes
+
+
+@frappe.whitelist()
+def repair_import_addresses(list_name: str | None = None, dry_run: int = 1, limit: int = 0):
+	"""Move mis-filed address values back into the right fields on imported leads.
+
+	Scoped to leads carrying an `import_lists` tag (optionally one list). Writes
+	with `db.set_value(update_modified=False)` — no `doc.save`, so no status,
+	assignment or realtime side-effects, and nothing jumps into anyone's
+	"recently touched" view. Dry-run by default; returns a sample of the diffs.
+
+	    bench execute crm.api.lead_import.repair_import_addresses \
+	        --kwargs '{"list_name": "ISTL LeadPack — Jun 2026", "dry_run": 1}'
+	"""
+	_validate_access()
+	if not _has("import_lists"):
+		return {"scanned": 0, "changed": 0, "samples": []}
+
+	filters = {"import_lists": ["is", "set"]}
+	if list_name:
+		filters = {"import_lists": ["like", f'%"{list_name}"%']}
+
+	rows = frappe.get_all(
+		LEAD,
+		filters=filters,
+		fields=["name", "email", "lead_summary", *ADDRESS_FIELDS],
+		limit_page_length=int(limit) or 0,
+		order_by="creation asc",
+	)
+
+	changed, samples = 0, []
+	field_counts = {}
+	for row in rows:
+		changes = _repair_one(row)
+		if not changes:
+			continue
+		changed += 1
+		for f in changes:
+			field_counts[f] = field_counts.get(f, 0) + 1
+		if len(samples) < 15:
+			samples.append(
+				{
+					"name": row["name"],
+					"before": {f: row.get(f) for f in changes},
+					"after": changes,
+				}
+			)
+		if not int(dry_run):
+			for field, value in changes.items():
+				frappe.db.set_value(LEAD, row["name"], field, value, update_modified=False)
+
+	if not int(dry_run):
+		frappe.db.commit()
+
+	return {
+		"dry_run": bool(int(dry_run)),
+		"scanned": len(rows),
+		"changed": changed,
+		"fields": field_counts,
+		"samples": samples,
+	}
 
 
 def apply_import_visibility(doctype: str, filters: dict):
