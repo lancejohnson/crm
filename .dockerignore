@@ -1,0 +1,24 @@
+# The build context is produced by `git archive HEAD`, so most of this is
+# already excluded. Kept so that building straight from a working tree (e.g.
+# `docker build .` while debugging) behaves the same way.
+
+.git
+.github
+.claude
+.devcontainer
+.vscode
+.worktrees
+**/node_modules
+**/__pycache__
+**/*.pyc
+frontend/dev-dist
+
+# Build output -- regenerated inside the image. Shipping the local copy would
+# put whatever was last built on this laptop into the context.
+crm/public/frontend
+crm/www/crm.html
+
+# Local-only scaffolding (compile-gate stubs, git worktrees)
+sites
+docs
+*.md
