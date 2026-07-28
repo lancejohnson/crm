@@ -1378,10 +1378,20 @@ create, text or delete is real. And realtime almost certainly won't work:
 tries `localhost:9000` instead of going through the proxy. Live task/SMS
 updates won't fire; everything else does.
 
-**Don't try to make `yarn build` faster — it's irreducible.** Measured: baseline
-42s, `--minify false` 39s, `--sourcemap false` 39s, both 41s, dropping
-vite-plugin-pwa 38s. It's rollup over 353 components. `lucideIcons: false`
-just fails the build. The only real speedup is not building, hence the above.
+**Don't tune `yarn build` flags — they do nothing.** Measured on Vite 5:
+baseline 42s, `--minify false` 39s, `--sourcemap false` 39s, both 41s, dropping
+vite-plugin-pwa 38s. `lucideIcons: false` just fails the build. Sourcemaps are
+68% of output SIZE but almost none of the TIME, so they stay on.
+
+**The bundler is Vite 8 (Rolldown), ahead of upstream** — adopted 2026-07-28,
+~40s → ~25s (36s → 18s best case). Upstream frappe/crm is still on vite ^5.4.21
+and frappe-ui's develop only reached vite ^7, with no Rolldown work in flight,
+so a rebase may try to drag this backwards — keep the pins.
+**`vite-plugin-pwa` must stay >= 1.x.** On 0.21.x the build still *succeeds*
+under Rolldown but silently drops `registerSW.js` and `manifest.webmanifest`,
+so the self-destroying service worker never registers and users get stale
+bundles from an old SW — the exact bug `selfDestroying` exists to prevent, and
+invisible unless you diff the output.
 
 `scripts/verify_no_drift.py` (also run by `smoke_test.py`) asserts prod matches
 this repo file-for-file. It exists because the old `docker cp`-based deploy had
