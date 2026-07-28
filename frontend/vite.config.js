@@ -93,7 +93,15 @@ export default defineConfig(async ({ mode }) => {
       jinjaBootData: true,
       buildConfig: {
         indexHtmlPath: '../crm/www/crm.html',
-        emptyOutDir: true,
+        // Do NOT wipe the output dir. Every chunk is content-hashed, and a
+        // deploy re-hashes nearly all of them (measured gw221 -> gw223: 124 of
+        // 127 chunks changed name), so emptying the dir deletes the exact files
+        // that every currently-open tab is still lazily importing. The next
+        // route a rep navigated to 404'd and the SPA threw — losing whatever
+        // they'd typed and not yet saved. Leaving old chunks in place lets open
+        // sessions run to completion; they pick up the new bundle on reload.
+        // Old assets are pruned separately rather than on every build.
+        emptyOutDir: false,
         sourcemap: true,
       },
     }),
