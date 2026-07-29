@@ -1384,11 +1384,22 @@ link then hand-edit the host to `http://localhost:8080/...` before opening it �
 the key is validated server-side and the Set-Cookie comes back through the
 proxy with the domain rewritten.
 
-**Two more caveats.** You are hitting the real production database — anything
-you create, text or delete is real. And realtime almost certainly won't work:
-`socket.js` builds the socket URL from `window.location`, so on port 8080 it
-tries `localhost:9000` instead of going through the proxy. Live task/SMS
-updates won't fire; everything else does.
+**Caveat: you are on the real production database** — anything you create, text
+or delete is real.
+
+**Known dev-only breakage: the Lead/Deal Activity feed hangs on "Loading…".**
+`all_activities` never leaves `loading`, even though
+`crm.api.activities.get_activities` returns 200 and every other request on the
+page succeeds. Verified dev-only — the same lead renders fine on prod. Not yet
+root-caused; everything else (dashboard, kanban, sidebar, routing, realtime)
+works. Use a deploy to exercise the activity timeline.
+
+**Realtime DOES work in dev** (verified end-to-end: created a task via the API
+from outside the browser and the tab's `$socket` received `crm_task_update`).
+It needs all three of: socket.js using the current origin, `window.site_name`
+injected by the crm-dev-boot plugin (it is the socket.io NAMESPACE — without it
+you silently connect to `/undefined`), and `socketio: false` on the FrappeUI
+plugin so frappe-ui's own `:9000` socket doesn't fight it.
 
 **Don't tune `yarn build` flags — they do nothing.** Measured on Vite 5:
 baseline 42s, `--minify false` 39s, `--sourcemap false` 39s, both 41s, dropping
