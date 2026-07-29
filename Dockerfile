@@ -12,7 +12,7 @@
 # upstream's image CI is broken for everything after v1.67.0.
 ARG BASE_IMAGE=ghcr.io/frappe/crm:v1.67.0
 
-FROM ${BASE_IMAGE}
+FROM ${BASE_IMAGE} AS builder
 ARG APP=/home/frappe/frappe-bench/apps/crm
 
 # LAYER ORDER IS LOAD-BEARING. `yarn build` is ~40s and by far the most
@@ -73,8 +73,24 @@ RUN CSC=/home/frappe/frappe-bench/sites/common_site_config.json \
  && NODE_OPTIONS=--max-old-space-size=2048 yarn build \
  && cp /tmp/csc.orig "$CSC" && rm /tmp/csc.orig
 
-# Below the build on purpose (see above). .dockerignore keeps crm/public/frontend
-# out of the context, so this cannot clobber what yarn build just produced.
+# ---- final stage --------------------------------------------------------
+# Only the BUILT OUTPUT crosses over, so the 1.59 GB yarn-install layer never
+# ships: 5.89 GB -> 3.74 GB. Costs nothing in build time -- measured 28s vs 28s
+# on a frontend change and ~2s vs ~2s on a backend-only change, because the
+# expensive layers are identical and BuildKit caches them either way.
+#
+# CAVEAT: node_modules in this final image is the BASE's (vite 5), not the
+# vite 8 tree the bundle was built with -- that stayed in the builder. Nothing
+# at runtime uses it and verify_no_drift.py excludes it, but a `yarn build` run
+# by hand INSIDE a running container would silently use vite 5. Build images,
+# don't build in containers (which is the entire point of this Dockerfile).
+FROM ${BASE_IMAGE}
+ARG APP=/home/frappe/frappe-bench/apps/crm
+COPY --from=builder --chown=frappe:frappe ${APP}/crm/public/frontend ${APP}/crm/public/frontend
+COPY --from=builder --chown=frappe:frappe ${APP}/crm/www/crm.html ${APP}/crm/www/crm.html
+# Source still has to be present: verify_no_drift.py compares BOTH crm/ and
+# frontend/ against the repo. .dockerignore keeps node_modules out of this.
+COPY --chown=frappe:frappe frontend/ ${APP}/frontend/
 COPY --chown=frappe:frappe crm/ ${APP}/crm/
 
 # DEAD LAST, and it has to stay here. GIT_REV changes on every single commit,
