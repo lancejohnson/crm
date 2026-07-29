@@ -1051,6 +1051,22 @@ duplicating. Work substantial features in a worktree of your own.
     directly rather than threaded through the AllModals→Activities expose chain,
     since nothing else opens it). Deletes are `trashed=true` (recoverable), and
     only for files actually parented by that lead's folder.
+  - **GOTCHA — `pages/MobileLead.vue` is a SEPARATE page**, not a responsive
+    variant of `Lead.vue`: below 768px the router renders it instead, and it
+    re-declares its own copy of the sidebar cards (First-Call Read / Tax Info /
+    Agreements / Underwriting / InvestorLift) plus its own `AllModals` host
+    (`detailModals`, since mobile tabs are mutually exclusive so `Activities`
+    isn't always mounted). Adding a card to `Lead.vue` alone makes it **invisible
+    on every phone** — which is exactly what shipped in gw245 and Lance caught.
+    Any new sidebar card must be added in BOTH files. Note also that the header
+    action row on mobile renders only Call + Text — there is no `More ▾` menu, so
+    a More-menu entry is not a mobile-reachable entry point on its own.
+    Mobile reaches the sidebar through a **Details** tab (first tab).
+  - **Verifying phone layouts through the pi-chrome extension**: the extension
+    pins the automation tab's viewport at desktop width, but
+    `window.open(url, 'name', 'popup=yes,width=390,height=844')` gives a genuine
+    390px viewport that `chrome_screenshot({targetId})` can capture — how the
+    mobile gap above was found and the fix confirmed.
   - Ops (`../frappe-crm-deploy`): `scripts/setup_lead_photos.py` adds the CRM Lead
     `photo_folder_id` / `photo_folder_url` cache fields. They are a CACHE, not the
     source of truth — everything is `has_field`-guarded and falls back to

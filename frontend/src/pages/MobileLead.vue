@@ -184,6 +184,7 @@
             :setAt="doc.first_call_at"
             @saved="document.reload()"
           />
+          <PhotosCard :lead="leadId" @open="showPhotoGallery = true" />
           <TaxInfoCard :lead="leadId" @fetch="detailModals?.fetchTaxInfo()" />
           <AgreementsCard
             :lead="leadId"
@@ -250,6 +251,12 @@
     doctype="CRM Lead"
     :document="document"
   />
+  <PhotoGalleryModal
+    v-if="showPhotoGallery"
+    v-model="showPhotoGallery"
+    :lead="leadId"
+    :address="doc.property_address"
+  />
 </template>
 <script setup>
 import DeleteLinkedDocModal from '@/components/DeleteLinkedDocModal.vue'
@@ -277,6 +284,8 @@ import SidePanelLayout from '@/components/SidePanelLayout.vue'
 import SLASection from '@/components/SLASection.vue'
 import CustomActions from '@/components/CustomActions.vue'
 import FirstCallReadCard from '@/components/FirstCallReadCard.vue'
+import PhotosCard from '@/components/PhotosCard.vue'
+import PhotoGalleryModal from '@/components/Modals/PhotoGalleryModal.vue'
 import TaxInfoCard from '@/components/TaxInfoCard.vue'
 import AgreementsCard from '@/components/AgreementsCard.vue'
 import UnderwritingCard from '@/components/UnderwritingCard.vue'
@@ -322,6 +331,9 @@ const props = defineProps({
 const errorTitle = ref('')
 const errorMessage = ref('')
 const showDeleteLinkedDocModal = ref(false)
+// Property photos (shared Google Drive). Mobile Details renders its own copy of
+// the sidebar cards, so the gallery modal is mounted here too — see Lead.vue.
+const showPhotoGallery = ref(false)
 
 const {
   triggerOnChange,
