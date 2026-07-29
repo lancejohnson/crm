@@ -209,7 +209,14 @@ export default defineConfig(async ({ mode }) => {
       // "localhost does not exist" otherwise); cookieDomainRewrite so the
       // session cookie the remote sets is accepted on localhost.
       ...(remoteTarget && {
-        port: 8080,
+        // strictPort so a collision FAILS instead of silently bumping to 8081.
+        // Several agents/worktrees run dev servers side by side here, and a
+        // silent bump is the worst outcome: you open 8080 and get a DIFFERENT
+        // worktree's bundle, with no indication anything is wrong. Give each
+        // worktree its own port -- CRM_DEV_PORT=8081 yarn dev -- the same way
+        // the Electron apps pin theirs.
+        port: Number(process.env.CRM_DEV_PORT || 8080),
+        strictPort: true,
         proxy: {
           '^/(api|assets|files|private|login|app|desk|socket.io)': {
             target: remoteTarget,

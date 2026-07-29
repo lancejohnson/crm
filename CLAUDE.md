@@ -1413,6 +1413,36 @@ Harmless leftover: one console error, `Unexpected token '<'`, from a call to
 `frappe.onboarding.get_onboarding_status` made with a RELATIVE url — it resolves
 against the current route, hits vite, and gets index.html back.
 
+### Several agents / worktrees at once
+
+```bash
+CRM_DEV_PORT=8081 CRM_DEV_TARGET=https://crm.groundworkpro.com yarn dev
+```
+
+- **One port per worktree.** `strictPort: true`, so a collision fails with
+  `Port 8080 is already in use` rather than quietly bumping to 8081 — the same
+  rule as the Electron apps, for the same reason: a silent bump means you open
+  8080 and get a *different worktree's* bundle with nothing to indicate it.
+  Convention: main repo 8080, extra worktrees 8081, 8082…
+- **Put worktrees OUTSIDE Dropbox** (`~/crm-worktrees/…`, not `.worktrees/`
+  inside the repo). Each needs its own `node_modules`, and ~400 MB landing in a
+  synced folder sends Dropbox + Spotlight to ~50% CPU each and load average past
+  10 — it silently doubled build times mid-measurement.
+- **`node_modules` per worktree is now mandatory**, not optional: the fork pins
+  its own vite/plugin versions, so a worktree on an older commit genuinely needs
+  a different tree. Don't symlink a shared one.
+- **The `sites/common_site_config.json` stub is no longer needed.** Nothing
+  imports it since socket.js stopped reading `socketio_port` — a worktree builds
+  with no scaffolding at all.
+- **Deploys serialise safely.** `build_image.sh` takes a machine-wide lock
+  (`/tmp/frappe-crm-build.lock`), the next `gwN` is read from the SERVER's pin
+  so two agents can't collide on a tag, and each build ships its OWN worktree
+  via `git stash create`. The shared `crm-assets` volume is additive, so one
+  agent's deploy never deletes another's chunks.
+- The dev API token is shared (Infisical), so every agent's dev server acts as
+  the same user. Fine on one laptop; worth remembering if a session looks like
+  it is "someone else's" activity.
+
 **Don't tune `yarn build` flags — they do nothing.** Measured on Vite 5:
 baseline 42s, `--minify false` 39s, `--sourcemap false` 39s, both 41s, dropping
 vite-plugin-pwa 38s. `lucideIcons: false` just fails the build. Sourcemaps are
