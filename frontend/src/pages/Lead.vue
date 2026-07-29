@@ -294,6 +294,7 @@
         :setAt="doc.first_call_at"
         @saved="document.reload()"
       />
+      <PhotosCard :lead="leadId" @open="showPhotoGallery = true" />
       <TaxInfoCard :lead="leadId" @fetch="activities?.fetchTaxInfo()" />
       <AgreementsCard :lead="leadId" @create="activities?.createAgreement()" />
       <UnderwritingCard
@@ -349,6 +350,12 @@
     doctype="CRM Lead"
     :document="document"
   />
+  <PhotoGalleryModal
+    v-if="showPhotoGallery"
+    v-model="showPhotoGallery"
+    :lead="leadId"
+    :address="doc.property_address"
+  />
 </template>
 <script setup>
 import DeleteLinkedDocModal from '@/components/DeleteLinkedDocModal.vue'
@@ -380,6 +387,8 @@ import SidePanelLayout from '@/components/SidePanelLayout.vue'
 import SLASection from '@/components/SLASection.vue'
 import CustomActions from '@/components/CustomActions.vue'
 import FirstCallReadCard from '@/components/FirstCallReadCard.vue'
+import PhotosCard from '@/components/PhotosCard.vue'
+import PhotoGalleryModal from '@/components/Modals/PhotoGalleryModal.vue'
 import TaxInfoCard from '@/components/TaxInfoCard.vue'
 import AgreementsCard from '@/components/AgreementsCard.vue'
 import UnderwritingCard from '@/components/UnderwritingCard.vue'
@@ -573,8 +582,21 @@ const moreActions = computed(() => {
         ? activities.value?.createUnderwriting()
         : toast.error(__('Set a property address to create an underwriting sheet')),
   })
+  items.push({
+    label: __('Photos'),
+    icon: 'image',
+    onClick: () =>
+      d.property_address
+        ? (showPhotoGallery.value = true)
+        : toast.error(__('Set a property address to add photos')),
+  })
   return items
 })
+
+// Property photos live in the shared Wholesaling Drive, not in Frappe — the
+// gallery modal is mounted here rather than threaded through AllModals because
+// nothing else needs to open it.
+const showPhotoGallery = ref(false)
 
 onMounted(async () => {
   if (document.doc) await triggerOnRender()

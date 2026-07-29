@@ -1008,6 +1008,55 @@ duplicating. Work substantial features in a worktree of your own.
     spellings render an EMPTY rep-chip row — read `usersStoreRef.allUsers`
     inside the computed. Fixed in `ImportLeadsModal.vue` as well.
   - No ops script: every field written already exists.
+- **Lead property photos → shared Google Drive** — a **Photos** sidebar card +
+  **Photos** item in the Lead header More ▾ menu open a gallery modal: drag-drop
+  or pick multiple files, scroll a thumbnail grid, click through them in the
+  existing `ImageLightbox`, **Download all** as one zip, or **Copy folder link**
+  to hand to a listing agent. Photos live in Drive ONLY (nothing mirrored into
+  Frappe's File table).
+  - **Folder** = one per lead, named after the full property address (composed by
+    `agreement._full_property_address`, so a street-only manual lead still gets a
+    fully-qualified name), created inside **`Wholesaling > Info & Photos`**
+    (`INFO_PHOTOS_FOLDER_ID`, config-overridable via `lead_photos_folder_id`) —
+    directly, NOT in that folder's legacy `Photos` subfolder (Lance's call). On
+    creation it gets `type=anyone, role=reader` so the link works with no Google
+    login; files inherit it, so sharing is set exactly once.
+  - **Adoption matches folders only.** `Info & Photos` also holds loose
+    "… Property Info" Google Docs whose names contain the same addresses, so
+    `_find_existing_folder` filters `mimeType=folder` and compares a normalized
+    name (case/punctuation-insensitive, trailing "Photos" dropped — the folders
+    already there are inconsistent about that suffix).
+  - **No new Google grant was needed** — the existing `crm-underwriting@` SA is
+    already a full member of the Wholesaling drive (see the Underwriting entry).
+    `photos.py` reuses `underwriting._google_access_token` rather than repeating
+    the JWT dance.
+  - **Uploads are one HTTP request per file** (resumable Drive upload: metadata
+    POST → session URI → PUT bytes). A 40-photo phone batch is hundreds of MB and
+    a single giant POST is exactly what trips nginx's body limit and loses the
+    whole batch instead of 39-of-40.
+  - **Download-all zips server-side** because Drive has no zip-a-folder API and
+    its web-UI download needs a Google session — the thing link-sharing exists to
+    avoid. Capped at `MAX_ZIP_BYTES` (400 MB), over which the user is pointed at
+    the Drive link. Duplicate filenames (legal in Drive, not in a zip) are
+    de-duped.
+  - Thumbnails render via `drive.google.com/thumbnail?id=…&sz=w400` (works
+    unauthenticated precisely because of the link share); Drive's own
+    `thumbnailLink` is short-lived and referrer-blocked. Videos show a play tile
+    that opens Drive rather than trying to stream inline.
+  - `crm/api/photos.py` (**new**: `get_lead_photos` / `ensure_photo_folder` /
+    `upload_lead_photo` / `delete_lead_photo` / `download_all_photos`; realtime
+    `crm_photos`, site-wide + `after_commit`), `frontend/src/components/PhotosCard.vue`
+    (**new**), `frontend/src/components/Modals/PhotoGalleryModal.vue` (**new**),
+    `frontend/src/pages/Lead.vue` (card + More-menu item + modal mount — mounted
+    directly rather than threaded through the AllModals→Activities expose chain,
+    since nothing else opens it). Deletes are `trashed=true` (recoverable), and
+    only for files actually parented by that lead's folder.
+  - Ops (`../frappe-crm-deploy`): `scripts/setup_lead_photos.py` adds the CRM Lead
+    `photo_folder_id` / `photo_folder_url` cache fields. They are a CACHE, not the
+    source of truth — everything is `has_field`-guarded and falls back to
+    resolving by address, so the feature works before the script runs; what they
+    buy is that a later address edit doesn't orphan the folder.
+
 - **DD Expiration date** (Leads) — `dd_expiration_date` (Date custom field)
   shown as a calendar-icon row in the Lead sidebar HEADER directly under the
   Acq Price row (same minimal no-label formatting): displays
@@ -1209,13 +1258,18 @@ duplicating. Work substantial features in a worktree of your own.
     the read API; `on_workbook_insert` hook mirrors the URL onto the lead
     (`underwriting_url`, has_field-guarded — field not required) + publishes
     `crm_underwriting`. `crm/hooks.py` — `CRM Underwriting Workbook` `after_insert`.
-  - **Credentials**: a dedicated, minimally-scoped Google service account
+  - **Credentials**: a dedicated Google service account
     `crm-underwriting@claude-code-486305.iam.gserviceaccount.com` (key in
     `~/.config/gcloud/crm-underwriting-key.json`). It is **NOT** domain-wide
-    delegated — it's added as a **Content Manager (fileOrganizer) of only the
-    Underwriting Drive folder**, so it can touch that folder + the template (which
-    lives inside it) and nothing else in the org. It **acts as itself** (no `sub`
-    claim): `_google_access_token()` omits `sub` when `google_workspace_subject`
+    delegated. **Its actual reach is much broader than this doc long claimed**
+    (measured 2026-07-29): it is a full member of **8 shared drives** — Wholesaling,
+    Creative Finance, Entitlement, Hiring, Lux, RDF, Swipe, Training — with
+    `canAddChildren`/`canEdit`/`canShare`/`canDeleteChildren` all true on
+    Wholesaling, not "Content Manager of only the Underwriting folder". The
+    Underwriting folder simply sits at the root of the Wholesaling drive. That
+    breadth is what let the lead-photos feature ship with no new grant; it is also
+    worth remembering that this key lives in prod's site config, so a prod
+    compromise reaches all 8 drives. It **acts as itself** (no `sub` claim): `_google_access_token()` omits `sub` when `google_workspace_subject`
     is "" (present-but-empty). The key + empty subject are read from site config
     (`google_sa_json` / `google_workspace_subject`), the `frappe.conf.get` route
     `live_demo.py` uses for `demo_password`. (Legacy: an absent
