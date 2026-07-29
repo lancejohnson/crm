@@ -1372,8 +1372,20 @@ cookie to localhost, hence logging in through the dev server rather than
 reusing your crm.groundworkpro.com tab. Unset the env var and everything
 behaves exactly as before; production builds are unaffected.
 
-**Two caveats.** You are hitting the real production database — anything you
-create, text or delete is real. And realtime almost certainly won't work:
+**Logging in.** Use your password at `localhost:8080` — the cookie is then
+scoped to localhost and persists. **"Login with Email Link" does not work here**
+and fails in two ways: the button silently does nothing if the email field is
+blank (nothing is queued, nothing is logged — and it is rate-limited to 5/hour),
+and even when it does send, `send_login_link` builds the URL with `get_url()`,
+which reads the request `Host`. `changeOrigin` has rewritten that to
+crm.groundworkpro.com, so the emailed link points at PROD and logs you into
+prod, not localhost. If you want the passwordless route anyway, request the
+link then hand-edit the host to `http://localhost:8080/...` before opening it —
+the key is validated server-side and the Set-Cookie comes back through the
+proxy with the domain rewritten.
+
+**Two more caveats.** You are hitting the real production database — anything
+you create, text or delete is real. And realtime almost certainly won't work:
 `socket.js` builds the socket URL from `window.location`, so on port 8080 it
 tries `localhost:9000` instead of going through the proxy. Live task/SMS
 updates won't fire; everything else does.
