@@ -24,3 +24,6 @@ build
 # editor scratch (todo plugin)
 TODO.todo
 .todo-media/
+
+# dev server writes its chosen port here (multi-worktree discovery)
+frontend/.dev-port

@@ -4,6 +4,7 @@ import vueJsx from '@vitejs/plugin-vue-jsx'
 import path from 'path'
 import { execFileSync } from 'child_process'
 import net from 'node:net'
+import fs from 'node:fs'
 import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vitejs.dev/config/
@@ -114,7 +115,10 @@ function devWorktree() {
   } catch {
     /* not a git checkout — the directory name alone still identifies it */
   }
-  return { dir: path.basename(root), branch }
+  // `path` is the authoritative identifier -- two worktrees can share a
+  // basename, and an agent should match on its own resolved root rather than a
+  // display name. `dir` exists only because the badge needs to stay short.
+  return { dir: path.basename(root), branch, path: root }
 }
 const devTree = devWorktree()
 
@@ -161,6 +165,36 @@ export default defineConfig(async ({ mode }) => {
       {
         name: 'crm-dev-boot',
         apply: 'serve',
+        // How an agent finds out which port it ended up on, without having to
+        // scrape its own startup log:
+        //   cat frontend/.dev-port                  -> this worktree's port
+        //   curl -s localhost:<p>/__crm_dev         -> {dir, branch, port}
+        // The second one makes the whole set discoverable: probe 8080-8099 and
+        // each live server names the worktree it is serving, so an agent can
+        // confirm the port really belongs to ITS checkout rather than assume.
+        configureServer(server) {
+          server.middlewares.use('/__crm_dev', (_req, res) => {
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ ...devTree, port: devPort }))
+          })
+          const stamp = path.resolve(__dirname, '.dev-port')
+          const clean = () => {
+            try {
+              fs.unlinkSync(stamp)
+            } catch {
+              /* already gone */
+            }
+          }
+          server.httpServer?.once('listening', () => {
+            try {
+              fs.writeFileSync(stamp, String(devPort))
+            } catch {
+              /* non-fatal: the startup log and /__crm_dev still work */
+            }
+          })
+          for (const sig of ['exit', 'SIGINT', 'SIGTERM']) process.once(sig, clean)
+          server.httpServer?.once('close', clean)
+        },
         transformIndexHtml(html) {
           if (!remoteTarget) return html
           const site = new URL(remoteTarget).hostname

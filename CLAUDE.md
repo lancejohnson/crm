@@ -1428,6 +1428,19 @@ CRM_DEV_TARGET=https://crm.groundworkpro.com yarn dev    # same command in every
   which is the dangerous failure: you open 8080 and get a *different
   worktree's* bundle with nothing to indicate it — the same trap as the
   Electron apps. Now it fails with `Port 8080 is already in use`.
+- **How an agent learns its own port** (never assume 8080):
+  ```bash
+  cat frontend/.dev-port                      # this worktree's port
+  curl -s localhost:<port>/__crm_dev          # {dir, branch, path, port}
+  ```
+  For certainty rather than trust, match on the resolved root — two worktrees
+  can share a basename, and a stale `.dev-port` outlives a crashed server:
+  ```bash
+  ROOT=$(git rev-parse --show-toplevel)
+  for p in $(seq 8080 8099); do
+    curl -s --max-time 1 localhost:$p/__crm_dev | grep -q "\"path\":\"$ROOT\"" && echo $p
+  done
+  ```
 - **Every dev page carries a corner badge** (`<dir> · <branch> · :<port>`,
   bottom-right, `pointer-events:none`). Servers can no longer overlap; the
   badge is what stops *humans* overlapping — judging a change from the wrong
