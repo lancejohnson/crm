@@ -48,6 +48,29 @@ function devToken() {
 }
 const devAuth = devToken()
 
+// Who that token belongs to. Needed because the SPA decides whether you are
+// logged in from the `user_id` COOKIE (stores/session.js and
+// utils/sidebarLinks.js currentUser()) -- never from the API. Token auth
+// authenticates the proxy's requests but leaves the browser cookie-less, so
+// without this the router guard sees isLoggedIn=false, sends you to
+// /login?redirect-to=/crm, which proxies to prod, and prod -- seeing a valid
+// token -- redirects you to its own absolute URL. You end up on the real CRM.
+function devUser() {
+  if (!remoteTarget || !devAuth) return null
+  try {
+    const out = execFileSync(
+      'curl',
+      ['-s', '-H', `Authorization: token ${devAuth}`,
+       `${remoteTarget}/api/method/frappe.auth.get_logged_user`],
+      { encoding: 'utf8', timeout: 20000 },
+    )
+    return JSON.parse(out).message || null
+  } catch {
+    return null
+  }
+}
+const devAuthUser = devUser()
+
 export default defineConfig(async ({ mode }) => {
   const isDev = mode === 'development'
   const config = {
@@ -65,9 +88,18 @@ export default defineConfig(async ({ mode }) => {
         transformIndexHtml(html) {
           if (!remoteTarget) return html
           const site = new URL(remoteTarget).hostname
+          const lines = [`window.site_name = ${JSON.stringify(site)};`]
+          if (devAuthUser) {
+            // Not real auth -- the proxy's Authorization header is what actually
+            // authenticates. This only tells the SPA who it is looking at, so
+            // the router guard stops bouncing to /login.
+            lines.push(
+              `document.cookie = "user_id=" + ${JSON.stringify(devAuthUser)} + "; path=/";`,
+            )
+          }
           return html.replace(
             '</body>',
-            `<script>window.site_name = ${JSON.stringify(site)};</script>\n</body>`,
+            `<script>${lines.join('\n')}</script>\n</body>`,
           )
         },
       },
@@ -156,7 +188,20 @@ export default defineConfig(async ({ mode }) => {
             secure: true,
             ws: true,
             cookieDomainRewrite: '',
-            ...(devAuth && { headers: { Authorization: `token ${devAuth}` } }),
+            ...(devAuth && {
+              headers: { Authorization: `token ${devAuth}` },
+              // Token auth creates no session, so Frappe still answers with
+              // `user_id=Guest; full_name=Guest; sid=Guest` on every response.
+              // Those would overwrite the identity cookie injected below and
+              // the router guard would bounce to /login -> prod. When the
+              // Authorization header is doing the authenticating, response
+              // cookies are noise: drop them.
+              configure(proxy) {
+                proxy.on('proxyRes', (proxyRes) => {
+                  delete proxyRes.headers['set-cookie']
+                })
+              },
+            }),
           },
         },
       }),

@@ -43,7 +43,13 @@ let pinia = createPinia()
 let app = createApp(App)
 
 setConfig('resourceFetcher', frappeRequest)
-app.use(FrappeUI)
+// socketio:false because main.js creates the app's own socket below and
+// overwrites $socket with it -- frappe-ui's instance was left connected but
+// unreferenced (its socketio.js registers no listeners), i.e. a duplicate
+// connection per user in PRODUCTION too. In dev it was worse: frappe-ui's
+// version hardcodes port 9000 and uses the hostname as the site name, so it
+// spammed ERR_CONNECTION_REFUSED against localhost:9000 on every reload.
+app.use(FrappeUI, { socketio: false })
 app.use(pinia)
 app.use(router)
 app.use(translationPlugin)
@@ -56,16 +62,33 @@ app.config.globalProperties.$dialog = createDialog
 
 let socket
 if (import.meta.env.DEV) {
-  frappeRequest({ url: '/api/method/crm.www.crm.get_context_for_dev' }).then(
-    (values) => {
+  // get_context_for_dev throws unless the SERVER has developer_mode on. That is
+  // fine against a local bench, but we develop against production (no local
+  // mirror), where it is off -- and mounting used to live inside .then(), so
+  // the promise rejected, mount() never ran and the page stayed completely
+  // blank with only a ValidationError in the console. Mount regardless: when
+  // the endpoint is unavailable the boot globals come from vite instead (see
+  // the crm-dev-boot plugin in vite.config.js).
+  //
+  // Dev-only branch -- import.meta.env.DEV is false in production builds, so
+  // none of this ships.
+  frappeRequest({ url: '/api/method/crm.www.crm.get_context_for_dev' })
+    .then((values) => {
       for (let key in values) {
         window[key] = values[key]
       }
+    })
+    .catch(() => {
+      console.info(
+        '[crm-dev] get_context_for_dev unavailable (developer_mode off on the ' +
+          'target) — using boot data injected by vite',
+      )
+    })
+    .finally(() => {
       socket = initSocket()
       app.config.globalProperties.$socket = socket
       app.mount('#app')
-    },
-  )
+    })
 } else {
   socket = initSocket()
   app.config.globalProperties.$socket = socket
