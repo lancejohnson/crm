@@ -1416,14 +1416,22 @@ against the current route, hits vite, and gets index.html back.
 ### Several agents / worktrees at once
 
 ```bash
-CRM_DEV_PORT=8081 CRM_DEV_TARGET=https://crm.groundworkpro.com yarn dev
+CRM_DEV_TARGET=https://crm.groundworkpro.com yarn dev    # same command in every worktree
 ```
 
-- **One port per worktree.** `strictPort: true`, so a collision fails with
-  `Port 8080 is already in use` rather than quietly bumping to 8081 — the same
-  rule as the Electron apps, for the same reason: a silent bump means you open
-  8080 and get a *different worktree's* bundle with nothing to indicate it.
-  Convention: main repo 8080, extra worktrees 8081, 8082…
+- **Ports are claimed automatically — agents need no coordination.** Each
+  server takes the first free port in **8080-8099** and prints
+  `[crm-dev] worktree "<dir>" (<branch>) -> http://localhost:<port>/crm`.
+  Run the identical command in five worktrees and you get five servers. Set
+  `CRM_DEV_PORT` only if you want a fixed one; it is then honoured strictly.
+- **`strictPort: true` regardless.** Vite's default is to bump a busy port,
+  which is the dangerous failure: you open 8080 and get a *different
+  worktree's* bundle with nothing to indicate it — the same trap as the
+  Electron apps. Now it fails with `Port 8080 is already in use`.
+- **Every dev page carries a corner badge** (`<dir> · <branch> · :<port>`,
+  bottom-right, `pointer-events:none`). Servers can no longer overlap; the
+  badge is what stops *humans* overlapping — judging a change from the wrong
+  worktree's tab is the realistic mistake once several are open.
 - **Put worktrees OUTSIDE Dropbox** (`~/crm-worktrees/…`, not `.worktrees/`
   inside the repo). Each needs its own `node_modules`, and ~400 MB landing in a
   synced folder sends Dropbox + Spotlight to ~50% CPU each and load average past

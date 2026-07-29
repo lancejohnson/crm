@@ -3,6 +3,7 @@ import vue from '@vitejs/plugin-vue'
 import vueJsx from '@vitejs/plugin-vue-jsx'
 import path from 'path'
 import { execFileSync } from 'child_process'
+import net from 'node:net'
 import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vitejs.dev/config/
@@ -95,8 +96,59 @@ function devSysdefaults() {
 }
 const devDefaults = devSysdefaults()
 
+// Which worktree this server is serving. Shown in a corner badge in dev so a
+// tab can always be identified on sight -- the failure mode with several
+// agents running at once is not a crash, it is looking at the WRONG
+// worktree's UI and drawing conclusions from it.
+function devWorktree() {
+  if (!remoteTarget) return null
+  const root = path.resolve(__dirname, '..')
+  let branch = ''
+  try {
+    branch = execFileSync('git', ['-C', root, 'rev-parse', '--abbrev-ref', 'HEAD'],
+      { encoding: 'utf8', timeout: 5000 }).trim()
+    if (branch === 'HEAD') {
+      branch = execFileSync('git', ['-C', root, 'rev-parse', '--short', 'HEAD'],
+        { encoding: 'utf8', timeout: 5000 }).trim()
+    }
+  } catch {
+    /* not a git checkout — the directory name alone still identifies it */
+  }
+  return { dir: path.basename(root), branch }
+}
+const devTree = devWorktree()
+
+// Port selection. An explicit CRM_DEV_PORT is honoured strictly. Otherwise
+// claim the first free port in 8080-8099, so N agents can each just run
+// `yarn dev` with no coordination and none of them can land on another's.
+// strictPort stays on either way: a collision must fail, never silently bump
+// onto a port that already belongs to a different worktree.
+function portIsFree(port) {
+  return new Promise((resolve) => {
+    const s = net.createServer()
+    s.once('error', () => resolve(false))
+    s.once('listening', () => s.close(() => resolve(true)))
+    s.listen(port, '127.0.0.1')
+  })
+}
+async function resolveDevPort() {
+  if (process.env.CRM_DEV_PORT) return Number(process.env.CRM_DEV_PORT)
+  for (let p = 8080; p <= 8099; p++) {
+    if (await portIsFree(p)) return p
+  }
+  throw new Error('[crm-dev] no free port in 8080-8099')
+}
+
 export default defineConfig(async ({ mode }) => {
   const isDev = mode === 'development'
+  const devPort = remoteTarget ? await resolveDevPort() : undefined
+  if (devTree) {
+    console.info(
+      `[crm-dev] worktree "${devTree.dir}"` +
+        (devTree.branch ? ` (${devTree.branch})` : '') +
+        ` -> http://localhost:${devPort}/crm`,
+    )
+  }
   const config = {
     plugins: [
       // Production renders crm.html through jinja and injects the boot dict as
@@ -126,9 +178,21 @@ export default defineConfig(async ({ mode }) => {
               `document.cookie = "user_id=" + ${JSON.stringify(devAuthUser)} + "; path=/";`,
             )
           }
+          // A corner badge naming the worktree + port. With several agents up
+          // at once the real hazard is not a crash, it is judging a change
+          // from the WRONG worktree's tab. Loud failure on port collision
+          // stops servers overlapping; this stops humans overlapping. Dev
+          // only, pointer-events:none so it can never intercept a click.
+          const badge = devTree
+            ? `<div style="position:fixed;right:6px;bottom:4px;z-index:2147483647;
+                 font:11px ui-monospace,monospace;color:#888;background:rgba(0,0,0,.55);
+                 padding:2px 6px;border-radius:4px;pointer-events:none">
+                 ${devTree.dir}${devTree.branch ? ' · ' + devTree.branch : ''} · :${devPort}
+               </div>`
+            : ''
           return html.replace(
             '</body>',
-            `<script>${lines.join('\n')}</script>\n</body>`,
+            `<script>${lines.join('\n')}</script>\n${badge}\n</body>`,
           )
         },
       },
@@ -209,13 +273,10 @@ export default defineConfig(async ({ mode }) => {
       // "localhost does not exist" otherwise); cookieDomainRewrite so the
       // session cookie the remote sets is accepted on localhost.
       ...(remoteTarget && {
-        // strictPort so a collision FAILS instead of silently bumping to 8081.
-        // Several agents/worktrees run dev servers side by side here, and a
-        // silent bump is the worst outcome: you open 8080 and get a DIFFERENT
-        // worktree's bundle, with no indication anything is wrong. Give each
-        // worktree its own port -- CRM_DEV_PORT=8081 yarn dev -- the same way
-        // the Electron apps pin theirs.
-        port: Number(process.env.CRM_DEV_PORT || 8080),
+        // Auto-claimed free port in 8080-8099 (or CRM_DEV_PORT if you set one).
+        // strictPort either way: a collision must fail, never silently bump
+        // onto a port that already belongs to another worktree.
+        port: devPort,
         strictPort: true,
         proxy: {
           '^/(api|assets|files|private|login|app|desk|socket.io)': {
