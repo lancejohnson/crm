@@ -50,28 +50,18 @@ RUN cd ${APP}/frontend && yarn install --frozen-lockfile
 # prevent, and it is invisible unless you diff the output.
 COPY --chown=frappe:frappe frontend/ ${APP}/frontend/
 
-# src/socket.js does a BUILD-TIME `import { socketio_port } from
-# '../../../../sites/common_site_config.json'`, so rollup needs that key to
-# exist or the build dies with "socketio_port is not exported by". At runtime
-# sites/ is a named volume holding the real config, but during `docker build`
-# there is no volume and the base image ships `{}` -- which is exactly why the
-# old in-container build worked and this one didn't. Seed the key for the build
-# and put the original file back, all in one RUN so nothing leaks into the
-# image (the volume would shadow it anyway).
-#
-# The value is inert in production: socket.js only uses it when
-# window.location.port is set, i.e. when served on an explicit port in dev.
+# This used to have to seed `socketio_port` into sites/common_site_config.json
+# first: src/socket.js imported that JSON at BUILD time, and during a docker
+# build there is no sites volume, so rollup died with "socketio_port is not
+# exported by". socket.js now derives the socket URL from window.location
+# instead, so nothing reads that file at build time and the workaround is gone.
 #
 # vite.config.js sets emptyOutDir:false so a build adds new content-hashed
 # chunks rather than deleting the ones open tabs are still importing. Retention
 # across deploys is handled by the shared crm-assets volume, not here -- see
 # docker-compose.yml and the publish step in build_image.sh.
-RUN CSC=/home/frappe/frappe-bench/sites/common_site_config.json \
- && cp "$CSC" /tmp/csc.orig \
- && python3 -c "import json,sys;p=sys.argv[1];d=json.load(open(p));d.setdefault('socketio_port',9000);json.dump(d,open(p,'w'))" "$CSC" \
- && cd ${APP}/frontend \
- && NODE_OPTIONS=--max-old-space-size=2048 yarn build \
- && cp /tmp/csc.orig "$CSC" && rm /tmp/csc.orig
+RUN cd ${APP}/frontend \
+ && NODE_OPTIONS=--max-old-space-size=2048 yarn build
 
 # ---- final stage --------------------------------------------------------
 # Only the BUILT OUTPUT crosses over, so the 1.59 GB yarn-install layer never

@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vueJsx from '@vitejs/plugin-vue-jsx'
 import path from 'path'
+import { execFileSync } from 'child_process'
 import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vitejs.dev/config/
@@ -14,16 +15,62 @@ import { VitePWA } from 'vite-plugin-pwa'
 // and irreducible -- minify off, sourcemaps off and dropping the PWA plugin
 // each change it by ~2s -- so the only real speedup is not building at all.
 // This proxies API/asset/auth routes to the remote site, giving HMR against
-// real prod data. Log in once through the dev server itself (localhost:8080/
-// login) so the session cookie is scoped to localhost.
+// real prod data.
 //
 // Unset, everything below behaves exactly as before.
 const remoteTarget = process.env.CRM_DEV_TARGET
+
+// Auth for the proxy. A Frappe API key authenticates every proxied request, so
+// there is no login page and no 7-day cookie to re-enter -- API keys do not
+// expire. It also sidesteps CSRF: token-authenticated writes skip the
+// X-Frappe-CSRF-Token check, which matters because the dev server serves NO
+// jinja boot data, so window.csrf_token is undefined here.
+//
+// Read from $CRM_DEV_TOKEN if set, else pulled from Infisical (groundwork/dev,
+// CRM_DEV_API_TOKEN) so nothing is stored in the repo. If neither is available
+// this falls back to cookie auth -- you just have to log in at localhost:8080.
+//
+// NOTE: while the dev server runs, anything that can reach localhost:8080 acts
+// as that user. Revoke by clearing api_key/api_secret on the User in Frappe.
+function devToken() {
+  if (!remoteTarget) return null
+  if (process.env.CRM_DEV_TOKEN) return process.env.CRM_DEV_TOKEN
+  try {
+    return execFileSync(
+      `${process.env.HOME}/.claude/skills/api-call/scripts/inf-secret`,
+      ['-e', 'dev', 'CRM_DEV_API_TOKEN'],
+      { encoding: 'utf8', timeout: 20000 },
+    ).trim()
+  } catch {
+    console.warn('[crm-dev] no API token found — falling back to cookie login')
+    return null
+  }
+}
+const devAuth = devToken()
 
 export default defineConfig(async ({ mode }) => {
   const isDev = mode === 'development'
   const config = {
     plugins: [
+      // Production renders crm.html through jinja and injects the boot dict as
+      // window[...] globals. The dev server renders index.html itself, so NONE
+      // of that exists -- frappe-ui's jinjaBootData plugin is explicitly a
+      // no-op when context.server is set. window.site_name being undefined is
+      // not cosmetic: socket.js uses it as the socket.io NAMESPACE, so realtime
+      // would silently connect to "/undefined" and never receive an event.
+      // Derive it from the proxy target, which is what it is in production.
+      {
+        name: 'crm-dev-boot',
+        apply: 'serve',
+        transformIndexHtml(html) {
+          if (!remoteTarget) return html
+          const site = new URL(remoteTarget).hostname
+          return html.replace(
+            '</body>',
+            `<script>window.site_name = ${JSON.stringify(site)};</script>\n</body>`,
+          )
+        },
+      },
       vue(),
       vueJsx(),
       VitePWA({
@@ -109,6 +156,7 @@ export default defineConfig(async ({ mode }) => {
             secure: true,
             ws: true,
             cookieDomainRewrite: '',
+            ...(devAuth && { headers: { Authorization: `token ${devAuth}` } }),
           },
         },
       }),
