@@ -71,6 +71,30 @@ function devUser() {
 }
 const devAuthUser = devUser()
 
+// window.sysdefaults, the other global production's jinja boot injects (the
+// full set is site_name, csrf_token, sysdefaults). Not optional: meta.js,
+// utils/index.js and numberFormat.js dereference it WITHOUT optional chaining
+// -- `window.sysdefaults.currency`, `.date_format`, `.float_precision` -- so
+// its absence throws mid-render. That is what left the Lead activity feed
+// stuck on "Loading..." forever while every request returned 200.
+// csrf_token is deliberately not injected: token auth skips the CSRF check,
+// and FilesUploader already guards on the global being present.
+function devSysdefaults() {
+  if (!remoteTarget || !devAuth) return null
+  try {
+    const out = execFileSync(
+      'curl',
+      ['-s', '-H', `Authorization: token ${devAuth}`,
+       `${remoteTarget}/api/resource/System%20Settings/System%20Settings`],
+      { encoding: 'utf8', timeout: 20000 },
+    )
+    return JSON.parse(out).data || null
+  } catch {
+    return null
+  }
+}
+const devDefaults = devSysdefaults()
+
 export default defineConfig(async ({ mode }) => {
   const isDev = mode === 'development'
   const config = {
@@ -89,6 +113,11 @@ export default defineConfig(async ({ mode }) => {
           if (!remoteTarget) return html
           const site = new URL(remoteTarget).hostname
           const lines = [`window.site_name = ${JSON.stringify(site)};`]
+          if (devDefaults) {
+            lines.push(
+              `window.sysdefaults = ${JSON.stringify(devDefaults)};`,
+            )
+          }
           if (devAuthUser) {
             // Not real auth -- the proxy's Authorization header is what actually
             // authenticates. This only tells the SPA who it is looking at, so

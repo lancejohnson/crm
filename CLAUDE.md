@@ -1387,19 +1387,31 @@ proxy with the domain rewritten.
 **Caveat: you are on the real production database** — anything you create, text
 or delete is real.
 
-**Known dev-only breakage: the Lead/Deal Activity feed hangs on "Loading…".**
-`all_activities` never leaves `loading`, even though
-`crm.api.activities.get_activities` returns 200 and every other request on the
-page succeeds. Verified dev-only — the same lead renders fine on prod. Not yet
-root-caused; everything else (dashboard, kanban, sidebar, routing, realtime)
-works. Use a deploy to exercise the activity timeline.
+**The `crm-dev-boot` plugin is load-bearing — don't trim it.** Production renders
+`crm.html` through jinja and injects exactly three globals: `site_name`,
+`csrf_token`, `sysdefaults`. The dev server renders `index.html` itself and gets
+none of them, so the plugin re-creates two:
 
-**Realtime DOES work in dev** (verified end-to-end: created a task via the API
-from outside the browser and the tab's `$socket` received `crm_task_update`).
-It needs all three of: socket.js using the current origin, `window.site_name`
-injected by the crm-dev-boot plugin (it is the socket.io NAMESPACE — without it
-you silently connect to `/undefined`), and `socketio: false` on the FrappeUI
-plugin so frappe-ui's own `:9000` socket doesn't fight it.
+- **`sysdefaults`** (fetched live from System Settings). `stores/meta.js`,
+  `utils/index.js` and `utils/numberFormat.js` dereference it WITHOUT optional
+  chaining (`window.sysdefaults.currency`, `.date_format`, `.float_precision`),
+  so its absence throws mid-render. Symptom was the Lead activity feed stuck on
+  "Loading…" forever while every request returned 200 — the failure surfaces
+  nowhere near its cause.
+- **`site_name`** — the socket.io NAMESPACE. Without it realtime silently
+  connects to `/undefined` and never receives an event.
+
+`csrf_token` is deliberately not injected: token auth skips the CSRF check and
+FilesUploader already guards on the global being present.
+
+**Realtime works in dev**, verified end-to-end: a task created via the API from
+outside the browser appeared in the DOM live, and disappeared again on delete.
+It needs all three of the above plus `socketio: false` on the FrappeUI plugin,
+so frappe-ui's own hardcoded `:9000` socket doesn't fight the app's.
+
+Harmless leftover: one console error, `Unexpected token '<'`, from a call to
+`frappe.onboarding.get_onboarding_status` made with a RELATIVE url — it resolves
+against the current route, hits vite, and gets index.html back.
 
 **Don't tune `yarn build` flags — they do nothing.** Measured on Vite 5:
 baseline 42s, `--minify false` 39s, `--sourcemap false` 39s, both 41s, dropping
