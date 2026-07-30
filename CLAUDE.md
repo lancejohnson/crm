@@ -93,6 +93,32 @@ duplicating. Work substantial features in a worktree of your own.
   - `frontend/src/pages/Leads.vue` + `pages/Deals.vue` — `crm_task_update`
     listener → `reloadKanban()` (Deals gained a `reloadKanban` helper); on-board
     membership guard to avoid needless reloads
+- **Call classification badge (editable)** — each call card in the Lead/Deal
+  Activity timeline (and Buyer Conversation tab, same `CallArea.vue`) shows a
+  color-themed badge with the call's classification (Connected / Voicemail
+  Left / Greeting Hangup / Screener - No Contact / IVR-Robot / No Answer /
+  Phantom / No Transcript), written by the `classify-crm-calls` skill
+  (`~/.claude/skills/classify-crm-calls/` — deterministic pull → agent reads
+  transcripts → guarded write-back) onto CRM Call Log custom fields
+  (`custom_call_class` / `custom_call_class_source` rule|ai|human /
+  `custom_call_note` / `custom_call_side`; created idempotently by the skill's
+  pull script, NOT an ops setup script). The badge is a dropdown: picking a
+  class calls `crm.api.call_class.set_call_class`, which stamps
+  `source=human` — the classifier's write-back never overwrites human
+  verdicts. Tooltip shows the classifier's evidence note. No backend read
+  changes needed: `get_call_log` returns the full doc (`as_dict`), so the
+  fields ride along like `custom_ai_summary`. GOTCHA: frappe-ui `Dropdown`
+  uses reka-ui `DropdownMenuTrigger as-child` — the slot ROOT must be a plain
+  element (a `<button>`); wrapping the slot in `<Tooltip>` swallows the
+  trigger handlers, and `@click.stop` must live on a wrapper `<div>` (Dropdown
+  doesn't inherit attrs, so the card's open-modal click fires otherwise).
+  Mobile (gw253): wrapped badge rows use a tighter vertical gap, and transcript
+  lines switch below `sm` from the cramped 48px speaker-name column to a
+  two-column grid (time | speaker-above-content); long names no longer collide
+  with dialogue, and hover-only line actions hide on touch widths. Verified in
+  a genuine 390px Chrome popup: 9 transcript rows, zero bounding-box overlap.
+  `crm/api/call_class.py` (**new**) + `frontend/src/components/Activities/CallArea.vue` +
+  `CallTranscript.vue`.
 - `frontend/src/pages/Sequences.vue`, `Sequence.vue` — native sequences list +
   step editor + enrollments management
 - `frontend/src/router.js` — `/sequences`, `/sequences/:sequenceId` routes

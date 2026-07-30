@@ -178,7 +178,7 @@
           v-for="(line, i) in dialogue"
           :key="i"
           :data-idx="i"
-          class="group flex w-full items-start gap-2 rounded-md py-1.5 pl-2 pr-2 text-left transition-colors"
+          class="group grid w-full grid-cols-[2.75rem_minmax(0,1fr)] items-start gap-x-2 gap-y-0.5 rounded-md py-2 pl-2 pr-2 text-left transition-colors sm:grid-cols-[2.75rem_3rem_minmax(0,1fr)_auto] sm:gap-y-0 sm:py-1.5"
           :class="
             i === activeLine
               ? 'bg-surface-gray-2'
@@ -191,17 +191,19 @@
           "
           @click="seek(line.start)"
         >
-          <span class="tnum w-11 shrink-0 pt-0.5 text-xs text-ink-gray-4">
+          <span
+            class="tnum col-start-1 row-span-2 pt-0.5 text-xs text-ink-gray-4 sm:row-span-1"
+          >
             {{ formatTime(line.start) }}
           </span>
           <span
-            class="w-12 shrink-0 pt-0.5 text-xs font-medium"
+            class="col-start-2 min-w-0 break-words pt-0.5 text-xs font-medium leading-tight sm:w-12"
             :style="{ color: colorFor(line.speaker) }"
           >
             {{ line.speaker === 'rep' ? repName : leadName }}
           </span>
           <span
-            class="flex-1 leading-relaxed"
+            class="col-start-2 row-start-2 min-w-0 leading-relaxed sm:col-start-3 sm:row-start-1"
             :class="
               i === activeLine ? 'text-ink-gray-9' : 'text-ink-gray-7'
             "
@@ -209,7 +211,7 @@
             {{ line.content }}
           </span>
           <span
-            class="ml-1 flex shrink-0 items-center gap-1.5 self-center opacity-0 transition-opacity group-hover:opacity-100"
+            class="col-start-4 ml-1 hidden shrink-0 items-center gap-1.5 self-center opacity-0 transition-opacity group-hover:opacity-100 sm:flex"
           >
             <span
               v-if="canShareLink"

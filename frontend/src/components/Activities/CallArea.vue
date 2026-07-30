@@ -47,7 +47,7 @@
           />
         </div>
       </div>
-      <div class="flex items-center flex-wrap gap-2">
+      <div class="flex flex-wrap items-center gap-x-2 gap-y-1.5 sm:gap-y-2">
         <Badge :label="formatDate(call.creation, 'MMM D, dddd')">
           <template #prefix>
             <CalendarIcon class="size-3" />
@@ -85,6 +85,29 @@
           :label="statusLabelMap[call.status]"
           :theme="statusColorMap[call.status]"
         />
+        <!-- click.stop wrapper: keeps the card's open-detail-modal click away.
+             The slot root must be a plain element — frappe-ui Dropdown uses
+             reka-ui's DropdownMenuTrigger as-child, which binds its open/close
+             handlers onto the slot's root; a Tooltip root swallows them. -->
+        <div @click.stop>
+          <Dropdown v-if="callLog.data" :options="classOptions">
+            <button
+              type="button"
+              class="flex items-center leading-none"
+              :title="classTooltip"
+            >
+              <Badge
+                :label="callClass || __('Classify')"
+                :theme="callClassTheme"
+                class="cursor-pointer"
+              >
+                <template #suffix>
+                  <FeatherIcon name="chevron-down" class="size-3" />
+                </template>
+              </Badge>
+            </button>
+          </Dropdown>
+        </div>
       </div>
       <div
         v-if="call.show_transcript && call.recording_url"
@@ -135,7 +158,14 @@ import CallLogModal from '@/components/Modals/CallLogModal.vue'
 import { statusLabelMap, statusColorMap } from '@/utils/callLog.js'
 import { formatDate } from '@/utils'
 import { formatPhone } from '@/utils/phoneFormat'
-import { Badge, Tooltip, createResource } from 'frappe-ui'
+import {
+  Badge,
+  Tooltip,
+  Dropdown,
+  FeatherIcon,
+  createResource,
+  call as apiCall,
+} from 'frappe-ui' // Tooltip still used by the timestamp header
 import { reactive, ref, computed, watch, onMounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 
@@ -183,4 +213,54 @@ const callLog = createResource({
 })
 const showCallLogDetailModal = ref(false)
 const showCallLogModal = ref(false)
+
+// call classification badge (fields written by the classify-crm-calls
+// workflow; picking a value here stamps source=human so re-runs never
+// overwrite the correction)
+const CALL_CLASSES = [
+  'Connected',
+  'Voicemail Left',
+  'Greeting Hangup',
+  'Screener - No Contact',
+  'IVR / Robot',
+  'No Answer',
+  'Phantom',
+  'No Transcript',
+]
+const classThemes = {
+  Connected: 'green',
+  'Voicemail Left': 'blue',
+  'Greeting Hangup': 'gray',
+  'Screener - No Contact': 'orange',
+  'IVR / Robot': 'orange',
+  'No Answer': 'gray',
+  Phantom: 'red',
+  'No Transcript': 'gray',
+}
+const callClass = computed(() => callLog.data?.custom_call_class || '')
+const callClassTheme = computed(
+  () => classThemes[callClass.value] || 'gray',
+)
+const classTooltip = computed(() => {
+  if (!callClass.value) return __('Set call classification')
+  const src = callLog.data?.custom_call_class_source
+  const note = callLog.data?.custom_call_note
+  let t = __('Classified by {0}', [src || 'unknown'])
+  if (note) t += ` — ${note}`
+  return t
+})
+const classOptions = computed(() =>
+  CALL_CLASSES.map((c) => ({
+    label: c,
+    onClick: () => setCallClass(c),
+  })),
+)
+async function setCallClass(c) {
+  await apiCall('crm.api.call_class.set_call_class', {
+    call: call.name,
+    call_class: c,
+  })
+  callLog.data.custom_call_class = c
+  callLog.data.custom_call_class_source = 'human'
+}
 </script>
