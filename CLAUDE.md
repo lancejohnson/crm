@@ -1001,6 +1001,26 @@ duplicating. Work substantial features in a worktree of your own.
     (the old rule, kept). The status tuple lives in
     `investorlift_ingest.DISPO_LEAD_STATUSES` and `buyer_import` imports it
     (the other direction would cycle), so picker and switcher can't drift.
+  - **Buyer import lists** (gw247/gw248) — every bulk import tags its batch
+    with a **list name** on `CRM Buyer.import_lists` (JSON array, same shape +
+    `_dump`/ensure_ascii rules as the lead-side field — helpers imported from
+    `lead_import`), so /buyers can filter to "the REIA list from July" and feed
+    exactly that set into "Text these (N)". The import modal's **List name**
+    input is prefilled ("Buyer list — Jul 30, 2026"; a CSV upload swaps in the
+    filename unless the user typed their own — note the ref must be initialized
+    at setup, not just in the `watch(show)` reset, because /buyers mounts the
+    modal with `v-if` so it mounts with `show` already true and the watcher
+    never fires); clearing it skips tagging. Matched existing buyers get the
+    tag too (membership, not provenance) via side-effect-free `db.set_value`.
+    /buyers gains an **"All lists"** Autocomplete (hidden until a list exists;
+    options `name (count)` from `get_buyer_import_lists`), seedable via
+    `/buyers?list=…` — which the done-screen's "Open this list" button uses —
+    and counted into `hasFilter` so the bulk-text button lights up.
+    `crm/api/buyer_import.py` (`list_name` param + `_add_to_list` +
+    `get_buyer_import_lists`), `crm/api/buyers.py` (`get_buyers(import_list=)`,
+    quoted-JSON LIKE like metros), `ImportBuyersModal.vue`, `pages/Buyers.vue`.
+    Ops: `scripts/setup_buyer_import_lists.py` (adds the Long Text field; all
+    app code has_field/has_column-guarded).
   - **Gotcha (bit the lead importer too, silently)**: `usersStore()` is a Pinia
     *setup* store, so `store.allUsers` is the UNWRAPPED array and
     `const { allUsers } = usersStore()` hands back a stale snapshot; `users` is

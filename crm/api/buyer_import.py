@@ -6,13 +6,18 @@ address-request webhook). But a rep who buys a cash-buyer list, exports a
 county's LLC purchasers, or comes back from a REIA meeting with a spreadsheet
 has had no way in — the only route was the one-at-a-time "New buyer" modal.
 
-An import does up to three things:
+An import does up to four things:
 
   1. Creates the buyers we don't already have.
   2. Puts every buyer in the batch — newly created *and* already-existing — on
      the chosen property's Dispo board (a `CRM Lead Buyer` row) at a stage.
   3. Deals the buyers out round-robin between the selected reps as Frappe
      assignments (`_assign` ToDos), so each rep has a list to work.
+  4. Tags every buyer in the batch with the import's **list name** on
+     `CRM Buyer.import_lists` (a JSON array, same shape as the lead-side
+     field), so /buyers can filter to "the REIA list from July" and feed it
+     straight into the bulk-text flow. Matched existing buyers get the tag
+     too — membership, not provenance.
 
 Deliberate rules, each learned from the lead importer next door:
 
@@ -37,6 +42,11 @@ from frappe import _
 from frappe.desk.form.assign_to import add as assign_todo
 
 from crm.api.buyers import INTEREST_STAGES, _guard, _has_market_fields, _metros_json
+
+# _dump's ensure_ascii=False is load-bearing: import_lists is matched with a
+# raw LIKE on the literal list name, and default json.dumps would store
+# "Buyers — Jul 2026" as "Buyers \u2014 Jul 2026" — never matching the filter.
+from crm.api.lead_import import MAX_LIST_NAME, _dump, _load_list_names
 from crm.api.investorlift_ingest import (
 	BUYER_DOCTYPE,
 	DISPO_LEAD_STATUSES,
@@ -103,6 +113,20 @@ def _split_name(full: str):
 
 def _has_field(field: str) -> bool:
 	return frappe.get_meta(BUYER_DOCTYPE).has_field(field)
+
+
+def _add_to_list(buyer: str, list_name: str):
+	"""Append `list_name` to the buyer's import_lists (idempotent).
+
+	db.set_value, not doc.save — a list tag must not fire the Quo push or
+	reshuffle "recently active" ordering."""
+	current = _load_list_names(frappe.db.get_value(BUYER_DOCTYPE, buyer, "import_lists"))
+	if list_name in current:
+		return
+	current.append(list_name)
+	frappe.db.set_value(
+		BUYER_DOCTYPE, buyer, "import_lists", _dump(current), update_modified=False
+	)
 
 
 # ------------------------------------------------------------ properties
@@ -219,7 +243,7 @@ def _assign(buyer: str, user: str) -> bool:
 
 
 @frappe.whitelist()
-def import_buyers(rows, lead=None, stage="New", assign_to=None, assign_offset=0):
+def import_buyers(rows, lead=None, stage="New", assign_to=None, assign_offset=0, list_name=None):
 	"""Create/attach/assign a batch of buyers.
 
 	rows: list of dicts already keyed by the IMPORT_FIELDS names (the frontend
@@ -230,6 +254,8 @@ def import_buyers(rows, lead=None, stage="New", assign_to=None, assign_offset=0)
 	assign_to / assign_offset: round-robin owners; the offset carries the
 	rotation across chunked calls so a 500-row import doesn't restart at the
 	first rep every chunk and hand them everything.
+	list_name: optional label tagged onto every buyer in the batch (created AND
+	matched) via CRM Buyer.import_lists, so /buyers can filter to this list.
 	"""
 	_guard()
 
@@ -250,6 +276,11 @@ def import_buyers(rows, lead=None, stage="New", assign_to=None, assign_offset=0)
 
 	has_market = _has_market_fields()
 	has_tags = _has_field("quo_tags")
+
+	list_name = (list_name or "").strip()
+	if len(list_name) > MAX_LIST_NAME:
+		frappe.throw(_("List name too long (max {0} characters).").format(MAX_LIST_NAME))
+	tag_lists = bool(list_name) and _has_field("import_lists")
 
 	# metro names are matched, never created: a typo in a spreadsheet column
 	# must not add a bogus metro to the Census list everyone else picks from
@@ -333,12 +364,16 @@ def import_buyers(rows, lead=None, stage="New", assign_to=None, assign_offset=0)
 			if existing:
 				buyer = existing
 				_fill_gaps(buyer, fields)
+				if tag_lists:
+					_add_to_list(buyer, list_name)
 				matched.append(buyer)
 			else:
 				doc = frappe.get_doc({
 					"doctype": BUYER_DOCTYPE,
 					**{k: v for k, v in fields.items() if v is not None},
 				})
+				if tag_lists:
+					doc.import_lists = _dump([list_name])
 				doc.insert(ignore_permissions=True)
 				buyer = doc.name
 				created.append(buyer)
@@ -381,7 +416,30 @@ def import_buyers(rows, lead=None, stage="New", assign_to=None, assign_offset=0)
 		"unmatched_metros": sorted(unmatched_metros)[:10],
 		"errors": errors[:20],
 		"error_count": len(errors),
+		"list_name": list_name if tag_lists else None,
 	}
+
+
+@frappe.whitelist()
+def get_buyer_import_lists():
+	"""Every buyer import list -> {list_name, total, last} (newest first).
+	Powers the "All lists" filter on /buyers."""
+	_guard()
+	if not frappe.db.has_column(BUYER_DOCTYPE, "import_lists"):
+		return []
+	buckets = {}
+	for r in frappe.get_all(
+		BUYER_DOCTYPE,
+		filters={"import_lists": ["is", "set"]},
+		fields=["name", "import_lists", "creation"],
+		limit_page_length=0,
+	):
+		for ln in _load_list_names(r.get("import_lists")):
+			b = buckets.setdefault(ln, {"list_name": ln, "total": 0, "last": None})
+			b["total"] += 1
+			if not b["last"] or r.creation > b["last"]:
+				b["last"] = r.creation
+	return sorted(buckets.values(), key=lambda b: str(b["last"] or ""), reverse=True)
 
 
 @frappe.whitelist()

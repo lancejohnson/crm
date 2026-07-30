@@ -59,13 +59,16 @@ def _parse_metros(raw):
 
 
 @frappe.whitelist()
-def get_buyers(search=None, metro=None, property=None):
+def get_buyers(search=None, metro=None, property=None, import_list=None):
 	"""The /buyers directory: every CRM Buyer + deal count + the area they're
 	active in (their metro if set, else the cities of the properties they've
 	engaged with).
 
 	`property` is a CRM Lead name (a dispo property) — when given, the list is
-	restricted to the buyers engaged on that property (CRM Lead Buyer rows)."""
+	restricted to the buyers engaged on that property (CRM Lead Buyer rows).
+
+	`import_list` is a buyer import list name (CRM Buyer.import_lists is a JSON
+	array of names) — when given, only buyers tagged with that list."""
 	_guard()
 	if not frappe.db.exists("DocType", BUYER_DOCTYPE):
 		return []
@@ -81,6 +84,10 @@ def get_buyers(search=None, metro=None, property=None):
 	if metro and _has_market_fields():
 		# metro_areas is a JSON array of names — match the quoted element
 		filters.append(["metro_areas", "like", f'%{json.dumps(metro)}%'])
+	if import_list and frappe.get_meta(BUYER_DOCTYPE).has_field("import_lists"):
+		# same quoted-JSON-element LIKE as metros; ensure_ascii=False because the
+		# stored value is written that way (an em-dash in a list name must match)
+		filters.append(["import_lists", "like", f'%{json.dumps(import_list, ensure_ascii=False)}%'])
 	stage_by_buyer = {}
 	if property and frappe.db.exists("DocType", LEAD_BUYER_DOCTYPE):
 		# restrict to buyers engaged on this property (the CRM Lead Buyer rel table)

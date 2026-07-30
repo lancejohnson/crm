@@ -78,6 +78,29 @@
           />
         </template>
       </Autocomplete>
+      <Autocomplete
+        v-if="listOptions.length"
+        :options="listOptions"
+        :modelValue="listFilter"
+        :placeholder="__('All lists')"
+        @update:modelValue="(v) => (listFilter = v?.value || '')"
+      >
+        <template #target="{ togglePopover }">
+          <Button variant="outline" iconRight="chevron-down" @click="togglePopover()">
+            <span class="max-w-48 truncate">{{ listFilter || __('All lists') }}</span>
+          </Button>
+        </template>
+        <template #footer="{ close }">
+          <Button
+            v-if="listFilter"
+            variant="ghost"
+            class="w-full !justify-start"
+            :label="__('Clear filter')"
+            iconLeft="x"
+            @click="listFilter = ''; close()"
+          />
+        </template>
+      </Autocomplete>
       <div class="flex-1" />
       <template v-if="!selectMode">
         <span class="text-sm text-ink-gray-5">
@@ -179,7 +202,7 @@
       >
         <UsersIcon class="size-8" />
         <span class="text-base">
-          {{ search || metroFilter ? __('No buyers match.') : __('No buyers yet.') }}
+          {{ hasFilter ? __('No buyers match.') : __('No buyers yet.') }}
         </span>
       </div>
     </div>
@@ -189,7 +212,7 @@
   <ImportBuyersModal
     v-if="showImportModal"
     v-model="showImportModal"
-    @imported="buyers.reload()"
+    @imported="buyers.reload(); importLists.reload()"
   />
   <BulkTextModal v-model="showBulkText" :recipients="bulkRecipients" />
 </template>
@@ -213,10 +236,16 @@ import {
   usePageMeta,
 } from 'frappe-ui'
 import { ref, computed, watch } from 'vue'
+import { useRoute } from 'vue-router'
+
+const route = useRoute()
 
 const search = ref('')
 const metroFilter = ref('')
 const propertyFilter = ref('')
+// import-list filter — seedable via /buyers?list=... (the import modal's
+// "Open this list" lands here pre-filtered, ready for "Text these (N)")
+const listFilter = ref(String(route.query.list || ''))
 const showModal = ref(false)
 const showImportModal = ref(false)
 
@@ -235,7 +264,8 @@ const showBulkText = ref(false)
 const bulkRecipients = ref([]) // recipients handed to BulkTextModal (set on open)
 
 const hasFilter = computed(
-  () => !!(search.value || metroFilter.value || propertyFilter.value),
+  () =>
+    !!(search.value || metroFilter.value || propertyFilter.value || listFilter.value),
 )
 // when filtered by a property, each buyer carries a per-property interest_stage
 const propertyActive = computed(() => !!propertyFilter.value)
@@ -312,12 +342,13 @@ const buyers = createResource({
     search: search.value || null,
     metro: metroFilter.value || null,
     property: propertyFilter.value || null,
+    import_list: listFilter.value || null,
   }),
   auto: true,
 })
 const rows = computed(() => buyers.data || [])
 
-watch([search, metroFilter, propertyFilter], () => buyers.reload())
+watch([search, metroFilter, propertyFilter, listFilter], () => buyers.reload())
 
 const metros = createResource({
   url: 'crm.api.buyers.get_metro_areas',
@@ -337,6 +368,18 @@ const propertyOptions = computed(() =>
 )
 const propertyLabel = computed(
   () => propertyOptions.value.find((p) => p.value === propertyFilter.value)?.label || '',
+)
+
+// buyer import lists for the "All lists" filter (hidden until one exists)
+const importLists = createResource({
+  url: 'crm.api.buyer_import.get_buyer_import_lists',
+  auto: true,
+})
+const listOptions = computed(() =>
+  (importLists.data || []).map((l) => ({
+    label: `${l.list_name} (${l.total})`,
+    value: l.list_name,
+  })),
 )
 
 function tagList(buyer_type) {

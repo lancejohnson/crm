@@ -56,6 +56,25 @@
 
         <div>
           <div class="mb-1.5 text-xs text-ink-gray-5">
+            {{ __('List name') }}
+          </div>
+          <FormControl
+            v-model="listName"
+            type="text"
+            :placeholder="__('e.g. REIA cash buyers — Jul 2026')"
+            @update:modelValue="listNameTouched = true"
+          />
+          <div class="mt-1 text-xs text-ink-gray-5">
+            {{
+              __(
+                'Every buyer in this batch is tagged with this name — filter /buyers by it later to text the whole list. Clear it to skip tagging.',
+              )
+            }}
+          </div>
+        </div>
+
+        <div>
+          <div class="mb-1.5 text-xs text-ink-gray-5">
             {{ __('Split between (optional)') }}
           </div>
           <div class="flex flex-wrap gap-1.5">
@@ -224,6 +243,11 @@
               {{ __('added to') }} {{ propertyLabel }}
               <span class="text-ink-gray-5">({{ stage }})</span>
             </div>
+            <div v-if="result.list_name" class="mt-0.5 text-ink-gray-6">
+              {{ __('Tagged as') }}
+              <span class="font-medium text-ink-gray-8">{{ result.list_name }}</span>
+              — {{ __('filter Buyers by this list to text them.') }}
+            </div>
           </div>
         </div>
 
@@ -286,6 +310,12 @@
             @click="openBoard"
           />
           <Button
+            v-else-if="result.list_name"
+            variant="solid"
+            :label="__('Open this list')"
+            @click="openBuyers"
+          />
+          <Button
             v-else
             variant="solid"
             :label="__('Open buyers')"
@@ -327,6 +357,12 @@ const phase = ref('source')
 const property = ref('')
 const stage = ref('New')
 const raw = ref('')
+// list tag — prefilled with a dated default so filtering-by-list just works;
+// a CSV upload swaps in the filename unless the user already typed their own.
+// Initialized here (not only in the show-watcher) because /buyers mounts this
+// modal with v-if: it mounts with show already true, so the watcher never fires.
+const listName = ref(defaultListName())
+const listNameTouched = ref(false)
 const error = ref('')
 const importing = ref(false)
 const done = ref(0)
@@ -545,12 +581,22 @@ function sampleFor(i) {
 function onFile(e) {
   const file = e.target.files?.[0]
   if (!file) return
+  if (!listNameTouched.value && file.name) {
+    // "chicago-cash-buyers.csv" -> "chicago-cash-buyers"
+    listName.value = file.name.replace(/\.[^.]+$/, '').slice(0, 100)
+  }
   const reader = new FileReader()
   reader.onload = () => {
     raw.value = String(reader.result || '')
   }
   reader.readAsText(file)
   e.target.value = ''
+}
+
+function defaultListName() {
+  const d = new Date()
+  const mon = d.toLocaleString('en-US', { month: 'short' })
+  return `Buyer list — ${mon} ${d.getDate()}, ${d.getFullYear()}`
 }
 
 function buildRows() {
@@ -591,6 +637,7 @@ async function runImport() {
     unmatched_metros: [],
     errors: [],
     error_count: 0,
+    list_name: null,
   }
 
   try {
@@ -604,6 +651,7 @@ async function runImport() {
         stage: stage.value,
         assign_to: assignees.value.length ? JSON.stringify(assignees.value) : null,
         assign_offset: offset,
+        list_name: listName.value.trim() || null,
       })
       totals.created += res.created || 0
       totals.matched += res.matched || 0
@@ -618,6 +666,7 @@ async function runImport() {
         totals.assigned[u] = (totals.assigned[u] || 0) + n
       }
       offset = res.assign_offset ?? offset
+      totals.list_name = res.list_name || totals.list_name
       done.value = Math.min(i + CHUNK, rows.length)
     }
     totals.errors = totals.errors.slice(0, 20)
@@ -641,7 +690,11 @@ function openBoard() {
 
 function openBuyers() {
   show.value = false
-  router.push({ name: 'Buyers' })
+  // land on /buyers pre-filtered to this list, ready for "Text these (N)"
+  router.push({
+    name: 'Buyers',
+    query: result.value.list_name ? { list: result.value.list_name } : undefined,
+  })
 }
 
 watch(show, (v) => {
@@ -650,6 +703,8 @@ watch(show, (v) => {
   property.value = props.lead || ''
   stage.value = 'New'
   raw.value = ''
+  listName.value = defaultListName()
+  listNameTouched.value = false
   error.value = ''
   done.value = 0
   result.value = {}
