@@ -354,9 +354,23 @@ def _handle_address_request(buyer_name, address):
 			row["phone"] = row["phone"] or extra.get("phone")
 			row["verified"] = extra.get("verified")
 			row["il_buyer_id"] = extra.get("il_buyer_id")
-	buyer = _upsert_buyer(row)
-	_upsert_relationship(lead, buyer, row)
-	frappe.db.commit()
+	# OpenPhone delivers the same IL notification once per Quo line it reaches,
+	# so two copies of this handler can run ~0.2s apart in parallel workers. Both
+	# used to pass _find_buyer before either insert committed — that is exactly
+	# how Abdul Rehman (BUY-00425/BUY-00426) and Shelton Jackson
+	# (BUY-00409/BUY-00410) each got duplicated. Serialize the find+insert on a
+	# DB named lock keyed by the buyer, and start a fresh read snapshot once
+	# inside — REPEATABLE READ would otherwise keep _find_buyer blind to a row
+	# the parallel handler committed while we waited on the lock.
+	lock = f"il-buyer:{(buyer_name or '').strip().lower()}"[:64]
+	frappe.db.sql("SELECT GET_LOCK(%s, 15)", lock)
+	try:
+		frappe.db.commit()  # new snapshot: see anything a parallel handler just wrote
+		buyer = _upsert_buyer(row)
+		_upsert_relationship(lead, buyer, row)
+		frappe.db.commit()
+	finally:
+		frappe.db.sql("SELECT RELEASE_LOCK(%s)", lock)
 	frappe.publish_realtime(
 		"crm_il_buyers", {"reference_doctype": "CRM Lead", "reference_docname": lead}, after_commit=True
 	)

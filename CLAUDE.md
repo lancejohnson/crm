@@ -1081,6 +1081,22 @@ duplicating. Work substantial features in a worktree of your own.
     `frontend/src/components/Activities/DispoBoard.vue`, `BuyerDetailPanel.vue`,
     `Controls/JsonListControl.vue`, `Modals/BuyerModal.vue`,
     `SidePanelLayout.vue`, `pages/Buyer.vue`. Ops: the two setup scripts above.
+  - **IL webhook duplicate-buyer race (gw257)** — "a new Abdul appeared when I
+    dragged him" was NOT the drag: OpenPhone delivers the same InvestorLift
+    notification text once per Quo line it reaches, so `on_sequence_event` →
+    `_handle_address_request` ran twice ~0.2s apart, both passed `_find_buyer`
+    pre-commit, and both inserted (Abdul BUY-00425/426 and Shelton
+    BUY-00409/410 were each created 0.2s/0.016s apart, owner=Guest). The two
+    stacked duplicates only became visible when one was dragged into another
+    column. Fixed with a MySQL `GET_LOCK` named lock keyed on the buyer name
+    around the find+insert, plus a `frappe.db.commit()` right after acquiring
+    it — REPEATABLE READ otherwise keeps the waiter's `_find_buyer` blind to
+    the row the parallel handler committed. Shell duplicates were raw-deleted
+    (`frappe.db.delete`, deliberately skipping `on_buyer_trash`: each shell
+    SHARED the keeper's `quo_contact_id`, and the trash hook tombstones the
+    contact — even with the id cleared it falls back to an externalId lookup),
+    then the keepers re-pushed so the Quo contact's externalId points at the
+    survivor.
 - **Lead property photos → shared Google Drive** — a **Photos** sidebar card +
   **Photos** item in the Lead header More ▾ menu open a gallery modal: drag-drop
   or pick multiple files, scroll a thumbnail grid, click through them in the
