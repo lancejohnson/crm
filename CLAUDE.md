@@ -1054,6 +1054,33 @@ duplicating. Work substantial features in a worktree of your own.
     spellings render an EMPTY rep-chip row — read `usersStoreRef.allUsers`
     inside the computed. Fixed in `ImportLeadsModal.vue` as well.
   - No ops script: every field written already exists.
+- **CRM-wide delete access + movable Dispo buyers + structured Buyer Buybox**
+  (gw256) — every CRM sales role can delete primary records. Lead/Deal/
+  Organization/Buyer permissions already allowed it; stock Contact did not, so
+  ops `scripts/setup_crm_delete_permissions.py` explicitly enables delete for
+  Sales User + Sales Manager (and repairs drift across Contact/CRM Lead/CRM Deal/
+  CRM Organization/CRM Buyer/CRM Lead Buyer). Buyer detail now has its missing
+  trash action and uses the standard linked-document delete/unlink modal.
+  - Dispo cards are real cross-column `vuedraggable` items; dropping calls
+    `crm.api.buyers.move_buyer_stage`, persists `CRM Lead Buyer.interest_stage`,
+    and publishes the existing `crm_il_buyers` realtime event after commit.
+    Every card also has an accessible **Move buyer** menu (same endpoint) for
+    touch/keyboard use and as a precise alternative to drag.
+  - CRM Buyer gained JSON-list `buybox_cities` (**Buying In**, specific city +
+    state) and `buybox_property_types` fields. Both render as searchable,
+    create-any-value chip pickers in the Buyer edit modal and inline sidebar;
+    city suggestions come from distinct CRM Lead property cities. Existing
+    `buybox` is now the free-form notes layer (price/ZIP/condition/etc.).
+  - Buyer detail now mounts the standard globally-configurable
+    `SidePanelLayout`: default sections are **Buybox** and **Buyer Details**;
+    managers use the section pencil → Edit Field Layout to add/reorder/remove
+    any CRM Buyer field. Ops `scripts/setup_buyer_directory.py` adds the two
+    fields and seeds `CRM Buyer-Side Panel` once without overwriting later
+    manager customization.
+  - App: `crm/api/buyers.py`, `crm/api/investorlift_ingest.py`,
+    `frontend/src/components/Activities/DispoBoard.vue`, `BuyerDetailPanel.vue`,
+    `Controls/JsonListControl.vue`, `Modals/BuyerModal.vue`,
+    `SidePanelLayout.vue`, `pages/Buyer.vue`. Ops: the two setup scripts above.
 - **Lead property photos → shared Google Drive** — a **Photos** sidebar card +
   **Photos** item in the Lead header More ▾ menu open a gallery modal: drag-drop
   or pick multiple files, scroll a thumbnail grid, click through them in the

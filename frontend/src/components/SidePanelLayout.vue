@@ -115,6 +115,17 @@
                             fieldChange($event.target.checked, field)
                           "
                         />
+                        <JsonListControl
+                          v-else-if="field.options === 'JSON List'"
+                          :modelValue="parseJsonList(doc[field.fieldname])"
+                          :options="jsonListOptions(field)"
+                          :placeholder="field.placeholder"
+                          :disabled="Boolean(field.read_only)"
+                          @change="
+                            (value) =>
+                              fieldChange(JSON.stringify(value), field)
+                          "
+                        />
                         <FormControl
                           v-else-if="
                             [
@@ -382,6 +393,7 @@
 
 <script setup>
 import Password from '@/components/Controls/Password.vue'
+import JsonListControl from '@/components/Controls/JsonListControl.vue'
 import FormattedInput from '@/components/Controls/FormattedInput.vue'
 import DurationInput from '@/components/Controls/DurationInput.vue'
 import RatingInput from '@/components/Controls/RatingInput.vue'
@@ -411,7 +423,7 @@ import {
 } from '@/utils'
 import { flt } from '@/utils/numberFormat.js'
 import { formatPhone } from '@/utils/phoneFormat'
-import { Tooltip, DateTimePicker, DatePicker } from 'frappe-ui'
+import { Tooltip, DateTimePicker, DatePicker, createResource } from 'frappe-ui'
 import { useDocument } from '@/data/document'
 import { ref, computed, getCurrentInstance } from 'vue'
 
@@ -431,6 +443,35 @@ const { getFormattedPercent, getFormattedFloat, getFormattedCurrency } =
 const { users, isManager, getUser } = usersStore()
 
 const showSidePanelModal = ref(false)
+
+const buyerCities = createResource({
+  url: 'crm.api.buyers.get_buybox_cities',
+  auto: props.doctype === 'CRM Buyer',
+})
+const BUYBOX_PROPERTY_TYPES = [
+  'Single Family',
+  'Multifamily',
+  'Condo / Townhome',
+  'Land',
+  'Mobile Home',
+  'Commercial',
+]
+
+function parseJsonList(value) {
+  if (Array.isArray(value)) return value
+  try {
+    const parsed = JSON.parse(value || '[]')
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return value ? [value] : []
+  }
+}
+
+function jsonListOptions(field) {
+  if (field.fieldname === 'buybox_cities') return buyerCities.data || []
+  if (field.fieldname === 'buybox_property_types') return BUYBOX_PROPERTY_TYPES
+  return []
+}
 
 let document = { doc: {} }
 let triggerOnChange

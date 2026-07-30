@@ -19,12 +19,22 @@
             {{ __('via InvestorLift') }}
           </div>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          :label="__('Edit')"
-          @click="$emit('edit')"
-        />
+        <div class="flex shrink-0 items-center gap-1">
+          <Button
+            variant="outline"
+            size="sm"
+            :label="__('Edit')"
+            @click="$emit('edit')"
+          />
+          <Button
+            variant="subtle"
+            theme="red"
+            size="sm"
+            icon="trash-2"
+            :tooltip="__('Delete buyer')"
+            @click="$emit('delete')"
+          />
+        </div>
       </div>
 
       <!-- contact -->
@@ -52,43 +62,28 @@
         </a>
       </div>
 
-      <!-- type tags -->
-      <div v-if="tags.length" class="flex flex-wrap gap-1">
-        <span
-          v-for="t in tags"
-          :key="t"
-          class="rounded bg-surface-gray-2 px-1.5 py-0.5 text-xs text-ink-gray-7"
-        >
-          {{ t }}
-        </span>
-      </div>
-
-      <!-- metros + deal history + last active -->
-      <div class="flex flex-col gap-1 text-sm text-ink-gray-6">
-        <span v-if="(data.metros || []).length" class="flex items-center gap-1.5">
-          <MapPinIcon class="size-3.5 shrink-0 text-ink-gray-5" />
-          {{ data.metros.join(' · ') }}
-        </span>
-        <span v-if="data.deal_history" class="flex items-center gap-1.5">
-          <HistoryIcon class="size-3.5 shrink-0 text-ink-gray-5" />
-          {{ data.deal_history }}
-        </span>
-        <span v-if="data.last_active">
-          {{ __('Last active') }} {{ timeAgo(data.last_active) }}
-        </span>
-      </div>
-
-      <!-- buybox (free-form until structured search) -->
-      <div
-        v-if="data.buybox"
-        class="whitespace-pre-line rounded-lg bg-surface-gray-1 px-3 py-2 text-sm text-ink-gray-7"
+      <span
+        v-if="(data.metros || []).length"
+        class="flex items-center gap-1.5 text-sm text-ink-gray-6"
       >
-        <span class="mr-1.5 text-xs font-medium uppercase text-ink-gray-5">
-          {{ __('Buybox') }}
-        </span>
-        {{ data.buybox }}
-      </div>
+        <MapPinIcon class="size-3.5 shrink-0 text-ink-gray-5" />
+        {{ data.metros.join(' · ') }}
+      </span>
     </div>
+
+    <!-- Globally configurable buyer side details. Managers can use the pencil
+         on either section to add/reorder any CRM Buyer field. -->
+    <SidePanelLayout
+      v-if="sections.data"
+      :key="buyerId + '-' + (data.modified || '')"
+      :sections="sections.data"
+      doctype="CRM Buyer"
+      :docname="buyerId"
+      @reload="sections.reload"
+      @afterFieldChange="$emit('reload')"
+    />
+
+    <div class="border-t" />
 
     <!-- engaged properties -->
     <div class="px-5 py-3">
@@ -149,16 +144,16 @@
 
 <script setup>
 import BuyerAgreementsCard from '@/components/BuyerAgreementsCard.vue'
+import SidePanelLayout from '@/components/SidePanelLayout.vue'
 import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
 import Email2Icon from '@/components/Icons/Email2Icon.vue'
 import CopyIcon from '~icons/lucide/copy'
 import BadgeCheckIcon from '~icons/lucide/badge-check'
-import HistoryIcon from '~icons/lucide/history'
 import MapPinIcon from '~icons/lucide/map-pin'
 import DispoIcon from '~icons/lucide/columns-3'
 import { copyToClipboard, timeAgo } from '@/utils'
 import { formatPhone } from '@/utils/phoneFormat'
-import { Avatar, Badge, Button } from 'frappe-ui'
+import { Avatar, Badge, Button, createResource } from 'frappe-ui'
 import { computed, ref } from 'vue'
 
 const props = defineProps({
@@ -167,17 +162,14 @@ const props = defineProps({
   buyerId: { type: String, required: true },
 })
 
-defineEmits(['edit', 'add-to-deal', 'create-agreement'])
+defineEmits(['edit', 'delete', 'reload', 'add-to-deal', 'create-agreement'])
 
 const agreementsCard = ref(null)
-
-// InvestorLift type tags + Quo contact tags (two-way synced), deduped
-const tags = computed(() => {
-  const all = [props.data?.buyer_type, props.data?.quo_tags]
-    .flatMap((raw) => (raw || '').split(','))
-    .map((t) => t.trim())
-    .filter(Boolean)
-  return [...new Set(all)]
+const sections = createResource({
+  url: 'crm.fcrm.doctype.crm_fields_layout.crm_fields_layout.get_sidepanel_sections',
+  cache: ['sidePanelSections', 'CRM Buyer'],
+  params: { doctype: 'CRM Buyer' },
+  auto: true,
 })
 const telDigits = computed(() => (props.data?.phone || '').replace(/[^\d+]/g, ''))
 

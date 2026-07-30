@@ -91,12 +91,42 @@
           :label="__('Quo tags')"
           :placeholder="__('Buyer, Chicago… (comma-separated, syncs to Quo)')"
         />
-        <FormControl
-          v-model="form.buybox"
-          type="textarea"
-          :label="__('Buybox')"
-          :placeholder="__('Price range, property types, zips… (free-form for now)')"
-        />
+
+        <div class="flex flex-col gap-3 border-t border-outline-gray-1 pt-4">
+          <div class="text-sm font-medium text-ink-gray-8">{{ __('Buybox') }}</div>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="space-y-1.5">
+              <label class="block text-xs text-ink-gray-5">
+                {{ __('Buying in') }}
+              </label>
+              <div class="min-h-8 rounded border border-outline-gray-2 px-2 py-1">
+                <JsonListControl
+                  v-model="form.buybox_cities"
+                  :options="buyboxCities.data || []"
+                  :placeholder="__('Select cities…')"
+                />
+              </div>
+            </div>
+            <div class="space-y-1.5">
+              <label class="block text-xs text-ink-gray-5">
+                {{ __('Property types') }}
+              </label>
+              <div class="min-h-8 rounded border border-outline-gray-2 px-2 py-1">
+                <JsonListControl
+                  v-model="form.buybox_property_types"
+                  :options="BUYBOX_PROPERTY_TYPES"
+                  :placeholder="__('Select types…')"
+                />
+              </div>
+            </div>
+          </div>
+          <FormControl
+            v-model="form.buybox"
+            type="textarea"
+            :label="__('Buybox notes')"
+            :placeholder="__('Price range, ZIP codes, condition, deal size…')"
+          />
+        </div>
 
         <!-- put the new buyer straight on a deal: the common case is meeting a
              buyer *about* a specific property, so it's here rather than a
@@ -208,6 +238,7 @@
 
 <script setup>
 import Autocomplete from '@/components/frappe-ui/Autocomplete.vue'
+import JsonListControl from '@/components/Controls/JsonListControl.vue'
 import {
   Dialog,
   FormControl,
@@ -247,6 +278,8 @@ const blank = () => ({
   buyer_type: '',
   quo_tags: '',
   metro_areas: [],
+  buybox_cities: [],
+  buybox_property_types: [],
   buybox: '',
 })
 const form = ref(blank())
@@ -265,6 +298,19 @@ const STAGES = [
   'Offer Made',
   'Not Interested',
 ]
+
+const BUYBOX_PROPERTY_TYPES = [
+  'Single Family',
+  'Multifamily',
+  'Condo / Townhome',
+  'Land',
+  'Mobile Home',
+  'Commercial',
+]
+const buyboxCities = createResource({
+  url: 'crm.api.buyers.get_buybox_cities',
+  auto: true,
+})
 
 // under-contract + dispo properties, the same set the bulk importer offers
 const properties = createResource({
@@ -332,13 +378,20 @@ watch(show, (v) => {
   if (!props.buyer && props.withProperty) properties.reload()
   form.value = props.buyer
     ? {
-        first_name: props.buyer.first_name || '',
-        last_name: props.buyer.last_name || '',
+        first_name:
+          props.buyer.first_name ||
+          (props.buyer.buyer_name || '').trim().split(/\s+/)[0] ||
+          '',
+        last_name:
+          props.buyer.last_name ||
+          (props.buyer.buyer_name || '').trim().split(/\s+/).slice(1).join(' '),
         phone: props.buyer.phone || '',
         email: props.buyer.email || '',
         buyer_type: props.buyer.buyer_type || '',
         quo_tags: props.buyer.quo_tags || '',
         metro_areas: [...(props.buyer.metros || [])],
+        buybox_cities: [...(props.buyer.buybox_cities || [])],
+        buybox_property_types: [...(props.buyer.buybox_property_types || [])],
         buybox: props.buyer.buybox || '',
       }
     : blank()

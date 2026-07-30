@@ -86,13 +86,23 @@
         <div class="text-ink-gray-4">{{ col.buyers.length }}</div>
       </div>
 
-      <div class="flex flex-col gap-3.5 overflow-y-auto">
-        <router-link
-          v-for="b in col.buyers"
-          :key="b.name"
-          :to="{ name: 'Buyer', params: { buyerId: b.buyer } }"
-          class="flex flex-col rounded-lg border bg-surface-white px-3.5 pb-2.5 pt-3 text-base text-ink-gray-9 hover:border-outline-gray-3"
-        >
+      <Draggable
+        :list="col.buyers"
+        group="dispo-buyers"
+        item-key="name"
+        class="flex min-h-12 flex-1 flex-col gap-3.5 overflow-y-auto rounded-md"
+        :class="moving ? 'bg-surface-gray-1' : ''"
+        :delay="isTouchScreenDevice() ? 200 : 0"
+        :data-stage="col.stage"
+        @start="moving = true"
+        @end="moveBuyer"
+      >
+        <template #item="{ element: b }">
+          <router-link
+            :to="{ name: 'Buyer', params: { buyerId: b.buyer } }"
+            :data-name="b.name"
+            class="flex cursor-grab flex-col rounded-lg border bg-surface-white px-3.5 pb-2.5 pt-3 text-base text-ink-gray-9 hover:border-outline-gray-3 active:cursor-grabbing"
+          >
           <!-- title: name + verified + direction -->
           <div class="flex items-center gap-1.5">
             <span class="truncate font-medium">{{ b.buyer_name || '—' }}</span>
@@ -109,6 +119,17 @@
             >
               {{ b.direction }}
             </Badge>
+            <div @click.stop.prevent>
+              <Dropdown :options="stageOptions(b)">
+                <button
+                  type="button"
+                  class="flex size-6 items-center justify-center rounded text-ink-gray-5 hover:bg-surface-gray-2 hover:text-ink-gray-8"
+                  :title="__('Move buyer')"
+                >
+                  <MoreHorizontalIcon class="size-4" />
+                </button>
+              </Dropdown>
+            </div>
           </div>
 
           <div class="my-2.5 h-px border-b" />
@@ -146,12 +167,14 @@
               <NoteIcon class="size-3" /> {{ b.message_count }}
             </span>
           </div>
-        </router-link>
-
-        <div v-if="!col.buyers.length" class="px-1 py-2 text-sm text-ink-gray-4">
-          {{ __('No buyers') }}
-        </div>
-      </div>
+          </router-link>
+        </template>
+        <template #footer>
+          <div v-if="!col.buyers.length" class="px-1 py-2 text-sm text-ink-gray-4">
+            {{ moving ? __('Drop buyer here') : __('No buyers') }}
+          </div>
+        </template>
+      </Draggable>
     </div>
   </div>
 </template>
@@ -162,11 +185,13 @@ import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
 import NoteIcon from '@/components/Icons/NoteIcon.vue'
 import BadgeCheckIcon from '~icons/lucide/badge-check'
 import HistoryIcon from '~icons/lucide/history'
-import { formatDate, parseColor } from '@/utils'
+import MoreHorizontalIcon from '~icons/lucide/more-horizontal'
+import { formatDate, isTouchScreenDevice, parseColor } from '@/utils'
 import { formatPhone } from '@/utils/phoneFormat'
 import { globalStore } from '@/stores/global'
-import { Badge, createResource } from 'frappe-ui'
-import { computed, onMounted, onBeforeUnmount } from 'vue'
+import { Badge, Dropdown, call, createResource, toast } from 'frappe-ui'
+import Draggable from 'vuedraggable'
+import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 
 const props = defineProps({
   lead: { type: String, required: true },
@@ -179,6 +204,7 @@ const listCols = {
 }
 
 const { $socket } = globalStore()
+const moving = ref(false)
 
 // Canonical stage order + column colors (mirrors the InvestorLift board).
 const STAGES = [
@@ -228,6 +254,43 @@ function tagList(buyer_type) {
 
 function telHref(phone) {
   return 'tel:' + (phone || '').replace(/[^\d+]/g, '')
+}
+
+function stageOptions(buyer) {
+  return [
+    {
+      group: __('Move to'),
+      items: STAGES.filter(({ stage }) => stage !== buyer.interest_stage).map(
+        ({ stage }) => ({
+          label: stage,
+          onClick: () => updateStage(buyer.name, stage),
+        }),
+      ),
+    },
+  ]
+}
+
+async function updateStage(relationship, toStage) {
+  try {
+    await call('crm.api.buyers.move_buyer_stage', {
+      relationship,
+      stage: toStage,
+    })
+    const row = (buyers.data || []).find((buyer) => buyer.name === relationship)
+    if (row) row.interest_stage = toStage
+  } catch (error) {
+    await buyers.reload()
+    toast.error(error.messages?.[0] || __('Could not move buyer'))
+  }
+}
+
+function moveBuyer(event) {
+  moving.value = false
+  const relationship = event?.item?.dataset?.name
+  const fromStage = event?.from?.dataset?.stage
+  const toStage = event?.to?.dataset?.stage
+  if (!relationship || !toStage || fromStage === toStage) return
+  updateStage(relationship, toStage)
 }
 
 function onBuyers(data) {

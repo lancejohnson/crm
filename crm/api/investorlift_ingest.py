@@ -514,15 +514,21 @@ def get_buyer(buyer):
 		frappe.throw(_("Buyer not found"), frappe.DoesNotExistError)
 
 	fields = ["name", "buyer_name", "first_name", "last_name", "phone", "email",
-	          "verified", "buyer_type", "deal_history", "last_active", "il_buyer_id"]
-	if frappe.get_meta(BUYER_DOCTYPE).has_field("metro_areas"):
+	          "verified", "buyer_type", "deal_history", "last_active", "il_buyer_id", "modified"]
+	meta = frappe.get_meta(BUYER_DOCTYPE)
+	if meta.has_field("metro_areas"):
 		fields += ["metro_areas", "buybox"]
+	for fieldname in ("buybox_cities", "buybox_property_types"):
+		if meta.has_field(fieldname):
+			fields.append(fieldname)
 	if frappe.get_meta(BUYER_DOCTYPE).has_field("quo_tags"):
 		fields += ["quo_tags"]
 	doc = frappe.db.get_value(BUYER_DOCTYPE, buyer, fields, as_dict=True)
-	from crm.api.buyers import _parse_metros
+	from crm.api.buyers import _json_list, _parse_metros
 
 	doc["metros"] = _parse_metros(doc.get("metro_areas"))
+	doc["buybox_cities"] = _json_list(doc.get("buybox_cities"))
+	doc["buybox_property_types"] = _json_list(doc.get("buybox_property_types"))
 
 	deals = []
 	rels = frappe.get_all(

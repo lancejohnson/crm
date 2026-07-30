@@ -24,6 +24,8 @@
             :deals="deals"
             :buyerId="buyerId"
             @edit="showEdit = true"
+            @delete="showDelete = true"
+            @reload="buyer.reload()"
             @add-to-deal="showAddToDeal = true"
             @create-agreement="createAgreementFor"
           />
@@ -97,6 +99,8 @@
         :deals="deals"
         :buyerId="buyerId"
         @edit="showEdit = true"
+        @delete="showDelete = true"
+        @reload="buyer.reload()"
         @add-to-deal="showAddToDeal = true"
         @create-agreement="createAgreementFor"
       />
@@ -118,6 +122,13 @@
     :buyer="buyerId"
     :options="{ afterCreate: onAgreementCreated }"
   />
+  <DeleteLinkedDocModal
+    v-if="showDelete"
+    v-model="showDelete"
+    doctype="CRM Buyer"
+    :docname="buyerId"
+    name="Buyers"
+  />
 </template>
 
 <script setup>
@@ -128,6 +139,7 @@ import BuyerModal from '@/components/Modals/BuyerModal.vue'
 import AddBuyerToDealModal from '@/components/Modals/AddBuyerToDealModal.vue'
 import CreateAgreementModal from '@/components/Modals/CreateAgreementModal.vue'
 import BuyerDetailPanel from '@/components/BuyerDetailPanel.vue'
+import DeleteLinkedDocModal from '@/components/DeleteLinkedDocModal.vue'
 import CallArea from '@/components/Activities/CallArea.vue'
 import SMSMedia from '@/components/Activities/SMSMedia.vue'
 import ActivityIcon from '@/components/Icons/ActivityIcon.vue'
@@ -156,6 +168,7 @@ import { useRoute } from 'vue-router'
 const route = useRoute()
 const buyerId = computed(() => route.params.buyerId)
 const showEdit = ref(false)
+const showDelete = ref(false)
 const showAddToDeal = ref(false)
 const activities = ref(null)
 const detailPanel = ref(null)

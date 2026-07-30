@@ -21,9 +21,12 @@ SALES_ROLES = ("System Manager", "Sales Manager", "Sales User")
 # fields a user may set on create/edit (identity + market; IL sync owns the rest)
 EDITABLE_FIELDS = (
 	"first_name", "last_name", "phone", "email",
-	"buyer_type", "metro_areas", "buybox", "deal_history", "verified",
+	"buyer_type", "metro_areas", "buybox", "buybox_cities",
+	"buybox_property_types", "deal_history", "verified",
 	"quo_tags",  # Quo (OpenPhone) contact tags — synced two-way with Quo
 )
+
+JSON_LIST_FIELDS = {"metro_areas", "buybox_cities", "buybox_property_types"}
 
 # an edit to any of these re-pushes the buyer's Quo contact
 QUO_PUSH_FIELDS = {"first_name", "last_name", "buyer_name", "phone", "email", "quo_tags"}
@@ -38,24 +41,36 @@ def _has_market_fields():
 	return frappe.get_meta(BUYER_DOCTYPE).has_field("metro_areas")
 
 
-def _metros_json(value):
-	"""Normalize a metro_areas input (list or JSON string) to a stored JSON
-	string, or None when empty. Metro names contain commas, hence JSON."""
+def _json_list(value):
+	"""Normalize a JSON-list field while preserving commas inside values."""
 	if isinstance(value, str):
 		try:
 			value = json.loads(value)
 		except (ValueError, TypeError):
 			value = [value] if value.strip() else []
-	metros = [m.strip() for m in (value or []) if isinstance(m, str) and m.strip()]
-	return json.dumps(metros) if metros else None
+	items = []
+	for item in value or []:
+		if not isinstance(item, str) or not item.strip():
+			continue
+		item = item.strip()
+		if item not in items:
+			items.append(item)
+	return items
+
+
+def _json_list_value(value):
+	items = _json_list(value)
+	return json.dumps(items, ensure_ascii=False) if items else None
+
+
+def _metros_json(value):
+	"""Backwards-compatible spelling used by buyer-import callers."""
+	return _json_list_value(value)
 
 
 def _parse_metros(raw):
-	try:
-		val = json.loads(raw or "[]")
-		return val if isinstance(val, list) else []
-	except (ValueError, TypeError):
-		return []
+	"""Backwards-compatible parser used by the directory and ingest API."""
+	return _json_list(raw)
 
 
 @frappe.whitelist()
@@ -77,6 +92,9 @@ def get_buyers(search=None, metro=None, property=None, import_list=None):
 	          "buyer_type", "verified", "deal_history", "last_active", "il_buyer_id", "modified"]
 	if _has_market_fields():
 		fields += ["metro_areas", "buybox"]
+		for fieldname in ("buybox_cities", "buybox_property_types"):
+			if frappe.get_meta(BUYER_DOCTYPE).has_field(fieldname):
+				fields.append(fieldname)
 	if frappe.get_meta(BUYER_DOCTYPE).has_field("quo_tags"):
 		fields += ["quo_tags"]
 
@@ -151,7 +169,8 @@ def get_buyers(search=None, metro=None, property=None, import_list=None):
 
 @frappe.whitelist()
 def create_buyer(first_name, last_name=None, phone=None, email=None,
-                 buyer_type=None, metro_areas=None, buybox=None, quo_tags=None):
+                 buyer_type=None, metro_areas=None, buybox=None, quo_tags=None,
+                 buybox_cities=None, buybox_property_types=None):
 	"""Create a buyer manually. Dedupes against existing buyers (email → phone);
 	on a duplicate, returns it instead of creating so the UI can open it."""
 	_guard()
@@ -178,8 +197,14 @@ def create_buyer(first_name, last_name=None, phone=None, email=None,
 		"phone": phone,
 		"email": email,
 		"buyer_type": (buyer_type or "").strip() or None,
-		**({"metro_areas": _metros_json(metro_areas), "buybox": (buybox or "").strip() or None}
-		   if _has_market_fields() else {}),
+		**({
+			"metro_areas": _metros_json(metro_areas),
+			"buybox": (buybox or "").strip() or None,
+			**({"buybox_cities": _json_list_value(buybox_cities)}
+			   if frappe.get_meta(BUYER_DOCTYPE).has_field("buybox_cities") else {}),
+			**({"buybox_property_types": _json_list_value(buybox_property_types)}
+			   if frappe.get_meta(BUYER_DOCTYPE).has_field("buybox_property_types") else {}),
+		} if _has_market_fields() else {}),
 		**({"quo_tags": (quo_tags or "").strip() or None}
 		   if frappe.get_meta(BUYER_DOCTYPE).has_field("quo_tags") else {}),
 	})
@@ -201,8 +226,8 @@ def update_buyer(buyer, updates):
 	for k, v in (updates or {}).items():
 		if k not in EDITABLE_FIELDS or not meta.has_field(k):
 			continue
-		if k == "metro_areas":
-			vals[k] = _metros_json(v)
+		if k in JSON_LIST_FIELDS:
+			vals[k] = _json_list_value(v)
 			continue
 		if isinstance(v, str):
 			v = v.strip()
@@ -229,6 +254,31 @@ def update_buyer(buyer, updates):
 
 
 INTEREST_STAGES = ("New", "Attempted to Contact", "Not Interested", "Interested", "Offer Made")
+
+
+@frappe.whitelist()
+def move_buyer_stage(relationship, stage):
+	"""Move one buyer relationship to another Dispo-board column."""
+	_guard()
+	if stage not in INTEREST_STAGES:
+		frappe.throw(_("Invalid buyer stage."))
+	if not frappe.db.exists(LEAD_BUYER_DOCTYPE, relationship):
+		frappe.throw(_("Buyer relationship not found"), frappe.DoesNotExistError)
+
+	doc = frappe.get_doc(LEAD_BUYER_DOCTYPE, relationship)
+	if not doc.has_permission("write"):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	if doc.interest_stage == stage:
+		return {"ok": True, "stage": stage}
+
+	doc.interest_stage = stage
+	doc.save()
+	frappe.publish_realtime(
+		"crm_il_buyers",
+		{"reference_doctype": "CRM Lead", "reference_docname": doc.lead},
+		after_commit=True,
+	)
+	return {"ok": True, "stage": stage}
 
 
 @frappe.whitelist()
@@ -303,6 +353,40 @@ def get_buyer_calls(buyer):
 		c["at_epoch"] = get_datetime(c["creation"]).replace(tzinfo=tz).timestamp()
 		out.append(c)
 	return out
+
+
+@frappe.whitelist()
+def get_buybox_cities():
+	"""Distinct property cities already in CRM, plus cities saved on buyers.
+
+	The picker still allows a custom city, so the existing lead set is a useful
+	starting vocabulary rather than a gate.
+	"""
+	_guard()
+	cities = {}
+	if frappe.get_meta("CRM Lead").has_field("property_city"):
+		for row in frappe.get_all(
+			"CRM Lead",
+			filters={"property_city": ["is", "set"]},
+			fields=["property_city", "property_state"],
+			limit_page_length=0,
+		):
+			city = (row.property_city or "").strip().title()
+			state = (row.property_state or "").strip()
+			state = state.upper() if len(state) <= 3 else state.title()
+			label = f"{city}, {state}" if state else city
+			if label:
+				cities.setdefault(label.lower(), label)
+
+	meta = frappe.get_meta(BUYER_DOCTYPE)
+	if meta.has_field("buybox_cities"):
+		for raw in frappe.get_all(
+			BUYER_DOCTYPE, fields=["buybox_cities"], limit_page_length=0
+		):
+			for city in _json_list(raw.get("buybox_cities")):
+				cities.setdefault(city.lower(), city)
+
+	return [{"label": value, "value": value} for value in sorted(cities.values())]
 
 
 @frappe.whitelist()
