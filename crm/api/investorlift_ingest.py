@@ -50,6 +50,21 @@ COLUMN_TO_STAGE = {
 	"offer made": "Offer Made",
 }
 
+# interest_stage -> the column id InvestorLift's own board uses. This is the
+# write-back direction, and it is NOT symmetric with COLUMN_TO_STAGE:
+#
+#   IL's transition matrix makes `new` unreachable from every other column and
+#   `offer_made` terminal. So a CRM move back to "New" can never be pushed --
+#   it is deliberately absent here rather than mapped to something lossy, and
+#   such rows are reported as unpushable instead of being silently mangled.
+STAGE_TO_COLUMN = {
+	"Attempted to Contact": "attempted_to_contact",
+	"Not Interested": "not_interested",
+	"Interested": "interested",
+	"Offer Made": "offer_made",
+}
+UNPUSHABLE_STAGES = ("New",)
+
 MANAGER_ROLES = ("System Manager", "Sales Manager")
 
 
@@ -169,7 +184,9 @@ def _upsert_relationship(lead, buyer, row):
 	# (frappe-crm-deploy scripts/setup_investorlift.py), so a site that hasn't run
 	# scripts/setup_il_stage_field.py yet must still ingest -- it just falls back
 	# to the old overwrite-always behaviour until the field exists.
-	track_il_stage = frappe.get_meta(LEAD_BUYER_DOCTYPE).has_field("il_stage")
+	meta = frappe.get_meta(LEAD_BUYER_DOCTYPE)
+	track_il_stage = meta.has_field("il_stage")
+	track_il_lead = meta.has_field("il_lead_id")
 
 	lookup = ["name", "il_stage"] if track_il_stage else ["name"]
 	current = frappe.db.get_value(
@@ -182,6 +199,10 @@ def _upsert_relationship(lead, buyer, row):
 		"message_count": row.get("note_count") or 0,
 		"last_active": row.get("last_active_at"),
 	}
+	# InvestorLift's per-(property,buyer) id, scraped off the card's React fiber.
+	# This is the handle write-back needs; without it a row can never be pushed.
+	if track_il_lead and row.get("il_lead_id"):
+		vals["il_lead_id"] = str(row["il_lead_id"])
 	vals = {k: v for k, v in vals.items() if v not in (None, "")}
 
 	if current:
@@ -199,6 +220,80 @@ def _upsert_relationship(lead, buyer, row):
 	doc = frappe.get_doc({"doctype": LEAD_BUYER_DOCTYPE, "lead": lead, "buyer": buyer, **vals})
 	doc.insert(ignore_permissions=True)
 	return doc.name, True
+
+
+@frappe.whitelist()
+def get_pending_stage_pushes(il_property_id):
+	"""Rows on this property whose CRM stage a human changed and IL doesn't know.
+
+	`interest_stage != il_stage` means exactly one thing after ingest has run: a
+	human moved the card in the CRM and InvestorLift's board still shows the old
+	column. (When IL is the one that moved, ingest sets both together, so they
+	match and nothing is pending.)
+
+	Returns pushable rows plus, separately, the ones that can never be pushed --
+	IL makes `new` unreachable, so a CRM move back to New has nowhere to go and is
+	surfaced rather than silently dropped.
+	"""
+	_guard()
+	il_property_id = str(il_property_id).strip()
+	lead = frappe.db.get_value("CRM Lead", {"il_property_id": il_property_id}, "name")
+	if not lead:
+		return {"ok": False, "error": f"no CRM Lead linked to il_property_id {il_property_id}"}
+
+	meta = frappe.get_meta(LEAD_BUYER_DOCTYPE)
+	if not (meta.has_field("il_stage") and meta.has_field("il_lead_id")):
+		return {"ok": True, "lead": lead, "pushes": [], "unpushable": [],
+		        "note": "il_stage/il_lead_id not provisioned on this site"}
+
+	rows = frappe.get_all(
+		LEAD_BUYER_DOCTYPE,
+		filters={"lead": lead},
+		fields=["name", "buyer", "interest_stage", "il_stage", "il_lead_id"],
+		limit_page_length=0,
+	)
+
+	pushes, unpushable = [], []
+	for r in rows:
+		if not r.interest_stage or r.interest_stage == r.il_stage:
+			continue  # nothing pending
+		if not r.il_lead_id:
+			unpushable.append({"relationship": r.name, "stage": r.interest_stage,
+			                   "reason": "no il_lead_id captured for this card yet"})
+			continue
+		if r.interest_stage in UNPUSHABLE_STAGES:
+			unpushable.append({"relationship": r.name, "stage": r.interest_stage,
+			                   "reason": "InvestorLift has no transition back to New"})
+			continue
+		target = STAGE_TO_COLUMN.get(r.interest_stage)
+		if not target:
+			unpushable.append({"relationship": r.name, "stage": r.interest_stage,
+			                   "reason": "no InvestorLift column for this stage"})
+			continue
+		pushes.append({"relationship": r.name, "lead_id": str(r.il_lead_id),
+		               "target": target, "stage": r.interest_stage})
+
+	return {"ok": True, "lead": lead, "pushes": pushes, "unpushable": unpushable}
+
+
+@frappe.whitelist()
+def confirm_stage_push(relationship, stage):
+	"""Record that InvestorLift now agrees with the CRM for this row.
+
+	Called only after the daemon has re-read the board and SEEN the card in its
+	new column -- InvestorLift's move handler is a silent no-op on a rejected
+	transition, so an unverified push must never reach this function. Setting
+	il_stage = interest_stage is what stops the row from being pushed again.
+	"""
+	_guard()
+	if not frappe.db.exists(LEAD_BUYER_DOCTYPE, relationship):
+		return {"ok": False, "error": "relationship not found"}
+	if not frappe.get_meta(LEAD_BUYER_DOCTYPE).has_field("il_stage"):
+		return {"ok": False, "error": "il_stage not provisioned"}
+	frappe.db.set_value(LEAD_BUYER_DOCTYPE, relationship, {"il_stage": stage},
+	                    update_modified=False)
+	frappe.db.commit()
+	return {"ok": True, "relationship": relationship, "il_stage": stage}
 
 
 @frappe.whitelist()
