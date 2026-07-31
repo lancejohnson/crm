@@ -1105,6 +1105,13 @@ duplicating. Work substantial features in a worktree of your own.
   template + `parseRows` render the same countdown + color). Deliberately NOT
   in the side-panel Dispo section. `pages/Lead.vue` + `pages/Leads.vue` +
   `utils/index.js`; ops: field added via `setup_dispo_fields.py`.
+- **Showing Access line** (Leads) — `showing_access` (Small Text custom field)
+  rendered as a key-icon row in the Lead sidebar header directly under the DD
+  expiration row: free-text access instructions ("vacant", "lockbox 4127, dogs
+  in yard", …) in a borderless auto-growing textarea that wraps; Enter/blur
+  saves, Esc reverts. Deliberately NOT in the side-panel Dispo section.
+  `pages/Lead.vue` + `pages/MobileLead.vue`; ops: field added via
+  `setup_dispo_fields.py`. Requested by Lance (Mattermost 2026-07-31).
 - **Documenso "Create Purchase Agreement"** (Leads) — a header action (in the
   decluttered "More" menu next to the name) that spins up a pre-filled, editable
   Documenso e-sign draft of the wholesale purchase agreement and hands back a
