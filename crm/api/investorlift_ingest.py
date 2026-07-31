@@ -633,6 +633,9 @@ def get_dispo_properties():
 	fields = ["name", "lead_name", "property_address", "modified"]
 	if has_il:
 		fields += ["il_property_id", "il_status"]
+		# so the Dispo board header can link straight to the buyer-facing listing
+		if frappe.get_meta("CRM Lead").has_field("il_marketplace_url"):
+			fields.append("il_marketplace_url")
 	leads = frappe.get_all(
 		"CRM Lead",
 		filters={"name": ("in", list(names))},
@@ -647,6 +650,7 @@ def get_dispo_properties():
 			"label": l.property_address or l.lead_name or l.name,
 			"il_property_id": l.get("il_property_id"),
 			"il_status": l.get("il_status"),
+			"il_marketplace_url": l.get("il_marketplace_url"),
 			"buyer_count": frappe.db.count(LEAD_BUYER_DOCTYPE, {"lead": l.name}) if has_buyers else 0,
 		})
 	return out

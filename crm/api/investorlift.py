@@ -285,6 +285,10 @@ def _writeback(lead, summary):
 	put("il_property_id", summary.get("il_property_id"))
 	put("il_status", summary.get("status"))
 	put("il_admin_url", summary.get("admin_url"))
+	# The buyer-facing marketplace listing (IL's `property_page_url`). _summary has
+	# always computed it; persisting it is what makes it available on a normal page
+	# load, since get_marketing reads stored fields and only hits the API on refresh.
+	put("il_marketplace_url", summary.get("marketplace_url"))
 	put("il_sms_sent", summary["sms"]["sent"])
 	put("il_sms_delivered", summary["sms"]["delivered"])
 	put("il_sms_clicked", summary["sms"]["clicked"])
@@ -472,7 +476,8 @@ def get_marketing(lead, refresh=0):
 			"il_sms_sent", "il_sms_delivered", "il_sms_clicked", "il_sms_unsub", "il_sms_ctr",
 			"il_email_sent", "il_email_delivered", "il_email_clicked",
 			"il_spend", "il_views", "il_marketing_synced_at",
-		],
+		]
+		+ (["il_marketplace_url"] if meta.has_field("il_marketplace_url") else []),
 		as_dict=True,
 	) or {}
 	il_id = stored.get("il_property_id")
@@ -491,6 +496,7 @@ def get_marketing(lead, refresh=0):
 		"il_property_id": il_id,
 		"status": stored.get("il_status"),
 		"admin_url": stored.get("il_admin_url"),
+		"marketplace_url": stored.get("il_marketplace_url"),
 		"views": cint(stored.get("il_views")),
 		"spend": flt(stored.get("il_spend")),
 		"sms": {

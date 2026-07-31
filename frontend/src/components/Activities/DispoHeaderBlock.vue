@@ -28,6 +28,15 @@
           {{ __('Admin listing') }}
           <ExternalLinkIcon class="size-3" />
         </a>
+        <a
+          v-if="m.marketplace_url"
+          :href="m.marketplace_url"
+          target="_blank"
+          class="flex items-center gap-1 text-ink-blue-3 hover:underline"
+        >
+          <ExternalLinkIcon class="size-3.5" />
+          {{ __('Public listing') }}
+        </a>
       </div>
 
       <div class="flex flex-wrap gap-x-6 gap-y-2 px-3 pt-1 pb-3">

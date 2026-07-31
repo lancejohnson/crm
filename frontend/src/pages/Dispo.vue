@@ -22,6 +22,16 @@
         >
           {{ current.il_status }}
         </Badge>
+        <a
+          v-if="current?.il_marketplace_url"
+          :href="current.il_marketplace_url"
+          target="_blank"
+          class="flex items-center gap-1 text-base text-ink-blue-3 hover:underline"
+          :title="__('Open the buyer-facing InvestorLift listing')"
+        >
+          <ExternalLinkIcon class="size-3.5" />
+          {{ __('Public listing') }}
+        </a>
       </div>
     </template>
     <template #right-header>
@@ -127,6 +137,7 @@ import DispoIcon from '~icons/lucide/columns-3'
 import BoardIcon from '~icons/lucide/columns-3'
 import ListIcon from '~icons/lucide/list'
 import ChevronDownIcon from '~icons/lucide/chevron-down'
+import ExternalLinkIcon from '~icons/lucide/external-link'
 import { Breadcrumbs, Button, Badge, Dropdown, createResource, usePageMeta } from 'frappe-ui'
 import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'

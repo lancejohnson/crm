@@ -36,6 +36,25 @@
         </a>
       </div>
 
+      <!-- buyer-facing marketplace listing: the link you'd actually send someone -->
+      <div v-if="m.marketplace_url" class="flex items-center gap-2">
+        <a
+          :href="m.marketplace_url"
+          target="_blank"
+          class="flex items-center gap-1 text-ink-blue-3 hover:underline"
+        >
+          {{ __('Public listing') }}
+          <ExternalLinkIcon class="size-3" />
+        </a>
+        <button
+          class="text-ink-gray-4 hover:text-ink-gray-7"
+          :title="__('Copy public link')"
+          @click="copyPublicLink"
+        >
+          <CopyIcon class="size-3.5" />
+        </button>
+      </div>
+
       <router-link
         :to="{ name: 'Dispo', params: { leadId: lead } }"
         class="flex items-center gap-1 text-ink-blue-3 hover:underline"
@@ -113,8 +132,9 @@
 <script setup>
 import MegaphoneIcon from '~icons/lucide/megaphone'
 import ExternalLinkIcon from '~icons/lucide/external-link'
+import CopyIcon from '~icons/lucide/copy'
 import DispoIcon from '~icons/lucide/columns-3'
-import { formatDate, formatNumber } from '@/utils'
+import { copyToClipboard, formatDate, formatNumber } from '@/utils'
 import { globalStore } from '@/stores/global'
 import { Badge, Button, Dropdown, createResource, call } from 'frappe-ui'
 import { computed, h, ref, onMounted, onBeforeUnmount } from 'vue'
@@ -142,6 +162,12 @@ const marketing = createResource({
 
 const m = computed(() => marketing.data || {})
 const linked = computed(() => !!m.value.linked)
+
+// the buyer-facing listing is the link that actually gets sent to people, so
+// make it one click to copy rather than open-then-copy-from-the-address-bar
+function copyPublicLink() {
+  if (m.value?.marketplace_url) copyToClipboard(m.value.marketplace_url)
+}
 
 function refresh() {
   marketing.update({ params: { lead: props.lead, refresh: 1 } })
