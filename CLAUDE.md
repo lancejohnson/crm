@@ -1629,6 +1629,31 @@ CRM_DEV_TARGET=https://crm.groundworkpro.com yarn dev    # same command in every
 - The dev API token is shared (Infisical), so every agent's dev server acts as
   the same user. Fine on one laptop; worth remembering if a session looks like
   it is "someone else's" activity.
+- **PUSH BEFORE YOU DEPLOY, PULL BEFORE YOU BUILD — this is the one that bites
+  ACROSS MACHINES.** The serialisation above only protects agents on the *same*
+  laptop; the lock, the tag counter and the assets volume say nothing about
+  whether the tree you're shipping is current. `build_image.sh` ships the
+  deployer's whole tree against a fixed base image, so a deploy from a stale
+  checkout doesn't merge — it **replaces** prod's app code, silently deleting
+  every feature committed since that checkout. Nothing warns you: the build
+  succeeds, `smoke_test.py` passes (it only asserts prod matches *your* repo,
+  which it now does), and the regression surfaces days later as "feature X
+  stopped working".
+  - **2026-07-31, the case in point.** gw256/gw257 (buyer drag, buyboxes,
+    delete access, IL duplicate-buyer race fix) were committed on the MBP but
+    never pushed. Next morning an agent on the **mini**, whose checkout was at
+    `8b8ea82d` (six commits behind), deployed gw258 to ship Showing Access.
+    Prod lost the drag, the buyboxes, the call classification badges, buyer
+    import lists, lead photos AND the duplicate-buyer race fix. Recovered by
+    merging both sides and redeploying as gw259.
+  - **Diagnosing it takes one command** — the image records the tree it was
+    built from, and `-dirty`/an old sha is the tell:
+    `docker image inspect ghcr.io/frappe/crm:<tag> --format '{{json .Config.Labels}}'`
+    → `org.opencontainers.image.revision`. Compare against `git log` before
+    assuming the feature's own code broke.
+  - So: `git push` the moment a feature is committed (an unpushed commit is
+    invisible to the other machine and *will* be clobbered), and
+    `git pull` immediately before `build_image.sh`.
 
 **Don't tune `yarn build` flags — they do nothing.** Measured on Vite 5:
 baseline 42s, `--minify false` 39s, `--sourcemap false` 39s, both 41s, dropping
