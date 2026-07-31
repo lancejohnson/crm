@@ -140,13 +140,42 @@ def _upsert_buyer(row):
 
 
 def _upsert_relationship(lead, buyer, row):
-	"""Create/update the per-property CRM Lead Buyer row."""
+	"""Create/update the per-property CRM Lead Buyer row.
+
+	`interest_stage` has two writers: this sync and a human on the Dispo board
+	(drag / "Move to" -> crm.api.buyers.move_buyer_stage). It used to be
+	overwritten from IL every cycle, so a CRM-side move survived ~10 minutes.
+
+	The rule now: **a human's move wins until InvestorLift's own column moves.**
+	`il_stage` snapshots the column IL last reported, so we can tell a genuine
+	IL move from IL merely repeating itself:
+
+	  incoming == il_stage  -> IL hasn't moved the card; leave interest_stage
+	                           alone (it may hold a human's decision).
+	  incoming != il_stage  -> the buyer actually moved on IL's board; that's
+	                           new information, so it wins and re-syncs the row.
+
+	This deliberately isn't a permanent human lock: that would let the CRM go
+	stale forever against real buyer activity. Only `interest_stage` is
+	protected — direction/message_count/last_active are pure IL telemetry that
+	nobody edits by hand, so they still overwrite freely.
+	"""
 	stage = COLUMN_TO_STAGE.get((row.get("column") or "").strip().lower())
 	direction = (row.get("direction") or "").strip().capitalize()
 	if direction not in ("Inbound", "Outbound"):
 		direction = None
 
-	existing = frappe.db.get_value(LEAD_BUYER_DOCTYPE, {"lead": lead, "buyer": buyer}, "name")
+	# Guard the field lookup: this doctype is provisioned per-site by the ops repo
+	# (frappe-crm-deploy scripts/setup_investorlift.py), so a site that hasn't run
+	# scripts/setup_il_stage_field.py yet must still ingest -- it just falls back
+	# to the old overwrite-always behaviour until the field exists.
+	track_il_stage = frappe.get_meta(LEAD_BUYER_DOCTYPE).has_field("il_stage")
+
+	lookup = ["name", "il_stage"] if track_il_stage else ["name"]
+	current = frappe.db.get_value(
+		LEAD_BUYER_DOCTYPE, {"lead": lead, "buyer": buyer}, lookup, as_dict=True
+	)
+
 	vals = {
 		"interest_stage": stage,
 		"direction": direction,
@@ -154,10 +183,19 @@ def _upsert_relationship(lead, buyer, row):
 		"last_active": row.get("last_active_at"),
 	}
 	vals = {k: v for k, v in vals.items() if v not in (None, "")}
-	if existing:
+
+	if current:
+		if stage and track_il_stage:
+			if current.get("il_stage") == stage:
+				vals.pop("interest_stage", None)  # IL unchanged -> don't touch the CRM's value
+			else:
+				vals["il_stage"] = stage  # IL moved -> take it, and re-snapshot
 		if vals:
-			frappe.db.set_value(LEAD_BUYER_DOCTYPE, existing, vals, update_modified=False)
-		return existing, False
+			frappe.db.set_value(LEAD_BUYER_DOCTYPE, current["name"], vals, update_modified=False)
+		return current["name"], False
+
+	if stage and track_il_stage:
+		vals["il_stage"] = stage
 	doc = frappe.get_doc({"doctype": LEAD_BUYER_DOCTYPE, "lead": lead, "buyer": buyer, **vals})
 	doc.insert(ignore_permissions=True)
 	return doc.name, True
