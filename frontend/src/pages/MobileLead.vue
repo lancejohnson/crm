@@ -150,6 +150,30 @@
                   @click.stop="updateField('dd_expiration_date', '')"
                 />
               </div>
+              <!-- Showing access: free-text access instructions ("vacant",
+                   "lockbox 4127", …); wraps, Enter/blur saves, Esc reverts. -->
+              <div
+                class="flex items-start gap-1.5 text-sm text-ink-gray-7"
+                :title="__('Showing Access')"
+              >
+                <FeatherIcon name="key" class="mt-0.5 size-3.5 shrink-0" />
+                <textarea
+                  ref="showingAccessInput"
+                  v-model="showingAccessDraft"
+                  rows="1"
+                  autocomplete="off"
+                  :placeholder="__('Showing access (vacant, lockbox code…)')"
+                  class="w-full resize-none overflow-hidden whitespace-pre-wrap border-none bg-transparent p-0 text-sm leading-5 text-ink-gray-7 placeholder:text-ink-gray-4 focus:text-ink-gray-9 focus:outline-none focus:ring-0"
+                  @focus="showingAccessFocused = true"
+                  @input="resizeShowingAccess"
+                  @keydown.enter.prevent="$event.target.blur()"
+                  @keydown.esc.prevent="
+                    showingAccessDraft = doc.showing_access || '';
+                    $event.target.blur()
+                  "
+                  @blur="saveShowingAccess"
+                />
+              </div>
               <div class="mt-1 flex gap-1.5">
                 <Button
                   :tooltip="__('Call')"
@@ -312,7 +336,7 @@ import {
   usePageMeta,
   toast,
 } from 'frappe-ui'
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import ConvertToDealModal from '@/components/Modals/ConvertToDealModal.vue'
 
@@ -555,6 +579,38 @@ function saveDdExpiration(e) {
   const value = e.target.value || ''
   if (value === (doc.value.dd_expiration_date || '')) return
   updateField('dd_expiration_date', value)
+}
+
+// Showing access inline editor (auto-growing textarea) — mirrors the desktop
+// Lead sidebar header.
+const showingAccessInput = ref(null)
+const showingAccessDraft = ref('')
+const showingAccessFocused = ref(false)
+
+watch(
+  () => doc.value?.showing_access,
+  (v) => {
+    if (showingAccessFocused.value) return
+    showingAccessDraft.value = v || ''
+    nextTick(resizeShowingAccess)
+  },
+  { immediate: true },
+)
+
+function resizeShowingAccess() {
+  const el = showingAccessInput.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${el.scrollHeight}px`
+}
+
+function saveShowingAccess() {
+  showingAccessFocused.value = false
+  const value = showingAccessDraft.value.trim()
+  showingAccessDraft.value = value
+  nextTick(resizeShowingAccess)
+  if (value === (doc.value.showing_access || '')) return
+  updateField('showing_access', value)
 }
 
 function dialNumber(number) {
