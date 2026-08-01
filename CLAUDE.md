@@ -1359,6 +1359,18 @@ duplicating. Work substantial features in a worktree of your own.
   - **Cancellations are deliberately not parsed** — the prompt returns `{}` for
     them. Clearing real fields on an LLM read of a cancellation is the one
     failure here that loses data instead of just being wrong. Verified live.
+  - **GOTCHA — backfilling: preview first, and mind ASSIGNMENT documents.** An
+    Assignment Agreement's price is what the BUYER pays US, not our acq price;
+    on the Phoenix deal a backfill would have overwritten `acq_price`
+    **180,000 → 190,000** (the assignment spread) on an active Buyer-Assigned
+    lead. AIFs/POAs and novations correctly return `{}`. Also, a lead often has
+    SEVERAL agreements (purchase → amendment → novation → AIF): submit oldest
+    first so later terms win, or a superseded original clobbers the amended
+    price. The 2026-08-01 backfill of dispo-active deals therefore ran as
+    preview → human review → apply-exact-reviewed-values (no second inference),
+    under a **fill-blanks-never-overwrite** rule; 7 fields across 5 leads, 4
+    agreements held back because the document disagreed with the CRM (two were
+    simply superseded originals the CRM already reflected).
   - `crm/api/contract_parse.py` (**new**: `PARSE_FIELDS` — the single source of
     truth, shipped to the mini on each fetch so adding a field needs no redeploy
     there — plus `notify_mini` / `get_agreement_for_parse` /
