@@ -536,6 +536,18 @@ def docuseal_webhook(secret: str = None):
 			except Exception:
 				frappe.log_error(frappe.get_traceback(), "agreement notification failed")
 
+		# Now fully signed? Trigger the contract parser on the Mac mini (it reads
+		# the signed PDF and writes acq price / DD expiration / closing date back
+		# onto the lead). Fire-and-forget by design: the listener's start-up
+		# catch-up sweep recovers anything sent while it was down, so an
+		# unreachable parser must never cost DocuSeal its 200.
+		try:
+			from crm.api.contract_parse import notify_mini
+
+			notify_mini(agr)
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), "contract parser trigger failed")
+
 	return {"ok": True, "updated": len(rows)}
 
 
