@@ -1316,6 +1316,61 @@ duplicating. Work substantial features in a worktree of your own.
   - Ops (`../frappe-crm-deploy`): `scripts/setup_agreement.py` adds `source`
     (Select `crm\nadopted`), `match_basis` (Small Text) and `is_archived` (Check)
     via `ensure_field` (idempotent). All three are live on prod.
+- **Signed contracts parse themselves into the lead (pi on the Mac mini)** — when
+  a DocuSeal envelope goes fully signed, `docuseal_webhook` POSTs a trigger to a
+  listener on the Mac mini; it fetches the signed PDF back out of the CRM, reads
+  it with a one-shot `pi`, and writes `acq_price` / `dd_expiration_date` /
+  `closing_date` (+ the property address if the contract corrects it) onto the
+  lead. Push, not polling — the mini never sleeps (`pmset`: `sleep 0`,
+  `autorestart 1`), so a startup catch-up is enough of a backstop.
+  - **Transport = Tailscale Funnel**, `https://lances-mac-mini.tailc8c60d.ts.net:8443`
+    → `127.0.0.1:7474`. Prod is NOT on the tailnet and doesn't need to be. Note
+    the pre-existing `:8444` Serve (→ `:7373`) is tailnet-only and is NOT a
+    Funnel-eligible port; this tailnet allows Funnel on **443, 8443, 10000**.
+  - **The push carries an ID, not a payload.** The URL is public, so nothing
+    from the request may reach the model — the listener reads one agreement id
+    and re-fetches everything authoritative from the CRM with its own token. A
+    forged trigger (needs the shared secret; wrong/absent → 403) can at worst
+    re-read a real agreement.
+  - **`pi` runs with every tool disabled** (`-xt bash,read,write,edit,ask_question`).
+    Contract text is semi-untrusted input going into a prompt on a machine with a
+    shell; with no tools the run is a pure text completion and the CRM write is
+    done afterwards by the script, through a validating endpoint. GOTCHA: pi
+    emits an OSC escape (`ESC ]9;Pi`) around stdout even when piped — strip
+    escapes before parsing JSON.
+  - **Writes go through `doc.save()`, not `db.set_value`** — deliberately the
+    opposite of the tax-pull/first-call pattern. The Version row is the point:
+    it renders as "changed Acq Price from … to …" on the activity timeline,
+    which is the entire audit trail here. Attribution is whichever user's API
+    key the mini holds (currently Administrator).
+  - **GOTCHA — the catch-up sweep is an outage bridge, NOT an importer.** It
+    first shipped at 30 days keyed on `creation`; on install that swept every
+    signed contract in history and began rewriting live leads (14 queued before
+    it was stopped — it got through one cancellation, which correctly wrote
+    nothing). Now 2 days, keyed on **`last_event_at`** (a contract sent last
+    week and signed during an outage must still be caught, so `creation` was
+    the wrong clock). Backfill is opt-in via a larger `days`.
+  - **GOTCHA — business-day arithmetic.** DD periods are usually "N business
+    days from the effective date", and holiday handling silently moves the
+    deadline a day (Labor Day did exactly this in testing). The convention is
+    now pinned in the prompt (weekends **and** US federal holidays excluded;
+    effective date = last signature = day 0) and the model returns a `_basis`
+    explaining each date, stored in `parse_result`.
+  - **Cancellations are deliberately not parsed** — the prompt returns `{}` for
+    them. Clearing real fields on an LLM read of a cancellation is the one
+    failure here that loses data instead of just being wrong. Verified live.
+  - `crm/api/contract_parse.py` (**new**: `PARSE_FIELDS` — the single source of
+    truth, shipped to the mini on each fetch so adding a field needs no redeploy
+    there — plus `notify_mini` / `get_agreement_for_parse` /
+    `list_unparsed_agreements` / `write_agreement_fields` / `mark_parse_failed`)
+    + the trigger call in `agreement.py::docuseal_webhook`.
+  - Ops (`../frappe-crm-deploy`): `mini/contract-parser/` (listener + plist +
+    README), `setup_agreement.py` gains `parsed_at` / `parse_status` /
+    `parse_result` (`parsed_at` = the idempotency key, so a re-delivered webhook
+    can't clobber a human's correction; an amendment is its own row and so
+    correctly overwrites). site_config: `contract_parser_url` +
+    `contract_parser_secret` — absent, `notify_mini` is a no-op and the feature
+    lies dormant.
 - **First-Call Read (2x2 lead qualification)** — after the first call a rep marks
   two yes/no reads that place the lead in a 2x2: **Motivated?** (is the seller
   motivated) x **On price?** (is their price realistic) → Motivated·On price /
