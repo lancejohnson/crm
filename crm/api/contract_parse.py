@@ -98,7 +98,14 @@ MIN_YEAR = 2000
 MAX_YEAR = 2100
 
 # How far back the catch-up sweep looks when the listener restarts.
-CATCHUP_DAYS = 30
+#
+# Deliberately SHORT. Catch-up exists to bridge an outage — the mini rebooting
+# for an OS update, a dropped POST — not to import history. A wide default is
+# actively dangerous: on first install it sweeps every contract ever signed and
+# silently rewrites fields on dozens of live leads, including long-dead deals.
+# (Observed: the first run here queued 14 historical agreements.) Backfilling
+# history is a decision a human makes explicitly, by passing a larger `days`.
+CATCHUP_DAYS = 2
 
 
 # --------------------------------------------------------------------------- #
@@ -171,27 +178,44 @@ def get_agreement_for_parse(agreement: str):
 def list_unparsed_agreements(days: int = CATCHUP_DAYS):
 	"""Signed-but-unparsed agreements — the listener's start-up catch-up sweep.
 
-	This is the durability backstop for the push (mini rebooting for an OS
-	update, listener crash-looping, a dropped POST). It runs once on startup,
-	NOT on a timer: there is no steady-state polling in this feature.
+	The durability backstop for the push (mini rebooting, listener crash-looping,
+	a dropped POST). Runs once on startup, NOT on a timer: this feature has no
+	steady-state polling.
+
+	Pass a larger `days` to deliberately backfill history — see CATCHUP_DAYS for
+	why that is opt-in rather than the default.
 	"""
 	if not frappe.db.has_column(AGREEMENT_DOCTYPE, "parsed_at"):
 		return []
 
-	filters = {"parsed_at": ["is", "not set"], "creation": [">", frappe.utils.add_days(None, -abs(int(days)))]}
+	filters = {"parsed_at": ["is", "not set"]}
 	if frappe.db.has_column(AGREEMENT_DOCTYPE, "is_archived"):
 		filters["is_archived"] = 0
 
 	rows = frappe.get_all(
 		AGREEMENT_DOCTYPE,
 		filters=filters,
-		fields=["name", "lead", "agreement_status", "signed_count", "total_signers"],
+		fields=[
+			"name", "lead", "agreement_status", "signed_count",
+			"total_signers", "last_event_at", "creation",
+		],
 		order_by="creation desc",
-		limit_page_length=200,
+		limit_page_length=500,
 	)
-	# `_is_completed` is a Python rule (status OR all-signers-signed), not a
-	# column, so the signed test happens here rather than in the query.
-	return [r.name for r in rows if r.lead and _is_completed(r)]
+
+	# Window on when the envelope was last touched by DocuSeal — i.e. roughly
+	# when it became signed. `creation` would be wrong: a contract sent last
+	# week and signed during an outage today must still be caught.
+	cutoff = frappe.utils.add_days(None, -abs(int(days)))
+	out = []
+	for r in rows:
+		if not r.lead or not _is_completed(r):
+			# `_is_completed` is a Python rule (status OR all-signers-signed),
+			# not a column, so the signed test can't live in the query.
+			continue
+		if frappe.utils.get_datetime(r.last_event_at or r.creation) >= frappe.utils.get_datetime(cutoff):
+			out.append(r.name)
+	return out
 
 
 # --------------------------------------------------------------------------- #
