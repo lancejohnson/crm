@@ -33,6 +33,66 @@ def strip_currency_cents(val):
 	return val
 
 
+def version_activities(version, doc_fields, avoid_fields, is_lead):
+	"""Render EVERY field change in a Version, not just the first one.
+
+	Frappe writes ONE Version per save, listing every field that changed in it.
+	This used to read `changed[0]` alone, so a save touching several fields put
+	exactly one of them on the timeline and silently dropped the rest. Editing
+	two fields in the side panel and saving once was enough to hit it; the
+	contract parser made it obvious, since it writes a price and two dates in a
+	single save and only the price appeared.
+
+	The old shape also had a latent duplicate: the activity dict was assembled
+	outside the `if change :=` branch that populated its variables, so a version
+	whose first change was falsy appended a stale copy of the PREVIOUS activity.
+	Building one activity per change, inside the loop, removes that too.
+	"""
+	out = []
+	for change in json.loads(version.data).get("changed") or []:
+		if not change:
+			continue
+		field = doc_fields.get(change[0], None)
+		if not field or change[0] in avoid_fields or (not change[1] and not change[2]):
+			continue
+
+		field_label = field.get("label") or change[0]
+		field_option = field.get("options") or None
+
+		activity_type = "changed"
+		data = {
+			"field": change[0],
+			"field_label": field_label,
+			"old_value": change[1],
+			"value": change[2],
+		}
+		if not change[1] and change[2]:
+			activity_type = "added"
+			data = {"field": change[0], "field_label": field_label, "value": change[2]}
+		elif change[1] and not change[2]:
+			activity_type = "removed"
+			data = {"field": change[0], "field_label": field_label, "value": change[1]}
+
+		if data.get("value") and field_option and is_translatable(field_option):
+			data["value"] = _(data["value"])
+			if data.get("old_value"):
+				data["old_value"] = _(data["old_value"])
+
+		if field.get("fieldtype") == "Currency":
+			data["value"] = strip_currency_cents(data.get("value"))
+			data["old_value"] = strip_currency_cents(data.get("old_value"))
+
+		out.append({
+			"activity_type": activity_type,
+			"creation": version.creation,
+			"owner": version.owner,
+			"data": data,
+			"is_lead": is_lead,
+			"options": field_option,
+		})
+	return out
+
+
 def get_deal_activities(name: str):
 	if not frappe.has_permission("CRM Deal", "read", name):
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
@@ -80,61 +140,7 @@ def get_deal_activities(name: str):
 	docinfo.versions.reverse()
 
 	for version in docinfo.versions:
-		data = json.loads(version.data)
-		if not data.get("changed"):
-			continue
-
-		if change := data.get("changed")[0]:
-			field = deal_fields.get(change[0], None)
-
-			if not field or change[0] in avoid_fields or (not change[1] and not change[2]):
-				continue
-
-			field_label = field.get("label") or change[0]
-			field_option = field.get("options") or None
-
-			activity_type = "changed"
-			data = {
-				"field": change[0],
-				"field_label": field_label,
-				"old_value": change[1],
-				"value": change[2],
-			}
-
-			if not change[1] and change[2]:
-				activity_type = "added"
-				data = {
-					"field": change[0],
-					"field_label": field_label,
-					"value": change[2],
-				}
-			elif change[1] and not change[2]:
-				activity_type = "removed"
-				data = {
-					"field": change[0],
-					"field_label": field_label,
-					"value": change[1],
-				}
-
-			if data.get("value") and field_option and is_translatable(field_option):
-				data["value"] = _(data["value"])
-
-				if data.get("old_value"):
-					data["old_value"] = _(data["old_value"])
-
-			if field.get("fieldtype") == "Currency":
-				data["value"] = strip_currency_cents(data.get("value"))
-				data["old_value"] = strip_currency_cents(data.get("old_value"))
-
-		activity = {
-			"activity_type": activity_type,
-			"creation": version.creation,
-			"owner": version.owner,
-			"data": data,
-			"is_lead": False,
-			"options": field_option,
-		}
-		activities.append(activity)
+		activities.extend(version_activities(version, deal_fields, avoid_fields, False))
 
 	for comment in docinfo.comments:
 		activity = {
@@ -227,61 +233,7 @@ def get_lead_activities(name: str):
 	docinfo.versions.reverse()
 
 	for version in docinfo.versions:
-		data = json.loads(version.data)
-		if not data.get("changed"):
-			continue
-
-		if change := data.get("changed")[0]:
-			field = lead_fields.get(change[0], None)
-
-			if not field or change[0] in avoid_fields or (not change[1] and not change[2]):
-				continue
-
-			field_label = field.get("label") or change[0]
-			field_option = field.get("options") or None
-
-			activity_type = "changed"
-			data = {
-				"field": change[0],
-				"field_label": field_label,
-				"old_value": change[1],
-				"value": change[2],
-			}
-
-			if not change[1] and change[2]:
-				activity_type = "added"
-				data = {
-					"field": change[0],
-					"field_label": field_label,
-					"value": change[2],
-				}
-			elif change[1] and not change[2]:
-				activity_type = "removed"
-				data = {
-					"field": change[0],
-					"field_label": field_label,
-					"value": change[1],
-				}
-
-			if data.get("value") and field_option and is_translatable(field_option):
-				data["value"] = _(data["value"])
-
-				if data.get("old_value"):
-					data["old_value"] = _(data["old_value"])
-
-			if field.get("fieldtype") == "Currency":
-				data["value"] = strip_currency_cents(data.get("value"))
-				data["old_value"] = strip_currency_cents(data.get("old_value"))
-
-		activity = {
-			"activity_type": activity_type,
-			"creation": version.creation,
-			"owner": version.owner,
-			"data": data,
-			"is_lead": True,
-			"options": field_option,
-		}
-		activities.append(activity)
+		activities.extend(version_activities(version, lead_fields, avoid_fields, True))
 
 	for comment in docinfo.comments:
 		activity = {
@@ -375,61 +327,7 @@ def get_buyer_activities(name: str):
 	docinfo.versions.reverse()
 
 	for version in docinfo.versions:
-		data = json.loads(version.data)
-		if not data.get("changed"):
-			continue
-
-		if change := data.get("changed")[0]:
-			field = buyer_fields.get(change[0], None)
-
-			if not field or change[0] in avoid_fields or (not change[1] and not change[2]):
-				continue
-
-			field_label = field.get("label") or change[0]
-			field_option = field.get("options") or None
-
-			activity_type = "changed"
-			data = {
-				"field": change[0],
-				"field_label": field_label,
-				"old_value": change[1],
-				"value": change[2],
-			}
-
-			if not change[1] and change[2]:
-				activity_type = "added"
-				data = {
-					"field": change[0],
-					"field_label": field_label,
-					"value": change[2],
-				}
-			elif change[1] and not change[2]:
-				activity_type = "removed"
-				data = {
-					"field": change[0],
-					"field_label": field_label,
-					"value": change[1],
-				}
-
-			if data.get("value") and field_option and is_translatable(field_option):
-				data["value"] = _(data["value"])
-
-				if data.get("old_value"):
-					data["old_value"] = _(data["old_value"])
-
-			if field.get("fieldtype") == "Currency":
-				data["value"] = strip_currency_cents(data.get("value"))
-				data["old_value"] = strip_currency_cents(data.get("old_value"))
-
-		activity = {
-			"activity_type": activity_type,
-			"creation": version.creation,
-			"owner": version.owner,
-			"data": data,
-			"is_lead": False,
-			"options": field_option,
-		}
-		activities.append(activity)
+		activities.extend(version_activities(version, buyer_fields, avoid_fields, False))
 
 	for comment in docinfo.comments:
 		activity = {
