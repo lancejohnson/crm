@@ -93,6 +93,50 @@ duplicating. Work substantial features in a worktree of your own.
   - `frontend/src/pages/Leads.vue` + `pages/Deals.vue` — `crm_task_update`
     listener → `reloadKanban()` (Deals gained a `reloadKanban` helper); on-board
     membership guard to avoid needless reloads
+- **Daily standup list (5am CT Mattermost DM)** — the list Lance runs the morning
+  call from. `crm/api/daily_standup.py` (**new**) holds ONE server-side definition
+  of "what has to happen today", rendered two ways: a DM as the `pi` Mattermost
+  bot, and the same lead set via `get_standup_lead_names(bucket)` for a CRM Leads
+  drill-in — so the standup list and the board **cannot drift**. Replaces an
+  earlier abandoned report whose lists were wrong ("the due list had 33 leads, but
+  most were Dead Lead"), so every rule and exclusion is explicit.
+  - **Cadence = Dennis's**, posted in the Acq channel 2026-07-31: 2x/day for a
+    week → weekly for 3 weeks → monthly. Two clarifications from Lance:
+    "Call/Text" means call AND text but **only calls are metered** (texts are fast
+    and don't compete for the same capacity), and **"1 week" = 5 BUSINESS days**
+    — the call log is flat every weekend, so calendar-day counting burned ~2 days
+    of a lead's best week and overstated cost (13 calls/lead in month 1, not 17).
+  - **Suppression**: an open task with a FUTURE due date means the lead is booked
+    → off today's list. Due-today/overdue puts it ON. Stops the report telling a
+    rep to cold-dial a seller Dennis already scheduled.
+  - **Roles, not owners** — `lead_owner`/`_assign` say Dennis owns ~99% of leads,
+    but German + Exe do the calling while Dennis closes. Splitting by owner would
+    hand the setters an empty list, so it emits one shared **calling queue** plus
+    a **closer list** (Contract Sent → Make Offer → Underwriting, closest-to-
+    closing first, flagged by DD date / task due / days silent).
+  - **Ordering was the hard part; two cuts were wrong.** Ranking "has a due task"
+    as its own top phase made the queue ~50 identical "needs 1 — Follow up" rows
+    (~45 leads carry an auto-created task literally titled "Follow up") and buried
+    all 17 never-called leads — the exact failure the report exists to fix. Phase
+    now comes from the **cadence alone**; a task is a *reason*, not a rank. Second
+    cut: a lead called yesterday still appeared under "Monthly sweep" because a
+    generic task was overdue — leads due ONLY via a leftover task now sit in their
+    own group at the bottom. Never-called sorts first (it's the actual leak).
+  - Groups are individually capped so the list stays finishable.
+  - **Excludes** parked import leads (`import_hidden`), converted, and
+    `EXCLUDE_LEAD_NAMES` (the "Lance Test" record).
+  - `preview_standup(send=0, note=...)` is the dry run (whitelisted/bench);
+    `send_daily_standup` is the scheduler entry, wrapped so a delivery failure
+    can't take down the cron slot, and it re-checks `is_business_day()` itself.
+  - **Ops**: `bench set-config mattermost_token <pi bot token>` +
+    `standup_dm_user lancejohnson` (token also at
+    `~/.config/mattermost/pi-agent.env`; see `Projects/Groundwork/mattermost`).
+    Absent a token `send_dm` no-ops rather than erroring.
+  - **GOTCHA**: cron `0 5 * * 1-5` is read in the **SITE timezone**
+    (America/Chicago), NOT UTC — writing it in UTC once turned an "8am" digest
+    into 1pm. And a new scheduler hook does **nothing** until `sync_jobs` creates
+    its Scheduled Job Type row on prod (gw127/128) — run it via `bench execute`,
+    not `bench console`.
 - **Dead leads stop generating work** — a lead moved to a dead status kept its
   open follow-up tasks forever, so they sat in the Activity to-do block and in
   every "due today" list. Measured on prod 2026-08-03: **25 open tasks on Dead
