@@ -244,6 +244,10 @@ doc_events = {
 			# lead newly linked to an InvestorLift property → tag its Quo
 			# contact with the property address ("Property" multi-select)
 			"crm.api.quo_contacts.on_lead_update",
+			# lead moved to a dead status (CRM Lead Status type "Lost") → cancel
+			# its open follow-up tasks, so dead leads stop showing up in the
+			# to-do block and in every "due today" list. See crm/api/task_hygiene.py
+			"crm.api.task_hygiene.on_lead_update",
 		],
 	},
 }
