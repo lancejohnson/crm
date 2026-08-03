@@ -8,11 +8,19 @@
     </template>
     <template #right-header>
       <div class="flex items-center gap-2">
+        <Dropdown :options="statusFilterOptions" placement="bottom-end">
+          <Button
+            :label="selectedStatus || __('All statuses')"
+            icon-right="chevron-down"
+          >
+            <template #prefix><FeatherIcon name="filter" class="size-4" /></template>
+          </Button>
+        </Dropdown>
         <Badge
           v-if="toCallCount"
           variant="subtle"
           theme="blue"
-          :label="`${toCallCount} to call · ${callsOwed} calls`"
+          :label="`${toCallLeadCount} ${toCallLeadCount === 1 ? __('lead') : __('leads')} · ${callsOwed} ${callsOwed === 1 ? __('call') : __('calls')}`"
         />
         <Badge v-else variant="subtle" theme="green" :label="__('All clear')" />
         <Button
@@ -59,53 +67,58 @@
         <template #item="{ element: item }">
           <div
             class="group relative cursor-pointer rounded-lg bg-surface-white p-3 shadow-sm ring-1 ring-outline-gray-1 hover:ring-outline-gray-3"
-            @click="openLead(item)"
+            @click="openTodayItem(item)"
           >
-            <div class="flex items-start justify-between gap-2">
-              <div class="min-w-0">
-                <div
-                  class="truncate text-base font-medium text-ink-gray-8"
-                  :class="item.state === 'Skipped' ? 'line-through opacity-60' : ''"
-                >
-                  {{ item.lead_name }}
-                </div>
-                <div class="mt-0.5 truncate text-xs text-ink-gray-5">
-                  {{ item.address || item.mobile_no || '—' }}
-                </div>
-              </div>
-              <!-- hover-only actions; stop propagation so they never open the lead -->
-              <div
-                class="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100"
-                @click.stop
-              >
-                <Button
-                  v-if="item.state !== 'Done'"
-                  variant="ghost"
-                  class="!h-7 !w-7"
-                  :tooltip="__('Done')"
+            <!-- Fixed-size, absolutely-positioned actions cannot widen the title
+                 row or run past a narrow desktop column. -->
+            <div
+              class="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+              @click.stop
+            >
+              <Tooltip v-if="item.state !== 'Done'" :text="__('Done')">
+                <button
+                  class="flex size-7 items-center justify-center rounded-md hover:bg-surface-gray-2"
                   @click.stop="setState(item, 'Done')"
                 >
-                  <CheckIcon class="h-4 w-4 text-ink-green-3" />
-                </Button>
-                <Button
-                  v-if="item.state !== 'Skipped'"
-                  variant="ghost"
-                  class="!h-7 !w-7"
-                  :tooltip="__('Skip for today')"
+                  <CheckIcon class="size-4 text-ink-green-3" />
+                </button>
+              </Tooltip>
+              <Tooltip v-if="item.state !== 'Skipped'" :text="__('Skip for today')">
+                <button
+                  class="flex size-7 items-center justify-center rounded-md hover:bg-surface-gray-2"
                   @click.stop="setState(item, 'Skipped')"
                 >
-                  <BanIcon class="h-4 w-4 text-ink-gray-5" />
-                </Button>
-                <Button
-                  v-if="item.state !== 'To Call'"
-                  variant="ghost"
-                  class="!h-7 !w-7"
-                  :tooltip="__('Put back')"
+                  <BanIcon class="size-4 text-ink-gray-5" />
+                </button>
+              </Tooltip>
+              <Tooltip v-if="item.state !== 'To Call'" :text="__('Put back')">
+                <button
+                  class="flex size-7 items-center justify-center rounded-md hover:bg-surface-gray-2"
                   @click.stop="setState(item, 'To Call')"
                 >
-                  <UndoIcon class="h-4 w-4 text-ink-gray-5" />
-                </Button>
+                  <UndoIcon class="size-4 text-ink-gray-5" />
+                </button>
+              </Tooltip>
+            </div>
+
+            <div class="min-w-0 pr-16">
+              <div
+                class="truncate text-base font-medium text-ink-gray-8"
+                :class="item.state === 'Skipped' ? 'line-through opacity-60' : ''"
+              >
+                {{ item.lead_name }}
               </div>
+              <div class="mt-0.5 truncate text-xs text-ink-gray-5" :title="item.address">
+                {{ item.address || '—' }}
+              </div>
+              <a
+                v-if="item.mobile_no"
+                :href="callHref(item.mobile_no)"
+                class="mt-0.5 block w-fit text-xs text-ink-blue-3 hover:underline"
+                @click.stop
+              >
+                {{ formatPhone(item.mobile_no) }}
+              </a>
             </div>
 
             <div class="mt-2 flex flex-wrap items-center gap-1.5">
@@ -116,9 +129,16 @@
                 :label="__(PHASE[item.phase].label)"
               />
               <Badge variant="subtle" theme="gray" :label="item.lead_status" />
+              <Badge
+                v-if="item.total_calls > 1"
+                variant="subtle"
+                theme="blue"
+                :label="__('Call {0} of {1}')
+                  .replace('{0}', item.call_number)
+                  .replace('{1}', item.total_calls)"
+              />
               <span class="text-xs text-ink-gray-5">
-                {{ item.calls_today }}/{{ item.calls_needed + item.calls_today }}
-                {{ __('calls today') }}
+                {{ item.calls_today }} {{ __('logged today') }}
               </span>
             </div>
             <div v-if="item.reason" class="mt-1 truncate text-xs text-ink-gray-5">
@@ -129,20 +149,34 @@
       </Draggable>
     </div>
   </div>
+
+  <TodayLeadModal v-model="showLeadModal" :item="selectedItem" />
 </template>
 
 <script setup>
 import LayoutHeader from '@/components/LayoutHeader.vue'
 import RefreshIcon from '@/components/Icons/RefreshIcon.vue'
+import TodayLeadModal from '@/components/TodayLeadModal.vue'
 import { globalStore } from '@/stores/global'
-import { Badge, Button, call, createResource, toast } from 'frappe-ui'
+import { callHref, formatPhone } from '@/utils/phoneFormat'
+import {
+  Badge,
+  Button,
+  Dropdown,
+  FeatherIcon,
+  Tooltip,
+  call,
+  createResource,
+  toast,
+} from 'frappe-ui'
 import Draggable from 'vuedraggable'
 import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
 
-const router = useRouter()
 const { $socket } = globalStore()
 const refreshing = ref(false)
+const selectedStatus = ref('')
+const selectedItem = ref(null)
+const showLeadModal = ref(false)
 
 // tiny inline icons (no new asset files for three glyphs)
 const CheckIcon = () =>
@@ -194,15 +228,31 @@ function syncColumns() {
 }
 watch(() => board.data, syncColumns, { immediate: true, deep: false })
 
-const toCallCount = computed(
-  () => columns.value.find((c) => c.state === 'To Call')?.items.length || 0,
+const toCallItems = computed(
+  () => columns.value.find((c) => c.state === 'To Call')?.items || [],
 )
-const callsOwed = computed(() =>
-  (columns.value.find((c) => c.state === 'To Call')?.items || []).reduce(
-    (n, i) => n + (i.calls_needed || 0),
-    0,
-  ),
+const toCallCount = computed(() => toCallItems.value.length)
+const toCallLeadCount = computed(
+  () => new Set(toCallItems.value.map((item) => item.lead)).size,
 )
+// Each materialised card is now one call. Twice-daily leads appear twice.
+const callsOwed = computed(() => toCallCount.value)
+const statusFilterOptions = computed(() => {
+  const counts = board.data?.status_counts || []
+  const total = counts.reduce((sum, row) => sum + row.count, 0)
+  return [
+    {
+      label: `${__('All statuses')} (${total})`,
+      icon: selectedStatus.value ? null : 'check',
+      onClick: () => setStatus(''),
+    },
+    ...counts.map((row) => ({
+      label: `${row.status} (${row.count})`,
+      icon: selectedStatus.value === row.status ? 'check' : null,
+      onClick: () => setStatus(row.status),
+    })),
+  ]
+})
 const prettyDate = computed(() => {
   if (!board.data?.date) return ''
   return new Date(board.data.date + 'T00:00:00').toLocaleDateString(undefined, {
@@ -220,8 +270,15 @@ function dotClass(state) {
   }[state]
 }
 
-function openLead(item) {
-  router.push({ name: 'Lead', params: { leadId: item.lead } })
+function setStatus(status) {
+  selectedStatus.value = status
+  board.params = status ? { status } : {}
+  board.reload()
+}
+
+function openTodayItem(item) {
+  selectedItem.value = item
+  showLeadModal.value = true
 }
 
 async function setState(item, state) {
@@ -263,7 +320,7 @@ async function refreshList() {
     const r = await call('crm.api.today_board.generate_today')
     board.reload()
     toast.success(
-      r.created ? __('Added {0} lead(s)').replace('{0}', r.created) : __('Already up to date'),
+      r.created ? __('Added {0} call(s)').replace('{0}', r.created) : __('Already up to date'),
     )
   } finally {
     refreshing.value = false

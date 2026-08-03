@@ -20,9 +20,9 @@ them, or resurrect a card someone had dismissed, the moment a call got logged.
 The board also has to hold still while people work it — a list that reshuffles
 underneath you is the thing that made the last attempt unusable.
 
-`CRM Today Item` is autonamed `format:{for_date}-{lead}`, so (date, lead) is
-structurally unique and generation can run as often as it likes without ever
-duplicating a card.
+`CRM Today Item` is autonamed `format:{for_date}-{lead}-{call_number}`. A lead
+that owes two calls gets two independently actionable cards (call 1 and call 2),
+while the call number keeps generation structurally idempotent.
 """
 
 import re
@@ -48,10 +48,109 @@ def _available() -> bool:
 	return bool(frappe.db.exists("DocType", DOCTYPE))
 
 
+def _supports_call_slots() -> bool:
+	"""The first Today schema had one row per lead. Keep reads working while the
+	idempotent ops setup adds call_number/total_calls and changes autoname."""
+	if not _available():
+		return False
+	meta = frappe.get_meta(DOCTYPE)
+	return bool(meta.has_field("call_number") and meta.has_field("total_calls"))
+
+
+def _row_fields(with_slots=False):
+	fields = ["name", "lead", "state", "sort_order", "phase", "reason",
+	          "calls_needed", "done_by", "done_at"]
+	if with_slots:
+		fields += ["call_number", "total_calls"]
+	return fields
+
+
 def _guard():
 	roles = set(frappe.get_roles())
 	if not roles & {"System Manager", "Sales Manager", "Sales User"}:
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+
+def _expand_legacy_items(day):
+	"""Turn an old two-call lead card into two one-call cards, once.
+
+	Existing cards keep their state and relative order. That matters on the day
+	the schema is upgraded: an old Done/Skipped card represented the human's
+	judgement for the whole lead, so both generated call cards inherit it rather
+	than resurrecting work. Names are intentionally not rewritten; the old
+	`date-lead` row becomes call 1 and the new formatted row is call 2.
+	"""
+	if not _supports_call_slots():
+		return 0
+	rows = frappe.get_all(
+		DOCTYPE,
+		filters={"for_date": day},
+		fields=_row_fields(True),
+		order_by="sort_order asc, name asc",
+	)
+	legacy = [r for r in rows if int(r.calls_needed or 0) > 1]
+	if not legacy:
+		return 0
+
+	# Preserve the exact visible order while opening integer gaps for sibling
+	# call cards. (sort_order is an Int, so fractions are not available.)
+	for i, row in enumerate(rows):
+		frappe.db.set_value(
+			DOCTYPE, row.name, "sort_order", (i + 1) * 10, update_modified=False
+		)
+		row.sort_order = (i + 1) * 10
+
+	created = 0
+	for row in legacy:
+		total = max(1, int(row.calls_needed or 1))
+		frappe.db.set_value(
+			DOCTYPE,
+			row.name,
+			{"call_number": 1, "total_calls": total, "calls_needed": 1},
+			update_modified=False,
+		)
+		for slot in range(2, total + 1):
+			try:
+				frappe.get_doc(
+					{
+						"doctype": DOCTYPE,
+						"for_date": day,
+						"lead": row.lead,
+						"state": row.state,
+						"sort_order": row.sort_order + slot - 1,
+						"phase": row.phase,
+						"reason": row.reason,
+						"calls_needed": 1,
+						"call_number": slot,
+						"total_calls": total,
+						"done_by": row.done_by if row.state == "Done" else None,
+						"done_at": row.done_at if row.state == "Done" else None,
+					}
+				).insert(ignore_permissions=True)
+				created += 1
+			except frappe.DuplicateEntryError:
+				# Concurrent first views can both attempt the expansion; autoname is
+				# the lock, so the loser simply observes the row the winner inserted.
+				pass
+	frappe.db.commit()
+	_publish(day)
+	return created
+
+
+def _slots_for(row):
+	"""Return (slot numbers still owed, total calls represented today).
+
+	Only the first-week cadence is a twice-daily cadence. If the first call was
+	logged before the board generated, create only call 2; weekly/monthly/task
+	cards remain a single call even if some unrelated call was already logged.
+	"""
+	if row.phase in ("never", "week1"):
+		total = 2
+		first = min(total, int(row.calls_today or 0)) + 1
+		return range(first, total + 1), total
+	return range(1, max(1, int(row.calls_needed or 1)) + 1), max(
+		1, int(row.calls_needed or 1)
+	)
 
 
 @frappe.whitelist()
@@ -71,33 +170,75 @@ def generate_today(for_date=None):
 
 	data = build_standup(day)
 	due = data["setter"]["due"]
+	with_slots = _supports_call_slots()
+	if with_slots:
+		_expand_legacy_items(day)
+		existing_rows = frappe.get_all(
+			DOCTYPE,
+			filters={"for_date": day},
+			fields=["name", "lead", "call_number"],
+		)
+		existing = {(r.lead, int(r.call_number or 1)) for r in existing_rows}
+	else:
+		existing_rows = frappe.get_all(
+			DOCTYPE, filters={"for_date": day}, fields=["name", "lead"]
+		)
+		existing = {r.lead for r in existing_rows}
 
-	existing = set(
-		frappe.get_all(DOCTYPE, filters={"for_date": day}, pluck="lead")
-	)
 	created = 0
 	for i, r in enumerate(due):
-		if r.name in existing:
-			continue
-		seed = _PHASE_SEED.get(r.phase, 500) + i
-		frappe.get_doc(
-			{
-				"doctype": DOCTYPE,
-				"for_date": day,
-				"lead": r.name,
-				"state": "To Call",
-				"sort_order": seed,
-				"phase": r.phase,
-				"reason": r.reason,
-				"calls_needed": r.calls_needed,
-			}
-		).insert(ignore_permissions=True)
-		created += 1
+		if with_slots:
+			slots, total = _slots_for(r)
+			for slot in slots:
+				if (r.name, slot) in existing:
+					continue
+				try:
+					frappe.get_doc(
+						{
+							"doctype": DOCTYPE,
+							"for_date": day,
+							"lead": r.name,
+							"state": "To Call",
+							# `due` is already cadence-sorted. Tens leave call 1/2
+							# adjacent and room to drag without immediate ties.
+							"sort_order": (i + 1) * 10 + slot - 1,
+							"phase": r.phase,
+							"reason": r.reason,
+							"calls_needed": 1,
+							"call_number": slot,
+							"total_calls": total,
+						}
+					).insert(ignore_permissions=True)
+					created += 1
+					existing.add((r.name, slot))
+				except frappe.DuplicateEntryError:
+					pass
+		elif r.name not in existing:
+			seed = _PHASE_SEED.get(r.phase, 500) + i
+			frappe.get_doc(
+				{
+					"doctype": DOCTYPE,
+					"for_date": day,
+					"lead": r.name,
+					"state": "To Call",
+					"sort_order": seed,
+					"phase": r.phase,
+					"reason": r.reason,
+					"calls_needed": r.calls_needed,
+				}
+			).insert(ignore_permissions=True)
+			created += 1
+			existing.add(r.name)
 
 	if created:
 		frappe.db.commit()
 		_publish(day)
-	return {"created": created, "existing": len(existing), "due": len(due), "available": True}
+	return {
+		"created": created,
+		"existing": len(existing_rows),
+		"due": len(due),
+		"available": True,
+	}
 
 
 def _publish(day):
@@ -105,7 +246,7 @@ def _publish(day):
 
 
 @frappe.whitelist()
-def get_today_board(for_date=None, auto_generate=1):
+def get_today_board(for_date=None, auto_generate=1, status=None):
 	"""Everything the board needs in one call: the cards, plus the lead facts the
 	cards display (status, phone, address, and how many calls it has had today so
 	a rep can see progress without opening the lead)."""
@@ -114,11 +255,13 @@ def get_today_board(for_date=None, auto_generate=1):
 	_guard()
 	day = getdate(for_date or now_datetime())
 
+	with_slots = _supports_call_slots()
+	if with_slots:
+		_expand_legacy_items(day)
 	rows = frappe.get_all(
 		DOCTYPE,
 		filters={"for_date": day},
-		fields=["name", "lead", "state", "sort_order", "phase", "reason",
-		        "calls_needed", "done_by", "done_at"],
+		fields=_row_fields(with_slots),
 		order_by="sort_order asc, name asc",
 	)
 	# generate on first view so the board works immediately, not only after 5am
@@ -127,8 +270,7 @@ def get_today_board(for_date=None, auto_generate=1):
 		rows = frappe.get_all(
 			DOCTYPE,
 			filters={"for_date": day},
-			fields=["name", "lead", "state", "sort_order", "phase", "reason",
-			        "calls_needed", "done_by", "done_at"],
+			fields=_row_fields(with_slots),
 			order_by="sort_order asc, name asc",
 		)
 	if not rows:
@@ -139,7 +281,7 @@ def get_today_board(for_date=None, auto_generate=1):
 		for l in frappe.get_all(
 			"CRM Lead",
 			filters={"name": ["in", [r.lead for r in rows]]},
-			fields=["name", "lead_name", "status", "mobile_no", "property_address",
+			fields=["name", "lead_name", "status", "mobile_no", "phone", "email", "property_address",
 			        "property_city", "property_state", "property_zip"],
 		)
 	}
@@ -159,9 +301,21 @@ def get_today_board(for_date=None, auto_generate=1):
 		l = leads.get(r.lead) or {}
 		r["lead_name"] = l.get("lead_name") or r.lead
 		r["lead_status"] = l.get("status")
-		r["mobile_no"] = l.get("mobile_no")
+		r["mobile_no"] = l.get("mobile_no") or l.get("phone")
+		r["email"] = l.get("email")
 		r["address"] = _address(l)
 		r["calls_today"] = made.get(r.lead, 0)
+		r["call_number"] = int(r.get("call_number") or 1)
+		r["total_calls"] = int(
+			r.get("total_calls") or max(1, int(r.get("calls_needed") or 1))
+		)
+
+	status_counts = {}
+	for r in rows:
+		if r.lead_status:
+			status_counts[r.lead_status] = status_counts.get(r.lead_status, 0) + 1
+	if status:
+		rows = [r for r in rows if r.lead_status == status]
 
 	cols = _empty_columns()
 	by_state = {c["state"]: c for c in cols}
@@ -169,7 +323,16 @@ def get_today_board(for_date=None, auto_generate=1):
 		by_state.get(r.state, by_state["To Call"])["items"].append(r)
 	for c in cols:
 		c["count"] = len(c["items"])
-	return {"available": True, "date": str(day), "columns": cols}
+	return {
+		"available": True,
+		"date": str(day),
+		"columns": cols,
+		"status_counts": [
+			{"status": key, "count": status_counts[key]}
+			for key in sorted(status_counts)
+		],
+		"selected_status": status or "",
+	}
 
 
 #: trailing country noise that only costs a narrow card its truncation budget
@@ -197,6 +360,125 @@ def _address(lead) -> str:
 
 def _empty_columns():
 	return [{"state": s, "items": [], "count": 0} for s in STATES]
+
+
+@frappe.whitelist()
+def get_today_lead_snapshot(lead):
+	"""A compact, read-only lead view for the Today card modal.
+
+	The full Lead page is intentionally much heavier. Setters need enough context
+	to make the call without leaving the queue: contact/property facts, open
+	tasks, and the latest human notes/comments. Every optional field is discovered
+	from metadata so an unprovisioned custom field cannot break the board.
+	"""
+	_guard()
+	if not frappe.db.exists("CRM Lead", lead):
+		frappe.throw(_("Lead not found"), frappe.DoesNotExistError)
+	if not frappe.has_permission("CRM Lead", "read", lead):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+	meta = frappe.get_meta("CRM Lead")
+	base_fields = [
+		"name", "lead_name", "status", "mobile_no", "phone", "email", "source",
+		"property_address", "property_city", "property_state", "property_zip",
+	]
+	optional = [
+		"lead_summary", "reason_for_sell", "duration_to_sell", "property_condition",
+		"property_occupied_by", "property_type", "bedrooms", "bathrooms",
+		"square_footage", "year_built", "asking_price", "best_call_time",
+	]
+	fields = [f for f in base_fields + optional if f == "name" or meta.has_field(f)]
+	doc = frappe.db.get_value("CRM Lead", lead, fields, as_dict=True)
+
+	detail_fields = [
+		"reason_for_sell", "duration_to_sell", "property_condition",
+		"property_occupied_by", "property_type", "bedrooms", "bathrooms",
+		"square_footage", "year_built", "asking_price", "best_call_time", "source",
+	]
+	details = []
+	for fieldname in detail_fields:
+		value = doc.get(fieldname)
+		if value in (None, ""):
+			continue
+		field = meta.get_field(fieldname)
+		details.append(
+			{
+				"fieldname": fieldname,
+				"label": field.label if field else fieldname.replace("_", " ").title(),
+				"value": value,
+				"fieldtype": field.fieldtype if field else "Data",
+			}
+		)
+
+	tasks = frappe.get_all(
+		"CRM Task",
+		filters={
+			"reference_doctype": "CRM Lead",
+			"reference_docname": lead,
+			"status": ["not in", ["Done", "Canceled"]],
+		},
+		fields=["name", "title", "description", "status", "due_date", "priority", "assigned_to"],
+		order_by="creation asc",
+	)
+	# Due first (oldest first), undated last — same ordering as the full Lead's
+	# pinned To-do block.
+	tasks.sort(key=lambda task: (task.due_date is None, task.due_date or ""))
+
+	notes = frappe.get_all(
+		"FCRM Note",
+		filters={"reference_doctype": "CRM Lead", "reference_docname": lead},
+		fields=["name", "title", "content", "owner", "modified"],
+		order_by="modified desc",
+		limit=8,
+	)
+	comments = frappe.get_all(
+		"Comment",
+		filters={
+			"reference_doctype": "CRM Lead",
+			"reference_name": lead,
+			"comment_type": "Comment",
+		},
+		fields=["name", "content", "owner", "creation"],
+		order_by="creation desc",
+		limit=8,
+	)
+	recent = [
+		{
+			"name": n.name,
+			"type": "note",
+			"title": n.title or _("Note"),
+			"content": n.content,
+			"owner": n.owner,
+			"when": n.modified,
+		}
+		for n in notes
+	] + [
+		{
+			"name": c.name,
+			"type": "comment",
+			"title": _("Comment"),
+			"content": c.content,
+			"owner": c.owner,
+			"when": c.creation,
+		}
+		for c in comments
+	]
+	recent.sort(key=lambda x: x["when"], reverse=True)
+
+	return {
+		"lead": {
+			"name": doc.name,
+			"lead_name": doc.lead_name or doc.name,
+			"status": doc.status,
+			"mobile_no": doc.mobile_no or doc.phone,
+			"email": doc.email,
+			"address": _address(doc),
+			"summary": doc.get("lead_summary"),
+		},
+		"details": details,
+		"tasks": tasks,
+		"recent": recent[:8],
+	}
 
 
 @frappe.whitelist()

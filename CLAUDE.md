@@ -108,9 +108,19 @@ duplicating. Work substantial features in a worktree of your own.
     unique, so generation at 5am + manual Refresh + first-page-view auto-generate
     can all race without duplicating a card (verified under a real
     clear-then-regenerate race: 0 duplicates).
-  - Interactions: hover **✓ Done / ⊘ Skip / ↩ put back**, drag across columns,
-    drag to reorder within one, and clicking anywhere else on the card **opens
-    the regular lead**. Realtime `crm_today` keeps several boards in step.
+  - Each card is now **one call**, not one lead: first-week leads that owe two
+    calls get independently actionable **Call 1 of 2 / Call 2 of 2** cards.
+    `CRM Today Item.call_number` extends the structural key to
+    `(date, lead, call_number)`; the schema upgrade preserves old card state/order
+    and expands an old `calls_needed=2` row on first read. If the first call was
+    logged before generation, only Call 2 is materialized.
+  - Cards show **address and phone on separate lines**. The header has a current-
+    status filter (counts are call-card counts). Clicking a card opens a compact
+    read-only lead modal (contact/property facts, open tasks, latest notes and
+    comments) with an **Open full lead** button; it no longer navigates immediately.
+  - Interactions: hover **✓ Done / ⊘ Skip / ↩ put back** (fixed-size absolute
+    buttons so they cannot overflow a narrow desktop card), drag across columns,
+    and drag to reorder within one. Realtime `crm_today` keeps boards in step.
   - **`reorder_today` renumbers the WHOLE destination column**, not just the
     dragged names — cards are seeded at cadence-priority offsets (never-called
     0-99, week 1 at 100+), so writing 10/20/30 onto three dragged cards dropped
