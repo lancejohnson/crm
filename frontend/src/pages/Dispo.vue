@@ -57,6 +57,14 @@
         </button>
       </div>
       <Button
+        v-if="current?.il_property_id"
+        variant="ghost"
+        :label="__('Sync InvestorLift')"
+        iconLeft="rotate-ccw"
+        :loading="manualSyncing"
+        @click="requestManualSync"
+      />
+      <Button
         v-if="selectedLead"
         variant="ghost"
         :label="__('Text buyers')"
@@ -130,6 +138,7 @@
 <script setup>
 import LayoutHeader from '@/components/LayoutHeader.vue'
 import DispoBoard from '@/components/Activities/DispoBoard.vue'
+import { globalStore } from '@/stores/global'
 import AddBuyerToDealModal from '@/components/Modals/AddBuyerToDealModal.vue'
 import ImportBuyersModal from '@/components/Modals/ImportBuyersModal.vue'
 import BulkTextModal from '@/components/Modals/BulkTextModal.vue'
@@ -138,12 +147,22 @@ import BoardIcon from '~icons/lucide/columns-3'
 import ListIcon from '~icons/lucide/list'
 import ChevronDownIcon from '~icons/lucide/chevron-down'
 import ExternalLinkIcon from '~icons/lucide/external-link'
-import { Breadcrumbs, Button, Badge, Dropdown, createResource, usePageMeta } from 'frappe-ui'
-import { ref, computed, watch } from 'vue'
+import {
+  Breadcrumbs,
+  Button,
+  Badge,
+  Dropdown,
+  call,
+  createResource,
+  toast,
+  usePageMeta,
+} from 'frappe-ui'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
 const router = useRouter()
+const { $socket } = globalStore()
 
 const properties = createResource({
   url: 'crm.api.investorlift_ingest.get_dispo_properties',
@@ -156,6 +175,9 @@ const showAddBuyer = ref(false)
 const showBulkText = ref(false)
 const showImport = ref(false)
 const boardKey = ref(0)
+const manualSyncing = ref(false)
+const manualRequestId = ref(null)
+let manualSyncTimeout = null
 
 function onImported() {
   // remount the board (new CRM Lead Buyer rows) and refresh the switcher's
@@ -198,6 +220,62 @@ async function openBulkText() {
   await dealBuyers.reload()
   showBulkText.value = true
 }
+
+function stopManualSyncWait() {
+  manualSyncing.value = false
+  manualRequestId.value = null
+  if (manualSyncTimeout) clearTimeout(manualSyncTimeout)
+  manualSyncTimeout = null
+}
+
+async function requestManualSync() {
+  if (!selectedLead.value || manualSyncing.value) return
+  manualSyncing.value = true
+  try {
+    const request = await call('crm.api.investorlift_ingest.request_deal_sync', {
+      lead: selectedLead.value,
+    })
+    manualRequestId.value = request.request_id
+    toast.success(__('InvestorLift sync queued'))
+    manualSyncTimeout = setTimeout(() => {
+      stopManualSyncWait()
+      toast.error(__('InvestorLift sync is taking longer than expected.'))
+    }, 6 * 60 * 1000)
+  } catch (error) {
+    stopManualSyncWait()
+    toast.error(error?.messages?.[0] || __('Could not queue the InvestorLift sync.'))
+  }
+}
+
+function onBuyerSync(data) {
+  if (data.reference_docname === selectedLead.value) {
+    boardKey.value++
+    properties.reload()
+  }
+}
+
+function onManualSyncComplete(data) {
+  if (data.request_id !== manualRequestId.value) return
+  stopManualSyncWait()
+  if (data.status === 'done') {
+    boardKey.value++
+    properties.reload()
+    toast.success(__('InvestorLift sync complete'))
+  } else {
+    const detail = data.summary?.errors?.[0]
+    toast.error(detail || __('InvestorLift sync failed.'))
+  }
+}
+
+onMounted(() => {
+  $socket.on('crm_il_buyers', onBuyerSync)
+  $socket.on('crm_il_sync_complete', onManualSyncComplete)
+})
+onBeforeUnmount(() => {
+  $socket.off('crm_il_buyers', onBuyerSync)
+  $socket.off('crm_il_sync_complete', onManualSyncComplete)
+  if (manualSyncTimeout) clearTimeout(manualSyncTimeout)
+})
 
 function selectProperty(p, push = true) {
   selectedLead.value = p.lead

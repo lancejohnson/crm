@@ -17,6 +17,8 @@ in our own timeline.
 
 import json
 import re
+import time
+import uuid
 
 import requests
 
@@ -66,6 +68,8 @@ STAGE_TO_COLUMN = {
 UNPUSHABLE_STAGES = ("New",)
 
 MANAGER_ROLES = ("System Manager", "Sales Manager")
+MANUAL_SYNC_TTL = 30 * 60
+MANUAL_SYNC_LEASE = 5 * 60
 
 
 def _guard():
@@ -360,6 +364,115 @@ def get_linked_properties():
 		filters={"il_property_id": ("is", "set")},
 		fields=["name as lead", "il_property_id"],
 	)
+
+
+def _manual_sync_key(lead):
+	return f"investorlift:manual-sync:{lead}"
+
+
+def _store_manual_sync(lead, payload):
+	frappe.cache().set_value(
+		_manual_sync_key(lead), payload, expires_in_sec=MANUAL_SYNC_TTL
+	)
+
+
+@frappe.whitelist()
+def request_deal_sync(lead):
+	"""Queue a one-property board refresh for the Mac mini sync daemon.
+
+	The Frappe server cannot scrape investorlift.ai itself: the authenticated,
+	persistent browser lives on the mini. This cache record is the small handoff
+	between the CRM button and that daemon. Repeated clicks reuse an active request
+	instead of scheduling duplicate browser work.
+	"""
+	if not frappe.has_permission("CRM Lead", "read", lead):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	if not frappe.get_meta("CRM Lead").has_field("il_property_id"):
+		frappe.throw(_("InvestorLift is not configured."))
+
+	il_property_id = frappe.db.get_value("CRM Lead", lead, "il_property_id")
+	if not il_property_id:
+		frappe.throw(_("This property is not linked to InvestorLift."))
+
+	now = time.time()
+	current = frappe.cache().get_value(_manual_sync_key(lead)) or {}
+	active = current.get("status") == "queued" or (
+		current.get("status") == "running"
+		and now - float(current.get("claimed_at") or 0) < MANUAL_SYNC_LEASE
+	)
+	if active:
+		return current
+
+	request = {
+		"request_id": uuid.uuid4().hex,
+		"lead": lead,
+		"il_property_id": str(il_property_id).strip(),
+		"status": "queued",
+		"requested_at": now,
+		"requested_by": frappe.session.user,
+	}
+	_store_manual_sync(lead, request)
+	return request
+
+
+@frappe.whitelist()
+def claim_manual_sync_requests():
+	"""Claim queued manual refreshes for the authenticated sync daemon.
+
+	A running request becomes claimable again after five minutes so a browser or
+	daemon crash cannot lose the user's click forever.
+	"""
+	_guard()
+	now = time.time()
+	claimed = []
+	for target in get_linked_properties():
+		lead = target.get("lead")
+		request = frappe.cache().get_value(_manual_sync_key(lead)) or {}
+		stale = request.get("status") == "running" and (
+			now - float(request.get("claimed_at") or 0) >= MANUAL_SYNC_LEASE
+		)
+		if request.get("status") != "queued" and not stale:
+			continue
+		request.update({
+			"lead": lead,
+			"il_property_id": str(target.get("il_property_id") or "").strip(),
+			"status": "running",
+			"claimed_at": now,
+		})
+		_store_manual_sync(lead, request)
+		claimed.append(request)
+	return claimed
+
+
+@frappe.whitelist()
+def complete_manual_sync(lead, request_id, summary=None):
+	"""Finish a claimed request and notify the CRM page that queued it."""
+	_guard()
+	current = frappe.cache().get_value(_manual_sync_key(lead)) or {}
+	if current.get("request_id") != request_id:
+		return {"ok": False, "reason": "request was replaced"}
+	if isinstance(summary, str):
+		summary = json.loads(summary)
+	summary = summary or {}
+	errors = summary.get("errors") or []
+	status = "failed" if errors or summary.get("session") == "dead" else "done"
+	current.update({
+		"status": status,
+		"completed_at": time.time(),
+		"summary": summary,
+	})
+	_store_manual_sync(lead, current)
+	frappe.publish_realtime(
+		"crm_il_sync_complete",
+		{
+			"reference_doctype": "CRM Lead",
+			"reference_docname": lead,
+			"request_id": request_id,
+			"status": status,
+			"summary": summary,
+		},
+	)
+	return {"ok": True, "status": status}
 
 
 # --------------------------------------------------------------------------- #
