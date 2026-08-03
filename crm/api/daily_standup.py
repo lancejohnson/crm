@@ -523,11 +523,14 @@ def send_daily_standup():
 
 
 @frappe.whitelist()
-def preview_standup(today=None, send=0):
+def preview_standup(today=None, send=0, note=None):
 	"""Dry run. Returns the exact markdown the 5am job would send; only actually
-	DMs when send=1."""
+	DMs when send=1. `note` prefixes the DM so a preview can never be mistaken for
+	the real 5am post."""
 	data = build_standup(getdate(today) if today else None)
 	text = render_markdown(data)
+	if note:
+		text = f"_{note}_\n\n{text}"
 	post = send_dm(text) if int(send or 0) else None
 	return {
 		"markdown": text,
