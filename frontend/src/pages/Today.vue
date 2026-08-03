@@ -137,7 +137,7 @@ import RefreshIcon from '@/components/Icons/RefreshIcon.vue'
 import { globalStore } from '@/stores/global'
 import { Badge, Button, call, createResource, toast } from 'frappe-ui'
 import Draggable from 'vuedraggable'
-import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
@@ -177,7 +177,11 @@ const board = createResource({
   cache: 'today_board',
 })
 
-// local, mutable copy — vuedraggable needs to write to the arrays it binds
+// local, mutable copy — vuedraggable needs to write to the arrays it binds.
+// Synced with a watcher rather than `board.onSuccess = ...`: the resource is
+// `auto: true`, so it can resolve BEFORE a post-hoc onSuccess assignment lands,
+// and the board then renders permanently empty ('All clear' over 66 real cards).
+// The watcher is timing-independent and also covers every later reload.
 const columns = ref([])
 function syncColumns() {
   columns.value = (board.data?.columns || []).map((c) => ({
@@ -185,7 +189,7 @@ function syncColumns() {
     items: [...(c.items || [])],
   }))
 }
-board.onSuccess = syncColumns
+watch(() => board.data, syncColumns, { immediate: true, deep: false })
 
 const toCallCount = computed(
   () => columns.value.find((c) => c.state === 'To Call')?.items.length || 0,
