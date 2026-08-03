@@ -25,6 +25,8 @@ structurally unique and generation can run as often as it likes without ever
 duplicating a card.
 """
 
+import re
+
 import frappe
 from frappe import _
 from frappe.utils import getdate, now_datetime
@@ -138,7 +140,7 @@ def get_today_board(for_date=None, auto_generate=1):
 			"CRM Lead",
 			filters={"name": ["in", [r.lead for r in rows]]},
 			fields=["name", "lead_name", "status", "mobile_no", "property_address",
-			        "property_city", "property_state"],
+			        "property_city", "property_state", "property_zip"],
 		)
 	}
 	calls = frappe.db.sql(
@@ -170,22 +172,27 @@ def get_today_board(for_date=None, auto_generate=1):
 	return {"available": True, "date": str(day), "columns": cols}
 
 
-def _address(lead) -> str:
-	"""Street + city + state, appending each part only when it isn't already in
-	the address string.
+#: trailing country noise that only costs a narrow card its truncation budget
+_COUNTRY_TAIL = re.compile(r",\s*(usa|u\.s\.a\.?|united states)\s*$", re.I)
 
-	Webhook/imported leads carry a fully-qualified `property_address` ("4526
-	Domingo Dr, Corpus Christi, TX 78416") while manually-entered ones are
-	street-only with separate city/state fields. Blindly joining all three
-	produced "...TX 78416, corpus christi, TX", which then ate the card's
-	truncation budget. Same rule as agreement._full_property_address.
+
+def _address(lead) -> str:
+	"""One clean "street, city, ST zip" line for a card.
+
+	Delegates to `agreement._full_property_address` rather than re-deriving the
+	rule. A first attempt here compared the raw `property_state` against the
+	address, which silently failed on the ~8% of leads whose state is stored
+	spelled out ("Minnesota") while the address carries the abbreviation ("MN") —
+	producing "611 5th Ave SE, Rochester, MN 55904, USA, Minnesota". The shared
+	helper already maps full names to abbreviations and matches the abbreviation
+	case-sensitively so "IN" doesn't match the word "in".
+
+	The only thing added on top is dropping a trailing ", USA", which some
+	webhook addresses carry and which is pure noise on a narrow card.
 	"""
-	out = (lead.get("property_address") or "").strip()
-	for part in (lead.get("property_city"), lead.get("property_state")):
-		part = (part or "").strip()
-		if part and part.lower() not in out.lower():
-			out = f"{out}, {part}" if out else part
-	return out
+	from crm.api.agreement import _full_property_address
+
+	return _COUNTRY_TAIL.sub("", _full_property_address(lead) or "").strip().rstrip(",")
 
 
 def _empty_columns():
