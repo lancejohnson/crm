@@ -516,6 +516,16 @@ def send_daily_standup():
 		today = getdate(now_datetime())
 		if not is_business_day(today):
 			return
+		# materialise the shared Today board first, so the board the reps open is
+		# already populated when they read the DM that describes it
+		try:
+			from crm.api.today_board import generate_today
+
+			generate_today(today)
+		except Exception:
+			frappe.log_error(
+				title="standup: could not generate Today board", message=frappe.get_traceback()
+			)
 		data = build_standup(today)
 		send_dm(render_markdown(data))
 	except Exception:

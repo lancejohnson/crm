@@ -15,6 +15,13 @@ const routes = [
     component: () => import('@/pages/MobileNotification.vue'),
   },
   {
+    // Shared daily calling board, generated from Dennis's cadence by the 5am
+    // standup job. See crm/api/today_board.py.
+    path: '/today',
+    name: 'Today',
+    component: () => import('@/pages/Today.vue'),
+  },
+  {
     // Groundwork custom leads dashboard (replaces the generic chart dashboard).
     // The upstream Dashboard.vue is kept in the repo but no longer routed.
     path: '/dashboard',

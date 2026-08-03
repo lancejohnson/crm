@@ -11,6 +11,7 @@ import StepsIcon from '@/components/Icons/StepsIcon.vue'
 import LucideHeadphones from '~icons/lucide/headphones'
 import LucideColumns3 from '~icons/lucide/columns-3'
 import LucideUsersRound from '~icons/lucide/users-round'
+import LucideListChecks from '~icons/lucide/list-checks'
 
 // The Call Review tab (and its AI integrity notes) is restricted to Lance — he
 // runs the CRM as his own user and reviews calls himself. Mirrors the backend
@@ -27,6 +28,10 @@ export function currentUser() {
 // canonical module list for the left sidebar; admin-defined order/visibility
 // lives in FCRM Settings.custom_sidebar_items as [{label, hidden}]
 export const sidebarLinks = [
+  // The shared daily calling board. Sits above Dashboard deliberately: it is the
+  // first thing the setters open each morning and the surface the 5am standup
+  // DM describes.
+  { label: 'Today', icon: LucideListChecks, to: 'Today' },
   { label: 'Dashboard', icon: LucideLayoutDashboard, to: 'Dashboard' },
   { label: 'Leads', icon: LeadsIcon, to: 'Leads' },
   { label: 'Deals', icon: DealsIcon, to: 'Deals' },
