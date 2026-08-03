@@ -282,6 +282,13 @@ scheduler_events = {
 			"crm.api.quo_contacts.sync_all",
 		],
 		"*/15 * * * *": ["crm.lead_syncing.background_sync.sync_leads_from_sources_15_minutes"],
+		# Daily standup list, 5:00am CENTRAL on business days. Frappe reads these
+		# cron times in the SITE timezone (America/Chicago), not UTC — writing them
+		# in UTC is what once turned an "8am" digest into a 1pm one. The job also
+		# re-checks is_business_day() itself. NOTE: a new scheduler hook does not
+		# run until `sync_jobs` creates its Scheduled Job Type row on prod (see
+		# gw127/128 — the AI call review silently never fired for weeks).
+		"0 5 * * 1-5": ["crm.api.daily_standup.send_daily_standup"],
 	},
 }
 
