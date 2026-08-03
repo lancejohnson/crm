@@ -116,8 +116,9 @@ duplicating. Work substantial features in a worktree of your own.
     logged before generation, only Call 2 is materialized.
   - Cards show **address and phone on separate lines**. The header has a current-
     status filter (counts are call-card counts). Clicking a card opens a compact
-    read-only lead modal (contact/property facts, open tasks, latest notes and
-    comments) with an **Open full lead** button; it no longer navigates immediately.
+    read-only lead modal (contact/property facts, open tasks, and a unified recent
+    activity stream of calls/texts/emails) with an **Open full lead** button; raw
+    intake notes are deliberately excluded so vendor-payload JSON never fills the modal.
   - Interactions: hover **✓ Done / ⊘ Skip / ↩ put back** (fixed-size absolute
     buttons so they cannot overflow a narrow desktop card), drag across columns,
     and drag to reorder within one. Realtime `crm_today` keeps boards in step.

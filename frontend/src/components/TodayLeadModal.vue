@@ -118,33 +118,59 @@
 
           <section>
             <div class="mb-2 flex items-center gap-1.5">
-              <h3 class="text-sm font-semibold text-ink-gray-8">{{ __('Notes & comments') }}</h3>
-              <span class="text-xs text-ink-gray-4">{{ recent.length }}</span>
+              <h3 class="text-sm font-semibold text-ink-gray-8">{{ __('Recent activity') }}</h3>
+              <span class="text-xs text-ink-gray-4">{{ activity.length }}</span>
             </div>
-            <div v-if="recent.length" class="flex flex-col gap-2">
+            <div
+              v-if="activity.length"
+              class="divide-y divide-outline-gray-1 overflow-hidden rounded-lg border border-outline-gray-1"
+            >
               <div
-                v-for="entry in recent"
+                v-for="entry in activity"
                 :key="`${entry.type}-${entry.name}`"
-                class="rounded-lg border border-outline-gray-1 px-3 py-2.5"
+                class="flex items-start gap-3 px-3 py-3"
               >
-                <div class="mb-1 flex items-center justify-between gap-3">
-                  <div class="truncate text-sm font-medium text-ink-gray-8">
-                    {{ entry.title }}
+                <div class="flex size-8 shrink-0 items-center justify-center rounded-full bg-surface-gray-2 text-ink-gray-6">
+                  <FeatherIcon :name="activityIcon(entry.type)" class="size-4" />
+                </div>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                      <div class="truncate text-sm font-medium text-ink-gray-8">
+                        {{ entry.title }}
+                      </div>
+                      <div class="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-gray-5">
+                        <Badge
+                          variant="subtle"
+                          :theme="entry.direction === 'incoming' ? 'green' : 'gray'"
+                          :label="entry.direction === 'incoming' ? __('Incoming') : __('Outgoing')"
+                        />
+                        <span v-if="entry.type === 'call' && entry.duration">
+                          {{ formatDuration(entry.duration) }}
+                        </span>
+                        <span v-if="entry.classification">{{ entry.classification }}</span>
+                        <span v-if="entry.counterparty" class="truncate">
+                          {{ formatPhone(entry.counterparty) }}
+                        </span>
+                      </div>
+                    </div>
+                    <Tooltip :text="formatDate(entry.when, 'ddd, MMM D, YYYY | hh:mm a')">
+                      <span class="shrink-0 text-xs text-ink-gray-4">
+                        {{ __(timeAgo(entry.when)) }}
+                      </span>
+                    </Tooltip>
                   </div>
-                  <div class="shrink-0 text-xs text-ink-gray-4">
-                    {{ ownerName(entry.owner) }} · {{ __(timeAgo(entry.when)) }}
+                  <div
+                    v-if="entry.content"
+                    class="mt-1.5 line-clamp-3 whitespace-pre-line text-sm leading-5 text-ink-gray-6"
+                  >
+                    {{ entry.content }}
                   </div>
                 </div>
-                <TextEditor
-                  v-if="entry.content"
-                  :content="entry.content"
-                  :editable="false"
-                  editor-class="prose-sm max-w-none text-sm text-ink-gray-6 focus:outline-none"
-                />
               </div>
             </div>
             <div v-else class="rounded-lg bg-surface-gray-1 px-3 py-3 text-sm text-ink-gray-5">
-              {{ __('No notes or comments yet') }}
+              {{ __('No calls, texts, or emails yet') }}
             </div>
           </section>
         </div>
@@ -165,16 +191,14 @@
 </template>
 
 <script setup>
-import { usersStore } from '@/stores/users'
 import { callHref, formatPhone } from '@/utils/phoneFormat'
-import { dueColor, formatDate, parseColor, timeAgo } from '@/utils'
+import { dueColor, formatDate, formatDuration, parseColor, timeAgo } from '@/utils'
 import {
   Badge,
   Button,
   Dialog,
   FeatherIcon,
   LoadingIndicator,
-  TextEditor,
   Tooltip,
   createResource,
 } from 'frappe-ui'
@@ -187,7 +211,6 @@ const props = defineProps({
 
 const show = defineModel({ type: Boolean })
 const router = useRouter()
-const { getUser } = usersStore()
 
 const snapshot = createResource({
   url: 'crm.api.today_board.get_today_lead_snapshot',
@@ -206,7 +229,7 @@ watch(
 const lead = computed(() => snapshot.data?.lead || null)
 const details = computed(() => snapshot.data?.details || [])
 const tasks = computed(() => snapshot.data?.tasks || [])
-const recent = computed(() => snapshot.data?.recent || [])
+const activity = computed(() => snapshot.data?.activity || [])
 const mapsUrl = computed(() =>
   lead.value?.address
     ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(lead.value.address)}`
@@ -218,8 +241,8 @@ function dueClass(date) {
   return color ? parseColor(color) : 'text-ink-gray-5'
 }
 
-function ownerName(owner) {
-  return getUser(owner)?.full_name || owner
+function activityIcon(type) {
+  return { call: 'phone', text: 'message-circle', email: 'mail' }[type] || 'activity'
 }
 
 function openFullLead() {

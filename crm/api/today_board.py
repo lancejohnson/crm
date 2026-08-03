@@ -28,6 +28,7 @@ while the call number keeps generation structurally idempotent.
 import re
 
 import frappe
+from bs4 import BeautifulSoup
 from frappe import _
 from frappe.utils import getdate, now_datetime
 
@@ -362,14 +363,118 @@ def _empty_columns():
 	return [{"state": s, "items": [], "count": 0} for s in STATES]
 
 
+def _plain_text(value):
+	"""Compact activity previews should never expose stored HTML/JSON markup."""
+	if not value:
+		return ""
+	return BeautifulSoup(str(value), "html.parser").get_text(" ", strip=True)
+
+
+def _recent_lead_activity(lead):
+	"""Latest calls, texts, and emails for the compact Today lead view.
+
+	This deliberately excludes FCRM Notes. Intake notes include raw vendor payloads,
+	which made the modal show a wall of JSON instead of the seller conversation the
+	setter actually needs before calling.
+	"""
+	activity = []
+
+	call_meta = frappe.get_meta("CRM Call Log")
+	call_fields = [
+		"name", "type", "from", "to", "duration", "caller", "receiver", "creation",
+	]
+	for optional in ("custom_ai_summary", "custom_call_class"):
+		if call_meta.has_field(optional):
+			call_fields.append(optional)
+	calls = frappe.get_all(
+		"CRM Call Log",
+		filters={"reference_doctype": "CRM Lead", "reference_docname": lead},
+		fields=call_fields,
+		order_by="creation desc",
+		limit=10,
+	)
+	for row in calls:
+		outgoing = row.type == "Outgoing"
+		activity.append(
+			{
+				"name": row.name,
+				"type": "call",
+				"direction": "outgoing" if outgoing else "incoming",
+				"title": _("Outgoing call") if outgoing else _("Incoming call"),
+				"content": _plain_text(row.get("custom_ai_summary")),
+				"when": row.creation,
+				"duration": row.duration or 0,
+				"classification": row.get("custom_call_class") or "",
+				"counterparty": row.get("to") if outgoing else row.get("from"),
+			}
+		)
+
+	if frappe.db.exists("DocType", "Quo Message"):
+		texts = frappe.get_all(
+			"Quo Message",
+			filters={"reference_doctype": "CRM Lead", "reference_docname": lead},
+			fields=["name", "direction", "from", "to", "content", "media", "message_date", "creation"],
+			order_by="message_date desc, creation desc",
+			limit=10,
+		)
+		for row in texts:
+			outgoing = row.direction == "Outgoing"
+			content = _plain_text(row.content)
+			if not content and row.media:
+				content = _("Attachment")
+			activity.append(
+				{
+					"name": row.name,
+					"type": "text",
+					"direction": "outgoing" if outgoing else "incoming",
+					"title": _("Outgoing text") if outgoing else _("Incoming text"),
+					"content": content,
+					"when": row.message_date or row.creation,
+					"counterparty": row.get("to") if outgoing else row.get("from"),
+				}
+			)
+
+	emails = frappe.get_all(
+		"Communication",
+		filters={
+			"reference_doctype": "CRM Lead",
+			"reference_name": lead,
+			"communication_medium": "Email",
+		},
+		fields=[
+			"name", "subject", "content", "sender", "sender_full_name", "recipients",
+			"sent_or_received", "communication_date", "creation", "delivery_status",
+		],
+		order_by="communication_date desc, creation desc",
+		limit=10,
+	)
+	for row in emails:
+		outgoing = row.sent_or_received == "Sent"
+		activity.append(
+			{
+				"name": row.name,
+				"type": "email",
+				"direction": "outgoing" if outgoing else "incoming",
+				"title": row.subject or (_("Outgoing email") if outgoing else _("Incoming email")),
+				"content": _plain_text(row.content),
+				"when": row.communication_date or row.creation,
+				"counterparty": row.recipients if outgoing else (row.sender_full_name or row.sender),
+				"status": row.delivery_status or "",
+			}
+		)
+
+	activity.sort(key=lambda item: item["when"], reverse=True)
+	return activity[:12]
+
+
 @frappe.whitelist()
 def get_today_lead_snapshot(lead):
 	"""A compact, read-only lead view for the Today card modal.
 
 	The full Lead page is intentionally much heavier. Setters need enough context
 	to make the call without leaving the queue: contact/property facts, open
-	tasks, and the latest human notes/comments. Every optional field is discovered
-	from metadata so an unprovisioned custom field cannot break the board.
+	tasks, and recent calls/texts/emails. Every optional field is discovered from
+	metadata so an unprovisioned custom field cannot break the board.
 	"""
 	_guard()
 	if not frappe.db.exists("CRM Lead", lead):
@@ -424,47 +529,6 @@ def get_today_lead_snapshot(lead):
 	# pinned To-do block.
 	tasks.sort(key=lambda task: (task.due_date is None, task.due_date or ""))
 
-	notes = frappe.get_all(
-		"FCRM Note",
-		filters={"reference_doctype": "CRM Lead", "reference_docname": lead},
-		fields=["name", "title", "content", "owner", "modified"],
-		order_by="modified desc",
-		limit=8,
-	)
-	comments = frappe.get_all(
-		"Comment",
-		filters={
-			"reference_doctype": "CRM Lead",
-			"reference_name": lead,
-			"comment_type": "Comment",
-		},
-		fields=["name", "content", "owner", "creation"],
-		order_by="creation desc",
-		limit=8,
-	)
-	recent = [
-		{
-			"name": n.name,
-			"type": "note",
-			"title": n.title or _("Note"),
-			"content": n.content,
-			"owner": n.owner,
-			"when": n.modified,
-		}
-		for n in notes
-	] + [
-		{
-			"name": c.name,
-			"type": "comment",
-			"title": _("Comment"),
-			"content": c.content,
-			"owner": c.owner,
-			"when": c.creation,
-		}
-		for c in comments
-	]
-	recent.sort(key=lambda x: x["when"], reverse=True)
-
 	return {
 		"lead": {
 			"name": doc.name,
@@ -477,7 +541,7 @@ def get_today_lead_snapshot(lead):
 		},
 		"details": details,
 		"tasks": tasks,
-		"recent": recent[:8],
+		"activity": _recent_lead_activity(lead),
 	}
 
 
