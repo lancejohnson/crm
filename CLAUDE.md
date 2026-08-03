@@ -93,6 +93,30 @@ duplicating. Work substantial features in a worktree of your own.
   - `frontend/src/pages/Leads.vue` + `pages/Deals.vue` — `crm_task_update`
     listener → `reloadKanban()` (Deals gained a `reloadKanban` helper); on-board
     membership guard to avoid needless reloads
+- **Dead leads stop generating work** — a lead moved to a dead status kept its
+  open follow-up tasks forever, so they sat in the Activity to-do block and in
+  every "due today" list. Measured on prod 2026-08-03: **25 open tasks on Dead
+  Leads** (oldest due 2026-06-22) — a quarter of the whole due-or-overdue
+  backlog was chasing leads nobody should call. Same disease that made the old
+  ISTL digest useless ("the due list had 33 leads, but most were Dead Lead").
+  `crm/api/task_hygiene.py` (**new**) + a `CRM Lead` `on_update` hook
+  (`on_lead_update`) cancels open tasks (`Backlog`/`Todo`/`In Progress`) when a
+  lead moves INTO a dead status.
+  - **Keyed on `CRM Lead Status.type == "Lost"`, NOT on status names** — both
+    "Dead Lead" and "Lost" are type Lost, so a rename or a new dead status
+    ("Not Interested") keeps working. Hardcoding a guessed status list is
+    exactly what broke the previous report. `Won` is deliberately excluded (a
+    won deal can still carry real closing tasks) — add to `TERMINAL_TYPES` if
+    that changes.
+  - Gated on `has_value_changed("status")`, so re-saving an already-dead lead
+    does NOT re-cancel a task a human deliberately reopened (verified).
+  - **Canceled, never deleted** (reversible; timeline keeps the struck-through
+    history), via `doc.save()` rather than `db.set_value` so `CRM Task.on_update`
+    fires `crm_task_update` and the kanban badge / to-do block refresh live.
+  - Hook body is wrapped in try/except — hygiene can never block a status change.
+  - `backfill_terminal_tasks(dry_run=1)` is the bench-executable sweep; applied
+    on prod (25 tasks / 25 leads, 0 errors, due backlog **91 → 66**, and every
+    remaining due task now sits on a live workable status). No ops piece.
 - **Call classification badge (editable)** — each call card in the Lead/Deal
   Activity timeline (and Buyer Conversation tab, same `CallArea.vue`) shows a
   color-themed badge with the call's classification (Connected / Voicemail
