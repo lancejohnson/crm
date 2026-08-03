@@ -113,6 +113,12 @@
       :tooltip="__('Sync every InvestorLift-linked property')"
       @click="requestAllSync"
     />
+    <span
+      v-if="!current?.il_property_id && !manualSyncing && !syncAllLoading && !syncNotice"
+      class="ml-2 text-sm text-ink-gray-5"
+    >
+      {{ __('Selected property is not linked to InvestorLift.') }}
+    </span>
     <div
       v-if="manualSyncing || syncAllLoading"
       class="ml-2 inline-flex items-center gap-2 rounded-full bg-surface-blue-1 px-3 py-1 text-sm font-medium text-ink-blue-3"
@@ -228,7 +234,6 @@ const syncNotice = ref('')
 const pendingSyncIds = new Set()
 let syncErrors = []
 let manualSyncTimeout = null
-let syncNoticeTimeout = null
 
 function onImported() {
   // remount the board (new CRM Lead Buyer rows) and refresh the switcher's
@@ -274,14 +279,10 @@ async function openBulkText() {
 
 function clearSyncNotice() {
   syncNotice.value = ''
-  if (syncNoticeTimeout) clearTimeout(syncNoticeTimeout)
-  syncNoticeTimeout = null
 }
 
 function showSyncNotice(message) {
-  clearSyncNotice()
   syncNotice.value = message
-  syncNoticeTimeout = setTimeout(clearSyncNotice, 8000)
 }
 
 function stopManualSyncWait() {
@@ -378,7 +379,6 @@ onBeforeUnmount(() => {
   $socket.off('crm_il_buyers', onBuyerSync)
   $socket.off('crm_il_sync_complete', onManualSyncComplete)
   if (manualSyncTimeout) clearTimeout(manualSyncTimeout)
-  if (syncNoticeTimeout) clearTimeout(syncNoticeTimeout)
 })
 
 function selectProperty(p, push = true) {
