@@ -93,6 +93,37 @@ duplicating. Work substantial features in a worktree of your own.
   - `frontend/src/pages/Leads.vue` + `pages/Deals.vue` — `crm_task_update`
     listener → `reloadKanban()` (Deals gained a `reloadKanban` helper); on-board
     membership guard to avoid needless reloads
+- **Shared "Today" board** (`/today`, top of the sidebar) — the surface the setters
+  work the day from; the 5am DM describes it, this is where German and Exe do it.
+  Three columns (**To Call / Done / Skipped**) built from the SAME cadence
+  definition as the standup DM, so the morning-call list and the worked list are
+  the same list. `frontend/src/pages/Today.vue` + `crm/api/today_board.py`.
+  - **Cards are rows, not a live recomputation** (ops doctype `CRM Today Item`).
+    "Done"/"Skipped" are judgements a person made; recomputing would lose them,
+    or resurrect a dismissed card, as soon as a call got logged — and the board
+    has to hold still while people work it. Division of responsibility: **the
+    cadence decides what LANDS on the board; humans own the card after that.**
+    Generation only ever ADDS and never retracts a card that stopped being due.
+  - **autoname `format:{for_date}-{lead}`** makes (date, lead) structurally
+    unique, so generation at 5am + manual Refresh + first-page-view auto-generate
+    can all race without duplicating a card (verified under a real
+    clear-then-regenerate race: 0 duplicates).
+  - Interactions: hover **✓ Done / ⊘ Skip / ↩ put back**, drag across columns,
+    drag to reorder within one, and clicking anywhere else on the card **opens
+    the regular lead**. Realtime `crm_today` keeps several boards in step.
+  - **`reorder_today` renumbers the WHOLE destination column**, not just the
+    dragged names — cards are seeded at cadence-priority offsets (never-called
+    0-99, week 1 at 100+), so writing 10/20/30 onto three dragged cards dropped
+    them *behind* untouched neighbours still sitting at 3, 4, 5. Any name not
+    passed keeps its relative position and is renumbered after the ones that
+    were, so even a partial list can't corrupt the order.
+  - **GOTCHA**: `columns` is synced from the resource with a **watcher**, not
+    `board.onSuccess = ...`. The resource is `auto: true` and can resolve BEFORE
+    a post-hoc onSuccess assignment lands — which rendered "All clear" over 66
+    real cards. Caught only in live verification; the API was fine the whole time.
+  - Ops: `scripts/setup_today_board.py` (idempotent, `--dry-run`).
+  - **Not yet checked on a phone** — fixed 22rem columns + horizontal scroll,
+    desktop-verified only.
 - **Daily standup list (5am CT Mattermost DM)** — the list Lance runs the morning
   call from. `crm/api/daily_standup.py` (**new**) holds ONE server-side definition
   of "what has to happen today", rendered two ways: a DM as the `pi` Mattermost
