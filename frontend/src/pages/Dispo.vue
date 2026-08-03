@@ -57,24 +57,6 @@
         </button>
       </div>
       <Button
-        v-if="current?.il_property_id"
-        variant="ghost"
-        :label="__('Sync property')"
-        iconLeft="rotate-ccw"
-        :loading="manualSyncing"
-        :disabled="syncAllLoading"
-        @click="requestManualSync"
-      />
-      <Button
-        v-if="hasLinkedProperties"
-        variant="ghost"
-        :label="__('Sync all')"
-        iconLeft="refresh-cw"
-        :loading="syncAllLoading"
-        :disabled="manualSyncing"
-        @click="requestAllSync"
-      />
-      <Button
         v-if="selectedLead"
         variant="ghost"
         :label="__('Text buyers')"
@@ -103,6 +85,59 @@
       </router-link>
     </template>
   </LayoutHeader>
+
+  <div
+    v-if="hasLinkedProperties"
+    class="flex min-h-12 items-center gap-2 border-b border-outline-gray-1 px-4 py-2"
+  >
+    <span class="mr-1 text-sm font-medium text-ink-gray-7">{{ __('InvestorLift') }}</span>
+    <Button
+      variant="subtle"
+      :label="__('Sync property')"
+      iconLeft="rotate-ccw"
+      :loading="manualSyncing"
+      :disabled="!current?.il_property_id || syncAllLoading"
+      :tooltip="
+        current?.il_property_id
+          ? __('Sync only the selected property')
+          : __('This property is not linked to InvestorLift')
+      "
+      @click="requestManualSync"
+    />
+    <Button
+      variant="subtle"
+      :label="__('Sync all')"
+      iconLeft="refresh-cw"
+      :loading="syncAllLoading"
+      :disabled="manualSyncing"
+      :tooltip="__('Sync every InvestorLift-linked property')"
+      @click="requestAllSync"
+    />
+    <div
+      v-if="manualSyncing || syncAllLoading"
+      class="ml-2 inline-flex items-center gap-2 rounded-full bg-surface-blue-1 px-3 py-1 text-sm font-medium text-ink-blue-3"
+      role="status"
+      aria-live="polite"
+    >
+      <span class="size-2 animate-pulse rounded-full bg-ink-blue-3" />
+      <span>
+        {{
+          syncAllLoading
+            ? __('Syncing all {0} linked properties…', [syncAllTotal])
+            : __('Syncing selected property…')
+        }}
+      </span>
+    </div>
+    <div
+      v-else-if="syncNotice"
+      class="ml-2 inline-flex items-center gap-2 rounded-full bg-surface-green-1 px-3 py-1 text-sm font-medium text-ink-green-3"
+      role="status"
+      aria-live="polite"
+    >
+      <span class="size-2 rounded-full bg-ink-green-3" />
+      {{ syncNotice }}
+    </div>
+  </div>
 
   <div class="flex flex-1 overflow-hidden">
     <DispoBoard
@@ -188,9 +223,12 @@ const showImport = ref(false)
 const boardKey = ref(0)
 const manualSyncing = ref(false)
 const syncAllLoading = ref(false)
+const syncAllTotal = ref(0)
+const syncNotice = ref('')
 const pendingSyncIds = new Set()
 let syncErrors = []
 let manualSyncTimeout = null
+let syncNoticeTimeout = null
 
 function onImported() {
   // remount the board (new CRM Lead Buyer rows) and refresh the switcher's
@@ -234,6 +272,18 @@ async function openBulkText() {
   showBulkText.value = true
 }
 
+function clearSyncNotice() {
+  syncNotice.value = ''
+  if (syncNoticeTimeout) clearTimeout(syncNoticeTimeout)
+  syncNoticeTimeout = null
+}
+
+function showSyncNotice(message) {
+  clearSyncNotice()
+  syncNotice.value = message
+  syncNoticeTimeout = setTimeout(clearSyncNotice, 8000)
+}
+
 function stopManualSyncWait() {
   manualSyncing.value = false
   syncAllLoading.value = false
@@ -244,13 +294,16 @@ function stopManualSyncWait() {
 }
 
 function waitForSync(requests, mode) {
+  clearSyncNotice()
   pendingSyncIds.clear()
   for (const request of requests) pendingSyncIds.add(request.request_id)
   syncErrors = []
+  syncAllTotal.value = requests.length
   manualSyncing.value = mode === 'property'
   syncAllLoading.value = mode === 'all'
   manualSyncTimeout = setTimeout(() => {
     stopManualSyncWait()
+    showSyncNotice(__('InvestorLift sync is taking longer than expected.'))
     toast.error(__('InvestorLift sync is taking longer than expected.'))
   }, 6 * 60 * 1000)
 }
@@ -300,10 +353,21 @@ function onManualSyncComplete(data) {
   if (pendingSyncIds.size) return
 
   const errors = [...syncErrors]
+  const completedAll = syncAllLoading.value
+  const completedTotal = syncAllTotal.value
   stopManualSyncWait()
   properties.reload()
-  if (errors.length) toast.error(errors[0])
-  else toast.success(__('InvestorLift sync complete'))
+  if (errors.length) {
+    showSyncNotice(__('InvestorLift sync failed'))
+    toast.error(errors[0])
+  } else {
+    showSyncNotice(
+      completedAll
+        ? __('Synced all {0} linked properties', [completedTotal])
+        : __('Selected property synced'),
+    )
+    toast.success(__('InvestorLift sync complete'))
+  }
 }
 
 onMounted(() => {
@@ -314,6 +378,7 @@ onBeforeUnmount(() => {
   $socket.off('crm_il_buyers', onBuyerSync)
   $socket.off('crm_il_sync_complete', onManualSyncComplete)
   if (manualSyncTimeout) clearTimeout(manualSyncTimeout)
+  if (syncNoticeTimeout) clearTimeout(syncNoticeTimeout)
 })
 
 function selectProperty(p, push = true) {
