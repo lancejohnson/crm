@@ -27,3 +27,8 @@ TODO.todo
 
 # dev server writes its chosen port here (multi-worktree discovery)
 frontend/.dev-port
+
+# local GUI verification evidence (videos, screenshots, fresh-agent reports)
+.pi/chrome-recordings/
+.pi/chrome-screenshots/
+.pi/verification/
