@@ -59,10 +59,20 @@
       <Button
         v-if="current?.il_property_id"
         variant="ghost"
-        :label="__('Sync InvestorLift')"
+        :label="__('Sync property')"
         iconLeft="rotate-ccw"
         :loading="manualSyncing"
+        :disabled="syncAllLoading"
         @click="requestManualSync"
+      />
+      <Button
+        v-if="hasLinkedProperties"
+        variant="ghost"
+        :label="__('Sync all')"
+        iconLeft="refresh-cw"
+        :loading="syncAllLoading"
+        :disabled="manualSyncing"
+        @click="requestAllSync"
       />
       <Button
         v-if="selectedLead"
@@ -169,6 +179,7 @@ const properties = createResource({
   auto: true,
 })
 const list = computed(() => properties.data || [])
+const hasLinkedProperties = computed(() => list.value.some((p) => p.il_property_id))
 
 const selectedLead = ref(route.params.leadId || null)
 const showAddBuyer = ref(false)
@@ -176,7 +187,9 @@ const showBulkText = ref(false)
 const showImport = ref(false)
 const boardKey = ref(0)
 const manualSyncing = ref(false)
-const manualRequestId = ref(null)
+const syncAllLoading = ref(false)
+const pendingSyncIds = new Set()
+let syncErrors = []
 let manualSyncTimeout = null
 
 function onImported() {
@@ -223,27 +236,50 @@ async function openBulkText() {
 
 function stopManualSyncWait() {
   manualSyncing.value = false
-  manualRequestId.value = null
+  syncAllLoading.value = false
+  pendingSyncIds.clear()
+  syncErrors = []
   if (manualSyncTimeout) clearTimeout(manualSyncTimeout)
   manualSyncTimeout = null
 }
 
+function waitForSync(requests, mode) {
+  pendingSyncIds.clear()
+  for (const request of requests) pendingSyncIds.add(request.request_id)
+  syncErrors = []
+  manualSyncing.value = mode === 'property'
+  syncAllLoading.value = mode === 'all'
+  manualSyncTimeout = setTimeout(() => {
+    stopManualSyncWait()
+    toast.error(__('InvestorLift sync is taking longer than expected.'))
+  }, 6 * 60 * 1000)
+}
+
 async function requestManualSync() {
-  if (!selectedLead.value || manualSyncing.value) return
+  if (!selectedLead.value || manualSyncing.value || syncAllLoading.value) return
   manualSyncing.value = true
   try {
     const request = await call('crm.api.investorlift_ingest.request_deal_sync', {
       lead: selectedLead.value,
     })
-    manualRequestId.value = request.request_id
-    toast.success(__('InvestorLift sync queued'))
-    manualSyncTimeout = setTimeout(() => {
-      stopManualSyncWait()
-      toast.error(__('InvestorLift sync is taking longer than expected.'))
-    }, 6 * 60 * 1000)
+    waitForSync([request], 'property')
+    toast.success(__('InvestorLift property sync queued'))
   } catch (error) {
     stopManualSyncWait()
     toast.error(error?.messages?.[0] || __('Could not queue the InvestorLift sync.'))
+  }
+}
+
+async function requestAllSync() {
+  if (manualSyncing.value || syncAllLoading.value) return
+  syncAllLoading.value = true
+  try {
+    const result = await call('crm.api.investorlift_ingest.request_all_deals_sync')
+    waitForSync(result.requests || [], 'all')
+    toast.success(__('Queued {0} InvestorLift properties', [result.total]))
+  } catch (error) {
+    stopManualSyncWait()
+    toast.error(error?.messages?.[0] || __('Could not queue all InvestorLift properties.'))
   }
 }
 
@@ -255,16 +291,19 @@ function onBuyerSync(data) {
 }
 
 function onManualSyncComplete(data) {
-  if (data.request_id !== manualRequestId.value) return
-  stopManualSyncWait()
-  if (data.status === 'done') {
-    boardKey.value++
-    properties.reload()
-    toast.success(__('InvestorLift sync complete'))
-  } else {
-    const detail = data.summary?.errors?.[0]
-    toast.error(detail || __('InvestorLift sync failed.'))
+  if (!pendingSyncIds.has(data.request_id)) return
+  pendingSyncIds.delete(data.request_id)
+  if (data.reference_docname === selectedLead.value) boardKey.value++
+  if (data.status !== 'done') {
+    syncErrors.push(data.summary?.errors?.[0] || __('InvestorLift sync failed.'))
   }
+  if (pendingSyncIds.size) return
+
+  const errors = [...syncErrors]
+  stopManualSyncWait()
+  properties.reload()
+  if (errors.length) toast.error(errors[0])
+  else toast.success(__('InvestorLift sync complete'))
 }
 
 onMounted(() => {

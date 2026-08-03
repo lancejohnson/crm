@@ -376,24 +376,8 @@ def _store_manual_sync(lead, payload):
 	)
 
 
-@frappe.whitelist()
-def request_deal_sync(lead):
-	"""Queue a one-property board refresh for the Mac mini sync daemon.
-
-	The Frappe server cannot scrape investorlift.ai itself: the authenticated,
-	persistent browser lives on the mini. This cache record is the small handoff
-	between the CRM button and that daemon. Repeated clicks reuse an active request
-	instead of scheduling duplicate browser work.
-	"""
-	if not frappe.has_permission("CRM Lead", "read", lead):
-		frappe.throw(_("Not permitted"), frappe.PermissionError)
-	if not frappe.get_meta("CRM Lead").has_field("il_property_id"):
-		frappe.throw(_("InvestorLift is not configured."))
-
-	il_property_id = frappe.db.get_value("CRM Lead", lead, "il_property_id")
-	if not il_property_id:
-		frappe.throw(_("This property is not linked to InvestorLift."))
-
+def _queue_manual_sync(lead, il_property_id):
+	"""Create or reuse the active cache request for one linked property."""
 	now = time.time()
 	current = frappe.cache().get_value(_manual_sync_key(lead)) or {}
 	active = current.get("status") == "queued" or (
@@ -413,6 +397,40 @@ def request_deal_sync(lead):
 	}
 	_store_manual_sync(lead, request)
 	return request
+
+
+@frappe.whitelist()
+def request_deal_sync(lead):
+	"""Queue a one-property board refresh for the Mac mini sync daemon.
+
+	The Frappe server cannot scrape investorlift.ai itself: the authenticated,
+	persistent browser lives on the mini. This cache record is the small handoff
+	between the CRM button and that daemon. Repeated clicks reuse an active request
+	instead of scheduling duplicate browser work.
+	"""
+	if not frappe.has_permission("CRM Lead", "read", lead):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	if not frappe.get_meta("CRM Lead").has_field("il_property_id"):
+		frappe.throw(_("InvestorLift is not configured."))
+
+	il_property_id = frappe.db.get_value("CRM Lead", lead, "il_property_id")
+	if not il_property_id:
+		frappe.throw(_("This property is not linked to InvestorLift."))
+	return _queue_manual_sync(lead, il_property_id)
+
+
+@frappe.whitelist()
+def request_all_deals_sync():
+	"""Queue every InvestorLift-linked property as one daemon batch."""
+	_guard()
+	targets = get_linked_properties()
+	if not targets:
+		frappe.throw(_("No properties are linked to InvestorLift."))
+	requests = [
+		_queue_manual_sync(target.get("lead"), target.get("il_property_id"))
+		for target in targets
+	]
+	return {"requests": requests, "total": len(requests)}
 
 
 @frappe.whitelist()
