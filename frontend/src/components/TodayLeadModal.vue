@@ -15,9 +15,7 @@
                 v-if="item?.total_calls > 1"
                 variant="subtle"
                 theme="blue"
-                :label="__('Call {0} of {1}')
-                  .replace('{0}', item.call_number)
-                  .replace('{1}', item.total_calls)"
+                :label="__('Call {0} of {1}', [item.call_number, item.total_calls])"
               />
             </div>
             <h2 class="truncate text-2xl font-semibold text-ink-gray-9">

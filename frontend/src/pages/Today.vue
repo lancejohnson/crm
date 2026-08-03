@@ -133,9 +133,7 @@
                 v-if="item.total_calls > 1"
                 variant="subtle"
                 theme="blue"
-                :label="__('Call {0} of {1}')
-                  .replace('{0}', item.call_number)
-                  .replace('{1}', item.total_calls)"
+                :label="__('Call {0} of {1}', [item.call_number, item.total_calls])"
               />
               <span class="text-xs text-ink-gray-5">
                 {{ item.calls_today }} {{ __('logged today') }}
@@ -320,7 +318,7 @@ async function refreshList() {
     const r = await call('crm.api.today_board.generate_today')
     board.reload()
     toast.success(
-      r.created ? __('Added {0} call(s)').replace('{0}', r.created) : __('Already up to date'),
+      r.created ? __('Added {0} call(s)', [r.created]) : __('Already up to date'),
     )
   } finally {
     refreshing.value = false
