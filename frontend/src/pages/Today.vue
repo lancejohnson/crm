@@ -39,7 +39,7 @@
     <div
       v-for="col in columns"
       :key="col.state"
-      class="flex w-[22rem] shrink-0 flex-col rounded-lg bg-surface-gray-1"
+      class="flex min-w-[17rem] flex-1 basis-0 flex-col rounded-lg bg-surface-gray-1"
     >
       <div class="flex items-center justify-between px-3 py-2">
         <div class="flex items-center gap-2">
@@ -163,12 +163,15 @@ const UndoIcon = () =>
     }),
   ])
 
+// frappe-ui Badge only implements gray/blue/green/orange/red — any other theme
+// name silently falls through to NO classes and renders as plain text, which is
+// how 'violet' left the "Task due" badge unstyled. Stick to the five.
 const PHASE = {
   never: { label: 'Never called', theme: 'red' },
-  week1: { label: 'Week 1', theme: 'blue' },
-  weekly: { label: 'Weekly', theme: 'orange' },
+  week1: { label: 'Week 1', theme: 'orange' },
+  weekly: { label: 'Weekly', theme: 'blue' },
   monthly: { label: 'Monthly', theme: 'gray' },
-  task: { label: 'Task due', theme: 'violet' },
+  task: { label: 'Task due', theme: 'green' },
 }
 
 const board = createResource({

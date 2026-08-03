@@ -158,10 +158,7 @@ def get_today_board(for_date=None, auto_generate=1):
 		r["lead_name"] = l.get("lead_name") or r.lead
 		r["lead_status"] = l.get("status")
 		r["mobile_no"] = l.get("mobile_no")
-		r["address"] = ", ".join(
-			[x for x in (l.get("property_address"), l.get("property_city"),
-			             l.get("property_state")) if x]
-		)
+		r["address"] = _address(l)
 		r["calls_today"] = made.get(r.lead, 0)
 
 	cols = _empty_columns()
@@ -171,6 +168,24 @@ def get_today_board(for_date=None, auto_generate=1):
 	for c in cols:
 		c["count"] = len(c["items"])
 	return {"available": True, "date": str(day), "columns": cols}
+
+
+def _address(lead) -> str:
+	"""Street + city + state, appending each part only when it isn't already in
+	the address string.
+
+	Webhook/imported leads carry a fully-qualified `property_address` ("4526
+	Domingo Dr, Corpus Christi, TX 78416") while manually-entered ones are
+	street-only with separate city/state fields. Blindly joining all three
+	produced "...TX 78416, corpus christi, TX", which then ate the card's
+	truncation budget. Same rule as agreement._full_property_address.
+	"""
+	out = (lead.get("property_address") or "").strip()
+	for part in (lead.get("property_city"), lead.get("property_state")):
+		part = (part or "").strip()
+		if part and part.lower() not in out.lower():
+			out = f"{out}, {part}" if out else part
+	return out
 
 
 def _empty_columns():
