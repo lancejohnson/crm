@@ -7,6 +7,7 @@ import { initSocket } from './socket'
 import router from './router'
 import translationPlugin from './translation'
 import App from './App.vue'
+import { initTelemetry, setTelemetryRoute } from './telemetry'
 
 import {
   FrappeUI,
@@ -61,6 +62,20 @@ app.use(telemetryPlugin, { app_name: 'crm' })
 app.config.globalProperties.$dialog = createDialog
 
 let socket
+
+function mountApp() {
+  // Telemetry starts only after boot/session context is available. The project is
+  // configured for full-session replay; all rendered text and inputs are masked
+  // in telemetry.js before anything leaves the browser.
+  initTelemetry()
+  setTelemetryRoute(router.currentRoute.value)
+  router.afterEach((to) => setTelemetryRoute(to))
+
+  socket = initSocket()
+  app.config.globalProperties.$socket = socket
+  app.mount('#app')
+}
+
 if (import.meta.env.DEV) {
   // get_context_for_dev throws unless the SERVER has developer_mode on. That is
   // fine against a local bench, but we develop against production (no local
@@ -84,15 +99,9 @@ if (import.meta.env.DEV) {
           'target) — using boot data injected by vite',
       )
     })
-    .finally(() => {
-      socket = initSocket()
-      app.config.globalProperties.$socket = socket
-      app.mount('#app')
-    })
+    .finally(mountApp)
 } else {
-  socket = initSocket()
-  app.config.globalProperties.$socket = socket
-  app.mount('#app')
+  mountApp()
 }
 
 if (import.meta.env.DEV) {

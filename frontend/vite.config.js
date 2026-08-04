@@ -122,6 +122,21 @@ function devWorktree() {
 }
 const devTree = devWorktree()
 
+// Stamp every PostHog event/report with the deployed source revision. CI can
+// override this when it builds from an exported tree rather than a git checkout.
+function buildId() {
+  if (process.env.CRM_BUILD_ID) return process.env.CRM_BUILD_ID
+  try {
+    return execFileSync('git', ['-C', path.resolve(__dirname, '..'), 'rev-parse', '--short=12', 'HEAD'], {
+      encoding: 'utf8',
+      timeout: 5000,
+    }).trim()
+  } catch {
+    return 'unknown'
+  }
+}
+const crmBuildId = buildId()
+
 // Port selection. An explicit CRM_DEV_PORT is honoured strictly. Otherwise
 // claim the first free port in 8080-8099, so N agents can each just run
 // `yarn dev` with no coordination and none of them can land on another's.
@@ -154,6 +169,9 @@ export default defineConfig(async ({ mode }) => {
     )
   }
   const config = {
+    define: {
+      'import.meta.env.VITE_CRM_BUILD_ID': JSON.stringify(crmBuildId),
+    },
     plugins: [
       // Production renders crm.html through jinja and injects the boot dict as
       // window[...] globals. The dev server renders index.html itself, so NONE
