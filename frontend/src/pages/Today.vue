@@ -174,12 +174,25 @@
               class="mt-2 flex w-full items-center gap-1.5 rounded-md border border-outline-gray-1 bg-surface-gray-1 px-2 py-1.5 text-left hover:border-outline-gray-3 hover:bg-surface-gray-2"
               @click.stop="openTask(item.task)"
             >
-              <FeatherIcon name="circle" class="size-3.5 shrink-0 text-ink-gray-4" />
+              <FeatherIcon
+                :name="item.task.is_completed ? 'check-circle' : 'circle'"
+                class="size-3.5 shrink-0"
+                :class="item.task.is_completed ? 'text-ink-green-3' : 'text-ink-gray-4'"
+              />
               <span class="min-w-0 flex-1 truncate text-xs font-medium text-ink-gray-7">
                 {{ item.task.title }}
               </span>
-              <span v-if="item.task.due_date" class="shrink-0 text-xs text-ink-gray-5">
-                {{ __(timeAgo(item.task.due_date)) }}
+              <span
+                v-if="item.task.completed_at || item.task.due_date"
+                class="shrink-0 text-xs text-ink-gray-5"
+              >
+                {{
+                  __(
+                    timeAgo(
+                      item.task.is_completed ? item.task.completed_at : item.task.due_date,
+                    ),
+                  )
+                }}
               </span>
             </button>
 

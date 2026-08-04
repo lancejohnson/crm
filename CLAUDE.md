@@ -114,10 +114,10 @@ duplicating. Work substantial features in a worktree of your own.
     Existing Done/Skipped state and manual ordering are never touched.
   - **Today report + team streak** — the flame button opens current Total/Done/
     Skipped/Remaining progress, who completed today's cards, and recent business-
-    day completion rates. The streak is deliberately strict: a perfect day means
-    every card is **Done**; Skipped cards are handled but do not count as
-    completed. An unfinished current day does not erase the streak earned through
-    the previous business day. `frontend/src/components/TodayReportModal.vue` +
+    day resolved rates (Done + Skipped). A perfect streak day means every card has been resolved
+    as **Done or Skipped**. An unfinished current day does not erase the streak
+    earned through the previous business day.
+    `frontend/src/components/TodayReportModal.vue` +
     `TodayReportMetric.vue`; `crm.api.today_board.get_today_report`.
   - **autoname `format:{for_date}-{lead}`** makes (date, lead) structurally
     unique, so generation at 5am + manual Refresh + first-page-view auto-generate
@@ -131,7 +131,10 @@ duplicating. Work substantial features in a worktree of your own.
     logged before generation, only Call 2 is materialized.
   - Cards show **address and phone on separate lines**, the soonest open task
     (click → the real Task modal), and a green **incoming-text flag** with the
-    last received time. Clicking the address on either the card or lead modal
+    last received time. Open tasks use a neutral empty circle. When the card is
+    Done and a task was completed that board day, it shows the latest completed
+    task with a green check instead of the next future task. Clicking the address
+    on either the card or lead modal
     asks **Google Maps or Zillow** and opens the chosen destination; both use the
     shared `utils/propertyLinks.js` builders also used by the full Lead page.
     The message icon opens the standard Send Text modal with

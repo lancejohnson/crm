@@ -387,7 +387,7 @@ def get_today_board(for_date=None, auto_generate=1, status=None, priority=None, 
 	# than issuing a query per card; due tasks sort before undated tasks.
 	task_fields = [
 		"name", "reference_doctype", "reference_docname", "title", "description",
-		"status", "due_date", "priority", "assigned_to", "creation",
+		"status", "due_date", "priority", "assigned_to", "creation", "modified",
 	]
 	task_meta = frappe.get_meta("CRM Task")
 	if task_meta.has_field("call_outcome"):
@@ -408,10 +408,36 @@ def get_today_board(for_date=None, auto_generate=1, status=None, priority=None, 
 			task.creation or "",
 		)
 	)
-	task_by_lead = {}
+	open_task_by_lead = {}
 	for task in open_tasks:
 		task.pop("creation", None)
-		task_by_lead.setdefault(task.reference_docname, task)
+		task.pop("modified", None)
+		task["is_completed"] = False
+		open_task_by_lead.setdefault(task.reference_docname, task)
+
+	# A Done card should show the task the rep just finished, not the next future
+	# follow-up. Use the latest task marked Done on this board date; `modified` is
+	# the task timeline's existing completion timestamp convention.
+	completed_tasks = frappe.get_all(
+		"CRM Task",
+		filters={
+			"reference_doctype": "CRM Lead",
+			"reference_docname": ["in", lead_names],
+			"status": "Done",
+			"modified": [
+				"between",
+				[f"{day} 00:00:00", f"{day} 23:59:59.999999"],
+			],
+		},
+		fields=task_fields,
+		order_by="modified desc",
+	)
+	completed_task_by_lead = {}
+	for task in completed_tasks:
+		task.pop("creation", None)
+		task["completed_at"] = task.pop("modified", None)
+		task["is_completed"] = True
+		completed_task_by_lead.setdefault(task.reference_docname, task)
 
 	incoming_by_lead = {}
 	if frappe.db.exists("DocType", "Quo Message"):
@@ -443,7 +469,11 @@ def get_today_board(for_date=None, auto_generate=1, status=None, priority=None, 
 			r.get("total_calls") or max(1, int(r.get("calls_needed") or 1))
 		)
 		r["priority_key"] = _priority_key(r.phase, r.call_number)
-		r["task"] = task_by_lead.get(r.lead)
+		r["task"] = (
+			completed_task_by_lead.get(r.lead)
+			if r.state == "Done" and completed_task_by_lead.get(r.lead)
+			else open_task_by_lead.get(r.lead)
+		)
 		r["last_incoming_text"] = incoming_by_lead.get(r.lead)
 
 	status_counts = {}
@@ -509,21 +539,19 @@ def _empty_report_day(day):
 def _finish_report_day(stats):
 	stats["remaining"] = stats["total"] - stats["done"] - stats["skipped"]
 	if stats["total"]:
-		stats["completion_rate"] = round(stats["done"] * 100 / stats["total"])
-		stats["handled_rate"] = round(
-			(stats["done"] + stats["skipped"]) * 100 / stats["total"]
-		)
-	stats["perfect"] = bool(stats["total"] and stats["done"] == stats["total"])
+		resolved = stats["done"] + stats["skipped"]
+		stats["completion_rate"] = round(resolved * 100 / stats["total"])
+		stats["handled_rate"] = stats["completion_rate"]
+	stats["perfect"] = bool(stats["total"] and stats["remaining"] == 0)
 	return stats
 
 
 @frappe.whitelist()
 def get_today_report(for_date=None, history_days=10):
-	"""Team progress today plus a strict 100%-Done business-day streak.
+	"""Team progress today plus a 100%-resolved business-day streak.
 
-	Skipped cards are reported as handled, but they do not count as completed and
-	therefore break a perfect-day streak. An unfinished current day does not erase
-	the streak earned through the previous business day.
+	Both Done and Skipped cards count toward the streak. An unfinished current day
+	does not erase the streak earned through the previous business day.
 	"""
 	_guard()
 	today = getdate(for_date or now_datetime())
@@ -596,8 +624,8 @@ def get_today_report(for_date=None, history_days=10):
 
 	recent = [by_day[day] for day in sorted(business_dates, reverse=True)[:history_days]]
 	recent_total = sum(day["total"] for day in recent)
-	recent_done = sum(day["done"] for day in recent)
-	recent_average = round(recent_done * 100 / recent_total) if recent_total else 0
+	recent_resolved = sum(day["done"] + day["skipped"] for day in recent)
+	recent_average = round(recent_resolved * 100 / recent_total) if recent_total else 0
 
 	people = Counter(row.done_by for row in rows if getdate(row.for_date) == today and row.state == "Done" and row.done_by)
 	user_names = {}
@@ -626,7 +654,7 @@ def get_today_report(for_date=None, history_days=10):
 			"best": best_streak,
 			"through": through,
 		},
-		"definition": _("A streak day requires every Today card to be marked Done. Skipped cards do not count as completed."),
+		"definition": _("A streak day requires every Today card to be resolved as Done or Skipped."),
 	}
 
 

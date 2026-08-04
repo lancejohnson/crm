@@ -37,7 +37,7 @@
             <div>
               <div class="text-sm font-semibold text-ink-gray-8">{{ __('Today') }}</div>
               <div class="text-xs text-ink-gray-5">
-                {{ today.done }} {{ __('of') }} {{ today.total }} {{ __('cards completed') }}
+                {{ today.done + today.skipped }} {{ __('of') }} {{ today.total }} {{ __('cards resolved') }}
               </div>
             </div>
             <div class="text-2xl font-semibold text-ink-gray-9">{{ today.completion_rate }}%</div>
