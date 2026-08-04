@@ -104,19 +104,23 @@ def _store_message(msg_id, from_num, e164, content, status, buyer):
 	the Quo Message after_insert app hook emits the `quo_message` realtime event."""
 	if not msg_id or frappe.db.exists("Quo Message", {"id": msg_id}):
 		return ""
-	doc = frappe.get_doc(
-		{
-			"doctype": "Quo Message",
-			"id": msg_id,
-			"direction": "Outgoing",
-			"from": from_num,
-			"to": e164,
-			"content": content,
-			"status": status,
-			"message_date": frappe.utils.now_datetime(),
-			"reference_doctype": BUYER_DOCTYPE,
-			"reference_docname": buyer,
-		}
-	)
+	values = {
+		"doctype": "Quo Message",
+		"id": msg_id,
+		"direction": "Outgoing",
+		"from": from_num,
+		"to": e164,
+		"content": content,
+		"status": status,
+		"message_date": frappe.utils.now_datetime(),
+		"reference_doctype": BUYER_DOCTYPE,
+		"reference_docname": buyer,
+	}
+	meta = frappe.get_meta("Quo Message")
+	if meta.has_field("sent_by"):
+		values["sent_by"] = frappe.session.user
+	if meta.has_field("activity_source"):
+		values["activity_source"] = "Manual"
+	doc = frappe.get_doc(values)
 	doc.insert(ignore_permissions=True)
 	return doc.name

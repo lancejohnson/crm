@@ -66,6 +66,19 @@
                 </nav>
               </Section>
             </div>
+            <div
+              v-if="user === ACTIVITY_PROGRESS_USER"
+              class="mx-2 mt-3 border-t pt-3"
+            >
+              <SidebarLink
+                :label="__('Team activity')"
+                @click="openActivityProgress"
+              >
+                <template #icon>
+                  <ActivityIcon class="h-4 w-4" />
+                </template>
+              </SidebarLink>
+            </div>
           </div>
         </div>
       </TransitionChild>
@@ -82,6 +95,7 @@
       </TransitionChild>
     </Dialog>
   </TransitionRoot>
+  <ActivityProgressModal v-model="showActivityProgress" />
 </template>
 <script setup>
 import {
@@ -101,14 +115,20 @@ import NoteIcon from '@/components/Icons/NoteIcon.vue'
 import TaskIcon from '@/components/Icons/TaskIcon.vue'
 import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
 import NotificationsIcon from '@/components/Icons/NotificationsIcon.vue'
+import ActivityIcon from '@/components/Icons/ActivityIcon.vue'
 import SidebarLink from '@/components/SidebarLink.vue'
+import ActivityProgressModal from '@/components/ActivityProgressModal.vue'
 import { viewsStore } from '@/stores/views'
 import { getSettings } from '@/stores/settings'
 import { applySidebarConfig } from '@/utils/sidebarLinks'
 import { unreadNotificationsCount } from '@/stores/notifications'
-import { computed, h } from 'vue'
+import { sessionStore } from '@/stores/session'
+import { computed, h, nextTick, ref } from 'vue'
 import { mobileSidebarOpened as sidebarOpened } from '@/composables/settings'
 
+const ACTIVITY_PROGRESS_USER = 'lance.johnson@groundworkpro.com'
+const { user } = sessionStore()
+const showActivityProgress = ref(false)
 const { getPinnedViews, getPublicViews } = viewsStore()
 const { settings } = getSettings()
 
@@ -120,6 +140,12 @@ const links = computed(() =>
     link.condition ? link.condition() : true,
   ),
 )
+
+async function openActivityProgress() {
+  sidebarOpened.value = false
+  await nextTick()
+  showActivityProgress.value = true
+}
 
 const allViews = computed(() => {
   let _views = [

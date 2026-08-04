@@ -32,6 +32,22 @@ duplicating. Work substantial features in a worktree of your own.
   `zillowUrl`/`mapsUrl` helpers). Toasts if no address is set. Pure frontend.
   `frontend/src/pages/Lead.vue`.
 
+- **Lance-only Team Activity pulse** — a small **Team activity** button at the
+  bottom of the app sidebar (rendered only for
+  `lance.johnson@groundworkpro.com`) opens a day-by-day per-user pace report:
+  calls + talk time, human-sent Quo texts, completed CRM tasks, and completed
+  Today cards, with first/last activity, a half-hour time-of-day histogram, and
+  configurable per-user daily goals. Goals persist cross-device in Lance's
+  Frappe user defaults (no custom doctype). The backend endpoint repeats the
+  exact Lance-only permission gate; Administrator is retained only for bench
+  verification. Automated sequence texts are explicitly excluded rather than
+  credited to the owner of the Quo line. `crm/api/activity_progress.py` +
+  `frontend/src/components/ActivityProgressModal.vue` + desktop `AppSidebar.vue`
+  + mobile-drawer `MobileSidebar.vue` (both entry points are required).
+  Quo attribution support is in the ops repo: `Quo Message.sent_by` and
+  `activity_source`, stamped by manual CRM sends / the sequence runner / the
+  Quo webhook, plus a safe preview-first historical backfill.
+
 - **Activity feed no longer auto-scrolls on every reload** — the Lead/Deal
   Activity timeline used to yank the viewport on every action (adding a
   comment/task, sending a text) and on every realtime reload from a teammate,

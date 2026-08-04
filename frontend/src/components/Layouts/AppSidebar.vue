@@ -98,6 +98,16 @@
         </template>
       </SidebarLink>
       <SidebarLink
+        v-if="user === ACTIVITY_PROGRESS_USER"
+        :label="__('Team activity')"
+        :isCollapsed="isSidebarCollapsed"
+        @click="showActivityProgress = true"
+      >
+        <template #icon>
+          <ActivityIcon class="h-4 w-4" />
+        </template>
+      </SidebarLink>
+      <SidebarLink
         v-if="isOnboardingStepsCompleted"
         :label="__('Help')"
         :isCollapsed="isSidebarCollapsed"
@@ -130,6 +140,7 @@
     </div>
     <Notifications />
     <Settings />
+    <ActivityProgressModal v-model="showActivityProgress" />
     <HelpModal
       v-if="showHelpModal"
       v-model="showHelpModal"
@@ -170,9 +181,11 @@ import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
 import CollapseSidebar from '@/components/Icons/CollapseSidebar.vue'
 import NotificationsIcon from '@/components/Icons/NotificationsIcon.vue'
 import HelpIcon from '@/components/Icons/HelpIcon.vue'
+import ActivityIcon from '@/components/Icons/ActivityIcon.vue'
 import SidebarLink from '@/components/SidebarLink.vue'
 import Notifications from '@/components/Notifications.vue'
 import Settings from '@/components/Settings/Settings.vue'
+import ActivityProgressModal from '@/components/ActivityProgressModal.vue'
 import { viewsStore } from '@/stores/views'
 import { getSettings } from '@/stores/settings'
 import { applySidebarConfig } from '@/utils/sidebarLinks'
@@ -213,6 +226,8 @@ const { send } = useBroadcast()
 
 const isFCSite = ref(window.is_fc_site)
 const isDemoSite = ref(window.is_demo_site)
+const ACTIVITY_PROGRESS_USER = 'lance.johnson@groundworkpro.com'
+const showActivityProgress = ref(false)
 
 const { settings } = getSettings()
 
