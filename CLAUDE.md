@@ -1644,10 +1644,13 @@ specifically: the `Quo Message` doctype, the `send-text` and `list-quo-numbers`
 API server scripts, and inbound text mirroring in the `sequence-events` webhook
 all live in `../frappe-crm-deploy`.
 
-## Testing & verification — prod only (no local dev mirror)
+## Testing & verification — local first (prod-backed dev)
 
-The local dev mirror was **removed (2026-06-19)** — work exclusively against
-prod. There is no `dev.sh`/`docker-compose.dev.yml` anymore; don't recreate one.
+The full local backend/database mirror was **removed (2026-06-19)**; there is no
+`dev.sh`/`docker-compose.dev.yml`, and one should not be recreated. Frontend work
+is nevertheless tested **before push/deploy** through the local Vite dev server,
+which serves the local source while proxying authenticated API/realtime traffic
+to prod. Production must never be the first place a UI change is exercised.
 
 - **Backend logic** — validate read-only against the live DB with `bench
   execute` / `bench console` on the prod backend; roll back anything that writes:
@@ -1661,38 +1664,48 @@ prod. There is no `dev.sh`/`docker-compose.dev.yml` anymore; don't recreate one.
   unmerged code without deploying, `docker cp` the module into the backend
   container under a throwaway name, `execute` it, then remove it. Any snippet
   that writes must end in `frappe.db.rollback()`.
-- **Compile gate** — `cd frontend && yarn build` must succeed (no upstream
-  tests); the in-image build run by `build_image.sh` is the real gate. A host
-  `yarn build` needs the `socket.js` bench-relative config import resolved: from
-  the **main repo** stub `../sites/common_site_config.json` (i.e.
-  `Projects/sites/common_site_config.json`) = `{"socketio_port": 9000}`; from a
-  worktree symlink the main `frontend/node_modules` and stub
-  `sites/common_site_config.json` (see the `frontend-yarn-build-compile-gate`
-  memory).
-- **Visual / UI verification — MANDATORY for any UI change.** If a change touches
-  a UI component (a `.vue` file, a new screen, a button, a layout), you MUST open
-  it in the live site and actually look at it after shipping — the change isn't
-  "done" until you've confirmed it renders and works. Use the **Google Chrome MCP**
-  (`mcp__claude-in-chrome__*`) against the live site
-  `https://crm.groundworkpro.com/crm` — it rides Lance's real, logged-in Chrome
-  session. **Do NOT use headless Playwright here** (this overrides the global
-  browser-interaction default): the SPA needs real nginx + an authenticated
-  session, which only prod has. Ship the change first (below), then open the
-  live page, exercise the new component (click it, unfold it, etc.), and report
-  what you saw — don't just confirm the page loaded.
+- **Compile gate — before push/deploy.** Run `cd frontend && yarn build`; it must
+  succeed (there are no upstream frontend tests). Worktrees need their own
+  `node_modules`; no sites config stub is required. The later in-image build is
+  a second gate, not the first test.
+- **Visual / UI verification — MANDATORY before push/deploy for any UI change.**
+  Start the prod-backed local server with
+  `cd frontend && CRM_DEV_TARGET=https://crm.groundworkpro.com yarn dev`, read
+  the actual port from `frontend/.dev-port`, and call π's `verify_ui` against
+  `http://localhost:<port>/crm`. If the relevant device target is not already
+  known, call `verify_ui` without a target first and ask Lance which target
+  matters. Exercise the changed behavior (click, type, unfold, save/reload where
+  safe) and verify the resulting state; merely loading the page is insufficient.
+  Complete this local verification before committing/pushing or running
+  `build_image.sh`. The dev page uses the real production database, so avoid or
+  roll back destructive test data.
+- **After deploy** — run `smoke_test.py` and make only a focused production
+  spot-check for deploy/cache/auth differences. This is confirmation, not the
+  initial test pass; do not push a change merely to make it testable.
 
 ## Ship a change
 
+Do not deploy in order to test. The order is local compile + local `verify_ui`,
+then commit/push, then deploy and smoke-test:
+
 ```bash
-# edit source here, then:
-cd ../frappe-crm-deploy && ./scripts/build_image.sh && python3 scripts/smoke_test.py
-# commit here AND commit the compose pin bump in ../frappe-crm-deploy
+# 1. Before commit/push/deploy (for frontend/UI work)
+cd frontend && yarn build
+CRM_DEV_TARGET=https://crm.groundworkpro.com yarn dev
+# read .dev-port and run verify_ui against http://localhost:<port>/crm
+
+# 2. After the local checks pass, commit and push this app repo
+# 3. Pull the latest deploy repo, then deploy and smoke-test
+cd ../../frappe-crm-deploy && git pull
+./scripts/build_image.sh && python3 scripts/smoke_test.py
+# commit and push the compose pin bump in ../frappe-crm-deploy
 ```
 
 `build_image.sh` is the deploy step. It also takes `FORK=/path/to/worktree` to
 build+deploy straight from a worktree without merging first. Frontend has no
-tests upstream; `yarn build` succeeding is the gate. Don't run `bench run-tests`
-against the prod site.
+tests upstream; the local `yarn build` and local `verify_ui` are the initial
+gates, while the in-image build and `smoke_test.py` are post-push deployment
+gates. Don't run `bench run-tests` against the prod site.
 
 **Timings (measured, per-step timing prints as it runs).** Frontend change
 ~75s; backend-only change ~30s, because the Dockerfile copies `crm/` BELOW
