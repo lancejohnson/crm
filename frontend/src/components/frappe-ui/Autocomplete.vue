@@ -126,7 +126,7 @@
             >
               <slot
                 name="footer"
-                v-bind="{ value: search?.el._value, close }"
+                v-bind="{ value: query, close }"
               ></slot>
             </div>
           </div>
@@ -209,6 +209,7 @@ const selectedValue = computed({
 })
 
 function close() {
+  query.value = ''
   showOptions.value = false
 }
 

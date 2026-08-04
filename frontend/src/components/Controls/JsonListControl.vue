@@ -29,7 +29,7 @@
           class="rounded px-1.5 py-0.5 text-xs text-ink-gray-5 hover:bg-surface-gray-2 hover:text-ink-gray-8"
           @click.stop="togglePopover()"
         >
-          + {{ items.length ? __('Add') : placeholder }}
+          + {{ items.length ? addLabel || __('Add') : placeholder }}
         </button>
       </template>
       <template #footer="{ value: query, close }">
@@ -58,6 +58,7 @@ const props = defineProps({
   modelValue: { type: Array, default: () => [] },
   options: { type: Array, default: () => [] },
   placeholder: { type: String, default: 'Select…' },
+  addLabel: { type: String, default: '' },
   disabled: { type: Boolean, default: false },
   allowCreate: { type: Boolean, default: true },
 })

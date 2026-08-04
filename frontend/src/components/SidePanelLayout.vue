@@ -119,7 +119,8 @@
                           v-else-if="field.options === 'JSON List'"
                           :modelValue="parseJsonList(doc[field.fieldname])"
                           :options="jsonListOptions(field)"
-                          :placeholder="field.placeholder"
+                          :placeholder="jsonListPlaceholder(field)"
+                          :add-label="jsonListAddLabel(field)"
                           :disabled="Boolean(field.read_only)"
                           @change="
                             (value) =>
@@ -444,7 +445,8 @@ const { users, isManager, getUser } = usersStore()
 
 const showSidePanelModal = ref(false)
 
-const buyerCities = createResource({
+const buyerLocations = createResource({
+  // Keep the legacy endpoint so local UI verification works before backend deploy.
   url: 'crm.api.buyers.get_buybox_cities',
   auto: props.doctype === 'CRM Buyer',
 })
@@ -468,9 +470,22 @@ function parseJsonList(value) {
 }
 
 function jsonListOptions(field) {
-  if (field.fieldname === 'buybox_cities') return buyerCities.data || []
+  if (field.fieldname === 'buybox_cities') return buyerLocations.data || []
   if (field.fieldname === 'buybox_property_types') return BUYBOX_PROPERTY_TYPES
   return []
+}
+
+function jsonListPlaceholder(field) {
+  if (field.fieldname === 'buybox_cities') {
+    return __('Select cities, states, or ZIP codes…')
+  }
+  return field.placeholder
+}
+
+function jsonListAddLabel(field) {
+  return field.fieldname === 'buybox_cities'
+    ? __('Add city, state, or ZIP')
+    : ''
 }
 
 let document = { doc: {} }

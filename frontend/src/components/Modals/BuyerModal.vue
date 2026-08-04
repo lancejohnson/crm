@@ -102,8 +102,9 @@
               <div class="min-h-8 rounded border border-outline-gray-2 px-2 py-1">
                 <JsonListControl
                   v-model="form.buybox_cities"
-                  :options="buyboxCities.data || []"
-                  :placeholder="__('Select cities…')"
+                  :options="buyboxLocations.data || []"
+                  :placeholder="__('Select cities, states, or ZIP codes…')"
+                  :add-label="__('Add city, state, or ZIP')"
                 />
               </div>
             </div>
@@ -124,7 +125,7 @@
             v-model="form.buybox"
             type="textarea"
             :label="__('Buybox notes')"
-            :placeholder="__('Price range, ZIP codes, condition, deal size…')"
+            :placeholder="__('Price range, condition, deal size…')"
           />
         </div>
 
@@ -307,7 +308,8 @@ const BUYBOX_PROPERTY_TYPES = [
   'Mobile Home',
   'Commercial',
 ]
-const buyboxCities = createResource({
+const buyboxLocations = createResource({
+  // Keep the legacy endpoint so local UI verification works before backend deploy.
   url: 'crm.api.buyers.get_buybox_cities',
   auto: true,
 })

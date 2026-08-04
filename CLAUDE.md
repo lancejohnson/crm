@@ -1210,11 +1210,15 @@ duplicating. Work substantial features in a worktree of your own.
     and publishes the existing `crm_il_buyers` realtime event after commit.
     Every card also has an accessible **Move buyer** menu (same endpoint) for
     touch/keyboard use and as a precise alternative to drag.
-  - CRM Buyer gained JSON-list `buybox_cities` (**Buying In**, specific city +
-    state) and `buybox_property_types` fields. Both render as searchable,
-    create-any-value chip pickers in the Buyer edit modal and inline sidebar;
-    city suggestions come from distinct CRM Lead property cities. Existing
-    `buybox` is now the free-form notes layer (price/ZIP/condition/etc.).
+  - CRM Buyer gained JSON-list `buybox_cities` (**Buying In**; legacy field
+    name, now stores city/state markets, whole states, and ZIP codes) and
+    `buybox_property_types` fields. Both render as searchable, create-any-value
+    chip pickers in the Buyer edit modal and inline sidebar; location
+    suggestions come from distinct CRM Lead cities, states, and ZIPs. Existing
+    `buybox` is the free-form notes layer (price/condition/deal-size/etc.). The
+    shared Autocomplete footer now reads its reactive query and clears it on
+    close; the prior private-DOM `_value` lag could save `554012`, and reopening
+    after adding `MN` concatenated the next entry into `MN55401`.
   - Buyer detail now mounts the standard globally-configurable
     `SidePanelLayout`: default sections are **Buybox** and **Buyer Details**;
     managers use the section pencil → Edit Field Layout to add/reorder/remove

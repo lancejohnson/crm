@@ -432,38 +432,72 @@ def get_buyer_calls(buyer):
 	return out
 
 
-@frappe.whitelist()
-def get_buybox_cities():
-	"""Distinct property cities already in CRM, plus cities saved on buyers.
+def _buybox_location_label(value, kind=None):
+	"""Label a stored location without changing the value saved on the buyer."""
+	if not kind:
+		compact = value.replace("-", "")
+		if compact.isdigit() and len(compact) in (5, 9):
+			kind = "ZIP"
+		elif len(value) == 2 and value.isalpha():
+			kind = "State"
+	return f"{kind}: {value}" if kind else value
 
-	The picker still allows a custom city, so the existing lead set is a useful
-	starting vocabulary rather than a gate.
+
+@frappe.whitelist()
+def get_buybox_locations():
+	"""Distinct cities, states and ZIP codes already represented in the CRM.
+
+	`buybox_cities` is the legacy storage field name, but its JSON array now holds
+	all three location granularities. The picker also permits custom values, so
+	these options are a useful starting vocabulary rather than a gate.
 	"""
 	_guard()
-	cities = {}
-	if frappe.get_meta("CRM Lead").has_field("property_city"):
+	locations = {}
+
+	def add(value, kind=None):
+		value = (value or "").strip()
+		if not value:
+			return
+		key = value.lower()
+		locations.setdefault(key, {
+			"label": _buybox_location_label(value, kind),
+			"value": value,
+		})
+
+	lead_meta = frappe.get_meta("CRM Lead")
+	lead_fields = [
+		fieldname for fieldname in ("property_city", "property_state", "property_zip")
+		if lead_meta.has_field(fieldname)
+	]
+	if lead_fields:
 		for row in frappe.get_all(
-			"CRM Lead",
-			filters={"property_city": ["is", "set"]},
-			fields=["property_city", "property_state"],
-			limit_page_length=0,
+			"CRM Lead", fields=lead_fields, limit_page_length=0,
 		):
-			city = (row.property_city or "").strip().title()
-			state = (row.property_state or "").strip()
+			city = (row.get("property_city") or "").strip().title()
+			state = (row.get("property_state") or "").strip()
 			state = state.upper() if len(state) <= 3 else state.title()
-			label = f"{city}, {state}" if state else city
-			if label:
-				cities.setdefault(label.lower(), label)
+			# A few historical imports put a street address/email in property_city.
+			# Do not promote those dirty values into every buyer's suggestions.
+			if city and not any(char.isdigit() for char in city) and "@" not in city:
+				add(f"{city}, {state}" if state else city, "City")
+			add(state, "State")
+			add(row.get("property_zip"), "ZIP")
 
 	meta = frappe.get_meta(BUYER_DOCTYPE)
 	if meta.has_field("buybox_cities"):
 		for raw in frappe.get_all(
 			BUYER_DOCTYPE, fields=["buybox_cities"], limit_page_length=0
 		):
-			for city in _json_list(raw.get("buybox_cities")):
-				cities.setdefault(city.lower(), city)
+			for location in _json_list(raw.get("buybox_cities")):
+				add(location)
 
-	return [{"label": value, "value": value} for value in sorted(cities.values())]
+	return sorted(locations.values(), key=lambda option: option["value"].lower())
+
+
+@frappe.whitelist()
+def get_buybox_cities():
+	"""Backward-compatible endpoint for older clients."""
+	return get_buybox_locations()
 
 
 @frappe.whitelist()
