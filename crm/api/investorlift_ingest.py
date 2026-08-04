@@ -903,13 +903,21 @@ def get_deal_buyers(lead):
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 	if not frappe.db.exists("DocType", LEAD_BUYER_DOCTYPE):
 		return []
+	fields = [
+		"name", "buyer", "buyer_name", "interest_stage", "direction",
+		"phone", "buyer_type", "deal_history", "verified", "last_active", "message_count",
+	]
+	meta = frappe.get_meta(LEAD_BUYER_DOCTYPE)
+	fields += [
+		fieldname for fieldname in (
+			"not_interested_reasons", "not_interested_note",
+			"not_interested_by", "not_interested_at",
+		) if meta.has_field(fieldname)
+	]
 	return frappe.get_all(
 		LEAD_BUYER_DOCTYPE,
 		filters={"lead": lead},
-		fields=[
-			"name", "buyer", "buyer_name", "interest_stage", "direction",
-			"phone", "buyer_type", "deal_history", "verified", "last_active", "message_count",
-		],
+		fields=fields,
 		order_by="interest_stage asc, modified desc",
 		limit_page_length=0,
 	)

@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 import frappe
 from frappe import _
-from frappe.utils import get_datetime, get_system_timezone
+from frappe.utils import get_datetime, get_system_timezone, now_datetime
 
 from crm.api.investorlift_ingest import BUYER_DOCTYPE, LEAD_BUYER_DOCTYPE, _find_buyer, _last10
 
@@ -255,10 +255,53 @@ def update_buyer(buyer, updates):
 
 INTEREST_STAGES = ("New", "Attempted to Contact", "Not Interested", "Interested", "Offer Made")
 
+# Canonical per-property rejection reasons. Keep the values in sync with
+# frontend/src/utils/buyerRejectionReasons.js so the board's icons and the
+# server-side validation cannot drift.
+NOT_INTERESTED_REASONS = (
+	"Pricing",
+	"Not buying in this location",
+	"Not currently in the market",
+	"Daisy chainer",
+	"Does not buy deal type",
+	"Property condition",
+	"No longer buying",
+	"Other",
+)
+
+
+def _not_interested_reasons(value):
+	"""Normalize and validate the JSON multi-select sent by the Dispo board."""
+	if isinstance(value, str):
+		try:
+			value = json.loads(value)
+		except (TypeError, ValueError):
+			value = [value]
+	if not isinstance(value, (list, tuple)):
+		frappe.throw(_("Not interested reasons must be a list."))
+
+	items = []
+	for item in value:
+		if not isinstance(item, str) or not item.strip():
+			continue
+		item = item.strip()
+		if item not in NOT_INTERESTED_REASONS:
+			frappe.throw(_("Invalid not interested reason: {0}").format(item))
+		if item not in items:
+			items.append(item)
+	if not items:
+		frappe.throw(_("Select at least one reason."))
+	return items
+
 
 @frappe.whitelist()
-def move_buyer_stage(relationship, stage):
-	"""Move one buyer relationship to another Dispo-board column."""
+def move_buyer_stage(relationship, stage, reasons=None, note=None):
+	"""Move one buyer relationship to another Dispo-board column.
+
+	Moving to Not Interested also stores structured, per-property reasons. The
+	same endpoint updates reasons on an already-Not-Interested card, so corrections
+	remain atomic with the relationship row and publish the usual realtime event.
+	"""
 	_guard()
 	if stage not in INTEREST_STAGES:
 		frappe.throw(_("Invalid buyer stage."))
@@ -268,17 +311,51 @@ def move_buyer_stage(relationship, stage):
 	doc = frappe.get_doc(LEAD_BUYER_DOCTYPE, relationship)
 	if not doc.has_permission("write"):
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
-	if doc.interest_stage == stage:
+
+	updates = {}
+	meta = frappe.get_meta(LEAD_BUYER_DOCTYPE)
+	if stage == "Not Interested":
+		if not meta.has_field("not_interested_reasons"):
+			frappe.throw(_("Not interested reasons are not configured yet."))
+		selected = _not_interested_reasons(reasons)
+		note = (note or "").strip()
+		if len(note) > 1000:
+			frappe.throw(_("The note must be 1,000 characters or fewer."))
+		updates = {
+			"not_interested_reasons": json.dumps(selected, ensure_ascii=False),
+			"not_interested_note": note or None,
+			"not_interested_by": frappe.session.user,
+			"not_interested_at": now_datetime(),
+		}
+	else:
+		# Reasons describe the buyer's current per-property stage. Clear them when
+		# the buyer leaves Not Interested so an InvestorLift-origin move back into
+		# that column cannot surface stale CRM reasons from an earlier decision.
+		for fieldname in (
+			"not_interested_reasons", "not_interested_note",
+			"not_interested_by", "not_interested_at",
+		):
+			if meta.has_field(fieldname) and doc.get(fieldname):
+				updates[fieldname] = None
+
+	if doc.interest_stage == stage and not updates:
 		return {"ok": True, "stage": stage}
 
 	doc.interest_stage = stage
+	for fieldname, value in updates.items():
+		if doc.meta.has_field(fieldname):
+			setattr(doc, fieldname, value)
 	doc.save()
 	frappe.publish_realtime(
 		"crm_il_buyers",
 		{"reference_doctype": "CRM Lead", "reference_docname": doc.lead},
 		after_commit=True,
 	)
-	return {"ok": True, "stage": stage}
+	return {
+		"ok": True,
+		"stage": stage,
+		**({"reasons": selected, "note": note} if stage == "Not Interested" else {}),
+	}
 
 
 @frappe.whitelist()

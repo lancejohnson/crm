@@ -21,13 +21,34 @@
       class="grid items-center gap-3 border-b border-outline-gray-1 px-4 py-2.5 text-sm text-ink-gray-8 hover:bg-surface-gray-1 sm:px-5"
       :style="listCols"
     >
-      <span class="flex min-w-0 items-center gap-1.5">
-        <IndicatorIcon :class="b._stageColor" />
-        <span class="truncate text-ink-gray-6">{{ b.interest_stage || 'New' }}</span>
+      <span class="flex min-w-0 flex-col gap-1">
+        <span class="flex min-w-0 items-center gap-1.5">
+          <IndicatorIcon :class="b._stageColor" />
+          <span class="truncate text-ink-gray-6">{{
+            b.interest_stage || 'New'
+          }}</span>
+        </span>
+        <span
+          v-if="
+            b.interest_stage === 'Not Interested' && rejectionReasons(b).length
+          "
+          class="flex flex-wrap gap-1"
+          :title="__('Edit reasons')"
+          @click.stop.prevent="openReasonModal(b, 'Not Interested')"
+        >
+          <BuyerRejectionReasonBadge
+            v-for="reason in rejectionReasons(b)"
+            :key="reason"
+            :reason="reason"
+          />
+        </span>
       </span>
       <span class="flex min-w-0 items-center gap-1.5">
         <span class="truncate font-medium">{{ b.buyer_name || '—' }}</span>
-        <BadgeCheckIcon v-if="b.verified" class="size-3.5 shrink-0 text-ink-blue-3" />
+        <BadgeCheckIcon
+          v-if="b.verified"
+          class="size-3.5 shrink-0 text-ink-blue-3"
+        />
       </span>
       <span class="flex min-w-0 flex-wrap gap-1">
         <span
@@ -37,7 +58,9 @@
         >
           {{ t }}
         </span>
-        <span v-if="!tagList(b.buyer_type).length" class="text-ink-gray-4">—</span>
+        <span v-if="!tagList(b.buyer_type).length" class="text-ink-gray-4"
+          >—</span
+        >
       </span>
       <a
         v-if="b.phone"
@@ -80,10 +103,25 @@
       :key="col.stage"
       class="flex min-w-72 w-72 flex-col gap-2.5 rounded-lg p-2.5"
     >
-      <div class="flex items-center gap-2 px-1">
-        <IndicatorIcon :class="col.color" />
-        <div class="text-base text-ink-gray-9">{{ col.stage }}</div>
-        <div class="text-ink-gray-4">{{ col.buyers.length }}</div>
+      <div class="flex flex-col gap-1.5 px-1">
+        <div class="flex items-center gap-2">
+          <IndicatorIcon :class="col.color" />
+          <div class="text-base text-ink-gray-9">{{ col.stage }}</div>
+          <div class="text-ink-gray-4">{{ col.buyers.length }}</div>
+        </div>
+        <div
+          v-if="col.stage === 'Not Interested' && rejectionSummary.length"
+          class="flex flex-wrap gap-1"
+          :aria-label="__('Not interested reason counts')"
+        >
+          <BuyerRejectionReasonBadge
+            v-for="item in rejectionSummary"
+            :key="item.reason"
+            :reason="item.reason"
+            :count="item.count"
+            show-label
+          />
+        </div>
       </div>
 
       <Draggable
@@ -103,83 +141,123 @@
             :data-name="b.name"
             class="flex cursor-grab flex-col rounded-lg border bg-surface-white px-3.5 pb-2.5 pt-3 text-base text-ink-gray-9 hover:border-outline-gray-3 active:cursor-grabbing"
           >
-          <!-- title: name + verified + direction -->
-          <div class="flex items-center gap-1.5">
-            <span class="truncate font-medium">{{ b.buyer_name || '—' }}</span>
-            <BadgeCheckIcon
-              v-if="b.verified"
-              class="size-4 shrink-0 text-ink-blue-3"
-            />
-            <div class="flex-1" />
-            <Badge
-              v-if="b.direction"
-              :theme="b.direction === 'Inbound' ? 'green' : 'blue'"
-              variant="subtle"
-              size="sm"
-            >
-              {{ b.direction }}
-            </Badge>
-            <div @click.stop.prevent>
-              <Dropdown :options="stageOptions(b)">
-                <button
-                  type="button"
-                  class="flex size-6 items-center justify-center rounded text-ink-gray-5 hover:bg-surface-gray-2 hover:text-ink-gray-8"
-                  :title="__('Move buyer')"
-                >
-                  <MoreHorizontalIcon class="size-4" />
-                </button>
-              </Dropdown>
-            </div>
-          </div>
-
-          <div class="my-2.5 h-px border-b" />
-
-          <!-- fields -->
-          <div class="flex flex-col gap-2 text-sm">
-            <div v-if="b.buyer_type" class="flex flex-wrap gap-1">
-              <span
-                v-for="t in tagList(b.buyer_type)"
-                :key="t"
-                class="rounded bg-surface-gray-2 px-1.5 py-0.5 text-xs text-ink-gray-7"
+            <!-- title: name + verified + direction -->
+            <div class="flex items-center gap-1.5">
+              <span class="truncate font-medium">{{
+                b.buyer_name || '—'
+              }}</span>
+              <BadgeCheckIcon
+                v-if="b.verified"
+                class="size-4 shrink-0 text-ink-blue-3"
+              />
+              <div class="flex-1" />
+              <Badge
+                v-if="b.direction"
+                :theme="b.direction === 'Inbound' ? 'green' : 'blue'"
+                variant="subtle"
+                size="sm"
               >
-                {{ t }}
+                {{ b.direction }}
+              </Badge>
+              <div @click.stop.prevent>
+                <Dropdown :options="stageOptions(b)">
+                  <button
+                    type="button"
+                    class="flex size-6 items-center justify-center rounded text-ink-gray-5 hover:bg-surface-gray-2 hover:text-ink-gray-8"
+                    :title="__('Move buyer')"
+                  >
+                    <MoreHorizontalIcon class="size-4" />
+                  </button>
+                </Dropdown>
+              </div>
+            </div>
+
+            <div class="my-2.5 h-px border-b" />
+
+            <!-- fields -->
+            <div class="flex flex-col gap-2 text-sm">
+              <div
+                v-if="
+                  b.interest_stage === 'Not Interested' &&
+                  rejectionReasons(b).length
+                "
+                class="flex flex-wrap gap-1"
+                :title="__('Edit reasons')"
+                @click.stop.prevent="openReasonModal(b, 'Not Interested')"
+              >
+                <BuyerRejectionReasonBadge
+                  v-for="reason in rejectionReasons(b)"
+                  :key="reason"
+                  :reason="reason"
+                  :show-label="rejectionReasons(b).length <= 2"
+                />
+              </div>
+              <div v-if="b.buyer_type" class="flex flex-wrap gap-1">
+                <span
+                  v-for="t in tagList(b.buyer_type)"
+                  :key="t"
+                  class="rounded bg-surface-gray-2 px-1.5 py-0.5 text-xs text-ink-gray-7"
+                >
+                  {{ t }}
+                </span>
+              </div>
+              <a
+                v-if="b.phone"
+                :href="telHref(b.phone)"
+                class="flex items-center gap-1.5 text-ink-gray-8 hover:text-ink-blue-3"
+                @click.stop
+              >
+                <PhoneIcon class="size-3.5 text-ink-gray-5" />
+                {{ formatPhone(b.phone) }}
+              </a>
+              <div
+                v-if="b.deal_history"
+                class="flex items-center gap-1.5 text-ink-gray-6"
+              >
+                <HistoryIcon class="size-3.5 text-ink-gray-5" />
+                {{ b.deal_history }}
+              </div>
+            </div>
+
+            <div class="mb-2 mt-2.5 h-px border-b" />
+            <div
+              class="flex items-center justify-between text-xs text-ink-gray-5"
+            >
+              <span>{{
+                b.last_active ? formatDate(b.last_active, '', true) : ''
+              }}</span>
+              <span v-if="b.message_count" class="flex items-center gap-1">
+                <NoteIcon class="size-3" /> {{ b.message_count }}
               </span>
             </div>
-            <a
-              v-if="b.phone"
-              :href="telHref(b.phone)"
-              class="flex items-center gap-1.5 text-ink-gray-8 hover:text-ink-blue-3"
-              @click.stop
-            >
-              <PhoneIcon class="size-3.5 text-ink-gray-5" />
-              {{ formatPhone(b.phone) }}
-            </a>
-            <div v-if="b.deal_history" class="flex items-center gap-1.5 text-ink-gray-6">
-              <HistoryIcon class="size-3.5 text-ink-gray-5" />
-              {{ b.deal_history }}
-            </div>
-          </div>
-
-          <div class="mb-2 mt-2.5 h-px border-b" />
-          <div class="flex items-center justify-between text-xs text-ink-gray-5">
-            <span>{{ b.last_active ? formatDate(b.last_active, '', true) : '' }}</span>
-            <span v-if="b.message_count" class="flex items-center gap-1">
-              <NoteIcon class="size-3" /> {{ b.message_count }}
-            </span>
-          </div>
           </router-link>
         </template>
         <template #footer>
-          <div v-if="!col.buyers.length" class="px-1 py-2 text-sm text-ink-gray-4">
+          <div
+            v-if="!col.buyers.length"
+            class="px-1 py-2 text-sm text-ink-gray-4"
+          >
             {{ moving ? __('Drop buyer here') : __('No buyers') }}
           </div>
         </template>
       </Draggable>
     </div>
   </div>
+
+  <BuyerRejectionReasonModal
+    v-if="showReasonModal && pendingMove"
+    v-model="showReasonModal"
+    :buyer-name="pendingMove.buyerName"
+    :initial-reasons="pendingMove.reasons"
+    :initial-note="pendingMove.note"
+    :on-confirm="confirmReasonMove"
+    :on-cancel="cancelReasonMove"
+  />
 </template>
 
 <script setup>
+import BuyerRejectionReasonBadge from '@/components/BuyerRejectionReasonBadge.vue'
+import BuyerRejectionReasonModal from '@/components/Modals/BuyerRejectionReasonModal.vue'
 import IndicatorIcon from '@/components/Icons/IndicatorIcon.vue'
 import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
 import NoteIcon from '@/components/Icons/NoteIcon.vue'
@@ -187,6 +265,7 @@ import BadgeCheckIcon from '~icons/lucide/badge-check'
 import HistoryIcon from '~icons/lucide/history'
 import MoreHorizontalIcon from '~icons/lucide/more-horizontal'
 import { formatDate, isTouchScreenDevice, parseColor } from '@/utils'
+import { parseBuyerRejectionReasons } from '@/utils/buyerRejectionReasons'
 import { formatPhone } from '@/utils/phoneFormat'
 import { globalStore } from '@/stores/global'
 import { Badge, Dropdown, call, createResource, toast } from 'frappe-ui'
@@ -205,6 +284,8 @@ const listCols = {
 
 const { $socket } = globalStore()
 const moving = ref(false)
+const showReasonModal = ref(false)
+const pendingMove = ref(null)
 
 // Canonical stage order + column colors (mirrors the InvestorLift board).
 const STAGES = [
@@ -245,6 +326,26 @@ const flatBuyers = computed(() =>
   ),
 )
 
+const rejectionSummary = computed(() => {
+  const counts = new Map()
+  for (const buyer of buyers.data || []) {
+    if (buyer.interest_stage !== 'Not Interested') continue
+    const reasons = rejectionReasons(buyer)
+    if (!reasons.length)
+      counts.set('Unspecified', (counts.get('Unspecified') || 0) + 1)
+    for (const reason of reasons) {
+      counts.set(reason, (counts.get(reason) || 0) + 1)
+    }
+  }
+  return [...counts.entries()]
+    .map(([reason, count]) => ({ reason, count }))
+    .sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason))
+})
+
+function rejectionReasons(buyer) {
+  return parseBuyerRejectionReasons(buyer?.not_interested_reasons)
+}
+
 function tagList(buyer_type) {
   return (buyer_type || '')
     .split(',')
@@ -257,31 +358,88 @@ function telHref(phone) {
 }
 
 function stageOptions(buyer) {
-  return [
-    {
-      group: __('Move to'),
-      items: STAGES.filter(({ stage }) => stage !== buyer.interest_stage).map(
-        ({ stage }) => ({
-          label: stage,
-          onClick: () => updateStage(buyer.name, stage),
-        }),
-      ),
-    },
-  ]
+  const options = []
+  if (buyer.interest_stage === 'Not Interested') {
+    options.push({
+      group: __('Not interested'),
+      items: [
+        {
+          label: __('Edit reasons'),
+          onClick: () => openReasonModal(buyer, 'Not Interested'),
+        },
+      ],
+    })
+  }
+  options.push({
+    group: __('Move to'),
+    items: STAGES.filter(({ stage }) => stage !== buyer.interest_stage).map(
+      ({ stage }) => ({
+        label: stage,
+        onClick: () => updateStage(buyer.name, stage),
+      }),
+    ),
+  })
+  return options
 }
 
-async function updateStage(relationship, toStage) {
+function openReasonModal(buyer, toStage) {
+  pendingMove.value = {
+    relationship: buyer.name,
+    buyerName: buyer.buyer_name || '',
+    toStage,
+    reasons: rejectionReasons(buyer),
+    note: buyer.not_interested_note || '',
+  }
+  showReasonModal.value = true
+}
+
+async function persistStage(relationship, toStage, details = null) {
   try {
-    await call('crm.api.buyers.move_buyer_stage', {
+    const result = await call('crm.api.buyers.move_buyer_stage', {
       relationship,
       stage: toStage,
+      reasons: details ? JSON.stringify(details.reasons) : null,
+      note: details?.note || null,
     })
     const row = (buyers.data || []).find((buyer) => buyer.name === relationship)
-    if (row) row.interest_stage = toStage
+    if (row) {
+      row.interest_stage = toStage
+      if (details) {
+        row.not_interested_reasons = JSON.stringify(details.reasons)
+        row.not_interested_note = details.note || ''
+      } else if (toStage !== 'Not Interested') {
+        row.not_interested_reasons = ''
+        row.not_interested_note = ''
+      }
+    }
+    return result
   } catch (error) {
     await buyers.reload()
     toast.error(error.messages?.[0] || __('Could not move buyer'))
+    throw error
   }
+}
+
+function updateStage(relationship, toStage) {
+  const buyer = (buyers.data || []).find((row) => row.name === relationship)
+  if (!buyer) return buyers.reload()
+  if (toStage === 'Not Interested') {
+    openReasonModal(buyer, toStage)
+    return
+  }
+  return persistStage(relationship, toStage)
+}
+
+async function confirmReasonMove(details) {
+  if (!pendingMove.value) return
+  const move = pendingMove.value
+  await persistStage(move.relationship, move.toStage, details)
+  pendingMove.value = null
+}
+
+function cancelReasonMove() {
+  pendingMove.value = null
+  buyers.reload()
 }
 
 function moveBuyer(event) {
@@ -294,7 +452,10 @@ function moveBuyer(event) {
 }
 
 function onBuyers(data) {
-  if (data.reference_doctype === 'CRM Lead' && data.reference_docname === props.lead) {
+  if (
+    data.reference_doctype === 'CRM Lead' &&
+    data.reference_docname === props.lead
+  ) {
     buyers.reload()
   }
 }

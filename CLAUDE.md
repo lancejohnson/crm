@@ -1207,6 +1207,25 @@ duplicating. Work substantial features in a worktree of your own.
     contact — even with the id cleared it falls back to an externalId lookup),
     then the keepers re-pushed so the Quo contact's externalId points at the
     survivor.
+- **Dispo Not Interested reasons** — moving a buyer card into **Not Interested**
+  (drag or the accessible Move buyer menu) pauses the move and opens an IL-style
+  multi-select: Pricing / Not buying in this location / Not currently in the
+  market / Daisy chainer / Does not buy deal type / Property condition / No
+  longer buying / Other, plus an optional note. Cancel reloads the board so a
+  dragged card snaps back; Submit saves the stage + reasons atomically through
+  `move_buyer_stage`. Reasons live on the per-property `CRM Lead Buyer`
+  relationship (never on global `CRM Buyer`), are editable from the card/menu,
+  and clear when the buyer leaves Not Interested so a later IL-origin stage move
+  cannot surface stale CRM reasons. Orange reason symbols render on board/list
+  cards; the Not Interested column header aggregates labeled counts per reason
+  for that property (legacy rows with no selection count as Unspecified). Reuses
+  `crm_il_buyers` realtime. App:
+  `crm/api/buyers.py`, `crm/api/investorlift_ingest.py`,
+  `frontend/src/components/Activities/DispoBoard.vue`,
+  `BuyerRejectionReasonBadge.vue`, `Modals/BuyerRejectionReasonModal.vue`, and
+  `utils/buyerRejectionReasons.js`. Ops:
+  `scripts/setup_buyer_rejection_reasons.py` adds JSON reasons / note / by / at
+  fields; `setup_investorlift.py` includes them for fresh sites.
 - **Lead property photos → shared Google Drive** — a **Photos** sidebar card +
   **Photos** item in the Lead header More ▾ menu open a gallery modal: drag-drop
   or pick multiple files, scroll a thumbnail grid, click through them in the
