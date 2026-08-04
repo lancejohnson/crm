@@ -38,15 +38,13 @@
               >
                 {{ formatPhone(item.mobile_no) }}
               </a>
-              <a
+              <button
                 v-if="item?.address"
-                :href="mapsUrl"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="hover:text-ink-gray-8 hover:underline"
+                class="text-left hover:text-ink-blue-3 hover:underline"
+                @click="emit('openAddress', item.address)"
               >
                 {{ item.address }}
-              </a>
+              </button>
               <a
                 v-if="item?.email"
                 :href="`mailto:${item.email}`"
@@ -98,12 +96,13 @@
 import Activities from '@/components/Activities/Activities.vue'
 import { callHref, formatPhone } from '@/utils/phoneFormat'
 import { Badge, Button, Dialog, FeatherIcon } from 'frappe-ui'
-import { computed, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 const props = defineProps({
   item: { type: Object, default: null },
 })
+const emit = defineEmits(['openAddress'])
 
 const show = defineModel({ type: Boolean })
 const router = useRouter()
@@ -113,12 +112,6 @@ const tabs = [{ name: 'Activity', label: __('Activity') }]
 watch(
   () => props.item?.lead,
   () => (tabIndex.value = 0),
-)
-
-const mapsUrl = computed(() =>
-  props.item?.address
-    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(props.item.address)}`
-    : '',
 )
 
 function openFullLead() {

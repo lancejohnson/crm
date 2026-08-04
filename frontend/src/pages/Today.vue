@@ -105,9 +105,15 @@
               >
                 {{ item.lead_name }}
               </div>
-              <div class="mt-0.5 truncate text-xs text-ink-gray-5" :title="item.address">
-                {{ item.address || '—' }}
-              </div>
+              <button
+                v-if="item.address"
+                class="mt-0.5 block max-w-full truncate text-left text-xs text-ink-gray-5 hover:text-ink-blue-3 hover:underline"
+                :title="item.address"
+                @click.stop="openAddress(item.address)"
+              >
+                {{ item.address }}
+              </button>
+              <div v-else class="mt-0.5 text-xs text-ink-gray-5">—</div>
               <div v-if="item.mobile_no" class="mt-0.5 flex items-center gap-1.5">
                 <a
                   :href="callHref(item.mobile_no)"
@@ -173,7 +179,12 @@
     </div>
   </div>
 
-  <TodayLeadModal v-model="showLeadModal" :item="selectedItem" />
+  <TodayLeadModal
+    v-model="showLeadModal"
+    :item="selectedItem"
+    @open-address="openAddress"
+  />
+  <PropertyLinkModal v-model="showPropertyLinkModal" :address="selectedAddress" />
   <TodayPriorityModal
     v-model="showPriorityModal"
     :priorities="priorityItems"
@@ -205,6 +216,7 @@ import LayoutHeader from '@/components/LayoutHeader.vue'
 import RefreshIcon from '@/components/Icons/RefreshIcon.vue'
 import TodayLeadModal from '@/components/TodayLeadModal.vue'
 import TodayPriorityModal from '@/components/TodayPriorityModal.vue'
+import PropertyLinkModal from '@/components/Modals/PropertyLinkModal.vue'
 import SendTextModal from '@/components/Modals/SendTextModal.vue'
 import TaskModal from '@/components/Modals/TaskModal.vue'
 import { globalStore } from '@/stores/global'
@@ -230,6 +242,8 @@ const selectedPriority = ref('')
 const selectedSignal = ref('')
 const selectedItem = ref(null)
 const showLeadModal = ref(false)
+const selectedAddress = ref('')
+const showPropertyLinkModal = ref(false)
 const showPriorityModal = ref(false)
 const savingPriority = ref(false)
 const selectedTask = ref(null)
@@ -392,6 +406,12 @@ function setFilter(type, value) {
 function openTodayItem(item) {
   selectedItem.value = item
   showLeadModal.value = true
+}
+
+function openAddress(address) {
+  if (!address) return
+  selectedAddress.value = address
+  showPropertyLinkModal.value = true
 }
 
 function openTask(task) {

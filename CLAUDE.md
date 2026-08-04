@@ -116,7 +116,10 @@ duplicating. Work substantial features in a worktree of your own.
     logged before generation, only Call 2 is materialized.
   - Cards show **address and phone on separate lines**, the soonest open task
     (click → the real Task modal), and a green **incoming-text flag** with the
-    last received time. The message icon opens the standard Send Text modal with
+    last received time. Clicking the address on either the card or lead modal
+    asks **Google Maps or Zillow** and opens the chosen destination; both use the
+    shared `utils/propertyLinks.js` builders also used by the full Lead page.
+    The message icon opens the standard Send Text modal with
     the cursor already in the composer; Today adds **Skip / Send / Send & finish**
     so the card can be judged without returning to the board.
   - **Filters** cover lead status, priority, incoming texts, and open tasks. A

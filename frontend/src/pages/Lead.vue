@@ -431,6 +431,7 @@ import {
 } from '@/utils'
 import { getView } from '@/utils/view'
 import { callHref } from '@/utils/phoneFormat'
+import { mapsUrl, zillowUrl } from '@/utils/propertyLinks'
 import { myQuoNumber } from '@/composables/quoSender'
 import { getSettings } from '@/stores/settings'
 import { globalStore } from '@/stores/global'
@@ -495,19 +496,6 @@ const {
 const canDelete = computed(() => permissions.data?.permissions?.delete || false)
 
 const doc = computed(() => document.doc || {})
-
-// Same slug Zillow's /homes/<slug>_rb/ search expects — shared by the More
-// menu item and Open Research tabs so both land on the identical listing.
-function zillowUrl(address) {
-  const slug = address
-    .replace(/[^A-Za-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-  return `https://www.zillow.com/homes/${slug}_rb/`
-}
-
-function mapsUrl(address) {
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
-}
 
 // Open 2 Zillow tabs + 1 Google Maps tab for this lead's property. All three
 // window.opens stay in the same click gesture so the popup blocker allows them.
