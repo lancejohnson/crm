@@ -12,7 +12,7 @@
         <span v-if="buyerName"> · </span>{{ __('Select all that apply') }}
       </div>
 
-      <div class="flex max-h-80 flex-col gap-1.5 overflow-y-auto pr-1">
+      <div class="flex flex-col gap-1.5">
         <button
           v-for="reason in BUYER_REJECTION_REASONS"
           :key="reason.value"

@@ -1218,8 +1218,10 @@ duplicating. Work substantial features in a worktree of your own.
   and clear when the buyer leaves Not Interested so a later IL-origin stage move
   cannot surface stale CRM reasons. Orange reason symbols render on board/list
   cards; the Not Interested column header aggregates labeled counts per reason
-  for that property (legacy rows with no selection count as Unspecified). Reuses
-  `crm_il_buyers` realtime. App:
+  for that property (legacy rows with no selection count as Unspecified). The
+  modal renders all eight choices without an internal scroller — the app's
+  hidden-scrollbar styling made the bottom choices look absent in the first live
+  verification. Reuses `crm_il_buyers` realtime. App:
   `crm/api/buyers.py`, `crm/api/investorlift_ingest.py`,
   `frontend/src/components/Activities/DispoBoard.vue`,
   `BuyerRejectionReasonBadge.vue`, `Modals/BuyerRejectionReasonModal.vue`, and
