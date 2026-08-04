@@ -114,17 +114,30 @@ duplicating. Work substantial features in a worktree of your own.
     `(date, lead, call_number)`; the schema upgrade preserves old card state/order
     and expands an old `calls_needed=2` row on first read. If the first call was
     logged before generation, only Call 2 is materialized.
-  - Cards show **address and phone on separate lines**. The header has a current-
-    status filter (counts are call-card counts). Clicking a card opens a compact
-    read-only lead modal (contact/property facts, open tasks, and a unified recent
-    activity stream of calls/texts/emails) with an **Open full lead** button; raw
-    intake notes are deliberately excluded so vendor-payload JSON never fills the modal.
+  - Cards show **address and phone on separate lines**, the soonest open task
+    (click → the real Task modal), and a green **incoming-text flag** with the
+    last received time. The message icon opens the standard Send Text modal with
+    the cursor already in the composer; Today adds **Skip / Send / Send & finish**
+    so the card can be judged without returning to the board.
+  - **Filters** cover lead status, priority, incoming texts, and open tasks. A
+    draggable **Priority order** modal saves each user's order cross-device via a
+    standard Frappe user default (no custom field). Default = Never called → Task
+    due → Week 1 morning → Week 1 afternoon → Weekly → Monthly. Week-one call 1/2
+    are separate morning/afternoon passes; the persisted cadence phase stays
+    `week1`, and `priority_key` derives the pass from `call_number` at read time.
+  - A task after TODAY suppresses cadence generation (a later-today task still
+    belongs today); if both an overdue task and a future appointment exist, the
+    future appointment wins. Due tasks rank immediately after never-called.
+  - Clicking a card now mounts the **actual Lead `Activities.vue` surface**, not
+    a lookalike: the same timeline, quick comments, To-do quick-add, task edit and
+    task completion behavior. `scrollOnMount=false` keeps the pinned To-do visible
+    in this modal instead of the Lead page's normal mount scroll hiding it.
   - Interactions: hover **✓ Done / ⊘ Skip / ↩ put back** (fixed-size absolute
     buttons so they cannot overflow a narrow desktop card), drag across columns,
     and drag to reorder within one. Realtime `crm_today` keeps boards in step.
   - **`reorder_today` renumbers the WHOLE destination column**, not just the
-    dragged names — cards are seeded at cadence-priority offsets (never-called
-    0-99, week 1 at 100+), so writing 10/20/30 onto three dragged cards dropped
+    dragged names — cards are seeded at wide priority offsets, so writing
+    10/20/30 onto three dragged cards once dropped
     them *behind* untouched neighbours still sitting at 3, 4, 5. Any name not
     passed keeps its relative position and is renumbered after the ones that
     were, so even a partial list can't corrupt the order.
@@ -133,8 +146,8 @@ duplicating. Work substantial features in a worktree of your own.
     a post-hoc onSuccess assignment lands — which rendered "All clear" over 66
     real cards. Caught only in live verification; the API was fine the whole time.
   - Ops: `scripts/setup_today_board.py` (idempotent, `--dry-run`).
-  - **Not yet checked on a phone** — fixed 22rem columns + horizontal scroll,
-    desktop-verified only.
+  - **Not yet checked on a phone** — fixed-width columns + horizontal scroll;
+    desktop is the primary surface unless Ger confirms otherwise.
 - **Daily standup list (5am CT Mattermost DM)** — the list Lance runs the morning
   call from. `crm/api/daily_standup.py` (**new**) holds ONE server-side definition
   of "what has to happen today", rendered two ways: a DM as the `pi` Mattermost

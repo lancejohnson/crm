@@ -786,6 +786,7 @@ const props = defineProps({
   doctype: { type: String, default: 'CRM Lead' },
   docname: { type: String, default: '' },
   tabs: { type: Array, default: () => [] },
+  scrollOnMount: { type: Boolean, default: true },
 })
 
 const emit = defineEmits(['beforeSave', 'afterSave'])
@@ -971,6 +972,7 @@ onMounted(() => {
   // do NOT scroll on resource reloads (comment/task adds, realtime events from
   // teammates) — that yanked the viewport away every time the user did anything.
   nextTick(() => {
+    if (!props.scrollOnMount) return
     const hash = route.hash.slice(1) || null
     let tabNames = props.tabs?.map((tab) => tab.name)
     if (!tabNames?.includes(hash)) {

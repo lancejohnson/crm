@@ -25,6 +25,7 @@ that owes two calls gets two independently actionable cards (call 1 and call 2),
 while the call number keeps generation structurally idempotent.
 """
 
+import json
 import re
 
 import frappe
@@ -37,10 +38,33 @@ from crm.api.daily_standup import build_standup
 DOCTYPE = "CRM Today Item"
 STATES = ("To Call", "Done", "Skipped")
 
-#: seeds sort_order so the board opens in cadence priority — never-called first.
-#: Gaps of 100 leave room to drag between two cards without renumbering the world.
-_PHASE_SEED = {"never": 0, "week1": 100, "week1_partial": 150, "weekly": 200,
-               "monthly": 300, "task": 400}
+#: The default personal priority order. Week-one's two calls are deliberately
+#: separated so the first pass can be finished before afternoon follow-ups begin.
+PRIORITY_ORDER = ("never", "task", "week1_am", "week1_pm", "weekly", "monthly")
+PRIORITY_DEFAULT_KEY = "crm_today_priority_order"
+
+
+def _priority_key(phase, call_number=1):
+	if phase in ("week1", "week1_partial"):
+		return "week1_am" if int(call_number or 1) == 1 else "week1_pm"
+	return phase if phase in PRIORITY_ORDER else "monthly"
+
+
+def _priority_order():
+	raw = frappe.defaults.get_user_default(PRIORITY_DEFAULT_KEY)
+	try:
+		stored = json.loads(raw) if isinstance(raw, str) else raw
+	except (TypeError, ValueError):
+		stored = []
+	clean = []
+	for key in stored or []:
+		if key in PRIORITY_ORDER and key not in clean:
+			clean.append(key)
+	return clean + [key for key in PRIORITY_ORDER if key not in clean]
+
+
+def _priority_seed(phase, call_number=1):
+	return PRIORITY_ORDER.index(_priority_key(phase, call_number)) * 10000
 
 
 def _available() -> bool:
@@ -200,9 +224,9 @@ def generate_today(for_date=None):
 							"for_date": day,
 							"lead": r.name,
 							"state": "To Call",
-							# `due` is already cadence-sorted. Tens leave call 1/2
-							# adjacent and room to drag without immediate ties.
-							"sort_order": (i + 1) * 10 + slot - 1,
+							# Keep the morning and afternoon week-one passes apart.
+							# The per-user preference is applied again at read time.
+							"sort_order": _priority_seed(r.phase, slot) + (i + 1) * 10,
 							"phase": r.phase,
 							"reason": r.reason,
 							"calls_needed": 1,
@@ -215,7 +239,7 @@ def generate_today(for_date=None):
 				except frappe.DuplicateEntryError:
 					pass
 		elif r.name not in existing:
-			seed = _PHASE_SEED.get(r.phase, 500) + i
+			seed = _priority_seed(r.phase) + i
 			frappe.get_doc(
 				{
 					"doctype": DOCTYPE,
@@ -247,7 +271,7 @@ def _publish(day):
 
 
 @frappe.whitelist()
-def get_today_board(for_date=None, auto_generate=1, status=None):
+def get_today_board(for_date=None, auto_generate=1, status=None, priority=None, signal=None):
 	"""Everything the board needs in one call: the cards, plus the lead facts the
 	cards display (status, phone, address, and how many calls it has had today so
 	a rep can see progress without opening the lead)."""
@@ -275,13 +299,20 @@ def get_today_board(for_date=None, auto_generate=1, status=None):
 			order_by="sort_order asc, name asc",
 		)
 	if not rows:
-		return {"available": True, "date": str(day), "columns": _empty_columns()}
+		return {
+			"available": True,
+			"date": str(day),
+			"columns": _empty_columns(),
+			"priority_order": _priority_order(),
+			"status_counts": [],
+		}
 
+	lead_names = list({r.lead for r in rows})
 	leads = {
 		l.name: l
 		for l in frappe.get_all(
 			"CRM Lead",
-			filters={"name": ["in", [r.lead for r in rows]]},
+			filters={"name": ["in", lead_names]},
 			fields=["name", "lead_name", "status", "mobile_no", "phone", "email", "property_address",
 			        "property_city", "property_state", "property_zip"],
 		)
@@ -293,10 +324,57 @@ def get_today_board(for_date=None, auto_generate=1, status=None):
 		  and date(creation) = %(d)s
 		group by reference_docname
 		""",
-		{"names": [r.lead for r in rows], "d": day},
+		{"names": lead_names, "d": day},
 		as_dict=True,
 	)
 	made = {c.n: c.c for c in calls}
+
+	# One open task per lead for the card. Fetch once for the whole board rather
+	# than issuing a query per card; due tasks sort before undated tasks.
+	task_fields = [
+		"name", "reference_doctype", "reference_docname", "title", "description",
+		"status", "due_date", "priority", "assigned_to", "creation",
+	]
+	task_meta = frappe.get_meta("CRM Task")
+	if task_meta.has_field("call_outcome"):
+		task_fields.append("call_outcome")
+	open_tasks = frappe.get_all(
+		"CRM Task",
+		filters={
+			"reference_doctype": "CRM Lead",
+			"reference_docname": ["in", lead_names],
+			"status": ["not in", ["Done", "Canceled"]],
+		},
+		fields=task_fields,
+	)
+	open_tasks.sort(
+		key=lambda task: (
+			task.due_date is None,
+			task.due_date or "",
+			task.creation or "",
+		)
+	)
+	task_by_lead = {}
+	for task in open_tasks:
+		task.pop("creation", None)
+		task_by_lead.setdefault(task.reference_docname, task)
+
+	incoming_by_lead = {}
+	if frappe.db.exists("DocType", "Quo Message"):
+		incoming = frappe.db.sql(
+			"""
+			select reference_docname n,
+			       max(coalesce(message_date, creation)) last_incoming_text
+			from `tabQuo Message`
+			where reference_doctype='CRM Lead'
+			  and reference_docname in %(names)s
+			  and direction='Incoming'
+			group by reference_docname
+			""",
+			{"names": lead_names},
+			as_dict=True,
+		)
+		incoming_by_lead = {row.n: row.last_incoming_text for row in incoming}
 
 	for r in rows:
 		l = leads.get(r.lead) or {}
@@ -310,6 +388,9 @@ def get_today_board(for_date=None, auto_generate=1, status=None):
 		r["total_calls"] = int(
 			r.get("total_calls") or max(1, int(r.get("calls_needed") or 1))
 		)
+		r["priority_key"] = _priority_key(r.phase, r.call_number)
+		r["task"] = task_by_lead.get(r.lead)
+		r["last_incoming_text"] = incoming_by_lead.get(r.lead)
 
 	status_counts = {}
 	for r in rows:
@@ -317,6 +398,25 @@ def get_today_board(for_date=None, auto_generate=1, status=None):
 			status_counts[r.lead_status] = status_counts.get(r.lead_status, 0) + 1
 	if status:
 		rows = [r for r in rows if r.lead_status == status]
+	if priority:
+		rows = [r for r in rows if r.priority_key == priority]
+	if signal == "incoming":
+		rows = [r for r in rows if r.last_incoming_text]
+	elif signal == "task":
+		rows = [r for r in rows if r.task]
+
+	priority_order = _priority_order()
+	priority_rank = {key: i for i, key in enumerate(priority_order)}
+	to_call = [r for r in rows if r.state == "To Call"]
+	to_call.sort(
+		key=lambda r: (
+			priority_rank.get(r.priority_key, len(priority_rank)),
+			r.sort_order,
+			r.name,
+		)
+	)
+	other = [r for r in rows if r.state != "To Call"]
+	rows = to_call + other
 
 	cols = _empty_columns()
 	by_state = {c["state"]: c for c in cols}
@@ -333,7 +433,30 @@ def get_today_board(for_date=None, auto_generate=1, status=None):
 			for key in sorted(status_counts)
 		],
 		"selected_status": status or "",
+		"selected_priority": priority or "",
+		"selected_signal": signal or "",
+		"priority_order": priority_order,
 	}
+
+
+@frappe.whitelist()
+def set_today_priority_order(order):
+	"""Save this user's cross-device priority order without adding a schema field."""
+	_guard()
+	if isinstance(order, str):
+		try:
+			order = json.loads(order)
+		except ValueError:
+			order = []
+	if not isinstance(order, list):
+		frappe.throw(_("Invalid priority order."))
+	clean = []
+	for key in order:
+		if key in PRIORITY_ORDER and key not in clean:
+			clean.append(key)
+	clean += [key for key in PRIORITY_ORDER if key not in clean]
+	frappe.defaults.set_user_default(PRIORITY_DEFAULT_KEY, json.dumps(clean))
+	return clean
 
 
 #: trailing country noise that only costs a narrow card its truncation budget
@@ -575,10 +698,9 @@ def reorder_today(order, state=None, for_date=None):
 	back anyway.
 
 	The whole column is then renumbered in steps of 10. Renumbering only the
-	names passed in is not enough: cards are seeded at cadence-priority offsets
-	(never-called at 0-99, week 1 at 100+, and so on), so writing 10/20/30 onto
-	three dragged cards drops them *behind* untouched neighbours that still sit at
-	3, 4, 5. Any name in the column that wasn't passed keeps its relative position
+	names passed in is not enough: cards are initially seeded at wide priority
+	offsets, so writing 10/20/30 onto only the dragged cards can drop them behind
+	untouched neighbours. Any name in the column that wasn't passed keeps its relative position
 	and is renumbered after the ones that were, so even a partial list leaves the
 	column in a sane, predictable total order rather than a corrupted one.
 	"""

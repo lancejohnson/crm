@@ -7,15 +7,20 @@
       </div>
     </template>
     <template #right-header>
-      <div class="flex items-center gap-2">
-        <Dropdown :options="statusFilterOptions" placement="bottom-end">
+      <div class="flex flex-wrap items-center justify-end gap-2">
+        <Dropdown :options="filterOptions" placement="bottom-end">
           <Button
-            :label="selectedStatus || __('All statuses')"
+            :label="activeFilterCount ? __('Filters ({0})', [activeFilterCount]) : __('Filters')"
+            :variant="activeFilterCount ? 'subtle' : undefined"
+            :theme="activeFilterCount ? 'blue' : 'gray'"
             icon-right="chevron-down"
           >
             <template #prefix><FeatherIcon name="filter" class="size-4" /></template>
           </Button>
         </Dropdown>
+        <Button :label="__('Priority')" @click="showPriorityModal = true">
+          <template #prefix><FeatherIcon name="list" class="size-4" /></template>
+        </Button>
         <Badge
           v-if="toCallCount"
           variant="subtle"
@@ -23,11 +28,7 @@
           :label="`${toCallLeadCount} ${toCallLeadCount === 1 ? __('lead') : __('leads')} · ${callsOwed} ${callsOwed === 1 ? __('call') : __('calls')}`"
         />
         <Badge v-else variant="subtle" theme="green" :label="__('All clear')" />
-        <Button
-          :label="__('Refresh list')"
-          :loading="refreshing"
-          @click="refreshList"
-        >
+        <Button :label="__('Refresh list')" :loading="refreshing" @click="refreshList">
           <template #prefix><RefreshIcon class="h-4 w-4" /></template>
         </Button>
       </div>
@@ -37,9 +38,7 @@
   <div v-if="board.data && !board.data.available" class="flex h-full items-center justify-center">
     <div class="text-center text-ink-gray-5">
       <p class="text-base">{{ __('The Today board is not set up on this site yet.') }}</p>
-      <p class="mt-1 text-sm">
-        {{ __('Run scripts/setup_today_board.py from the ops repo.') }}
-      </p>
+      <p class="mt-1 text-sm">{{ __('Run scripts/setup_today_board.py from the ops repo.') }}</p>
     </div>
   </div>
 
@@ -69,8 +68,6 @@
             class="group relative cursor-pointer rounded-lg bg-surface-white p-3 shadow-sm ring-1 ring-outline-gray-1 hover:ring-outline-gray-3"
             @click="openTodayItem(item)"
           >
-            <!-- Fixed-size, absolutely-positioned actions cannot widen the title
-                 row or run past a narrow desktop column. -->
             <div
               class="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
               @click.stop
@@ -111,34 +108,62 @@
               <div class="mt-0.5 truncate text-xs text-ink-gray-5" :title="item.address">
                 {{ item.address || '—' }}
               </div>
-              <a
-                v-if="item.mobile_no"
-                :href="callHref(item.mobile_no)"
-                class="mt-0.5 block w-fit text-xs text-ink-blue-3 hover:underline"
-                @click.stop
-              >
-                {{ formatPhone(item.mobile_no) }}
-              </a>
+              <div v-if="item.mobile_no" class="mt-0.5 flex items-center gap-1.5">
+                <a
+                  :href="callHref(item.mobile_no)"
+                  class="w-fit text-xs text-ink-blue-3 hover:underline"
+                  @click.stop
+                >
+                  {{ formatPhone(item.mobile_no) }}
+                </a>
+                <Tooltip :text="__('Send text')">
+                  <button
+                    class="flex size-6 items-center justify-center rounded text-ink-blue-3 hover:bg-surface-blue-1"
+                    @click.stop="openText(item)"
+                  >
+                    <FeatherIcon name="message-square" class="size-3.5" />
+                  </button>
+                </Tooltip>
+              </div>
             </div>
 
             <div class="mt-2 flex flex-wrap items-center gap-1.5">
               <Badge
-                v-if="PHASE[item.phase]"
+                v-if="PHASE[item.priority_key]"
                 variant="subtle"
-                :theme="PHASE[item.phase].theme"
-                :label="__(PHASE[item.phase].label)"
+                :theme="PHASE[item.priority_key].theme"
+                :label="__(PHASE[item.priority_key].label)"
               />
               <Badge variant="subtle" theme="gray" :label="item.lead_status" />
-              <Badge
-                v-if="item.total_calls > 1"
-                variant="subtle"
-                theme="blue"
-                :label="__('Call {0} of {1}', [item.call_number, item.total_calls])"
-              />
               <span class="text-xs text-ink-gray-5">
                 {{ item.calls_today }} {{ __('logged today') }}
               </span>
             </div>
+
+            <Tooltip
+              v-if="item.last_incoming_text"
+              :text="formatDate(item.last_incoming_text, 'ddd, MMM D, YYYY | hh:mm a')"
+            >
+              <div class="mt-2 flex w-fit items-center gap-1 rounded bg-surface-green-1 px-1.5 py-1 text-xs font-medium text-ink-green-3">
+                <FeatherIcon name="flag" class="size-3.5" />
+                {{ __('Texted us {0}', [__(timeAgo(item.last_incoming_text))]) }}
+              </div>
+            </Tooltip>
+
+            <button
+              v-if="item.task"
+              class="mt-2 flex w-full items-center gap-1.5 rounded-md border border-outline-gray-1 bg-surface-gray-1 px-2 py-1.5 text-left hover:border-outline-gray-3 hover:bg-surface-gray-2"
+              @click.stop="openTask(item.task)"
+            >
+              <FeatherIcon name="check-circle" class="size-3.5 shrink-0 text-ink-green-3" />
+              <span class="min-w-0 flex-1 truncate text-xs font-medium text-ink-gray-7">
+                {{ item.task.title }}
+              </span>
+              <span v-if="item.task.due_date" class="shrink-0 text-xs text-ink-gray-5">
+                {{ __(timeAgo(item.task.due_date)) }}
+              </span>
+            </button>
+
             <div v-if="item.reason" class="mt-1 truncate text-xs text-ink-gray-5">
               {{ item.reason }}
             </div>
@@ -149,13 +174,41 @@
   </div>
 
   <TodayLeadModal v-model="showLeadModal" :item="selectedItem" />
+  <TodayPriorityModal
+    v-model="showPriorityModal"
+    :priorities="priorityItems"
+    :saving="savingPriority"
+    @save="savePriorityOrder"
+  />
+  <TaskModal
+    v-if="showTaskModal"
+    v-model="showTaskModal"
+    :task="selectedTask"
+    doctype="CRM Lead"
+    :doc="selectedTask?.reference_docname"
+    @after="board.reload()"
+  />
+  <SendTextModal
+    v-if="showTextModal"
+    v-model="showTextModal"
+    :reference-doc="textReferenceDoc"
+    doctype="CRM Lead"
+    show-outcome-actions
+    :options="{ afterInsert: () => board.reload() }"
+    @finish="finishTextItem"
+    @skip="skipTextItem"
+  />
 </template>
 
 <script setup>
 import LayoutHeader from '@/components/LayoutHeader.vue'
 import RefreshIcon from '@/components/Icons/RefreshIcon.vue'
 import TodayLeadModal from '@/components/TodayLeadModal.vue'
+import TodayPriorityModal from '@/components/TodayPriorityModal.vue'
+import SendTextModal from '@/components/Modals/SendTextModal.vue'
+import TaskModal from '@/components/Modals/TaskModal.vue'
 import { globalStore } from '@/stores/global'
+import { formatDate, timeAgo } from '@/utils'
 import { callHref, formatPhone } from '@/utils/phoneFormat'
 import {
   Badge,
@@ -173,10 +226,17 @@ import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 const { $socket } = globalStore()
 const refreshing = ref(false)
 const selectedStatus = ref('')
+const selectedPriority = ref('')
+const selectedSignal = ref('')
 const selectedItem = ref(null)
 const showLeadModal = ref(false)
+const showPriorityModal = ref(false)
+const savingPriority = ref(false)
+const selectedTask = ref(null)
+const showTaskModal = ref(false)
+const selectedTextItem = ref(null)
+const showTextModal = ref(false)
 
-// tiny inline icons (no new asset files for three glyphs)
 const CheckIcon = () =>
   h('svg', { viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [
     h('path', { d: 'M4 10.5l4 4 8-8', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }),
@@ -195,16 +255,15 @@ const UndoIcon = () =>
     }),
   ])
 
-// frappe-ui Badge only implements gray/blue/green/orange/red — any other theme
-// name silently falls through to NO classes and renders as plain text, which is
-// how 'violet' left the "Task due" badge unstyled. Stick to the five.
 const PHASE = {
-  never: { label: 'Never called', theme: 'red' },
-  week1: { label: 'Week 1', theme: 'orange' },
-  weekly: { label: 'Weekly', theme: 'blue' },
-  monthly: { label: 'Monthly', theme: 'gray' },
-  task: { label: 'Task due', theme: 'green' },
+  never: { label: 'Never called', theme: 'red', defaultOrder: 0 },
+  task: { label: 'Task due', theme: 'green', defaultOrder: 1 },
+  week1_am: { label: 'Week 1 · morning', theme: 'orange', defaultOrder: 2 },
+  week1_pm: { label: 'Week 1 · afternoon', theme: 'orange', defaultOrder: 3 },
+  weekly: { label: 'Weekly', theme: 'blue', defaultOrder: 4 },
+  monthly: { label: 'Monthly', theme: 'gray', defaultOrder: 5 },
 }
+const DEFAULT_PRIORITY_ORDER = Object.keys(PHASE)
 
 const board = createResource({
   url: 'crm.api.today_board.get_today_board',
@@ -212,11 +271,6 @@ const board = createResource({
   cache: 'today_board',
 })
 
-// local, mutable copy — vuedraggable needs to write to the arrays it binds.
-// Synced with a watcher rather than `board.onSuccess = ...`: the resource is
-// `auto: true`, so it can resolve BEFORE a post-hoc onSuccess assignment lands,
-// and the board then renders permanently empty ('All clear' over 66 real cards).
-// The watcher is timing-independent and also covers every later reload.
 const columns = ref([])
 function syncColumns() {
   columns.value = (board.data?.columns || []).map((c) => ({
@@ -233,22 +287,67 @@ const toCallCount = computed(() => toCallItems.value.length)
 const toCallLeadCount = computed(
   () => new Set(toCallItems.value.map((item) => item.lead)).size,
 )
-// Each materialised card is now one call. Twice-daily leads appear twice.
 const callsOwed = computed(() => toCallCount.value)
-const statusFilterOptions = computed(() => {
-  const counts = board.data?.status_counts || []
-  const total = counts.reduce((sum, row) => sum + row.count, 0)
+const activeFilterCount = computed(
+  () => [selectedStatus.value, selectedPriority.value, selectedSignal.value].filter(Boolean).length,
+)
+const priorityItems = computed(() => {
+  const order = board.data?.priority_order || DEFAULT_PRIORITY_ORDER
+  return order.map((key) => ({ key, ...PHASE[key] })).filter((item) => item.label)
+})
+const filterOptions = computed(() => {
+  const statusCounts = board.data?.status_counts || []
   return [
     {
-      label: `${__('All statuses')} (${total})`,
-      icon: selectedStatus.value ? null : 'check',
-      onClick: () => setStatus(''),
+      group: __('Lead status'),
+      items: [
+        {
+          label: __('All statuses'),
+          icon: selectedStatus.value ? null : 'check',
+          onClick: () => setFilter('status', ''),
+        },
+        ...statusCounts.map((row) => ({
+          label: `${row.status} (${row.count})`,
+          icon: selectedStatus.value === row.status ? 'check' : null,
+          onClick: () => setFilter('status', row.status),
+        })),
+      ],
     },
-    ...counts.map((row) => ({
-      label: `${row.status} (${row.count})`,
-      icon: selectedStatus.value === row.status ? 'check' : null,
-      onClick: () => setStatus(row.status),
-    })),
+    {
+      group: __('Priority'),
+      items: [
+        {
+          label: __('All priorities'),
+          icon: selectedPriority.value ? null : 'check',
+          onClick: () => setFilter('priority', ''),
+        },
+        ...priorityItems.value.map((item) => ({
+          label: __(item.label),
+          icon: selectedPriority.value === item.key ? 'check' : null,
+          onClick: () => setFilter('priority', item.key),
+        })),
+      ],
+    },
+    {
+      group: __('Signals'),
+      items: [
+        {
+          label: __('All cards'),
+          icon: selectedSignal.value ? null : 'check',
+          onClick: () => setFilter('signal', ''),
+        },
+        {
+          label: __('Texted us'),
+          icon: selectedSignal.value === 'incoming' ? 'check' : null,
+          onClick: () => setFilter('signal', 'incoming'),
+        },
+        {
+          label: __('Has an open task'),
+          icon: selectedSignal.value === 'task' ? 'check' : null,
+          onClick: () => setFilter('signal', 'task'),
+        },
+      ],
+    },
   ]
 })
 const prettyDate = computed(() => {
@@ -259,6 +358,12 @@ const prettyDate = computed(() => {
     day: 'numeric',
   })
 })
+const textReferenceDoc = computed(() => ({
+  name: selectedTextItem.value?.lead,
+  lead_name: selectedTextItem.value?.lead_name,
+  mobile_no: selectedTextItem.value?.mobile_no,
+  phone: selectedTextItem.value?.mobile_no,
+}))
 
 function dotClass(state) {
   return {
@@ -268,10 +373,20 @@ function dotClass(state) {
   }[state]
 }
 
-function setStatus(status) {
-  selectedStatus.value = status
-  board.params = status ? { status } : {}
+function reloadWithFilters() {
+  board.params = {
+    ...(selectedStatus.value ? { status: selectedStatus.value } : {}),
+    ...(selectedPriority.value ? { priority: selectedPriority.value } : {}),
+    ...(selectedSignal.value ? { signal: selectedSignal.value } : {}),
+  }
   board.reload()
+}
+
+function setFilter(type, value) {
+  if (type === 'status') selectedStatus.value = value
+  if (type === 'priority') selectedPriority.value = value
+  if (type === 'signal') selectedSignal.value = value
+  reloadWithFilters()
 }
 
 function openTodayItem(item) {
@@ -279,10 +394,27 @@ function openTodayItem(item) {
   showLeadModal.value = true
 }
 
+function openTask(task) {
+  selectedTask.value = { ...task }
+  showTaskModal.value = true
+}
+
+function openText(item) {
+  selectedTextItem.value = item
+  showTextModal.value = true
+}
+
+function finishTextItem() {
+  if (selectedTextItem.value) setState(selectedTextItem.value, 'Done')
+}
+
+function skipTextItem() {
+  if (selectedTextItem.value) setState(selectedTextItem.value, 'Skipped')
+}
+
 async function setState(item, state) {
   const prev = item.state
   item.state = state
-  // move it locally straight away so the card visibly leaves the column
   const from = columns.value.find((c) => c.state === prev)
   const to = columns.value.find((c) => c.state === state)
   if (from && to) {
@@ -304,11 +436,24 @@ async function onDrop(evt, col) {
       order: col.items.map((i) => i.name),
       state: col.state,
     })
-    // keep each card's own state in step with the column it now sits in
     col.items.forEach((i) => (i.state = col.state))
   } catch (e) {
     toast.error(e.messages?.[0] || __('Could not reorder'))
     board.reload()
+  }
+}
+
+async function savePriorityOrder(order) {
+  savingPriority.value = true
+  try {
+    await call('crm.api.today_board.set_today_priority_order', { order })
+    showPriorityModal.value = false
+    await board.reload()
+    toast.success(__('Priority order saved'))
+  } catch (e) {
+    toast.error(e.messages?.[0] || __('Could not save priority order'))
+  } finally {
+    savingPriority.value = false
   }
 }
 
@@ -317,9 +462,7 @@ async function refreshList() {
   try {
     const r = await call('crm.api.today_board.generate_today')
     board.reload()
-    toast.success(
-      r.created ? __('Added {0} call(s)', [r.created]) : __('Already up to date'),
-    )
+    toast.success(r.created ? __('Added {0} call(s)', [r.created]) : __('Already up to date'))
   } finally {
     refreshing.value = false
   }

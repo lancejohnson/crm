@@ -152,12 +152,12 @@ def _fetch_chase_rows(today):
 	)
 	call_map = {c.n: c for c in calls}
 
-	# next scheduled task (future due date) = the suppression signal;
-	# overdue/due-today tasks are a reason to call, not to skip.
+	# A task after today is the suppression signal. A task later *today* still
+	# belongs on today's list; a tomorrow-or-later appointment trumps cadence.
 	tasks = frappe.db.sql(
 		"""
 		select reference_docname n,
-		       min(case when due_date > %(now)s then due_date end) next_future_due,
+		       min(case when due_date > %(eod)s then due_date end) next_future_due,
 		       sum(case when due_date is not null and due_date <= %(eod)s then 1 else 0 end) due_now,
 		       min(case when due_date is not null and due_date <= %(eod)s then title end) due_title
 		from `tabCRM Task`
@@ -167,7 +167,6 @@ def _fetch_chase_rows(today):
 		""",
 		{
 			"names": names,
-			"now": now_datetime(),
 			"eod": datetime.combine(getdate(today), datetime.max.time()),
 		},
 		as_dict=True,
@@ -189,15 +188,13 @@ def _fetch_chase_rows(today):
 def _classify(row, today):
 	"""Return (phase, calls_needed, due, reason) for one chase lead.
 
-	Phase comes from the CADENCE ONLY. An overdue task is a *reason* to call, not
-	a phase of its own — an early version made "has a due task" the top-ranked
-	phase and, because ~45 leads carry an auto-created task literally titled
-	"Follow up", the queue became 50 identical rows that buried all 18
-	never-called leads. A generic overdue task must never outrank a lead nobody
-	has ever dialled.
+	Never-called leads stay first. A due task is the next priority, ahead of the
+	cadence follow-up passes. Any task after today suppresses the card entirely,
+	even when an older task is still overdue: the later appointment is the rep's
+	current plan and must trump the automatic cadence.
 	"""
-	# scheduled for later -> not today's problem
-	if row.next_future_due and not row.tasks_due_now:
+	# scheduled after today -> not today's problem
+	if row.next_future_due:
 		return ("scheduled", 0, False,
 		        f"booked {frappe.utils.format_datetime(row.next_future_due, 'd MMM')}")
 
@@ -223,27 +220,25 @@ def _classify(row, today):
 		phase, due, need = "monthly", since >= PHASE3_INTERVAL, 1
 		reason = ago(since)
 
-	# An overdue / due-today task pulls a lead onto the list even when the cadence
-	# says it could wait. When that is the ONLY reason it is here, it goes in its
-	# own group at the bottom rather than being filed under a sweep it isn't due
-	# for — otherwise a lead called yesterday shows up under "Monthly sweep",
-	# which reads as broken and costs the list its credibility.
+	# A due task pulls a lead onto the list and becomes its priority, except that
+	# never-called remains the leak at the very top. First-week leads retain the
+	# number of calls they owe; only their placement changes.
 	if row.tasks_due_now:
 		title = (row.due_task_title or "").strip()
 		generic = title.lower() in ("", "follow up", "follow up call", "call back", "call")
-		if not due:
-			phase, due, need = "task", True, 1
-			reason = ("task due" if generic else f"task: {title}") + f" · {ago(since)}"
+		task_reason = "task due" if generic else f"task: {title}"
+		if phase != "never":
+			phase, due, need = "task", True, max(need, 1)
+			reason = task_reason + f" · {ago(since)}"
 		else:
 			need = max(need, 1)
-			reason += " · task due" if generic else f" · task: {title}"
+			reason += f" · {task_reason}"
 
 	return (phase, max(0, need), due, reason)
 
 
-#: display order — the leak first (never called), then freshest, then sweeps,
-#: then leads pulled in only by a leftover task
-_PHASE_RANK = {"never": 0, "week1": 1, "weekly": 2, "monthly": 3, "task": 4}
+#: display order — never-called first, then explicit due tasks, then cadence.
+_PHASE_RANK = {"never": 0, "task": 1, "week1": 2, "weekly": 3, "monthly": 4}
 
 _PHASE_LABEL = {
 	"never": "Never called",

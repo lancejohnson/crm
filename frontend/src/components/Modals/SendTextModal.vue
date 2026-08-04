@@ -26,6 +26,7 @@
         <div>
           <div class="mb-1.5 text-xs text-ink-gray-5">{{ __('Message') }}</div>
           <Textarea
+            ref="messageInput"
             v-model="content"
             :rows="5"
             :placeholder="__('Type your message here...')"
@@ -36,13 +37,35 @@
       </div>
     </template>
     <template #actions>
+      <div v-if="showOutcomeActions" class="flex w-full items-center gap-2">
+        <Button
+          :label="__('Skip')"
+          :disabled="sending"
+          @click="skip"
+        />
+        <Button
+          class="ml-auto"
+          :label="__('Send')"
+          :loading="sending && !finishing"
+          :disabled="!canSend"
+          @click="sendSMS(false)"
+        />
+        <Button
+          variant="solid"
+          :label="__('Send & finish')"
+          :loading="sending && finishing"
+          :disabled="!canSend"
+          @click="sendSMS(true)"
+        />
+      </div>
       <Button
+        v-else
         class="w-full"
         variant="solid"
         :label="__('Send')"
         :loading="sending"
-        :disabled="!content.trim() || !to.trim()"
-        @click="sendSMS"
+        :disabled="!canSend"
+        @click="sendSMS(false)"
       />
     </template>
   </Dialog>
@@ -64,20 +87,24 @@ import {
   ErrorMessage,
   toast,
 } from 'frappe-ui'
-import { ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 
 const props = defineProps({
   referenceDoc: { type: Object, default: () => ({}) },
   doctype: { type: String, default: 'CRM Lead' },
   options: { type: Object, default: () => ({ afterInsert: () => {} }) },
+  showOutcomeActions: { type: Boolean, default: false },
 })
 
+const emit = defineEmits(['finish', 'skip'])
 const show = defineModel({ type: Boolean })
 
 const to = ref('')
 const content = ref('')
 const sending = ref(false)
+const finishing = ref(false)
 const error = ref(null)
+const messageInput = ref(null)
 // the sender's already-linked number (read once when the modal opens); if empty
 // a modal asks them to pick their number from the Quo workspace list first
 const linkedNumber = ref('')
@@ -94,9 +121,17 @@ watch(
       linkedNumber.value = myQuoNumber()
       fromNumber.value = linkedNumber.value
       if (!linkedNumber.value) showSelectNumber.value = true
+      nextTick(() => {
+        messageInput.value?.el?.focus?.()
+        messageInput.value?.$el?.querySelector?.('textarea')?.focus?.()
+      })
     }
   },
   { immediate: true },
+)
+
+const canSend = computed(
+  () => !sending.value && !!content.value.trim() && !!to.value.trim(),
 )
 
 function onNumberSaved(number) {
@@ -118,7 +153,13 @@ function sendOnCmdEnter(event) {
   }
 }
 
-async function sendSMS() {
+function skip() {
+  if (sending.value) return
+  show.value = false
+  emit('skip')
+}
+
+async function sendSMS(markFinished = false) {
   const message = content.value.trim()
   if (!message || sending.value) return
   const lead = leadName()
@@ -135,6 +176,7 @@ async function sendSMS() {
     return
   }
   sending.value = true
+  finishing.value = markFinished
   error.value = null
   try {
     await call('send-text', {
@@ -147,10 +189,12 @@ async function sendSMS() {
     toast.success(__('Text sent'))
     show.value = false
     props.options.afterInsert?.()
+    if (markFinished) emit('finish')
   } catch (e) {
     error.value = e.messages?.[0] || __('Failed to send text')
   } finally {
     sending.value = false
+    finishing.value = false
   }
 }
 </script>

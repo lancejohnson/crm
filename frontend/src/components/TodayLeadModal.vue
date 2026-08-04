@@ -1,15 +1,18 @@
 <template>
-  <Dialog v-model="show" :options="{ size: '3xl' }">
+  <Dialog
+    v-model="show"
+    :options="{ size: '5xl', title: item?.lead_name || __('Lead details') }"
+  >
     <template #body>
-      <div class="flex max-h-[85vh] flex-col bg-surface-modal">
+      <div class="flex h-[88vh] max-h-[88vh] flex-col overflow-hidden bg-surface-modal">
         <div class="flex items-start justify-between gap-4 border-b px-5 py-4 sm:px-6">
           <div class="min-w-0">
             <div class="mb-1 flex flex-wrap items-center gap-2">
               <Badge
-                v-if="lead?.status"
+                v-if="item?.lead_status"
                 variant="subtle"
                 theme="gray"
-                :label="lead.status"
+                :label="item.lead_status"
               />
               <Badge
                 v-if="item?.total_calls > 1"
@@ -19,169 +22,70 @@
               />
             </div>
             <h2 class="truncate text-2xl font-semibold text-ink-gray-9">
-              {{ lead?.lead_name || item?.lead_name || __('Lead details') }}
+              {{ item?.lead_name || __('Lead details') }}
             </h2>
-            <div class="mt-2 flex flex-col gap-1 text-sm text-ink-gray-6">
-              <a
-                v-if="lead?.mobile_no"
-                :href="callHref(lead.mobile_no)"
-                class="w-fit text-ink-blue-3 hover:underline"
-              >
-                {{ formatPhone(lead.mobile_no) }}
-              </a>
-              <a
-                v-if="lead?.address"
-                :href="mapsUrl"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="max-w-full truncate hover:text-ink-gray-8 hover:underline"
-                :title="lead.address"
-              >
-                {{ lead.address }}
-              </a>
-              <a
-                v-if="lead?.email"
-                :href="`mailto:${lead.email}`"
-                class="w-fit hover:text-ink-gray-8 hover:underline"
-              >
-                {{ lead.email }}
-              </a>
-            </div>
           </div>
           <Button variant="ghost" icon="x" class="shrink-0" @click="show = false" />
         </div>
 
-        <div v-if="snapshot.loading" class="flex min-h-64 items-center justify-center">
-          <LoadingIndicator class="size-6 text-ink-gray-5" />
-        </div>
-
-        <div v-else-if="snapshot.data" class="flex-1 overflow-y-auto px-5 py-4 sm:px-6">
-          <div
-            v-if="item?.reason"
-            class="mb-4 rounded-lg border border-outline-gray-1 bg-surface-gray-1 px-3 py-2 text-sm text-ink-gray-6"
-          >
-            <span class="font-medium text-ink-gray-8">{{ __('Why today:') }}</span>
-            {{ item.reason }}
-          </div>
-
-          <section v-if="lead?.summary || details.length" class="mb-5">
-            <h3 class="mb-2 text-sm font-semibold text-ink-gray-8">
-              {{ __('Lead details') }}
-            </h3>
-            <div
-              v-if="lead?.summary"
-              class="mb-2 whitespace-pre-wrap rounded-lg bg-surface-gray-1 px-3 py-2 text-sm text-ink-gray-7"
-            >
-              {{ lead.summary }}
-            </div>
-            <div class="grid grid-cols-1 gap-x-5 gap-y-2 rounded-lg border border-outline-gray-1 p-3 sm:grid-cols-2">
-              <div v-for="field in details" :key="field.fieldname" class="min-w-0">
-                <div class="text-xs text-ink-gray-5">{{ __(field.label) }}</div>
-                <div class="truncate text-sm text-ink-gray-8" :title="String(field.value)">
-                  {{ field.value }}
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section class="mb-5">
-            <div class="mb-2 flex items-center gap-1.5">
-              <h3 class="text-sm font-semibold text-ink-gray-8">{{ __('Open tasks') }}</h3>
-              <span class="text-xs text-ink-gray-4">{{ tasks.length }}</span>
-            </div>
-            <div
-              v-if="tasks.length"
-              class="divide-y divide-outline-gray-1 overflow-hidden rounded-lg border border-outline-gray-1"
-            >
-              <div v-for="task in tasks" :key="task.name" class="flex items-start gap-2 px-3 py-2.5">
-                <FeatherIcon name="circle" class="mt-0.5 size-4 shrink-0 text-ink-gray-4" />
-                <div class="min-w-0 flex-1">
-                  <div class="text-sm text-ink-gray-8">{{ task.title }}</div>
-                  <div v-if="task.description" class="mt-0.5 line-clamp-2 text-xs text-ink-gray-5">
-                    {{ task.description }}
-                  </div>
-                </div>
-                <Tooltip
-                  v-if="task.due_date"
-                  :text="formatDate(task.due_date, 'ddd, MMM D, YYYY | hh:mm a')"
-                >
-                  <span class="shrink-0 text-xs" :class="dueClass(task.due_date)">
-                    {{ __(timeAgo(task.due_date)) }}
-                  </span>
-                </Tooltip>
-              </div>
-            </div>
-            <div v-else class="rounded-lg bg-surface-gray-1 px-3 py-3 text-sm text-ink-gray-5">
-              {{ __('No open tasks') }}
-            </div>
-          </section>
-
-          <section>
-            <div class="mb-2 flex items-center gap-1.5">
-              <h3 class="text-sm font-semibold text-ink-gray-8">{{ __('Recent activity') }}</h3>
-              <span class="text-xs text-ink-gray-4">{{ activity.length }}</span>
-            </div>
-            <div
-              v-if="activity.length"
-              class="divide-y divide-outline-gray-1 overflow-hidden rounded-lg border border-outline-gray-1"
-            >
-              <div
-                v-for="entry in activity"
-                :key="`${entry.type}-${entry.name}`"
-                class="flex items-start gap-3 px-3 py-3"
+        <div class="flex min-h-0 flex-1 flex-col md:flex-row">
+          <aside class="shrink-0 border-b p-4 md:w-64 md:overflow-y-auto md:border-b-0 md:border-r sm:p-5">
+            <div class="flex flex-col gap-2 text-sm text-ink-gray-6">
+              <a
+                v-if="item?.mobile_no"
+                :href="callHref(item.mobile_no)"
+                class="w-fit text-ink-blue-3 hover:underline"
               >
-                <div class="flex size-8 shrink-0 items-center justify-center rounded-full bg-surface-gray-2 text-ink-gray-6">
-                  <FeatherIcon :name="activityIcon(entry.type)" class="size-4" />
-                </div>
-                <div class="min-w-0 flex-1">
-                  <div class="flex items-start justify-between gap-3">
-                    <div class="min-w-0">
-                      <div class="truncate text-sm font-medium text-ink-gray-8">
-                        {{ entry.title }}
-                      </div>
-                      <div class="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-gray-5">
-                        <Badge
-                          variant="subtle"
-                          :theme="entry.direction === 'incoming' ? 'green' : 'gray'"
-                          :label="entry.direction === 'incoming' ? __('Incoming') : __('Outgoing')"
-                        />
-                        <span v-if="entry.type === 'call' && entry.duration">
-                          {{ formatDuration(entry.duration) }}
-                        </span>
-                        <span v-if="entry.classification">{{ entry.classification }}</span>
-                        <span v-if="entry.counterparty" class="truncate">
-                          {{ formatPhone(entry.counterparty) }}
-                        </span>
-                      </div>
-                    </div>
-                    <Tooltip :text="formatDate(entry.when, 'ddd, MMM D, YYYY | hh:mm a')">
-                      <span class="shrink-0 text-xs text-ink-gray-4">
-                        {{ __(timeAgo(entry.when)) }}
-                      </span>
-                    </Tooltip>
-                  </div>
-                  <div
-                    v-if="entry.content"
-                    class="mt-1.5 line-clamp-3 whitespace-pre-line text-sm leading-5 text-ink-gray-6"
-                  >
-                    {{ entry.content }}
-                  </div>
-                </div>
+                {{ formatPhone(item.mobile_no) }}
+              </a>
+              <a
+                v-if="item?.address"
+                :href="mapsUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="hover:text-ink-gray-8 hover:underline"
+              >
+                {{ item.address }}
+              </a>
+              <a
+                v-if="item?.email"
+                :href="`mailto:${item.email}`"
+                class="w-fit hover:text-ink-gray-8 hover:underline"
+              >
+                {{ item.email }}
+              </a>
+            </div>
+
+            <div
+              v-if="item?.reason"
+              class="mt-4 rounded-lg border border-outline-gray-1 bg-surface-gray-1 px-3 py-2 text-sm text-ink-gray-6"
+            >
+              <div class="mb-0.5 text-xs font-medium text-ink-gray-8">
+                {{ __('Why today') }}
               </div>
+              {{ item.reason }}
             </div>
-            <div v-else class="rounded-lg bg-surface-gray-1 px-3 py-3 text-sm text-ink-gray-5">
-              {{ __('No calls, texts, or emails yet') }}
-            </div>
-          </section>
+          </aside>
+
+          <!-- Reuse the lead page's actual activity surface. This keeps calls,
+               texts, comments, the To-do quick-add, completion checkboxes, and
+               realtime behavior identical instead of maintaining a second copy. -->
+          <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface-white">
+            <Activities
+              v-if="show && item?.lead"
+              :key="item.lead"
+              v-model:tabIndex="tabIndex"
+              doctype="CRM Lead"
+              :docname="item.lead"
+              :tabs="tabs"
+              :scroll-on-mount="false"
+            />
+          </div>
         </div>
 
         <div class="flex justify-end gap-2 border-t px-5 py-3 sm:px-6">
           <Button :label="__('Close')" @click="show = false" />
-          <Button
-            variant="solid"
-            :label="__('Open full lead')"
-            @click="openFullLead"
-          >
+          <Button variant="solid" :label="__('Open full lead')" @click="openFullLead">
             <template #suffix><FeatherIcon name="arrow-up-right" class="size-4" /></template>
           </Button>
         </div>
@@ -191,18 +95,10 @@
 </template>
 
 <script setup>
+import Activities from '@/components/Activities/Activities.vue'
 import { callHref, formatPhone } from '@/utils/phoneFormat'
-import { dueColor, formatDate, formatDuration, parseColor, timeAgo } from '@/utils'
-import {
-  Badge,
-  Button,
-  Dialog,
-  FeatherIcon,
-  LoadingIndicator,
-  Tooltip,
-  createResource,
-} from 'frappe-ui'
-import { computed, watch } from 'vue'
+import { Badge, Button, Dialog, FeatherIcon } from 'frappe-ui'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 const props = defineProps({
@@ -211,39 +107,19 @@ const props = defineProps({
 
 const show = defineModel({ type: Boolean })
 const router = useRouter()
-
-const snapshot = createResource({
-  url: 'crm.api.today_board.get_today_lead_snapshot',
-})
+const tabIndex = ref(0)
+const tabs = [{ name: 'Activity', label: __('Activity') }]
 
 watch(
-  [show, () => props.item?.lead],
-  ([isOpen, lead]) => {
-    if (!isOpen || !lead) return
-    snapshot.params = { lead }
-    snapshot.reload()
-  },
-  { immediate: true },
+  () => props.item?.lead,
+  () => (tabIndex.value = 0),
 )
 
-const lead = computed(() => snapshot.data?.lead || null)
-const details = computed(() => snapshot.data?.details || [])
-const tasks = computed(() => snapshot.data?.tasks || [])
-const activity = computed(() => snapshot.data?.activity || [])
 const mapsUrl = computed(() =>
-  lead.value?.address
-    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(lead.value.address)}`
+  props.item?.address
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(props.item.address)}`
     : '',
 )
-
-function dueClass(date) {
-  const color = dueColor(date)
-  return color ? parseColor(color) : 'text-ink-gray-5'
-}
-
-function activityIcon(type) {
-  return { call: 'phone', text: 'message-circle', email: 'mail' }[type] || 'activity'
-}
 
 function openFullLead() {
   if (!props.item?.lead) return
