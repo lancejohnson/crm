@@ -35,6 +35,18 @@ function sessionUser() {
   return user && user !== 'Guest' ? user : null
 }
 
+function frontendBuildId() {
+  // Production's git metadata is deliberately absent from the Docker build
+  // context, but the entry chunk is content-hashed and uniquely identifies the
+  // exact frontend users are running. Local Vite builds retain the git-derived
+  // value injected by vite.config.js.
+  for (const script of document.scripts) {
+    const match = script.src.match(/\/assets\/crm\/frontend\/assets\/index-([^/]+)\.js$/)
+    if (match) return match[1]
+  }
+  return import.meta.env.VITE_CRM_BUILD_ID || 'unknown'
+}
+
 /** Start privacy-first, full-session replay for authenticated CRM users. */
 export function initTelemetry() {
   if (initialized || typeof window === 'undefined' || !sessionUser()) return
@@ -70,7 +82,7 @@ export function initTelemetry() {
       client.identify(sessionUser(), { application: 'frappe-crm' })
       client.register({
         application: 'frappe-crm',
-        build: import.meta.env.VITE_CRM_BUILD_ID || 'unknown',
+        build: frontendBuildId(),
         deployment: window.location.hostname === 'crm.groundworkpro.com' ? 'production' : 'development',
       })
     },
