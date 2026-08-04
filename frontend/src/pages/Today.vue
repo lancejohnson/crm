@@ -18,6 +18,7 @@
             <template #prefix><FeatherIcon name="filter" class="size-4" /></template>
           </Button>
         </Dropdown>
+        <Button :label="streakLabel" @click="openTodayReport" />
         <Button :label="__('Priority')" @click="showPriorityModal = true">
           <template #prefix><FeatherIcon name="list" class="size-4" /></template>
         </Button>
@@ -28,9 +29,21 @@
           :label="`${toCallLeadCount} ${toCallLeadCount === 1 ? __('lead') : __('leads')} · ${callsOwed} ${callsOwed === 1 ? __('call') : __('calls')}`"
         />
         <Badge v-else variant="subtle" theme="green" :label="__('All clear')" />
-        <Button :label="__('Refresh list')" :loading="refreshing" @click="refreshList">
-          <template #prefix><RefreshIcon class="h-4 w-4" /></template>
-        </Button>
+        <Tooltip
+          :text="__('Re-run the cadence now and add any newly-due leads or tasks')"
+          placement="bottom"
+        >
+          <Button :label="__('Sync list')" :loading="refreshing" @click="syncList">
+            <template #prefix><RefreshIcon class="h-4 w-4" /></template>
+          </Button>
+        </Tooltip>
+        <Badge
+          v-if="syncStatus"
+          variant="subtle"
+          :theme="syncStatusTheme"
+          :label="syncStatus"
+          role="status"
+        />
       </div>
     </template>
   </LayoutHeader>
@@ -185,6 +198,11 @@
     @open-address="openAddress"
   />
   <PropertyLinkModal v-model="showPropertyLinkModal" :address="selectedAddress" />
+  <TodayReportModal
+    v-model="showReportModal"
+    :report="todayReport.data"
+    :loading="todayReport.loading"
+  />
   <TodayPriorityModal
     v-model="showPriorityModal"
     :priorities="priorityItems"
@@ -216,6 +234,7 @@ import LayoutHeader from '@/components/LayoutHeader.vue'
 import RefreshIcon from '@/components/Icons/RefreshIcon.vue'
 import TodayLeadModal from '@/components/TodayLeadModal.vue'
 import TodayPriorityModal from '@/components/TodayPriorityModal.vue'
+import TodayReportModal from '@/components/TodayReportModal.vue'
 import PropertyLinkModal from '@/components/Modals/PropertyLinkModal.vue'
 import SendTextModal from '@/components/Modals/SendTextModal.vue'
 import TaskModal from '@/components/Modals/TaskModal.vue'
@@ -237,6 +256,8 @@ import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 const { $socket } = globalStore()
 const refreshing = ref(false)
+const syncStatus = ref('')
+const syncStatusTheme = ref('green')
 const selectedStatus = ref('')
 const selectedPriority = ref('')
 const selectedSignal = ref('')
@@ -244,6 +265,7 @@ const selectedItem = ref(null)
 const showLeadModal = ref(false)
 const selectedAddress = ref('')
 const showPropertyLinkModal = ref(false)
+const showReportModal = ref(false)
 const showPriorityModal = ref(false)
 const savingPriority = ref(false)
 const selectedTask = ref(null)
@@ -284,6 +306,11 @@ const board = createResource({
   auto: true,
   cache: 'today_board',
 })
+const todayReport = createResource({
+  url: 'crm.api.today_board.get_today_report',
+  auto: true,
+  cache: 'today_report',
+})
 
 const columns = ref([])
 function syncColumns() {
@@ -302,6 +329,10 @@ const toCallLeadCount = computed(
   () => new Set(toCallItems.value.map((item) => item.lead)).size,
 )
 const callsOwed = computed(() => toCallCount.value)
+const streakLabel = computed(() => {
+  const days = todayReport.data?.streak?.current || 0
+  return `🔥 ${days} ${days === 1 ? __('day') : __('days')}`
+})
 const activeFilterCount = computed(
   () => [selectedStatus.value, selectedPriority.value, selectedSignal.value].filter(Boolean).length,
 )
@@ -408,6 +439,11 @@ function openTodayItem(item) {
   showLeadModal.value = true
 }
 
+function openTodayReport() {
+  showReportModal.value = true
+  todayReport.reload()
+}
+
 function openAddress(address) {
   if (!address) return
   selectedAddress.value = address
@@ -477,12 +513,23 @@ async function savePriorityOrder(order) {
   }
 }
 
-async function refreshList() {
+async function syncList() {
   refreshing.value = true
+  syncStatus.value = ''
   try {
     const r = await call('crm.api.today_board.generate_today')
-    board.reload()
-    toast.success(r.created ? __('Added {0} call(s)', [r.created]) : __('Already up to date'))
+    await Promise.all([board.reload(), todayReport.reload()])
+    const message = r.created
+      ? __('Added {0} new call(s)', [r.created])
+      : __('List is up to date')
+    syncStatusTheme.value = 'green'
+    syncStatus.value = message
+    toast.success(message)
+  } catch (e) {
+    const message = e.messages?.[0] || __('Could not sync the list')
+    syncStatusTheme.value = 'red'
+    syncStatus.value = __('Sync failed')
+    toast.error(message)
   } finally {
     refreshing.value = false
   }
@@ -490,7 +537,10 @@ async function refreshList() {
 
 function onRealtime() {
   board.reload()
+  todayReport.reload()
 }
 onMounted(() => $socket.on('crm_today', onRealtime))
-onBeforeUnmount(() => $socket.off('crm_today', onRealtime))
+onBeforeUnmount(() => {
+  $socket.off('crm_today', onRealtime)
+})
 </script>

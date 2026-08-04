@@ -238,7 +238,11 @@ doc_events = {
 		# creation only, so later manual edits are respected. Runs before the
 		# controller rebuilds lead_name/title from the name parts in validate().
 		"before_validate": ["crm.api.name_format.normalize_lead_names"],
-		"after_insert": ["crm.api.sequence_drain.enqueue_for_lead"],
+		"after_insert": [
+			"crm.api.sequence_drain.enqueue_for_lead",
+			# A new never-called lead may owe work immediately; add its card after commit.
+			"crm.api.today_board.enqueue_today_sync",
+		],
 		"on_update": [
 			"crm.api.sequence_drain.enqueue_for_lead",
 			# lead newly linked to an InvestorLift property → tag its Quo
@@ -248,6 +252,8 @@ doc_events = {
 			# its open follow-up tasks, so dead leads stop showing up in the
 			# to-do block and in every "due today" list. See crm/api/task_hygiene.py
 			"crm.api.task_hygiene.on_lead_update",
+			# Status moves during standup can make a lead newly eligible today.
+			"crm.api.today_board.enqueue_today_sync",
 		],
 	},
 }
@@ -273,7 +279,12 @@ scheduler_events = {
 		# due enrollment (the old `CRM Sequence Runner` core-cron is disabled in
 		# favour of this). The drainer runs on the dedicated `seqdrain` queue.
 		"* * * * *": ["crm.api.sequence_drain.drain_due"],
-		"*/5 * * * *": ["crm.lead_syncing.background_sync.sync_leads_from_sources_5_minutes"],
+		"*/5 * * * *": [
+			"crm.lead_syncing.background_sync.sync_leads_from_sources_5_minutes",
+			# Safety net for new leads/tasks that land while an event-driven sync is
+			# already finishing. Add-only and business-day guarded.
+			"crm.api.today_board.run_today_sync",
+		],
 		"*/10 * * * *": [
 			"crm.lead_syncing.background_sync.sync_leads_from_sources_10_minutes",
 			# Buyer <-> Quo contact reconcile: pull team edits/tags from Quo,

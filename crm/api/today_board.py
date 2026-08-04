@@ -27,13 +27,19 @@ while the call number keeps generation structurally idempotent.
 
 import json
 import re
+from collections import Counter
+from datetime import timedelta
 
 import frappe
 from bs4 import BeautifulSoup
 from frappe import _
 from frappe.utils import getdate, now_datetime
 
-from crm.api.daily_standup import build_standup
+from crm.api.daily_standup import (
+	build_standup,
+	is_business_day,
+	previous_business_day,
+)
 
 DOCTYPE = "CRM Today Item"
 STATES = ("To Call", "Done", "Skipped")
@@ -180,19 +186,21 @@ def _slots_for(row):
 
 @frappe.whitelist()
 def generate_today(for_date=None):
-	"""Materialise today's cards from the cadence.
+	"""Manually sync missing cards from the latest cadence/task state.
 
-	Only ever ADDS. An existing card is left completely alone — its state and its
-	position are human decisions, and a second run (5am job, manual refresh, first
-	page load) must not overwrite them. A lead that stops being due does NOT get
-	its card removed either: it was on today's list when the day started, and
-	silently retracting work is how a board loses trust.
+	Only ever ADDS. Existing cards keep their human-owned state and position, so a
+	standup/status/task change can add newly-due work without resurrecting or
+	reordering anything the team already judged.
 	"""
-	if not _available():
-		return {"created": 0, "existing": 0, "available": False}
 	_guard()
-	day = getdate(for_date or now_datetime())
+	return _generate_today(getdate(for_date or now_datetime()))
 
+
+def _generate_today(day):
+	"""Internal sync used by the manual button, hooks, and five-minute safety job."""
+	if not _available():
+		return {"created": 0, "existing": 0, "due": 0, "available": False}
+	day = getdate(day or now_datetime())
 	data = build_standup(day)
 	due = data["setter"]["due"]
 	with_slots = _supports_call_slots()
@@ -264,6 +272,52 @@ def generate_today(for_date=None):
 		"due": len(due),
 		"available": True,
 	}
+
+
+def enqueue_today_sync(doc=None, method=None):
+	"""Queue an add-only sync when a new lead or lead task may create work today.
+
+	Imports can create many leads/tasks in one transaction, so active jobs are
+	deduplicated. The five-minute scheduler is the safety net for the narrow race
+	where a second commit lands while the deduplicated job is already finishing.
+	"""
+	try:
+		day = getdate(now_datetime())
+		if not _available() or not is_business_day(day):
+			return
+		if doc and doc.doctype == "CRM Lead":
+			if method == "on_update" and not doc.has_value_changed("status"):
+				return
+		elif doc and doc.doctype == "CRM Task":
+			if doc.reference_doctype != "CRM Lead" or not doc.reference_docname:
+				return
+		frappe.enqueue(
+			"crm.api.today_board.run_today_sync",
+			queue="short",
+			job_id=f"today-sync-{day}",
+			deduplicate=True,
+			enqueue_after_commit=True,
+		)
+	except TypeError:  # compatibility with older Frappe enqueue signatures
+		frappe.enqueue(
+			"crm.api.today_board.run_today_sync",
+			queue="short",
+			enqueue_after_commit=True,
+		)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Today board sync enqueue failed")
+
+
+def run_today_sync():
+	"""Worker/scheduler entry: keep today's add-only board current."""
+	day = getdate(now_datetime())
+	if not is_business_day(day):
+		return {"created": 0, "available": _available(), "skipped": "non-business day"}
+	try:
+		return _generate_today(day)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Today board automatic sync failed")
+		return {"created": 0, "available": _available(), "error": True}
 
 
 def _publish(day):
@@ -436,6 +490,143 @@ def get_today_board(for_date=None, auto_generate=1, status=None, priority=None, 
 		"selected_priority": priority or "",
 		"selected_signal": signal or "",
 		"priority_order": priority_order,
+	}
+
+
+def _empty_report_day(day):
+	return {
+		"date": str(getdate(day)),
+		"total": 0,
+		"done": 0,
+		"skipped": 0,
+		"remaining": 0,
+		"completion_rate": 0,
+		"handled_rate": 0,
+		"perfect": False,
+	}
+
+
+def _finish_report_day(stats):
+	stats["remaining"] = stats["total"] - stats["done"] - stats["skipped"]
+	if stats["total"]:
+		stats["completion_rate"] = round(stats["done"] * 100 / stats["total"])
+		stats["handled_rate"] = round(
+			(stats["done"] + stats["skipped"]) * 100 / stats["total"]
+		)
+	stats["perfect"] = bool(stats["total"] and stats["done"] == stats["total"])
+	return stats
+
+
+@frappe.whitelist()
+def get_today_report(for_date=None, history_days=10):
+	"""Team progress today plus a strict 100%-Done business-day streak.
+
+	Skipped cards are reported as handled, but they do not count as completed and
+	therefore break a perfect-day streak. An unfinished current day does not erase
+	the streak earned through the previous business day.
+	"""
+	_guard()
+	today = getdate(for_date or now_datetime())
+	if not _available():
+		return {
+			"available": False,
+			"today": _empty_report_day(today),
+			"recent": [],
+			"completed_by": [],
+			"streak": {"current": 0, "best": 0, "through": None},
+		}
+
+	try:
+		history_days = max(5, min(30, int(history_days or 10)))
+	except (TypeError, ValueError):
+		history_days = 10
+	start = today - timedelta(days=370)
+	rows = frappe.get_all(
+		DOCTYPE,
+		filters={"for_date": ["between", [start, today]]},
+		fields=["for_date", "state", "done_by"],
+		order_by="for_date asc",
+		limit_page_length=50000,
+	)
+
+	by_day = {}
+	for row in rows:
+		day = getdate(row.for_date)
+		stats = by_day.setdefault(day, _empty_report_day(day))
+		stats["total"] += 1
+		if row.state == "Done":
+			stats["done"] += 1
+		elif row.state == "Skipped":
+			stats["skipped"] += 1
+	for stats in by_day.values():
+		_finish_report_day(stats)
+
+	today_stats = by_day.get(today, _empty_report_day(today))
+	business_dates = sorted(day for day in by_day if is_business_day(day))
+	first_day = business_dates[0] if business_dates else today
+
+	# Current streak: an in-progress today is not a failure until the day ends.
+	cursor = today
+	if not is_business_day(cursor) or not by_day.get(cursor, {}).get("perfect"):
+		cursor = previous_business_day(cursor)
+	current_streak = 0
+	through = None
+	while cursor >= first_day:
+		stats = by_day.get(cursor)
+		if not stats or not stats["perfect"]:
+			break
+		if through is None:
+			through = str(cursor)
+		current_streak += 1
+		cursor = previous_business_day(cursor)
+
+	# Best streak: missing or imperfect weekdays break the run.
+	best_streak = 0
+	run = 0
+	cursor = first_day
+	while cursor <= today:
+		if is_business_day(cursor):
+			stats = by_day.get(cursor)
+			if stats and stats["perfect"]:
+				run += 1
+				best_streak = max(best_streak, run)
+			else:
+				run = 0
+		cursor += timedelta(days=1)
+
+	recent = [by_day[day] for day in sorted(business_dates, reverse=True)[:history_days]]
+	recent_total = sum(day["total"] for day in recent)
+	recent_done = sum(day["done"] for day in recent)
+	recent_average = round(recent_done * 100 / recent_total) if recent_total else 0
+
+	people = Counter(row.done_by for row in rows if getdate(row.for_date) == today and row.state == "Done" and row.done_by)
+	user_names = {}
+	if people:
+		user_names = {
+			u.name: u.full_name or u.name
+			for u in frappe.get_all(
+				"User",
+				filters={"name": ["in", list(people)]},
+				fields=["name", "full_name"],
+			)
+		}
+	completed_by = [
+		{"user": user, "name": user_names.get(user, user), "done": count}
+		for user, count in people.most_common()
+	]
+
+	return {
+		"available": True,
+		"today": today_stats,
+		"recent": recent,
+		"recent_average": recent_average,
+		"completed_by": completed_by,
+		"streak": {
+			"current": current_streak,
+			"best": best_streak,
+			"through": through,
+		},
+		"definition": _("A streak day requires every Today card to be marked Done. Skipped cards do not count as completed."),
 	}
 
 

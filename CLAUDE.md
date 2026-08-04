@@ -104,6 +104,21 @@ duplicating. Work substantial features in a worktree of your own.
     has to hold still while people work it. Division of responsibility: **the
     cadence decides what LANDS on the board; humans own the card after that.**
     Generation only ever ADDS and never retracts a card that stopped being due.
+  - **The list stays current after the 5am snapshot.** Header **Sync list**
+    manually re-runs the shared cadence and reports how many cards it added.
+    New leads and every lead-task mutation enqueue the same add-only sync after
+    commit; an every-five-minute business-day scheduler is the race/failure
+    safety net. Jobs dedupe during import bursts, and structural card autonames
+    make concurrent runs safe. New scheduler method
+    `crm.api.today_board.run_today_sync` requires `sync_jobs` after deploy.
+    Existing Done/Skipped state and manual ordering are never touched.
+  - **Today report + team streak** — the flame button opens current Total/Done/
+    Skipped/Remaining progress, who completed today's cards, and recent business-
+    day completion rates. The streak is deliberately strict: a perfect day means
+    every card is **Done**; Skipped cards are handled but do not count as
+    completed. An unfinished current day does not erase the streak earned through
+    the previous business day. `frontend/src/components/TodayReportModal.vue` +
+    `TodayReportMetric.vue`; `crm.api.today_board.get_today_report`.
   - **autoname `format:{for_date}-{lead}`** makes (date, lead) structurally
     unique, so generation at 5am + manual Refresh + first-page-view auto-generate
     can all race without duplicating a card (verified under a real

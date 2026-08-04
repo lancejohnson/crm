@@ -57,6 +57,11 @@ class CRMTask(Document):
 				},
 				after_commit=True,
 			)
+			# A new/due-today lead task can pull the lead onto the shared Today board.
+			# This is add-only and queued after commit, so task saves stay fast.
+			from crm.api.today_board import enqueue_today_sync
+
+			enqueue_today_sync(self)
 
 	def validate(self):
 		if self.is_new() or not self.assigned_to:
