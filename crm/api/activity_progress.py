@@ -1,34 +1,176 @@
-"""Lance-only team activity pulse.
+"""Lance-only team activity board.
 
-Combines human work already mirrored into the CRM:
-- Quo calls (CRM Call Log)
+One row per person for one day, built from work already recorded:
+- Quo calls (CRM Call Log — the `call.completed` webhook mirror, attributed to
+  the Quo user who actually dialled, not the line owner)
 - human-sent Quo texts (Quo Message; automated sequence texts are excluded)
-- completed CRM tasks
-- completed Today-board cards
+- Today-board cards resolved (Done / Skipped)
+- completed CRM tasks, split by whether the lead was on that day's Today list
+- hours tracked in Toggl, including the clocked-in windows
+
+Toggl is matched to CRM users by **email** — the Toggl workspace exposes the same
+addresses, so no mapping field is needed. Every Toggl call is best-effort: if the
+API is slow, down, or unconfigured the board still renders without it.
 
 Daily goals are stored as a JSON user default for Lance, so they persist across
-browsers without adding another custom doctype.
+browsers without another custom doctype.
 """
 
 import json
 from collections import defaultdict
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import frappe
+import requests
 from frappe import _
-from frappe.utils import getdate, now_datetime
+from frappe.utils import convert_utc_to_system_timezone, getdate, now_datetime
 
 ACTIVITY_PROGRESS_USER = "lance.johnson@groundworkpro.com"
 GOALS_DEFAULT_KEY = "crm_activity_progress_goals"
-GOAL_KEYS = ("calls", "texts", "tasks", "today")
+GOAL_KEYS = ("calls", "texts", "tasks", "cards")
 CRM_ROLES = {"System Manager", "Sales Manager", "Sales User"}
+
+TOGGL_API = "https://api.track.toggl.com"
+TOGGL_USERS_TTL = 3600
+TOGGL_DAY_TTL = 120
+TOGGL_TIMEOUT = 12
 
 
 def _guard():
-	# Administrator remains available for bench/read-only verification. The only
-	# human account allowed through this endpoint is Lance's.
+	# Administrator stays allowed so bench/read-only verification keeps working.
 	if frappe.session.user not in (ACTIVITY_PROGRESS_USER, "Administrator"):
 		frappe.throw(_("Only Lance can view team activity progress."), frappe.PermissionError)
+
+
+# ---------------------------------------------------------------------------
+# Toggl
+# ---------------------------------------------------------------------------
+
+
+def _toggl_conf():
+	user = (frappe.conf.get("toggl_username") or "").strip()
+	pwd = (frappe.conf.get("toggl_password") or "").strip()
+	ws = frappe.conf.get("toggl_workspace_id")
+	if not (user and pwd and ws):
+		return None
+	return user, pwd, ws
+
+
+def _toggl_user_ids():
+	"""Toggl user id -> email. Cached: workspace membership rarely changes."""
+	cached = frappe.cache().get_value("crm_toggl_users")
+	if cached:
+		return {int(k): v for k, v in json.loads(cached).items()}
+	conf = _toggl_conf()
+	if not conf:
+		return {}
+	user, pwd, ws = conf
+	resp = requests.get(
+		f"{TOGGL_API}/api/v9/workspaces/{ws}/users", auth=(user, pwd), timeout=TOGGL_TIMEOUT
+	)
+	resp.raise_for_status()
+	out = {}
+	for row in resp.json() or []:
+		if row.get("id") and row.get("email"):
+			out[int(row["id"])] = row["email"].strip().lower()
+	frappe.cache().set_value("crm_toggl_users", json.dumps(out), expires_in_sec=TOGGL_USERS_TTL)
+	return out
+
+
+def _to_site_time(iso):
+	"""Toggl stamps carry the member's own offset (the setters are on -03:00); the
+	rest of this report is naive site time, so normalise before anything is
+	compared. Same conversion the Quo webhook uses."""
+	aware = datetime.fromisoformat(iso)
+	utc_naive = aware.astimezone(timezone.utc).replace(tzinfo=None)
+	return convert_utc_to_system_timezone(utc_naive).replace(tzinfo=None)
+
+
+def _toggl_day(day):
+	"""Per-email tracked seconds + clocked-in windows for `day`.
+
+	Never raises: a Toggl outage must not take the board down with it.
+	"""
+	key = f"crm_toggl_day::{day}"
+	cached = frappe.cache().get_value(key)
+	if cached:
+		return json.loads(cached)
+
+	result = {"ok": False, "people": {}}
+	conf = _toggl_conf()
+	if not conf:
+		result["reason"] = "not configured"
+		return result
+	user, pwd, ws = conf
+	try:
+		emails = _toggl_user_ids()
+		if not emails:
+			result["reason"] = "no workspace members"
+			return result
+		resp = requests.post(
+			f"{TOGGL_API}/reports/api/v3/workspace/{ws}/search/time_entries",
+			auth=(user, pwd),
+			json={"start_date": str(day), "end_date": str(day), "user_ids": list(emails)},
+			timeout=TOGGL_TIMEOUT,
+		)
+		resp.raise_for_status()
+		people = {}
+		now = now_datetime()
+		for row in resp.json() or []:
+			email = emails.get(int(row.get("user_id") or 0))
+			if not email:
+				continue
+			bucket = people.setdefault(email, {"seconds": 0, "bands": [], "running": False})
+			for entry in row.get("time_entries") or []:
+				start, stop = entry.get("start"), entry.get("stop")
+				if not start:
+					continue
+				began = _to_site_time(start)
+				if stop:
+					# Toggl reports a running timer's duration as a negative number,
+					# so a completed entry's own seconds are only trusted here.
+					ended = _to_site_time(stop)
+					bucket["seconds"] += max(0, int(entry.get("seconds") or 0))
+				else:
+					# Still clocked in: run the band to now so the live board shows
+					# today's real time instead of zero.
+					ended = max(began, now)
+					bucket["seconds"] += max(0, int((ended - began).total_seconds()))
+					bucket["running"] = True
+				bucket["bands"].append([began.isoformat(), ended.isoformat()])
+		for bucket in people.values():
+			bucket["bands"].sort()
+		result = {"ok": True, "people": people}
+	except Exception:
+		# Logged, not raised — the rest of the board is still worth showing.
+		frappe.log_error(title="Toggl fetch failed", message=frappe.get_traceback())
+		result = {"ok": False, "people": {}, "reason": "unavailable"}
+
+	frappe.cache().set_value(key, json.dumps(result), expires_in_sec=TOGGL_DAY_TTL)
+	return result
+
+
+# ---------------------------------------------------------------------------
+# goals
+# ---------------------------------------------------------------------------
+
+
+def _load_goals(valid_users):
+	raw = frappe.defaults.get_user_default(GOALS_DEFAULT_KEY)
+	try:
+		stored = json.loads(raw) if isinstance(raw, str) else raw
+	except (TypeError, ValueError):
+		stored = {}
+	if not isinstance(stored, dict):
+		stored = {}
+	goals = {}
+	for user in valid_users:
+		row = stored.get(user) if isinstance(stored.get(user), dict) else {}
+		# `today` was the pre-rename key for the Today-card goal.
+		if "cards" not in row and "today" in row:
+			row = dict(row, cards=row.get("today"))
+		goals[user] = {key: max(0, int(row.get(key) or 0)) for key in GOAL_KEYS}
+	return goals
 
 
 def _crm_users():
@@ -46,25 +188,8 @@ def _crm_users():
 	return users
 
 
-def _load_goals(valid_users):
-	raw = frappe.defaults.get_user_default(GOALS_DEFAULT_KEY)
-	try:
-		stored = json.loads(raw) if isinstance(raw, str) else raw
-	except (TypeError, ValueError):
-		stored = {}
-	if not isinstance(stored, dict):
-		stored = {}
-
-	goals = {}
-	for user in valid_users:
-		row = stored.get(user) if isinstance(stored.get(user), dict) else {}
-		goals[user] = {key: max(0, int(row.get(key) or 0)) for key in GOAL_KEYS}
-	return goals
-
-
 def _bounds(for_date=None):
 	day = getdate(for_date or now_datetime())
-	# This is an operational pulse, not an unbounded reporting endpoint.
 	if day > getdate(now_datetime()) or day < getdate(now_datetime()) - timedelta(days=90):
 		frappe.throw(_("Choose a date within the last 90 days."))
 	return day, f"{day} 00:00:00", f"{day} 23:59:59.999999"
@@ -77,20 +202,16 @@ def _event(people, user, kind, at, **extra):
 	return True
 
 
+# ---------------------------------------------------------------------------
+# activity sources
+# ---------------------------------------------------------------------------
+
+
 def _call_events(people, number_users, start, end):
 	rows = frappe.get_all(
 		"CRM Call Log",
 		filters={"start_time": ["between", [start, end]]},
-		fields=[
-			"caller",
-			"receiver",
-			"from",
-			"to",
-			"type",
-			"start_time",
-			"duration",
-			"status",
-		],
+		fields=["caller", "receiver", "from", "to", "type", "start_time", "duration", "status"],
 		order_by="start_time asc",
 		limit_page_length=5000,
 	)
@@ -99,29 +220,19 @@ def _call_events(people, number_users, start, end):
 		workspace_number = row.get("from") if row.type == "Outgoing" else row.get("to")
 		user = row.get("caller") or row.get("receiver") or number_users.get(workspace_number)
 		kind = "call_in" if row.type == "Incoming" else "call_out"
-		if not _event(
-			people,
-			user,
-			kind,
-			row.start_time,
-			duration=int(row.duration or 0),
-			status=row.status or "",
-		):
+		if not _event(people, user, kind, row.start_time, duration=int(row.duration or 0)):
 			unattributed += 1
 			continue
-		people[user]["counts"]["calls"] += 1
-		people[user]["counts"]["talk_seconds"] += int(row.duration or 0)
-		if row.type == "Incoming":
-			people[user]["counts"]["inbound_calls"] += 1
-		else:
-			people[user]["counts"]["outbound_calls"] += 1
+		counts = people[user]["counts"]
+		counts["calls"] += 1
+		counts["talk_seconds"] += int(row.duration or 0)
+		counts["inbound_calls" if row.type == "Incoming" else "outbound_calls"] += 1
 	return unattributed
 
 
 def _text_events(people, start, end):
 	if not frappe.db.exists("DocType", "Quo Message"):
 		return 0, False
-
 	meta = frappe.get_meta("Quo Message")
 	has_sender = meta.has_field("sent_by")
 	has_source = meta.has_field("activity_source")
@@ -133,101 +244,112 @@ def _text_events(people, start, end):
 
 	rows = frappe.get_all(
 		"Quo Message",
-		filters={
-			"direction": "Outgoing",
-			"message_date": ["between", [start, end]],
-		},
+		filters={"direction": "Outgoing", "message_date": ["between", [start, end]]},
 		fields=fields,
 		order_by="message_date asc",
 		limit_page_length=10000,
 	)
 	unattributed = 0
 	for row in rows:
-		source = row.get("activity_source") if has_source else ""
-		# Sequence steps are useful communication, but they are not a person
-		# completing work and must not inflate a rep's daily progress.
-		if source == "Sequence":
+		# A sequence step is real outreach but nobody *did* it — never credit a rep.
+		if has_source and row.get("activity_source") == "Sequence":
 			continue
 		user = row.get("sent_by") if has_sender else None
-		# Existing locally-sent messages already carry the real session user as
-		# owner. Be conservative with Guest rows until the sender backfill runs:
-		# line ownership would incorrectly credit automated sequence texts.
 		if not user and row.owner in people:
 			user = row.owner
-		if not _event(people, user, "text", row.message_date, source=source or "Legacy"):
+		if not _event(people, user, "text", row.message_date):
 			unattributed += 1
 			continue
 		people[user]["counts"]["texts"] += 1
-	return unattributed, has_sender and has_source
+	return unattributed, bool(has_sender and has_source)
 
 
-def _task_events(people, start, end):
+def _today_cards(people, day):
+	"""Per-person Done/Skipped plus the board-level totals.
+
+	The Today board is shared, so `total`/`remaining` belong to the board, not to
+	any one person. `resolved_*` (Done AND Skipped) is preferred over `done_*`
+	(Done only) so a skip — a real judgement someone made — is credited too.
+	"""
+	board = {"total": 0, "done": 0, "skipped": 0, "remaining": 0, "resolved_stamp": False}
+	if not frappe.db.exists("DocType", "CRM Today Item"):
+		return 0, board, set()
+	meta = frappe.get_meta("CRM Today Item")
+	resolved = meta.has_field("resolved_at") and meta.has_field("resolved_by")
+	board["resolved_stamp"] = resolved
+	fields = ["name", "lead", "state", "done_by", "done_at"]
+	if resolved:
+		fields += ["resolved_by", "resolved_at"]
+
+	rows = frappe.get_all(
+		"CRM Today Item", filters={"for_date": day}, fields=fields, limit_page_length=5000
+	)
+	unattributed = 0
+	leads = set()
+	for row in rows:
+		board["total"] += 1
+		if row.lead:
+			leads.add(row.lead)
+		if row.state == "Done":
+			board["done"] += 1
+		elif row.state == "Skipped":
+			board["skipped"] += 1
+		else:
+			continue
+		who = (row.get("resolved_by") if resolved else None) or row.get("done_by")
+		when = (row.get("resolved_at") if resolved else None) or row.get("done_at")
+		kind = "card_done" if row.state == "Done" else "card_skip"
+		if not _event(people, who, kind, when):
+			unattributed += 1
+			continue
+		key = "cards" if row.state == "Done" else "cards_skipped"
+		people[who]["counts"][key] += 1
+	board["remaining"] = board["total"] - board["done"] - board["skipped"]
+	return unattributed, board, leads
+
+
+def _task_events(people, start, end, board_leads):
 	rows = frappe.get_all(
 		"CRM Task",
 		filters={"status": "Done", "modified": ["between", [start, end]]},
-		fields=["modified", "modified_by", "assigned_to"],
+		fields=["modified", "modified_by", "assigned_to", "reference_docname"],
 		order_by="modified asc",
 		limit_page_length=5000,
 	)
 	unattributed = 0
 	for row in rows:
 		user = row.modified_by if row.modified_by in people else row.assigned_to
-		if not _event(people, user, "task", row.modified):
+		on_list = bool(row.reference_docname and row.reference_docname in board_leads)
+		if not _event(people, user, "task", row.modified, on_list=on_list):
 			unattributed += 1
 			continue
 		people[user]["counts"]["tasks"] += 1
-	return unattributed
-
-
-def _today_events(people, start, end):
-	if not frappe.db.exists("DocType", "CRM Today Item"):
-		return 0
-	meta = frappe.get_meta("CRM Today Item")
-	if not meta.has_field("done_by") or not meta.has_field("done_at"):
-		return 0
-	rows = frappe.get_all(
-		"CRM Today Item",
-		filters={"state": "Done", "done_at": ["between", [start, end]]},
-		fields=["done_by", "done_at"],
-		order_by="done_at asc",
-		limit_page_length=5000,
-	)
-	unattributed = 0
-	for row in rows:
-		if not _event(people, row.done_by, "today", row.done_at):
-			unattributed += 1
-			continue
-		people[row.done_by]["counts"]["today"] += 1
+		people[user]["counts"]["tasks_on_list" if on_list else "tasks_other"] += 1
 	return unattributed
 
 
 @frappe.whitelist()
 def get_activity_progress(for_date=None):
-	"""Return one day's per-user activity totals and timestamp-only event stream."""
+	"""One day of team activity: per-person totals, event stream, and Toggl time."""
 	_guard()
 	day, start, end = _bounds(for_date)
 	users = _crm_users()
-	user_names = {user.name for user in users}
-	goals = _load_goals(user_names)
+	goals = _load_goals({u.name for u in users})
 
-	people = {}
-	number_users = {}
+	people, number_users = {}, {}
 	for user in users:
 		people[user.name] = {
 			"user": user.name,
 			"name": user.full_name or user.name,
 			"image": user.user_image,
 			"counts": {
-				"calls": 0,
-				"outbound_calls": 0,
-				"inbound_calls": 0,
-				"talk_seconds": 0,
-				"texts": 0,
-				"tasks": 0,
-				"today": 0,
+				"calls": 0, "outbound_calls": 0, "inbound_calls": 0, "talk_seconds": 0,
+				"texts": 0, "tasks": 0, "tasks_on_list": 0, "tasks_other": 0,
+				"cards": 0, "cards_skipped": 0,
 			},
 			"goals": goals.get(user.name, {}),
 			"events": [],
+			"toggl": {"seconds": 0, "bands": [], "running": False},
 		}
 		if user.custom_quo_number:
 			number_users[user.custom_quo_number.strip()] = user.name
@@ -235,18 +357,29 @@ def get_activity_progress(for_date=None):
 	unattributed = defaultdict(int)
 	unattributed["calls"] = _call_events(people, number_users, start, end)
 	unattributed["texts"], exact_text_attribution = _text_events(people, start, end)
-	unattributed["tasks"] = _task_events(people, start, end)
-	unattributed["today"] = _today_events(people, start, end)
+	unattributed["cards"], board, board_leads = _today_cards(people, day)
+	unattributed["tasks"] = _task_events(people, start, end, board_leads)
 
+	toggl = _toggl_day(day)
 	for person in people.values():
+		entry = toggl["people"].get(person["user"].lower())
+		if entry:
+			person["toggl"] = {
+				"seconds": entry["seconds"],
+				"bands": entry["bands"],
+				"running": entry.get("running", False),
+			}
 		person["events"].sort(key=lambda event: str(event["at"]))
 
 	return {
 		"date": str(day),
 		"generated_at": now_datetime(),
 		"people": list(people.values()),
+		"board": board,
 		"unattributed": dict(unattributed),
 		"exact_text_attribution": exact_text_attribution,
+		"toggl_ok": toggl.get("ok", False),
+		"toggl_reason": toggl.get("reason", ""),
 	}
 
 
