@@ -111,6 +111,65 @@ def _guard():
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 
 
+#: Sentinel for "don't scope to one person" — the whole-team board everyone saw
+#: before leads were split between the setters.
+ALL_OWNERS = "all"
+
+#: Owner value for a lead nobody owns. Kept selectable rather than hidden: an
+#: ownerless lead still owes a call, and if it only ever showed up on a board
+#: nobody looks at, it would quietly go uncalled.
+UNASSIGNED = ""
+
+
+def _resolve_owner(owner):
+	"""Whose board are we showing? Defaults to your own.
+
+	The board is deliberately NOT permission-scoped — anyone on the sales team can
+	look at anyone's list (it is a five-person company, and the standup is read off
+	these lists together). Defaulting to your own is what stops it being a wall of
+	other people's work.
+	"""
+	if owner is None:
+		return frappe.session.user
+	owner = str(owner).strip()
+	if owner.lower() == ALL_OWNERS:
+		return ALL_OWNERS
+	return owner
+
+
+def _owner_options(rows):
+	"""Everyone with cards today, with their card count, for the board switcher.
+
+	Built from the day's cards rather than from the user list so it can't offer a
+	board that is empty, and so an unexpected owner (a lead still on the old
+	default owner, say) is visible instead of silently unreachable.
+	"""
+	counts = Counter((r.get("lead_owner") or UNASSIGNED) for r in rows)
+	if not counts:
+		return []
+
+	emails = [user for user in counts if user]
+	names = {}
+	if emails:
+		names = {
+			u.name: u.full_name or u.name
+			for u in frappe.get_all(
+				"User", filters={"name": ["in", emails]}, fields=["name", "full_name"]
+			)
+		}
+
+	options = [
+		{
+			"user": user,
+			"full_name": names.get(user) or (user or _("Unassigned")),
+			"count": count,
+		}
+		for user, count in counts.items()
+	]
+	options.sort(key=lambda o: (not o["user"], -o["count"], o["full_name"]))
+	return options
+
+
 def _expand_legacy_items(day):
 	"""Turn an old two-call lead card into two one-call cards, once.
 
@@ -334,14 +393,21 @@ def _publish(day):
 
 
 @frappe.whitelist()
-def get_today_board(for_date=None, auto_generate=1, status=None, priority=None, signal=None):
+def get_today_board(
+	for_date=None, auto_generate=1, status=None, priority=None, signal=None, owner=None
+):
 	"""Everything the board needs in one call: the cards, plus the lead facts the
 	cards display (status, phone, address, and how many calls it has had today so
-	a rep can see progress without opening the lead)."""
+	a rep can see progress without opening the lead).
+
+	Scoped to ONE person's leads by default (`owner`, defaulting to the caller) so
+	each setter works their own list. Pass `owner="all"` for the whole team's
+	board, which is what everyone saw before ownership was split."""
 	if not _available():
 		return {"available": False, "columns": [], "date": None}
 	_guard()
 	day = getdate(for_date or now_datetime())
+	owner = _resolve_owner(owner)
 
 	with_slots = _supports_call_slots()
 	if with_slots:
@@ -368,6 +434,8 @@ def get_today_board(for_date=None, auto_generate=1, status=None, priority=None, 
 			"columns": _empty_columns(),
 			"priority_order": _priority_order(),
 			"status_counts": [],
+			"owner": owner,
+			"owners": [],
 		}
 
 	lead_names = list({r.lead for r in rows})
@@ -376,8 +444,8 @@ def get_today_board(for_date=None, auto_generate=1, status=None, priority=None, 
 		for l in frappe.get_all(
 			"CRM Lead",
 			filters={"name": ["in", lead_names]},
-			fields=["name", "lead_name", "status", "mobile_no", "phone", "email", "property_address",
-			        "property_city", "property_state", "property_zip"],
+			fields=["name", "lead_name", "status", "lead_owner", "mobile_no", "phone", "email",
+			        "property_address", "property_city", "property_state", "property_zip"],
 		)
 	}
 	calls = frappe.db.sql(
@@ -469,6 +537,7 @@ def get_today_board(for_date=None, auto_generate=1, status=None, priority=None, 
 		l = leads.get(r.lead) or {}
 		r["lead_name"] = l.get("lead_name") or r.lead
 		r["lead_status"] = l.get("status")
+		r["lead_owner"] = l.get("lead_owner") or ""
 		r["mobile_no"] = l.get("mobile_no") or l.get("phone")
 		r["email"] = l.get("email")
 		r["address"] = _address(l)
@@ -485,6 +554,15 @@ def get_today_board(for_date=None, auto_generate=1, status=None, priority=None, 
 		)
 		r["last_incoming_text"] = incoming_by_lead.get(r.lead)
 
+	# The owner selector lists everyone who has cards today, counted BEFORE the
+	# owner filter, so a rep with an empty board can still see whose board has
+	# work on it and switch to it.
+	owners = _owner_options(rows)
+	if owner != ALL_OWNERS:
+		rows = [r for r in rows if (r.lead_owner or "") == owner]
+
+	# Everything below this line describes the board you are actually looking at:
+	# the status filter counts, the columns and the totals all agree with it.
 	status_counts = {}
 	for r in rows:
 		if r.lead_status:
@@ -529,7 +607,44 @@ def get_today_board(for_date=None, auto_generate=1, status=None, priority=None, 
 		"selected_priority": priority or "",
 		"selected_signal": signal or "",
 		"priority_order": priority_order,
+		"owner": owner,
+		"owners": owners,
 	}
+
+
+def _scope_rows_to_owner(rows, owner):
+	"""Keep only the cards whose lead belongs to `owner`.
+
+	Ownership is read off the lead at request time rather than stamped onto the
+	card. A card stamped at 5am would keep pointing at the old rep for the rest of
+	the day the moment a lead was reassigned — and reassignment is exactly what the
+	backfill and the round robin do.
+	"""
+	if not rows:
+		return []
+	lead_names = list({row.lead for row in rows if row.get("lead")})
+	if not lead_names:
+		return []
+	owners = {
+		lead.name: (lead.lead_owner or UNASSIGNED)
+		for lead in frappe.get_all(
+			"CRM Lead", filters={"name": ["in", lead_names]}, fields=["name", "lead_owner"]
+		)
+	}
+	return [row for row in rows if owners.get(row.lead, UNASSIGNED) == owner]
+
+
+def _report_day_from(day, rows):
+	"""Build one report day's stats from an already-scoped set of cards."""
+	stats = _empty_report_day(day)
+	for row in rows:
+		stats["total"] += 1
+		if row.state == "Done":
+			stats["done"] += 1
+		elif row.state == "Skipped":
+			stats["skipped"] += 1
+	_finish_report_day(stats)
+	return stats
 
 
 def _empty_report_day(day):
@@ -556,14 +671,24 @@ def _finish_report_day(stats):
 
 
 @frappe.whitelist()
-def get_today_report(for_date=None, history_days=10):
-	"""Team progress today plus a 100%-resolved business-day streak.
+def get_today_report(for_date=None, history_days=10, owner=None):
+	"""Progress today plus a 100%-resolved business-day streak.
 
 	Both Done and Skipped cards count toward the streak. An unfinished current day
 	does not erase the streak earned through the previous business day.
+
+	`owner` scopes TODAY's numbers to one person's leads so the progress figures
+	agree with the board that is actually on screen — a bar reading 12/87 while the
+	visible board holds 30 cards is worse than no bar at all.
+
+	The streak and the recent-day history stay deliberately TEAM-WIDE. The streak
+	was built as a shared artifact ("every Today card resolved"), and quietly
+	turning it into a personal stat would rewrite what the number has meant since
+	it shipped. `scope` in the response says which is which.
 	"""
 	_guard()
 	today = getdate(for_date or now_datetime())
+	owner = _resolve_owner(owner)
 	if not _available():
 		return {
 			"available": False,
@@ -581,7 +706,7 @@ def get_today_report(for_date=None, history_days=10):
 	rows = frappe.get_all(
 		DOCTYPE,
 		filters={"for_date": ["between", [start, today]]},
-		fields=["for_date", "state", "done_by"],
+		fields=["for_date", "state", "done_by", "lead"],
 		order_by="for_date asc",
 		limit_page_length=50000,
 	)
@@ -598,7 +723,14 @@ def get_today_report(for_date=None, history_days=10):
 	for stats in by_day.values():
 		_finish_report_day(stats)
 
-	today_stats = by_day.get(today, _empty_report_day(today))
+	# `by_day` stays team-wide throughout: it is what the streak is computed from.
+	# Only the headline "today" figures are re-derived for one person's leads.
+	todays_rows = [row for row in rows if getdate(row.for_date) == today]
+	if owner != ALL_OWNERS:
+		todays_rows = _scope_rows_to_owner(todays_rows, owner)
+		today_stats = _report_day_from(today, todays_rows)
+	else:
+		today_stats = by_day.get(today, _empty_report_day(today))
 	business_dates = sorted(day for day in by_day if is_business_day(day))
 	first_day = business_dates[0] if business_dates else today
 
@@ -636,7 +768,11 @@ def get_today_report(for_date=None, history_days=10):
 	recent_resolved = sum(day["done"] + day["skipped"] for day in recent)
 	recent_average = round(recent_resolved * 100 / recent_total) if recent_total else 0
 
-	people = Counter(row.done_by for row in rows if getdate(row.for_date) == today and row.state == "Done" and row.done_by)
+	# Credit list follows the same scope as the headline numbers, or the two halves
+	# of the same panel would describe different card sets.
+	people = Counter(
+		row.done_by for row in todays_rows if row.state == "Done" and row.done_by
+	)
 	user_names = {}
 	if people:
 		user_names = {
@@ -663,6 +799,10 @@ def get_today_report(for_date=None, history_days=10):
 			"best": best_streak,
 			"through": through,
 		},
+		"owner": owner,
+		# Today's figures follow the board on screen; the streak and the recent-day
+		# history are the team's. The UI labels them so the two aren't confused.
+		"scope": {"today": "owner" if owner != ALL_OWNERS else "team", "streak": "team"},
 		"definition": _("A streak day requires every Today card to be resolved as Done or Skipped."),
 	}
 

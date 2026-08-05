@@ -4,6 +4,13 @@
       <div class="flex items-center gap-2">
         <span class="text-lg font-semibold text-ink-gray-8">{{ __('Today') }}</span>
         <Badge v-if="board.data?.date" variant="subtle" theme="gray" :label="prettyDate" />
+        <!-- Whose board this is belongs next to the title, not in Filters: it
+             says what you are looking at rather than narrowing it. -->
+        <Dropdown :options="ownerOptions" placement="bottom-start">
+          <Button :variant="viewingOwnBoard ? 'ghost' : 'subtle'" :theme="viewingOwnBoard ? 'gray' : 'blue'" icon-right="chevron-down">
+            <span class="max-w-[12rem] truncate">{{ ownerLabel }}</span>
+          </Button>
+        </Dropdown>
       </div>
     </template>
     <template #right-header>
@@ -28,7 +35,22 @@
           theme="blue"
           :label="`${toCallLeadCount} ${toCallLeadCount === 1 ? __('lead') : __('leads')} · ${callsOwed} ${callsOwed === 1 ? __('call') : __('calls')}`"
         />
-        <Badge v-else variant="subtle" theme="green" :label="__('All clear')" />
+        <!-- "All clear" has to mean you FINISHED, not that you were never given
+             anything: with the board scoped per person, a rep who owns no leads
+             would otherwise get the same congratulatory badge as one who worked
+             through 40 cards. -->
+        <Badge
+          v-else-if="boardCardCount"
+          variant="subtle"
+          theme="green"
+          :label="__('All clear')"
+        />
+        <Badge
+          v-else
+          variant="subtle"
+          theme="gray"
+          :label="viewingOwnBoard ? __('No leads on your board') : __('No leads on this board')"
+        />
         <Tooltip
           :text="__('Re-run the cadence now and add any newly-due leads or tasks')"
           placement="bottom"
@@ -282,6 +304,7 @@ import PropertyLinkModal from '@/components/Modals/PropertyLinkModal.vue'
 import SendTextModal from '@/components/Modals/SendTextModal.vue'
 import TaskModal from '@/components/Modals/TaskModal.vue'
 import { globalStore } from '@/stores/global'
+import { sessionStore } from '@/stores/session'
 import { statusesStore } from '@/stores/statuses'
 import { formatDate, timeAgo } from '@/utils'
 import { callHref, formatPhone } from '@/utils/phoneFormat'
@@ -300,6 +323,13 @@ import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 const { $socket } = globalStore()
 const { statusOptions, getLeadStatus } = statusesStore()
+const { user: sessionUser } = sessionStore()
+
+// Whose board is on screen. Deliberately NOT persisted across reloads: the
+// board is the list you work from, and silently reopening on a teammate's list
+// is the one mistake here that costs real calls. Switching is one click.
+const ALL_OWNERS = 'all'
+const selectedOwner = ref(sessionUser)
 const refreshing = ref(false)
 const syncStatus = ref('')
 const syncStatusTheme = ref('green')
@@ -377,6 +407,9 @@ const toCallLeadCount = computed(
   () => new Set(toCallItems.value.map((item) => item.lead)).size,
 )
 const callsOwed = computed(() => toCallCount.value)
+const boardCardCount = computed(() =>
+  columns.value.reduce((total, col) => total + col.items.length, 0),
+)
 const streakLabel = computed(() => {
   const days = todayReport.data?.streak?.current || 0
   return `🔥 ${days} ${days === 1 ? __('day') : __('days')}`
@@ -468,6 +501,7 @@ function dotClass(state) {
 
 function reloadWithFilters() {
   board.params = {
+    owner: selectedOwner.value,
     ...(selectedStatus.value ? { status: selectedStatus.value } : {}),
     ...(selectedPriority.value ? { priority: selectedPriority.value } : {}),
     ...(selectedSignal.value ? { signal: selectedSignal.value } : {}),
@@ -481,6 +515,61 @@ function setFilter(type, value) {
   if (type === 'signal') selectedSignal.value = value
   reloadWithFilters()
 }
+
+function setOwner(owner) {
+  if (owner === selectedOwner.value) return
+  selectedOwner.value = owner
+  reloadWithFilters()
+  // The report panel has to follow the board, or its progress bar describes a
+  // card set that isn't the one on screen.
+  todayReport.params = { owner: owner }
+  todayReport.reload()
+}
+
+const ownerLabel = computed(() => {
+  if (selectedOwner.value === ALL_OWNERS) return __('Everyone')
+  const match = (board.data?.owners || []).find(
+    (o) => o.user === selectedOwner.value,
+  )
+  if (match) return match.full_name
+  return selectedOwner.value === sessionUser ? __('My leads') : selectedOwner.value
+})
+
+const viewingOwnBoard = computed(() => selectedOwner.value === sessionUser)
+
+const ownerOptions = computed(() => {
+  const owners = board.data?.owners || []
+  const mine = owners.find((o) => o.user === sessionUser)
+  const options = [
+    {
+      label: `${__('My leads')}${mine ? ` (${mine.count})` : ''}`,
+      icon: viewingOwnBoard.value ? 'check' : null,
+      onClick: () => setOwner(sessionUser),
+    },
+  ]
+  const others = owners.filter((o) => o.user !== sessionUser)
+  if (others.length) {
+    options.push({
+      group: __('Other boards'),
+      items: others.map((o) => ({
+        label: `${o.full_name} (${o.count})`,
+        icon: selectedOwner.value === o.user ? 'check' : null,
+        onClick: () => setOwner(o.user),
+      })),
+    })
+  }
+  options.push({
+    group: __('Everyone'),
+    items: [
+      {
+        label: __('The whole team'),
+        icon: selectedOwner.value === ALL_OWNERS ? 'check' : null,
+        onClick: () => setOwner(ALL_OWNERS),
+      },
+    ],
+  })
+  return options
+})
 
 function openTodayItem(item) {
   selectedItem.value = item

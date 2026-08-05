@@ -134,6 +134,102 @@ duplicating. Work substantial features in a worktree of your own.
   dry-run by default). Pure app code — no ops/server-script piece. Backend only
   (no `.vue`). `crm/hooks.py` + `crm/api/name_format.py`.
 
+- **Lead-owner round robin (German ↔ Exe) on new inbound leads** — every
+  ownerless lead used to be stamped with one hardcoded owner by the ops server
+  script `Lead Default Owner`, which is why `lead_owner` said Dennis on ~99% of
+  leads even though German and Exe do the calling. A `CRM Lead` **`before_insert`**
+  hook now hands each new inbound lead to the next setter in the rotation.
+  Setting `lead_owner` is the whole job — `CRM Lead.after_insert` then does the
+  DocShare + `_assign` ToDo (verified end-to-end on prod, incl. the **Guest**
+  path the webhooks actually insert through). `crm/api/lead_round_robin.py`
+  (**new**) + `crm/hooks.py`.
+  - **Why `before_insert` in app code beats the server script**: `run_method`
+    calls `Document.hook(fn)` (all `doc_events`) and only *then*
+    `run_server_script_for_doc_event` — frappe `document.py` lines 1011 vs 1015.
+    So app hooks always win, and `Lead Default Owner` (`if not doc.lead_owner`)
+    degrades into a **safety net** that still stamps Dennis if the roster is
+    empty/disabled or this code raises. The hook swallows every exception on
+    purpose: a misrouted lead beats a lost lead.
+  - **No stored counter — the rotation is derived from the leads themselves**:
+    whoever holds fewer of *today's* leads gets the next one, ties broken by
+    alternation from whoever got the most recent one. Nothing to drift or reset,
+    and no read-modify-write to race on (two simultaneous webhook leads can both
+    pick the same person; the next lead self-corrects — verified). The daily
+    reset is the point: an all-time balance would mean a week off creates a debt
+    that dumps the next hundred leads on whoever came back. Alternation still
+    carries across midnight via the "who got the last one" tiebreak.
+  - **Scope**: only leads created with **no owner** — the inbound webhooks
+    (iSpeedToLead / Red Panda / PropertyLeads / Leadzolo), which insert as Guest.
+    UI-created leads already carry `lead_owner = current user` (`LeadModal.vue`)
+    and are left alone. **Bulk imports are excluded** (`import_hidden`): the
+    importer has its own "split between" picker, and a 500-row LeadPack would
+    swamp a daily rotation for leads that are parked rather than worked. Parked
+    leads are excluded from the *tally* too, via the NULL-safe
+    `import_hidden.isnull() | != 1` form (`!= 1` alone silently drops NULL rows —
+    the same trap `leads_dashboard.live()` documents).
+  - Roster + kill switch live in site_config (`lead_round_robin_users`,
+    `lead_round_robin_enabled`); disabled Users drop out automatically, so
+    disabling a CRM login is the vacation lever. `round_robin_status()` is the
+    whitelisted read-only "who's up next and why".
+  - **Catch-up ramp** (`lead_round_robin_ramp_user` / `_ramp_count` /
+    `_ramp_since` in site_config) — hands the first N leads after a moment to
+    one person before alternation starts, because the continuity backfill lands
+    lopsided (70/36) and the person behind should get the next few. Same
+    derived-from-data rule as the rotation: the ramp leads **are** the first
+    `count` leads owned by that user created at/after `since`. Nothing is
+    decremented — no counter to drift, no read-modify-write to race on, and it
+    self-expires (the keys can then be deleted at leisure).
+    - **GOTCHA — ramp deliveries must be netted OUT of the daily tally**
+      (`_todays_counts` subtracts `delivered_today`). Without that the ramp
+      undoes itself inside one day: 10 leads to Exe, the tally then reads
+      Exe 10 / German 0, and the balancer sends the next 10 to German for a net
+      effect of **zero**. Verified on prod with real inserts:
+      `EEEEEEEEEE` then `GEGEGEGEGE`, Exe still +10 at the end.
+    - Every caller routes through `_choose(roster)` so the hook, `next_owner()`
+      and `round_robin_status()` cannot disagree about whose turn it is.
+  - **GOTCHA — `_last_owner` must exclude parked imports** (it now shares
+    `_exclude_parked` with the tally). The June LeadPack put **514** parked leads
+    on the two setters with recent `creation` stamps, so the "most recent lead"
+    tiebreak was otherwise decided by whoever happened to be last in a
+    months-old bulk job.
+  - **Ops consequence — `lead_ring_alert.py` `DEFAULT_OWNER` had to change.**
+    `PUSHOVER_KEYS` only maps Lance and Dennis, and an unmapped owner fell back
+    to **Lance**. That fallback was previously unreachable (every lead was
+    Dennis's); with the rotation it would have fired on *every* new lead,
+    ringing Lance at priority 2 with 5-minute re-rings for an hour. Fallback is
+    now Dennis — exactly who has been getting these alerts all along. To give the
+    setters their own ring, add their Pushover user keys to Infisical and map
+    them; the lookup already keys on `lead_owner`.
+  - **Ownership now genuinely moves**, so things keyed on `lead_owner` follow it:
+    sequence call-tasks (`crm_sequence_runner_core.py`) and agreement
+    view/sign notifications (`agreement_notify.py`) go to the setter who owns
+    the lead instead of Dennis. The Today board is scoped by it (see below), and
+    German's/Exe's `/dashboard` populates for the first time.
+  - **Backfill** — `crm/api/lead_owner_backfill.py` (**new**,
+    `backfill_lead_owners(dry_run=1)`) moves EXISTING leads onto the setters.
+    Required, not optional: the scoped Today board shows German and Exe nothing
+    until it runs (all 81 of 2026-08-05's cards belonged to the old default
+    owner). Scope is **live workable leads only** — converted / dead / won /
+    parked-import (`import_hidden`) are excluded, and only leads on the *default*
+    owner or with no owner move, so a lead a human deliberately took is left
+    alone. Of 747 leads on prod, **106** qualify.
+    - **Two strategies, because prior contact is 70 German / 6 Exe** and
+      continuity genuinely conflicts with balance. Measured dry runs:
+      `continuity` (default) → **70/36, 0 relationships broken**;
+      `even` → **53/53, 38 broken**. Attribution reuses the activity report's
+      exact `caller`→`receiver`→`custom_quo_number` chain so the two can't
+      disagree about whose call it was; a lead is only claimed when ONE setter
+      leads outright.
+    - Writes `lead_owner` via `db.set_value(update_modified=False)` (no `doc.save`
+      → no SLA re-application, no disturbed `modified`), so **there is no Version
+      row and no timeline entry** for a moved lead — deliberate for a bulk admin
+      action, but remember it when someone asks why a lead changed hands.
+    - **Assignment is fixed up explicitly** because `CRM Lead.assign_agent` only
+      ever ADDS: left to itself every moved lead would be assigned to the old
+      owner AND the new one (the double-assignment `lead_import` warns about).
+      The old owner's ToDo is removed only when they were the previous
+      `lead_owner`; any other assignee was put there by a person and stays.
+
 - **Realtime task auto-refresh (no page reload), site-wide** — `CRM Task` now
   broadcasts a `crm_task_update` realtime event (with
   `reference_doctype`/`reference_docname`) on `after_insert`/`on_update`/`on_trash`,
@@ -164,11 +260,36 @@ duplicating. Work substantial features in a worktree of your own.
   - `frontend/src/pages/Leads.vue` + `pages/Deals.vue` — `crm_task_update`
     listener → `reloadKanban()` (Deals gained a `reloadKanban` helper); on-board
     membership guard to avoid needless reloads
-- **Shared "Today" board** (`/today`, top of the sidebar) — the surface the setters
+- **"Today" board** (`/today`, top of the sidebar) — the surface the setters
   work the day from; the 5am DM describes it, this is where German and Exe do it.
   Three columns (**To Call / Done / Skipped**) built from the SAME cadence
   definition as the standup DM, so the morning-call list and the worked list are
   the same list. `frontend/src/pages/Today.vue` + `crm/api/today_board.py`.
+  - **Scoped to YOUR leads, with a board switcher** (was one shared pile until
+    ownership was split). `get_today_board(owner=...)` defaults to the caller;
+    a dropdown next to the title opens anyone else's board or `owner="all"`
+    (the whole team — what everyone saw before). **Ownership is read off the
+    lead at request time, never stamped onto the card**: a card stamped at 5am
+    would keep pointing at the old rep the moment a lead was reassigned, and
+    reassigning is exactly what the round robin and the backfill do. Generation
+    is untouched — what LANDS on the board is unchanged, only the view is scoped.
+  - The selector is built from the **day's cards**, not the user list, so it
+    can't offer an empty board and an unexpected owner (a lead still on the old
+    default) is visible rather than silently unreachable. It's counted **before**
+    the owner filter so a rep whose own board is empty can still see where the
+    work is; everything after the filter (status counts, columns, totals)
+    describes the board actually on screen.
+  - **Not persisted across reloads** — unlike `dispoView`/`activityScope`, which
+    are view modes. This is *whose work you are doing*, and silently reopening on
+    a teammate's list is the one mistake here that costs real calls.
+  - `get_today_report(owner=...)` scopes **today's** figures + `completed_by` the
+    same way (a bar reading 12/87 over a 30-card board is worse than no bar), but
+    the **streak and recent-day history stay team-wide** — the streak shipped as a
+    shared artifact and silently personalising it would rewrite what the number
+    has meant. Response carries `scope`; `TodayReportModal.vue` labels which is
+    which. **GOTCHA**: `by_day` must stay team-wide inside `get_today_report` —
+    it's what the streak is computed from; only `today_stats`/`todays_rows` are
+    re-derived per owner.
   - **Cards are rows, not a live recomputation** (ops doctype `CRM Today Item`).
     "Done"/"Skipped" are judgements a person made; recomputing would lose them,
     or resurrect a dismissed card, as soon as a call got logged — and the board
