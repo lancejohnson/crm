@@ -182,7 +182,32 @@ duplicating. Work substantial features in a worktree of your own.
   - **Ownership now genuinely moves**, so things keyed on `lead_owner` follow it:
     sequence call-tasks (`crm_sequence_runner_core.py`) and agreement
     view/sign notifications (`agreement_notify.py`) go to the setter who owns
-    the lead instead of Dennis.
+    the lead instead of Dennis. The Today board is scoped by it (see below), and
+    German's/Exe's `/dashboard` populates for the first time.
+  - **Backfill** — `crm/api/lead_owner_backfill.py` (**new**,
+    `backfill_lead_owners(dry_run=1)`) moves EXISTING leads onto the setters.
+    Required, not optional: the scoped Today board shows German and Exe nothing
+    until it runs (all 81 of 2026-08-05's cards belonged to the old default
+    owner). Scope is **live workable leads only** — converted / dead / won /
+    parked-import (`import_hidden`) are excluded, and only leads on the *default*
+    owner or with no owner move, so a lead a human deliberately took is left
+    alone. Of 747 leads on prod, **106** qualify.
+    - **Two strategies, because prior contact is 70 German / 6 Exe** and
+      continuity genuinely conflicts with balance. Measured dry runs:
+      `continuity` (default) → **70/36, 0 relationships broken**;
+      `even` → **53/53, 38 broken**. Attribution reuses the activity report's
+      exact `caller`→`receiver`→`custom_quo_number` chain so the two can't
+      disagree about whose call it was; a lead is only claimed when ONE setter
+      leads outright.
+    - Writes `lead_owner` via `db.set_value(update_modified=False)` (no `doc.save`
+      → no SLA re-application, no disturbed `modified`), so **there is no Version
+      row and no timeline entry** for a moved lead — deliberate for a bulk admin
+      action, but remember it when someone asks why a lead changed hands.
+    - **Assignment is fixed up explicitly** because `CRM Lead.assign_agent` only
+      ever ADDS: left to itself every moved lead would be assigned to the old
+      owner AND the new one (the double-assignment `lead_import` warns about).
+      The old owner's ToDo is removed only when they were the previous
+      `lead_owner`; any other assignee was put there by a person and stays.
 
 - **Realtime task auto-refresh (no page reload), site-wide** — `CRM Task` now
   broadcasts a `crm_task_update` realtime event (with
@@ -214,11 +239,36 @@ duplicating. Work substantial features in a worktree of your own.
   - `frontend/src/pages/Leads.vue` + `pages/Deals.vue` — `crm_task_update`
     listener → `reloadKanban()` (Deals gained a `reloadKanban` helper); on-board
     membership guard to avoid needless reloads
-- **Shared "Today" board** (`/today`, top of the sidebar) — the surface the setters
+- **"Today" board** (`/today`, top of the sidebar) — the surface the setters
   work the day from; the 5am DM describes it, this is where German and Exe do it.
   Three columns (**To Call / Done / Skipped**) built from the SAME cadence
   definition as the standup DM, so the morning-call list and the worked list are
   the same list. `frontend/src/pages/Today.vue` + `crm/api/today_board.py`.
+  - **Scoped to YOUR leads, with a board switcher** (was one shared pile until
+    ownership was split). `get_today_board(owner=...)` defaults to the caller;
+    a dropdown next to the title opens anyone else's board or `owner="all"`
+    (the whole team — what everyone saw before). **Ownership is read off the
+    lead at request time, never stamped onto the card**: a card stamped at 5am
+    would keep pointing at the old rep the moment a lead was reassigned, and
+    reassigning is exactly what the round robin and the backfill do. Generation
+    is untouched — what LANDS on the board is unchanged, only the view is scoped.
+  - The selector is built from the **day's cards**, not the user list, so it
+    can't offer an empty board and an unexpected owner (a lead still on the old
+    default) is visible rather than silently unreachable. It's counted **before**
+    the owner filter so a rep whose own board is empty can still see where the
+    work is; everything after the filter (status counts, columns, totals)
+    describes the board actually on screen.
+  - **Not persisted across reloads** — unlike `dispoView`/`activityScope`, which
+    are view modes. This is *whose work you are doing*, and silently reopening on
+    a teammate's list is the one mistake here that costs real calls.
+  - `get_today_report(owner=...)` scopes **today's** figures + `completed_by` the
+    same way (a bar reading 12/87 over a 30-card board is worse than no bar), but
+    the **streak and recent-day history stay team-wide** — the streak shipped as a
+    shared artifact and silently personalising it would rewrite what the number
+    has meant. Response carries `scope`; `TodayReportModal.vue` labels which is
+    which. **GOTCHA**: `by_day` must stay team-wide inside `get_today_report` —
+    it's what the streak is computed from; only `today_stats`/`todays_rows` are
+    re-derived per owner.
   - **Cards are rows, not a live recomputation** (ops doctype `CRM Today Item`).
     "Done"/"Skipped" are judgements a person made; recomputing would lose them,
     or resurrect a dismissed card, as soon as a call got logged — and the board
