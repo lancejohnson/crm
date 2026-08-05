@@ -91,9 +91,11 @@
               v-if="!visible.length"
               class="px-3 py-4 text-center text-sm text-ink-gray-4"
             >
-              {{ hasStages
-                ? __('No buyers in the selected statuses.')
-                : __('None of these buyers have a phone number on file.') }}
+              <!-- The empty state has to name the RIGHT reason. Do-not-contact
+                   removes people from this list, so "nobody has a phone number"
+                   was actively false for a buyer who has one and simply asked to
+                   be left alone (caught in verification, gw298). -->
+              {{ emptyReason }}
             </div>
           </div>
           <div v-if="noPhone.length" class="mt-1 text-xs text-ink-gray-4">
@@ -309,6 +311,17 @@ const stagesPresent = computed(() => {
   return STAGE_ORDER.filter((s) => set.has(s))
 })
 const hasStages = computed(() => stagesPresent.value.length > 0)
+
+const emptyReason = computed(() => {
+  if (doNotContact.value.length && !contactable.value.length)
+    return doNotContact.value.length === 1
+      ? __('That buyer asked not to be contacted.')
+      : __('All of these buyers asked not to be contacted.')
+  if (hasStages.value) return __('No buyers in the selected statuses.')
+  if (doNotContact.value.length)
+    return __('No one left to text — the rest asked not to be contacted.')
+  return __('None of these buyers have a phone number on file.')
+})
 const activeStages = ref(new Set())
 
 function stageActive(s) {
