@@ -20,6 +20,7 @@ import frappe
 import requests
 from frappe import _
 
+from crm.api.do_not_contact import is_blocked
 from crm.api.investorlift_ingest import BUYER_DOCTYPE
 
 OPENPHONE_MESSAGES_API = "https://api.openphone.com/v1/messages"
@@ -74,6 +75,17 @@ def send_buyer_text(buyer, content, from_number=None):
 	b = frappe.db.get_value(BUYER_DOCTYPE, buyer, ["name", "buyer_name", "phone"], as_dict=True)
 	if not b:
 		frappe.throw(_("Buyer not found."), frappe.DoesNotExistError)
+
+	# Hard stop, server-side and last (gw296). The UI also filters these out, but a
+	# buyer who asked to be removed must not depend on a client-side filter staying
+	# correct: the Danny Stoica text went out precisely because the signal the UI
+	# filtered on (the Dispo column) had been quietly changed by another system.
+	if is_blocked(b.name):
+		frappe.throw(
+			_("{0} asked not to be contacted. Clear Do Not Contact on the buyer first.")
+			.format(b.buyer_name or buyer)
+		)
+
 	e164 = _e164(b.phone)
 	if not e164:
 		frappe.throw(_("{0} has no valid phone number.").format(b.buyer_name or buyer))

@@ -97,6 +97,10 @@ def get_buyers(search=None, metro=None, property=None, import_list=None):
 				fields.append(fieldname)
 	if frappe.get_meta(BUYER_DOCTYPE).has_field("quo_tags"):
 		fields += ["quo_tags"]
+	# do-not-contact drives the row badge and the bulk-text exclusion (gw296)
+	for fieldname in ("do_not_contact", "do_not_contact_reason"):
+		if frappe.get_meta(BUYER_DOCTYPE).has_field(fieldname):
+			fields.append(fieldname)
 
 	filters = []
 	if metro and _has_market_fields():

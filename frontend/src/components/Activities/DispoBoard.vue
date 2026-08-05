@@ -49,6 +49,11 @@
           v-if="b.verified"
           class="size-3.5 shrink-0 text-ink-blue-3"
         />
+        <BanIcon
+          v-if="b.do_not_contact"
+          class="size-3.5 shrink-0 text-ink-red-4"
+          :title="dncTitle(b)"
+        />
       </span>
       <span class="flex min-w-0 flex-wrap gap-1">
         <span
@@ -149,6 +154,14 @@
               <BadgeCheckIcon
                 v-if="b.verified"
                 class="size-4 shrink-0 text-ink-blue-3"
+              />
+              <!-- Do-not-contact is shown on the card itself, next to the name.
+                   It is the one fact about a buyer you must not have to open a
+                   panel to discover (gw296). -->
+              <BanIcon
+                v-if="b.do_not_contact"
+                class="size-4 shrink-0 text-ink-red-4"
+                :title="dncTitle(b)"
               />
               <div class="flex-1" />
               <Badge
@@ -257,6 +270,7 @@
 
 <script setup>
 import BuyerRejectionReasonBadge from '@/components/BuyerRejectionReasonBadge.vue'
+import BanIcon from '~icons/lucide/ban'
 import BuyerRejectionReasonModal from '@/components/Modals/BuyerRejectionReasonModal.vue'
 import IndicatorIcon from '@/components/Icons/IndicatorIcon.vue'
 import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
@@ -344,6 +358,13 @@ const rejectionSummary = computed(() => {
 
 function rejectionReasons(buyer) {
   return parseBuyerRejectionReasons(buyer?.not_interested_reasons)
+}
+
+function dncTitle(b) {
+  const why = (b.do_not_contact_reason || '').trim()
+  return why
+    ? `${__('Do not contact')} — ${why}`
+    : __('Do not contact — this buyer asked to be removed')
 }
 
 function tagList(buyer_type) {

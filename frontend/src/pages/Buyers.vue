@@ -169,6 +169,11 @@
         <span class="flex min-w-0 items-center gap-1.5">
           <span class="truncate font-medium">{{ b.buyer_name || '—' }}</span>
           <BadgeCheckIcon v-if="b.verified" class="size-3.5 shrink-0 text-ink-blue-3" />
+          <BanIcon
+            v-if="b.do_not_contact"
+            class="size-3.5 shrink-0 text-ink-red-4"
+            :title="__('Do not contact — this buyer asked to be removed')"
+          />
         </span>
         <span class="truncate text-ink-gray-6">{{ formatPhone(b.phone) || '—' }}</span>
         <span class="truncate text-ink-gray-6">{{ b.email || '—' }}</span>
@@ -225,6 +230,7 @@ import BulkTextModal from '@/components/Modals/BulkTextModal.vue'
 import SearchIcon from '~icons/lucide/search'
 import UsersIcon from '~icons/lucide/users-round'
 import BadgeCheckIcon from '~icons/lucide/badge-check'
+import BanIcon from '~icons/lucide/ban'
 import Autocomplete from '@/components/frappe-ui/Autocomplete.vue'
 import { formatPhone } from '@/utils/phoneFormat'
 import {
@@ -285,11 +291,14 @@ function stageColor(s) {
 // default-excluded status(es), so the "Text these (N)" button shows the count
 // that will actually be pre-selected (Not Interested is off by default).
 const EXCLUDE_BY_DEFAULT = new Set(['Not Interested'])
+// the post-failsafe count, so the button previews what will actually be
+// pre-selected: phone on file, not a default-excluded stage, and not opted out
 const textTheseCount = computed(
   () =>
     rows.value.filter(
       (r) =>
         (r.phone || '').trim() &&
+        !r.do_not_contact &&
         !(r.interest_stage && EXCLUDE_BY_DEFAULT.has(r.interest_stage)),
     ).length,
 )
@@ -321,6 +330,7 @@ function toRecipient(r) {
     phone: r.phone,
     first_name: r.first_name,
     stage: r.interest_stage, // per-property status (only when property-filtered)
+    do_not_contact: r.do_not_contact, // asked to be removed — modal drops them
   }
 }
 // text everyone currently in the (filtered) list

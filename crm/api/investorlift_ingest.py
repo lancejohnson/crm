@@ -67,6 +67,13 @@ STAGE_TO_COLUMN = {
 }
 UNPUSHABLE_STAGES = ("New",)
 
+# How many times we'll try to make InvestorLift accept a stage before giving up
+# and reporting it. IL's move handler no-ops silently on a transition it doesn't
+# like, so "tried and nothing happened" is indistinguishable from "tried and it
+# worked" at push time -- only a later scrape settles it. Without a cap, a
+# transition IL refuses is re-attempted every cycle forever.
+MAX_STAGE_PUSH_ATTEMPTS = 5
+
 MANAGER_ROLES = ("System Manager", "Sales Manager")
 MANUAL_SYNC_TTL = 30 * 60
 MANUAL_SYNC_LEASE = 5 * 60
@@ -137,6 +144,17 @@ def _upsert_buyer(row):
 	if name:
 		# only overwrite with non-empty values (never blank out on a sparse scrape)
 		update = {k: v for k, v in fields.items() if v not in (None, "")}
+		# The team's habit is to append a marker to the name of someone who asked to
+		# be removed ("Danny Stoica (REMOVE)"). IL rewrites buyer_name from its own
+		# scrape every cycle, silently and without bumping `modified`, so that marker
+		# used to survive about five minutes. do_not_contact is the real record now,
+		# but for exactly those buyers we also stop overwriting the name, so what the
+		# team wrote on the card stays written (gw296).
+		if frappe.get_meta(BUYER_DOCTYPE).has_field("do_not_contact") and \
+				frappe.db.get_value(BUYER_DOCTYPE, name, "do_not_contact"):
+			update.pop("buyer_name", None)
+			update.pop("first_name", None)
+			update.pop("last_name", None)
 		if update:
 			# db.set_value fires no doc events — push identity changes to Quo,
 			# but only when a value ACTUALLY changed (the scraper re-upserts
@@ -158,7 +176,19 @@ def _upsert_buyer(row):
 	return doc.name
 
 
-def _upsert_relationship(lead, buyer, row):
+def _is_human_removal(current):
+	"""Did a person deliberately park this card in Not Interested?
+
+	`not_interested_by` is stamped only by crm.api.buyers.move_buyer_stage, i.e.
+	only by a human acting on the Dispo board. An IL-origin move into that column
+	leaves it empty, so this cannot mistake InvestorLift's own bookkeeping for a
+	decision one of ours made.
+	"""
+	return bool(current.get("not_interested_by")) and \
+		current.get("interest_stage") == "Not Interested"
+
+
+def _upsert_relationship(lead, buyer, row, stage_is_authoritative=True):
 	"""Create/update the per-property CRM Lead Buyer row.
 
 	`interest_stage` has two writers: this sync and a human on the Dispo board
@@ -178,6 +208,23 @@ def _upsert_relationship(lead, buyer, row):
 	stale forever against real buyer activity. Only `interest_stage` is
 	protected — direction/message_count/last_active are pure IL telemetry that
 	nobody edits by hand, so they still overwrite freely.
+
+	TWO EXCEPTIONS, both learned the hard way in gw296 (the Danny Stoica incident):
+
+	`stage_is_authoritative=False` — the caller invented the column instead of
+	reading it off the board. `_handle_address_request` and `pull_new_inquiries`
+	both hardcode "NEW LEADS", which is a fine default for a card that does not
+	exist yet and a lie about one that does: feeding it to the comparison above
+	makes it look like IL moved the card to New, which re-snapshots `il_stage`
+	and hands the next real scrape a false "IL moved it" signal.
+
+	A human's explicit Not Interested is **never** undone by an IL-origin move.
+	That column is where the team records "this person asked us to stop", and
+	InvestorLift moving a card back is not new information about our own
+	decision. `il_stage` still records what IL says, so the push queue keeps
+	trying to make IL agree — we just don't let IL win in the meantime. (The
+	durable opt-out lives on CRM Buyer.do_not_contact; this only stops the board
+	silently disagreeing with the person who worked it.)
 	"""
 	stage = COLUMN_TO_STAGE.get((row.get("column") or "").strip().lower())
 	direction = (row.get("direction") or "").strip().capitalize()
@@ -192,7 +239,11 @@ def _upsert_relationship(lead, buyer, row):
 	track_il_stage = meta.has_field("il_stage")
 	track_il_lead = meta.has_field("il_lead_id")
 
-	lookup = ["name", "il_stage"] if track_il_stage else ["name"]
+	lookup = ["name", "interest_stage"]
+	if track_il_stage:
+		lookup.append("il_stage")
+	if meta.has_field("not_interested_by"):
+		lookup.append("not_interested_by")
 	current = frappe.db.get_value(
 		LEAD_BUYER_DOCTYPE, {"lead": lead, "buyer": buyer}, lookup, as_dict=True
 	)
@@ -210,11 +261,19 @@ def _upsert_relationship(lead, buyer, row):
 	vals = {k: v for k, v in vals.items() if v not in (None, "")}
 
 	if current:
-		if stage and track_il_stage:
+		if not stage_is_authoritative:
+			# a synthesised column says nothing about where the card sits now
+			vals.pop("interest_stage", None)
+		elif stage and track_il_stage:
 			if current.get("il_stage") == stage:
 				vals.pop("interest_stage", None)  # IL unchanged -> don't touch the CRM's value
 			else:
 				vals["il_stage"] = stage  # IL moved -> take it, and re-snapshot
+				if meta.has_field("il_push_attempts"):
+					# the board actually changed, so whatever we were retrying is moot
+					vals["il_push_attempts"] = 0
+				if _is_human_removal(current):
+					vals.pop("interest_stage", None)
 		if vals:
 			frappe.db.set_value(LEAD_BUYER_DOCTYPE, current["name"], vals, update_modified=False)
 		return current["name"], False
@@ -250,10 +309,14 @@ def get_pending_stage_pushes(il_property_id):
 		return {"ok": True, "lead": lead, "pushes": [], "unpushable": [],
 		        "note": "il_stage/il_lead_id not provisioned on this site"}
 
+	fields = ["name", "buyer", "interest_stage", "il_stage", "il_lead_id"]
+	track_attempts = meta.has_field("il_push_attempts")
+	if track_attempts:
+		fields.append("il_push_attempts")
 	rows = frappe.get_all(
 		LEAD_BUYER_DOCTYPE,
 		filters={"lead": lead},
-		fields=["name", "buyer", "interest_stage", "il_stage", "il_lead_id"],
+		fields=fields,
 		limit_page_length=0,
 	)
 
@@ -261,6 +324,13 @@ def get_pending_stage_pushes(il_property_id):
 	for r in rows:
 		if not r.interest_stage or r.interest_stage == r.il_stage:
 			continue  # nothing pending
+		if track_attempts and int(r.get("il_push_attempts") or 0) >= MAX_STAGE_PUSH_ATTEMPTS:
+			# InvestorLift has ignored this move MAX times. Keep the CRM's value --
+			# it's a human's decision -- but stop pretending the push will work.
+			unpushable.append({"relationship": r.name, "stage": r.interest_stage,
+			                   "reason": f"InvestorLift did not accept this move after "
+			                             f"{MAX_STAGE_PUSH_ATTEMPTS} attempts; move it on IL by hand"})
+			continue
 		if not r.il_lead_id:
 			unpushable.append({"relationship": r.name, "stage": r.interest_stage,
 			                   "reason": "no il_lead_id captured for this card yet"})
@@ -281,23 +351,48 @@ def get_pending_stage_pushes(il_property_id):
 
 
 @frappe.whitelist()
-def confirm_stage_push(relationship, stage):
-	"""Record that InvestorLift now agrees with the CRM for this row.
+def record_stage_push_attempt(relationship, pushed=0):
+	"""Note that the daemon tried to push this row's stage onto InvestorLift.
 
-	Called only after the daemon has re-read the board and SEEN the card in its
-	new column -- InvestorLift's move handler is a silent no-op on a rejected
-	transition, so an unverified push must never reach this function. Setting
-	il_stage = interest_stage is what stops the row from being pushed again.
+	This REPLACES the old `confirm_stage_push`, which let the daemon declare that
+	IL agreed and wrote `il_stage` on the strength of it. That is what broke the
+	Danny Stoica card (gw296): the daemon "verified" a push by re-reading the
+	board's React store 3.5s after clicking, which is the client's own optimistic
+	state, not InvestorLift's. IL never persisted the move, `il_stage` was set to
+	Not Interested anyway, and the next scrape read the real column, concluded IL
+	had moved the card, and overwrote the human's decision. Three buyers marked
+	Not Interested were silently returned to a textable column that way; one of
+	them then received a bulk text after asking to be removed.
+
+	So the invariant is now absolute and worth stating plainly:
+
+	    `il_stage` is ONLY ever written from an observed scrape of the board.
+
+	Nothing else may claim to know what InvestorLift thinks. A push that really
+	landed needs no confirmation -- the next ingest sees the new column and
+	reconciles on its own, which is the same self-healing path the daemon already
+	relied on whenever a confirm call failed.
+
+	All this records is how many times we have tried, so a transition IL keeps
+	refusing stops being retried forever and gets surfaced instead.
 	"""
 	_guard()
 	if not frappe.db.exists(LEAD_BUYER_DOCTYPE, relationship):
 		return {"ok": False, "error": "relationship not found"}
-	if not frappe.get_meta(LEAD_BUYER_DOCTYPE).has_field("il_stage"):
-		return {"ok": False, "error": "il_stage not provisioned"}
-	frappe.db.set_value(LEAD_BUYER_DOCTYPE, relationship, {"il_stage": stage},
-	                    update_modified=False)
+	meta = frappe.get_meta(LEAD_BUYER_DOCTYPE)
+	if not meta.has_field("il_push_attempts"):
+		return {"ok": True, "note": "il_push_attempts not provisioned; nothing recorded"}
+
+	attempts = int(frappe.db.get_value(LEAD_BUYER_DOCTYPE, relationship, "il_push_attempts") or 0) + 1
+	vals = {"il_push_attempts": attempts}
+	if meta.has_field("il_push_last_at"):
+		vals["il_push_last_at"] = now_datetime()
+	frappe.db.set_value(LEAD_BUYER_DOCTYPE, relationship, vals, update_modified=False)
 	frappe.db.commit()
-	return {"ok": True, "relationship": relationship, "il_stage": stage}
+	return {
+		"ok": True, "relationship": relationship, "attempts": attempts,
+		"exhausted": attempts >= MAX_STAGE_PUSH_ATTEMPTS,
+	}
 
 
 @frappe.whitelist()
@@ -631,7 +726,9 @@ def _handle_address_request(buyer_name, address):
 	try:
 		frappe.db.commit()  # new snapshot: see anything a parallel handler just wrote
 		buyer = _upsert_buyer(row)
-		_upsert_relationship(lead, buyer, row)
+		# "NEW LEADS" above is a default for a card we may be creating, NOT a reading
+		# of IL's board -- see _upsert_relationship's docstring (gw296).
+		_upsert_relationship(lead, buyer, row, stage_is_authoritative=False)
 		frappe.db.commit()
 	finally:
 		frappe.db.sql("SELECT RELEASE_LOCK(%s)", lock)
@@ -700,7 +797,10 @@ def pull_new_inquiries():
 			}
 			try:
 				buyer = _upsert_buyer(row)
-				_, is_new = _upsert_relationship(lead.name, buyer, row)
+				# same synthesised "NEW LEADS" caveat as the address-request webhook
+				_, is_new = _upsert_relationship(
+					lead.name, buyer, row, stage_is_authoritative=False
+				)
 			except Exception:
 				frappe.log_error(frappe.get_traceback(), f"IL inquiry pull failed for customer {cid}")
 				continue
@@ -805,6 +905,10 @@ def get_buyer(buyer):
 			fields.append(fieldname)
 	if frappe.get_meta(BUYER_DOCTYPE).has_field("quo_tags"):
 		fields += ["quo_tags"]
+	for fieldname in ("do_not_contact", "do_not_contact_reason",
+	                  "do_not_contact_by", "do_not_contact_at"):
+		if meta.has_field(fieldname):
+			fields.append(fieldname)
 	doc = frappe.db.get_value(BUYER_DOCTYPE, buyer, fields, as_dict=True)
 	from crm.api.buyers import _json_list, _parse_metros
 
@@ -914,10 +1018,29 @@ def get_deal_buyers(lead):
 			"not_interested_by", "not_interested_at",
 		) if meta.has_field(fieldname)
 	]
-	return frappe.get_all(
+	rows = frappe.get_all(
 		LEAD_BUYER_DOCTYPE,
 		filters={"lead": lead},
 		fields=fields,
 		order_by="interest_stage asc, modified desc",
 		limit_page_length=0,
 	)
+
+	# Do-not-contact rides along so the board can mark the card and the bulk-text
+	# modal can drop the buyer without a second round trip. It lives on CRM Buyer,
+	# not the relationship: asking us to stop texting is a statement about the
+	# person, not about one property (gw296).
+	if rows and frappe.get_meta(BUYER_DOCTYPE).has_field("do_not_contact"):
+		flags = {
+			b.name: b for b in frappe.get_all(
+				BUYER_DOCTYPE,
+				filters={"name": ("in", list({r.buyer for r in rows if r.buyer}))},
+				fields=["name", "do_not_contact", "do_not_contact_reason"],
+				limit_page_length=0,
+			)
+		}
+		for r in rows:
+			flag = flags.get(r.buyer)
+			r["do_not_contact"] = int((flag or {}).get("do_not_contact") or 0)
+			r["do_not_contact_reason"] = (flag or {}).get("do_not_contact_reason")
+	return rows

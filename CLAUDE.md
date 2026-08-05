@@ -1402,6 +1402,79 @@ duplicating. Work substantial features in a worktree of your own.
   `utils/buyerRejectionReasons.js`. Ops:
   `scripts/setup_buyer_rejection_reasons.py` adds JSON reasons / note / by / at
   fields; `setup_investorlift.py` includes them for fresh sites.
+- **Do-not-contact + InvestorLift stage integrity** (gw296) — a buyer replied
+  "remove", Exe moved his card to **Not Interested**, and it was back in
+  **Attempted to Contact** on the next refresh; a later bulk text reached him and
+  he complained. Three separate defects, all now closed. **The rule that came out
+  of it: `il_stage` may ONLY ever be written from an observed scrape of the
+  board.** Nothing else may claim to know what InvestorLift thinks.
+  - **The sync daemon was confirming pushes InvestorLift never accepted.**
+    `_push_stages` clicked the card over, then "verified" by re-reading
+    `lead.lead_status` **out of the board's React store** 3.5s later — client-side
+    optimistic state that `onTaskMove` updates whether or not IL persists
+    anything — and called `confirm_stage_push`, which stamped
+    `il_stage = "Not Interested"`. IL had silently dropped the move (its handler
+    no-ops on a rejected transition), so the next scrape read the real column,
+    saw it differ from the poisoned `il_stage`, concluded "IL moved the card" and
+    overwrote the human's decision — **silently, via `db.set_value`, so it left no
+    version-history row**, which is why it looked like nothing had touched it.
+    Proof it never landed: push.log claims success at 11:28, and the *next* push
+    at 11:39 still reports `before: attempted_to_contact`.
+    `confirm_stage_push` is **replaced by `record_stage_push_attempt`**, which
+    records only that we tried. A push that really landed needs no confirmation —
+    the next ingest sees the new column and reconciles, the same self-healing
+    path the daemon already relied on whenever a confirm call failed.
+    `MAX_STAGE_PUSH_ATTEMPTS = 5` then reports the row as unpushable instead of
+    retrying a transition IL refuses forever (`il_push_attempts` resets whenever
+    the board actually changes).
+  - **The address-request webhook and the inquiry pull both hardcode
+    `"column": "NEW LEADS"`** — a fine default for a card that doesn't exist yet
+    and a lie about one that does. Fed to the comparison it read as "IL moved
+    this card to New", re-snapshotting `il_stage` and handing the next real
+    scrape a false signal. Both now pass `stage_is_authoritative=False`, which
+    applies the stage on CREATE only.
+  - **A human's explicit Not Interested is never undone by an IL-origin move.**
+    `not_interested_by` is stamped only by `move_buyer_stage`, i.e. only by a
+    person, so it can't mistake IL's own bookkeeping for one of our decisions.
+    `il_stage` still records what IL says (so the push queue keeps trying); IL
+    just doesn't get to win in the meantime.
+  - **`CRM Buyer.do_not_contact` is the durable opt-out** — the board column was
+    the wrong place to store a removal request, because it is shared state with a
+    third party that has no idea anyone asked us to stop. No IL code path writes
+    the new field. `crm/api/do_not_contact.py` (**new**): `is_opt_out()` matches
+    carrier keywords **only as the whole message** ("cancel"/"end" occur
+    naturally — "I want to cancel the contract on 123 Main" must not flag) plus
+    unambiguous phrases anywhere ("remove me", "stop texting", "lose my number");
+    `check_inbound_opt_out` is a `Quo Message` after_insert hook that flags the
+    buyer automatically; `backfill_opt_outs(dry_run=1)` sweeps stored history.
+    **"not interested" is deliberately NOT an opt-out** — conflating a board
+    stage with a removal request is the original mistake. Ambiguous compound
+    cases ("take me off this property but keep sending others") flag, because
+    over-applying costs one click to undo and `do_not_contact_reason` stores the
+    message verbatim so the reviewer sees exactly what tripped it.
+  - **`bulk_text.send_buyer_text` refuses a flagged buyer server-side**, last,
+    after the UI has already dropped them — the text went out precisely because
+    the signal the UI filtered on could be changed by another system. The modal
+    **removes** them rather than unchecking (so "Select all" can't reach them) and
+    **names them** in a red banner; `textTheseCount` reflects the post-failsafe
+    number. Badges on the Dispo card + list, the /buyers row, and a banner with
+    an Allow button on the buyer panel (turning it ON is unconfirmed, turning it
+    OFF asks).
+  - `_upsert_buyer` also **stops rewriting `buyer_name`/first/last for a flagged
+    buyer**: the team's habit is to append "(REMOVE)" to the name, and IL rewrote
+    it from its own scrape every cycle with `update_modified=False`, so the
+    marker vanished within minutes leaving `modified` still showing the human's
+    edit. (Observed live: the Aug-3 "(REMOVE)" was gone by Aug-5 with no human
+    touch.)
+  - Ops: `scripts/setup_do_not_contact.py` (CRM Buyer `do_not_contact` /
+    `_reason` / `_by` / `_at`; CRM Lead Buyer `il_push_attempts` /
+    `il_push_last_at`). Daemon lives in `~/Projects/Groundwork/investorlift-sync`
+    (launchd `com.groundwork.investorlift-sync`) — **it is a separate repo from
+    the ops repo and must be restarted for daemon.py changes to take effect.**
+  - GOTCHA: the sync writes with `db.set_value(..., update_modified=False)`
+    throughout, so **a machine overwrite leaves no Version row and does not move
+    `modified`**. A field that "changed by itself" with an old `modified` stamp is
+    the signature — look for a `set_value` writer, not a user.
 - **Lead property photos → shared Google Drive** — a **Photos** sidebar card +
   **Photos** item in the Lead header More ▾ menu open a gallery modal: drag-drop
   or pick multiple files, scroll a thumbnail grid, click through them in the

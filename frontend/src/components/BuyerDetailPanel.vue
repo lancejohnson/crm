@@ -37,6 +37,45 @@
         </div>
       </div>
 
+      <!-- Do not contact. Stated as a banner rather than a field in the list
+           below, because it overrides everything else on this panel: it is the
+           answer to "can I text this person", and the Danny Stoica incident
+           (gw296) happened because that answer was buried in a board column
+           another system could quietly change. -->
+      <div
+        v-if="data.do_not_contact"
+        class="flex items-start gap-2 rounded border border-outline-red-2 bg-surface-red-1 px-3 py-2"
+      >
+        <BanIcon class="mt-0.5 size-4 shrink-0 text-ink-red-4" />
+        <div class="min-w-0 flex-1">
+          <div class="text-sm font-medium text-ink-red-4">
+            {{ __('Do not contact') }}
+          </div>
+          <div v-if="data.do_not_contact_reason" class="mt-0.5 break-words text-xs text-ink-red-3">
+            {{ data.do_not_contact_reason }}
+          </div>
+          <div class="mt-1 text-xs text-ink-gray-5">
+            {{ __('Bulk texting is blocked for this buyer.') }}
+          </div>
+        </div>
+        <Button
+          variant
+          size="sm"
+          :loading="dncSaving"
+          :label="__('Allow')"
+          @click="setDoNotContact(false)"
+        />
+      </div>
+      <div v-else class="flex justify-end">
+        <Button
+          variant="ghost"
+          size="sm"
+          :loading="dncSaving"
+          :label="__('Mark do not contact')"
+          @click="setDoNotContact(true)"
+        />
+      </div>
+
       <!-- contact -->
       <div class="flex flex-col gap-1.5 text-sm">
         <div v-if="data.phone" class="flex items-center gap-1.5">
@@ -149,11 +188,12 @@ import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
 import Email2Icon from '@/components/Icons/Email2Icon.vue'
 import CopyIcon from '~icons/lucide/copy'
 import BadgeCheckIcon from '~icons/lucide/badge-check'
+import BanIcon from '~icons/lucide/ban'
 import MapPinIcon from '~icons/lucide/map-pin'
 import DispoIcon from '~icons/lucide/columns-3'
 import { copyToClipboard, timeAgo } from '@/utils'
 import { formatPhone } from '@/utils/phoneFormat'
-import { Avatar, Badge, Button, createResource } from 'frappe-ui'
+import { Avatar, Badge, Button, call, createResource, toast } from 'frappe-ui'
 import { computed, ref } from 'vue'
 
 const props = defineProps({
@@ -162,9 +202,37 @@ const props = defineProps({
   buyerId: { type: String, required: true },
 })
 
-defineEmits(['edit', 'delete', 'reload', 'add-to-deal', 'create-agreement'])
+const emit = defineEmits(['edit', 'delete', 'reload', 'add-to-deal', 'create-agreement'])
 
 const agreementsCard = ref(null)
+const dncSaving = ref(false)
+
+// Turning this ON needs no confirmation — erring toward not texting someone is
+// free. Turning it OFF is the one that can put a text in front of a person who
+// asked us to stop, so it asks first.
+async function setDoNotContact(enabled) {
+  if (!enabled) {
+    const who = props.data?.buyer_name || __('this buyer')
+    if (
+      !window.confirm(
+        __('Allow contacting {0} again? They previously asked to be removed.', [who]),
+      )
+    )
+      return
+  }
+  dncSaving.value = true
+  try {
+    await call('crm.api.do_not_contact.set_buyer_do_not_contact', {
+      buyer: props.buyerId,
+      enabled: enabled ? 1 : 0,
+    })
+    emit('reload')
+  } catch (e) {
+    toast.error(e.messages?.[0] || __('Could not update Do Not Contact'))
+  } finally {
+    dncSaving.value = false
+  }
+}
 const sections = createResource({
   url: 'crm.fcrm.doctype.crm_fields_layout.crm_fields_layout.get_sidepanel_sections',
   cache: ['sidePanelSections', 'CRM Buyer'],

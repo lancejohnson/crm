@@ -50,6 +50,9 @@
               <span v-if="noPhone.length" class="text-ink-gray-4">
                 · {{ noPhone.length }} {{ __('without a phone') }}
               </span>
+              <span v-if="doNotContact.length" class="text-ink-red-3">
+                · {{ doNotContact.length }} {{ __('do not contact') }}
+              </span>
             </span>
             <div class="flex gap-3">
               <button class="text-xs text-ink-blue-3 hover:underline" @click="selectAll">
@@ -95,6 +98,16 @@
           </div>
           <div v-if="noPhone.length" class="mt-1 text-xs text-ink-gray-4">
             {{ noPhone.length }} {{ __('buyer(s) skipped — no phone number on file.') }}
+          </div>
+          <!-- Named, not just counted: "3 excluded" is easy to scroll past, and the
+               whole point is that a removal request stays visible (gw296). -->
+          <div
+            v-if="doNotContact.length"
+            class="mt-1 rounded border border-outline-red-1 bg-surface-red-1 px-2 py-1.5 text-xs text-ink-red-4"
+          >
+            {{ doNotContact.length }}
+            {{ __('buyer(s) removed — they asked not to be contacted:') }}
+            {{ doNotContact.map((r) => r.buyer_name || r.name).join(', ') }}
           </div>
         </div>
 
@@ -271,18 +284,28 @@ const dialogTitle = computed(() =>
     : __('Text buyers'),
 )
 
+// Buyers who asked not to be contacted are removed outright — not unchecked,
+// removed: they must not be reachable by a stray "Select all" (gw296). The
+// backend refuses them too, so this is the courteous layer, not the guard.
+const doNotContact = computed(() =>
+  props.recipients.filter((r) => r.do_not_contact),
+)
+const contactable = computed(() =>
+  props.recipients.filter((r) => !r.do_not_contact),
+)
+
 // buyers we can actually text (have a phone) vs. those we can't
 const textable = computed(() =>
-  props.recipients.filter((r) => (r.phone || '').trim()),
+  contactable.value.filter((r) => (r.phone || '').trim()),
 )
 const noPhone = computed(() =>
-  props.recipients.filter((r) => !(r.phone || '').trim()),
+  contactable.value.filter((r) => !(r.phone || '').trim()),
 )
 
 // ── status failsafe ──────────────────────────────────────────────────────────
 // stages present among the recipients (only property-scoped recipients carry one)
 const stagesPresent = computed(() => {
-  const set = new Set(props.recipients.map((r) => r.stage).filter(Boolean))
+  const set = new Set(contactable.value.map((r) => r.stage).filter(Boolean))
   return STAGE_ORDER.filter((s) => set.has(s))
 })
 const hasStages = computed(() => stagesPresent.value.length > 0)

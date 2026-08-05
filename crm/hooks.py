@@ -181,8 +181,14 @@ doc_events = {
 	# Quo Message is a custom doctype (ops repo); the SMS server scripts can't
 	# call publish_realtime (not whitelisted in the sandbox), so the live
 	# refresh for the SMS thread/inbox is emitted here on insert instead.
+	# An inbound "STOP"/"remove me" also has to survive being read: the opt-out
+	# check flags the buyer on a field no integration writes (gw296), because the
+	# Dispo board column it used to rely on is shared state InvestorLift can move.
 	"Quo Message": {
-		"after_insert": ["crm.api.sms.on_quo_message_insert"],
+		"after_insert": [
+			"crm.api.sms.on_quo_message_insert",
+			"crm.api.do_not_contact.check_inbound_opt_out",
+		],
 	},
 	# CRM Property Tax Pull is a custom doctype (ops repo). The `pull-tax-info`
 	# server script stores BatchData's raw property record; the sandbox can't

@@ -266,6 +266,7 @@ const bulkRecipients = computed(() => {
         buyer_name: b.buyer_name,
         phone: b.phone,
         stage: b.interest_stage,
+        do_not_contact: b.do_not_contact, // asked to be removed — modal drops them
       })
     }
   }
