@@ -211,19 +211,58 @@
                       class="py-1.5 pr-3 text-right font-semibold tabular-nums text-ink-gray-9"
                     >
                       {{ p.counts.calls }}
+                      <span
+                        v-if="p.counts.calls_internal"
+                        class="block text-[10px] font-normal text-ink-gray-4"
+                        :title="
+                          __('teammate-to-teammate, not counted as outreach')
+                        "
+                      >
+                        +{{ p.counts.calls_internal }} {{ __('internal') }}
+                      </span>
                     </td>
                     <td class="py-1.5 pr-3">
                       <div class="flex items-center gap-1.5">
                         <span
-                          class="inline-block h-2 rounded-sm bg-surface-blue-3"
+                          class="inline-flex h-2 overflow-hidden rounded-sm"
                           :style="{ width: barPx(p.counts.calls, max.calls) }"
-                        />
+                        >
+                          <span
+                            class="h-full bg-surface-blue-3"
+                            :style="{ width: seg(p, 'calls_lead') }"
+                          />
+                          <span
+                            class="h-full bg-surface-green-3"
+                            :style="{ width: seg(p, 'calls_buyer') }"
+                          />
+                          <span
+                            class="h-full bg-surface-amber-3"
+                            :style="{ width: seg(p, 'calls_outside') }"
+                          />
+                        </span>
                         <span
                           class="whitespace-nowrap text-[10px] text-ink-gray-5"
                         >
-                          {{ p.counts.outbound_calls }}↗
-                          {{ p.counts.inbound_calls }}↙
+                          <span class="text-ink-blue-3"
+                            >{{ p.counts.calls_lead }} lead</span
+                          >
+                          ·
+                          <span class="text-ink-green-3"
+                            >{{ p.counts.calls_buyer }} buyer</span
+                          >
+                          <template v-if="p.counts.calls_outside">
+                            ·
+                            <span
+                              class="font-semibold text-ink-amber-3"
+                              :title="__('not in the CRM when called')"
+                              >{{ p.counts.calls_outside }} out</span
+                            >
+                          </template>
                         </span>
+                      </div>
+                      <div class="text-[10px] text-ink-gray-4">
+                        {{ p.counts.outbound_calls }}↗
+                        {{ p.counts.inbound_calls }}↙
                       </div>
                     </td>
                     <td
@@ -290,8 +329,28 @@
                     <td class="pt-2 pr-3"></td>
                     <td class="pt-2 pr-3 text-right font-semibold tabular-nums">
                       {{ totals.calls }}
+                      <span
+                        v-if="totals.internal"
+                        class="block text-[10px] font-normal text-ink-gray-4"
+                      >
+                        +{{ totals.internal }} {{ __('internal') }}
+                      </span>
                     </td>
-                    <td class="pt-2 pr-3"></td>
+                    <td
+                      class="pt-2 pr-3 text-[10px] font-semibold text-ink-gray-5"
+                    >
+                      <span class="text-ink-blue-3"
+                        >{{ totals.lead }} lead</span
+                      >
+                      ·
+                      <span class="text-ink-green-3"
+                        >{{ totals.buyer }} buyer</span
+                      >
+                      ·
+                      <span class="text-ink-amber-3"
+                        >{{ totals.outside }} out</span
+                      >
+                    </td>
                     <td class="pt-2 pr-3 text-right font-semibold tabular-nums">
                       {{ fmtDur(totals.talk) }}
                     </td>
@@ -426,12 +485,17 @@
             <span
               ><span
                 class="mr-1 inline-block size-2.5 rounded-sm bg-surface-blue-3 align-[-1px]"
-              />{{ __('call') }}</span
+              />{{ __('call to a lead') }}</span
             >
             <span
               ><span
                 class="mr-1 inline-block size-2.5 rounded-sm bg-surface-green-3 align-[-1px]"
-              />{{ __('text') }}</span
+              />{{ __('call to a buyer') }}</span
+            >
+            <span
+              ><span
+                class="mr-1 inline-block size-2.5 rounded-sm bg-surface-amber-3 align-[-1px]"
+              />{{ __('out = not in the CRM when called') }}</span
             >
             <span
               ><span
@@ -450,7 +514,7 @@
             >
             <span class="text-ink-gray-4">{{
               __(
-                'Cards column is done / skipped · Tasks is total (on today’s list / other)',
+                'Cards is done / skipped · Tasks is total (on today’s list / other) · teammate calls are listed separately and not counted as outreach',
               )
             }}</span>
           </div>
@@ -539,6 +603,10 @@ const people = computed(() =>
 const totals = computed(() => {
   const t = {
     calls: 0,
+    lead: 0,
+    buyer: 0,
+    outside: 0,
+    internal: 0,
     texts: 0,
     talk: 0,
     cards: 0,
@@ -548,6 +616,10 @@ const totals = computed(() => {
   }
   for (const p of people.value) {
     t.calls += p.counts.calls
+    t.lead += p.counts.calls_lead || 0
+    t.buyer += p.counts.calls_buyer || 0
+    t.outside += p.counts.calls_outside || 0
+    t.internal += p.counts.calls_internal || 0
     t.texts += p.counts.texts
     t.talk += p.counts.talk_seconds
     t.cards += p.counts.cards || 0
@@ -658,6 +730,10 @@ function pct(n, d) {
 function barPx(n, m) {
   return `${Math.max(2, Math.round((n / m) * 96))}px`
 }
+function seg(p, key) {
+  const total = p.counts.calls || 0
+  return total ? `${((p.counts[key] || 0) / total) * 100}%` : '0%'
+}
 function fmtHours(seconds) {
   return `${((seconds || 0) / 3600).toFixed(1)} h`
 }
@@ -680,6 +756,7 @@ function tickClass(kind) {
       call_in: 'bg-surface-blue-3',
       text: 'bg-surface-green-3',
       task: 'bg-surface-amber-3',
+      call_internal: 'bg-surface-gray-3',
       card_done: 'bg-surface-gray-6',
       card_skip: 'bg-surface-gray-4',
     }[kind] || 'bg-surface-gray-5'
@@ -692,6 +769,7 @@ function tickLabel(kind) {
       call_in: __('call in'),
       text: __('text'),
       task: __('task'),
+      call_internal: __('internal call'),
       card_done: __('card done'),
       card_skip: __('card skipped'),
     }[kind] || kind

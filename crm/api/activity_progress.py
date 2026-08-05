@@ -35,6 +35,10 @@ TOGGL_USERS_TTL = 3600
 TOGGL_DAY_TTL = 120
 TOGGL_TIMEOUT = 12
 
+QUO_API = "https://api.openphone.com"
+QUO_LINES_TTL = 21600
+QUO_TIMEOUT = 10
+
 
 def _guard():
 	# Administrator stays allowed so bench/read-only verification keeps working.
@@ -75,6 +79,54 @@ def _toggl_user_ids():
 			out[int(row["id"])] = row["email"].strip().lower()
 	frappe.cache().set_value("crm_toggl_users", json.dumps(out), expires_in_sec=TOGGL_USERS_TTL)
 	return out
+
+
+def _digits(value):
+	"""Last 10 digits — the house phone-matching rule."""
+	raw = "".join(ch for ch in str(value or "") if ch.isdigit())
+	return raw[-10:] if len(raw) >= 10 else ""
+
+
+def _workspace_lines():
+	"""Every Quo line in the workspace, as last-10 digits.
+
+	Used to tell a teammate-to-teammate call apart from real outreach. Read live
+	from Quo (one cheap, cached request) because `User.custom_quo_number` misses
+	shared lines that belong to no one — the "Backup Number", for instance.
+	Falls back to the per-user numbers if Quo is unreachable.
+	"""
+	cached = frappe.cache().get_value("crm_quo_lines")
+	if cached:
+		return set(json.loads(cached))
+
+	lines = set()
+	token = (frappe.conf.get("quo_api_key") or "").strip()
+	if token:
+		try:
+			resp = requests.get(
+				f"{QUO_API}/v1/phone-numbers",
+				headers={"Authorization": token, "User-Agent": "curl/8.1.0"},
+				timeout=QUO_TIMEOUT,
+			)
+			resp.raise_for_status()
+			for row in (resp.json() or {}).get("data") or []:
+				number = _digits(row.get("number"))
+				if number:
+					lines.add(number)
+		except Exception:
+			frappe.log_error(title="Quo line list failed", message=frappe.get_traceback())
+
+	if not lines:
+		for number in frappe.get_all(
+			"User", filters={"custom_quo_number": ["is", "set"]}, pluck="custom_quo_number"
+		):
+			number = _digits(number)
+			if number:
+				lines.add(number)
+		return lines
+
+	frappe.cache().set_value("crm_quo_lines", json.dumps(sorted(lines)), expires_in_sec=QUO_LINES_TTL)
+	return lines
 
 
 def _to_site_time(iso):
@@ -208,25 +260,61 @@ def _event(people, user, kind, at, **extra):
 
 
 def _call_events(people, number_users, start, end):
+	"""Classify every call, then count only the outreach.
+
+	Four buckets:
+	  lead / buyer — the webhook linked the call to a record at call time
+	  outside      — external number with no record: cold calls, and contacts
+	                 that only became a lead/buyer later (the link is stamped
+	                 once, at call time, and is never back-filled)
+	  internal     — teammate-to-teammate on our own Quo lines; real, but not
+	                 outreach, so it is kept out of the headline call count
+
+	NOTE: `reference_doctype` defaults to "CRM Lead" on every row whether or not
+	anything matched — only a non-empty `reference_docname` means truly linked.
+	"""
 	rows = frappe.get_all(
 		"CRM Call Log",
 		filters={"start_time": ["between", [start, end]]},
-		fields=["caller", "receiver", "from", "to", "type", "start_time", "duration", "status"],
+		fields=[
+			"caller", "receiver", "from", "to", "type", "start_time", "duration",
+			"status", "reference_doctype", "reference_docname",
+		],
 		order_by="start_time asc",
 		limit_page_length=5000,
 	)
+	lines = _workspace_lines()
 	unattributed = 0
 	for row in rows:
-		workspace_number = row.get("from") if row.type == "Outgoing" else row.get("to")
+		incoming = row.type == "Incoming"
+		workspace_number = row.get("to") if incoming else row.get("from")
 		user = row.get("caller") or row.get("receiver") or number_users.get(workspace_number)
-		kind = "call_in" if row.type == "Incoming" else "call_out"
-		if not _event(people, user, kind, row.start_time, duration=int(row.duration or 0)):
+		external = _digits(row.get("from") if incoming else row.get("to"))
+
+		if external and external in lines:
+			bucket = "internal"
+		elif (row.get("reference_docname") or "").strip():
+			bucket = "buyer" if row.get("reference_doctype") == "CRM Buyer" else "lead"
+		else:
+			bucket = "outside"
+
+		kind = "call_internal" if bucket == "internal" else ("call_in" if incoming else "call_out")
+		if not _event(
+			people, user, kind, row.start_time, duration=int(row.duration or 0), bucket=bucket
+		):
 			unattributed += 1
 			continue
+
 		counts = people[user]["counts"]
+		if bucket == "internal":
+			# counted and shown, but deliberately excluded from `calls`
+			counts["calls_internal"] += 1
+			counts["internal_seconds"] += int(row.duration or 0)
+			continue
 		counts["calls"] += 1
+		counts[f"calls_{bucket}"] += 1
 		counts["talk_seconds"] += int(row.duration or 0)
-		counts["inbound_calls" if row.type == "Incoming" else "outbound_calls"] += 1
+		counts["inbound_calls" if incoming else "outbound_calls"] += 1
 	return unattributed
 
 
@@ -344,6 +432,8 @@ def get_activity_progress(for_date=None):
 			"image": user.user_image,
 			"counts": {
 				"calls": 0, "outbound_calls": 0, "inbound_calls": 0, "talk_seconds": 0,
+				"calls_lead": 0, "calls_buyer": 0, "calls_outside": 0,
+				"calls_internal": 0, "internal_seconds": 0,
 				"texts": 0, "tasks": 0, "tasks_on_list": 0, "tasks_other": 0,
 				"cards": 0, "cards_skipped": 0,
 			},

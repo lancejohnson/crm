@@ -49,7 +49,32 @@ duplicating. Work substantial features in a worktree of your own.
     the line owner). Do NOT try to read call counts live from the Quo API: there
     is no per-user aggregate endpoint, and counting requires
     conversations → participants → `/v1/calls` per participant — minutes of
-    rate-limited work, far too slow for a page load.
+    rate-limited work, far too slow for a page load. **Measured 2026-08-05**: a
+    full live enumeration of all 5 lines for one day took **48s** and returned
+    **109** calls where the mirror had **147** — it found 0 the mirror lacked and
+    missed 38, because a conversation whose `updatedAt` falls outside the window
+    silently drops its calls. The mirror is both faster and more complete.
+  - **Calls are split lead / buyer / outside / internal**, and only the first
+    three count as outreach:
+    - **`reference_doctype` is NOT a link test** — it has a doctype default of
+      "CRM Lead", so it is set on every row whether or not anything matched.
+      Only a non-empty **`reference_docname`** means genuinely linked. Reading
+      the wrong field makes unlinked calls vanish (it reported 0 outside-CRM
+      calls when the true figure was 101 in two weeks).
+    - **outside** = external number with no linked record: cold calls, plus
+      people who only became a lead/buyer later. The webhook stamps the link
+      once, at call time, and never back-fills — 22 of 58 outside numbers in a
+      two-week sample exist in the CRM today (mostly a later buyer import), so
+      "outside" means *was not in the CRM when called*.
+    - **internal** = the other party is one of our own Quo lines. Real calls,
+      but not outreach, so they are excluded from the call count and shown as a
+      separate "+N internal". This is why totals dropped (Aug 4: 147 → 135 + 12).
+    - The workspace line list comes from one cached live Quo `/v1/phone-numbers`
+      call (6h TTL) because `User.custom_quo_number` misses shared lines like
+      the Backup Number; it falls back to the per-user numbers if Quo is down.
+    - The split is what makes cold calling visible: 2026-08-03, Exe ran 21
+      outside calls to 21 numbers against 24 buyer calls, while German's 82 were
+      all leads.
   - **Toggl** is matched to CRM users **by email** (the workspace exposes the
     same addresses), so no mapping field exists or is needed. Creds come from
     site_config `toggl_username` / `toggl_password` / `toggl_workspace_id`.
@@ -1801,6 +1826,14 @@ is nevertheless tested **before push/deploy** through the local Vite dev server,
 which serves the local source while proxying authenticated API/realtime traffic
 to prod. Production must never be the first place a UI change is exercised.
 
+- **GOTCHA — `docker cp`ing a changed `.py` onto prod does NOT change what the
+  WEB path serves.** The gunicorn workers already imported the module, so an
+  HTTP request keeps running the old code even after the file is replaced and
+  `__pycache__` is cleared. `bench execute` forks a fresh process and therefore
+  picks the change up immediately — which makes this very easy to misdiagnose:
+  the bench smoke test shows new fields while the browser shows stale data.
+  `docker compose restart backend` (~seconds, same window as a deploy) is what
+  actually reloads it. Cost a full failed verification round on 2026-08-05.
 - **Backend logic** — validate read-only against the live DB with `bench
   execute` / `bench console` on the prod backend; roll back anything that writes:
 
