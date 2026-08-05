@@ -545,7 +545,16 @@ def _pull_into_buyer(b, contact, tags, pull_name):
 	never looks like a CRM edit next cycle (no ping-pong)."""
 	vals = {}
 	df = contact.get("defaultFields") or {}
-	if pull_name:
+	# A do-not-contact buyer's name is left exactly as the team wrote it. This is
+	# the SECOND sync that rewrites buyer_name -- the InvestorLift one is guarded
+	# in investorlift_ingest._upsert_buyer for the same reason (gw296). The team
+	# appends "(REMOVE)" to the name of someone who asked to be left alone, and a
+	# marker that two different syncs can quietly erase is worse than no marker,
+	# because it looks like it worked.
+	if pull_name and not (
+		frappe.db.has_column(BUYER_DOCTYPE, "do_not_contact")
+		and b.get("do_not_contact")
+	):
 		first = (df.get("firstName") or "").strip()
 		last = (df.get("lastName") or "").strip()
 		display = _contact_display(contact)
@@ -623,7 +632,9 @@ def sync_all():
 		BUYER_DOCTYPE,
 		fields=["name", "buyer_name", "first_name", "last_name", "phone", "email",
 		        "modified", "quo_contact_id", "quo_synced_at",
-		        *(["quo_tags"] if frappe.db.has_column(BUYER_DOCTYPE, "quo_tags") else [])],
+		        *(["quo_tags"] if frappe.db.has_column(BUYER_DOCTYPE, "quo_tags") else []),
+		        # needed by _pull_into_buyer to leave a do-not-contact buyer's name alone
+		        *(["do_not_contact"] if frappe.db.has_column(BUYER_DOCTYPE, "do_not_contact") else [])],
 		limit_page_length=0,
 	)
 
