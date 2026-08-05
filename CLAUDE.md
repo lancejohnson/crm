@@ -171,6 +171,27 @@ duplicating. Work substantial features in a worktree of your own.
     `lead_round_robin_enabled`); disabled Users drop out automatically, so
     disabling a CRM login is the vacation lever. `round_robin_status()` is the
     whitelisted read-only "who's up next and why".
+  - **Catch-up ramp** (`lead_round_robin_ramp_user` / `_ramp_count` /
+    `_ramp_since` in site_config) — hands the first N leads after a moment to
+    one person before alternation starts, because the continuity backfill lands
+    lopsided (70/36) and the person behind should get the next few. Same
+    derived-from-data rule as the rotation: the ramp leads **are** the first
+    `count` leads owned by that user created at/after `since`. Nothing is
+    decremented — no counter to drift, no read-modify-write to race on, and it
+    self-expires (the keys can then be deleted at leisure).
+    - **GOTCHA — ramp deliveries must be netted OUT of the daily tally**
+      (`_todays_counts` subtracts `delivered_today`). Without that the ramp
+      undoes itself inside one day: 10 leads to Exe, the tally then reads
+      Exe 10 / German 0, and the balancer sends the next 10 to German for a net
+      effect of **zero**. Verified on prod with real inserts:
+      `EEEEEEEEEE` then `GEGEGEGEGE`, Exe still +10 at the end.
+    - Every caller routes through `_choose(roster)` so the hook, `next_owner()`
+      and `round_robin_status()` cannot disagree about whose turn it is.
+  - **GOTCHA — `_last_owner` must exclude parked imports** (it now shares
+    `_exclude_parked` with the tally). The June LeadPack put **514** parked leads
+    on the two setters with recent `creation` stamps, so the "most recent lead"
+    tiebreak was otherwise decided by whoever happened to be last in a
+    months-old bulk job.
   - **Ops consequence — `lead_ring_alert.py` `DEFAULT_OWNER` had to change.**
     `PUSHOVER_KEYS` only maps Lance and Dennis, and an unmapped owner fell back
     to **Lance**. That fallback was previously unreachable (every lead was
