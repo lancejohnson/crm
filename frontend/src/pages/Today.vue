@@ -35,7 +35,22 @@
           theme="blue"
           :label="`${toCallLeadCount} ${toCallLeadCount === 1 ? __('lead') : __('leads')} · ${callsOwed} ${callsOwed === 1 ? __('call') : __('calls')}`"
         />
-        <Badge v-else variant="subtle" theme="green" :label="__('All clear')" />
+        <!-- "All clear" has to mean you FINISHED, not that you were never given
+             anything: with the board scoped per person, a rep who owns no leads
+             would otherwise get the same congratulatory badge as one who worked
+             through 40 cards. -->
+        <Badge
+          v-else-if="boardCardCount"
+          variant="subtle"
+          theme="green"
+          :label="__('All clear')"
+        />
+        <Badge
+          v-else
+          variant="subtle"
+          theme="gray"
+          :label="viewingOwnBoard ? __('No leads on your board') : __('No leads on this board')"
+        />
         <Tooltip
           :text="__('Re-run the cadence now and add any newly-due leads or tasks')"
           placement="bottom"
@@ -392,6 +407,9 @@ const toCallLeadCount = computed(
   () => new Set(toCallItems.value.map((item) => item.lead)).size,
 )
 const callsOwed = computed(() => toCallCount.value)
+const boardCardCount = computed(() =>
+  columns.value.reduce((total, col) => total + col.items.length, 0),
+)
 const streakLabel = computed(() => {
   const days = todayReport.data?.streak?.current || 0
   return `🔥 ${days} ${days === 1 ? __('day') : __('days')}`
