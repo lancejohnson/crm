@@ -189,6 +189,59 @@ duplicating. Work substantial features in a worktree of your own.
   - Ops: `scripts/setup_today_board.py` (idempotent, `--dry-run`).
   - **Not yet checked on a phone** — fixed-width columns + horizontal scroll;
     desktop is the primary surface unless Ger confirms otherwise.
+- **Intraday Today pulse (every 30 min, Mattermost group DM)** — the half-hourly
+  heartbeat between the 5am standup and end of day, so pace is visible while the
+  day can still be changed. Group DM to German + Lance + `pi`, posted by the same
+  `pi` bot and token as the standup. `crm/api/today_pulse.py` (**new**).
+  - Carries: cards resolved **since the last pulse**, the day's rolling total as a
+    Done/Skipped/left progress bar, pace vs. the hours left, and **Quo talk time**.
+  - **Talk time is a first-class metric, not decoration.** Cards-per-half-hour
+    alone punishes the behaviour we want: a setter in a 20-minute conversation
+    with a motivated seller resolves fewer cards than one dialing voicemails, and
+    a bare "+0" reads as a rebuke for doing the job right. A window with no cards
+    but real talk time is rendered as *"No cards closed — but 19m on the phone,
+    longest 15m. Deep in a conversation."*
+  - **Skips are timestamped now** (`resolved_at`/`resolved_by`, stamped for Done
+    AND Skipped; `done_at`/`done_by` stay Done-only so the Today report, activity
+    pulse and card UI keep their exact meaning). ~30% of a day's cards are
+    resolved by skipping, so a Done-only delta reported a working setter as idle.
+    Falls back to `done_at` and says so in the message if the ops script hasn't run.
+  - **The delta window is a watermark, not a fixed 30 minutes** — it runs from the
+    last *successfully posted* pulse to now, so a failed or skipped slot folds its
+    cards into the next message instead of dropping them. Verified by replaying a
+    real day: the deltas sum to exactly the day's resolved total (87 = 87).
+  - **The observed rate is measured from the first resolved card, not from 9:30.**
+    The setters routinely start an hour or more after the window opens; charging
+    them for that time made the pulse open every day with a false "behind" warning
+    built out of hours nobody was working. A rate is withheld entirely until
+    `MIN_RATE_HOURS` of actual work has elapsed.
+  - **Late in the day the required rate is replaced by a projection.** "need
+    ~62/hr" with 30 minutes left is arithmetically true and useless; the message
+    instead says what the current pace actually lands ("at ~12/hr that's about 6
+    more, ~25 carrying over"). On the 8/04 replay that projection was accurate to
+    within one card.
+  - **The bar is two-tone (`█` resolved / `░` still to call), not three.** It first
+    shaded Done and Skipped separately; Lance read the middle shade as "in progress"
+    on the very first preview. A legend on the counts line fixed the ambiguity but
+    not the cost — a nudge that has to be decoded every thirty minutes is not
+    glanceable. The Done/Skipped texture lives in the counts line instead.
+  - **`_progress_bar` never lies in either direction** — a non-zero segment never
+    rounds away to nothing, and a board with work left always keeps at least one
+    empty cell (naive rounding filled every cell with 1 card left of 21+, so the
+    bar read "finished" while the board was not). Invariants checked exhaustively
+    over every Done/Skipped/left split for totals 1–200.
+  - Call attribution reuses `activity_progress`'s exact chain (`caller` →
+    `receiver` → `User.custom_quo_number`), so the pulse and the Team Activity
+    report cannot disagree about whose call it was. Verified 0 unattributed on prod.
+  - No self-reply loop: `agent-listener` drops posts whose `user_id` is its own,
+    and the pulse posts as that same `pi` user.
+  - `preview_pulse(send=0, now=..., since=...)` is the dry run and never moves the
+    watermark.
+  - **Ops**: needs `scripts/setup_today_board.py` (adds `resolved_*`, idempotent)
+    and `bench sync_jobs` on prod — a new scheduler hook does nothing until its
+    Scheduled Job Type row exists. Cron `*/30 9-17 * * 1-5` is read in the SITE
+    timezone (America/Chicago); the job itself enforces the real 9:30am–5:00pm
+    window so the working hours live in one readable place.
 - **Daily standup list (5am CT Mattermost DM)** — the list Lance runs the morning
   call from. `crm/api/daily_standup.py` (**new**) holds ONE server-side definition
   of "what has to happen today", rendered two ways: a DM as the `pi` Mattermost

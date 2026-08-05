@@ -96,6 +96,15 @@ def _row_fields(with_slots=False):
 	return fields
 
 
+def _supports_resolved_stamp() -> bool:
+	"""`resolved_at`/`resolved_by` are added by the same idempotent ops script that
+	provisions the doctype. Degrade quietly if the app is deployed first."""
+	if not _available():
+		return False
+	meta = frappe.get_meta(DOCTYPE)
+	return bool(meta.has_field("resolved_at") and meta.has_field("resolved_by"))
+
+
 def _guard():
 	roles = set(frappe.get_roles())
 	if not roles & {"System Manager", "Sales Manager", "Sales User"}:
@@ -928,12 +937,25 @@ def set_today_state(item, state):
 	if doc.state == state:
 		return {"ok": True, "state": state}
 	doc.state = state
+	now = now_datetime()
+	# `done_*` stays Done-only: the Today report's "completed by" list, the
+	# Lance-only activity pulse and the card UI all read it with that meaning.
 	if state == "Done":
 		doc.done_by = frappe.session.user
-		doc.done_at = now_datetime()
+		doc.done_at = now
 	else:
 		doc.done_by = None
 		doc.done_at = None
+	# `resolved_*` covers Done AND Skipped, because a skip is a real judgement a
+	# person made and the intraday pulse has to be able to see it happen. Moving a
+	# card back to "To Call" un-resolves it.
+	if _supports_resolved_stamp():
+		if state == "To Call":
+			doc.resolved_by = None
+			doc.resolved_at = None
+		else:
+			doc.resolved_by = frappe.session.user
+			doc.resolved_at = now
 	doc.save(ignore_permissions=True)
 	_publish(doc.for_date)
 	return {"ok": True, "state": state}

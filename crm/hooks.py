@@ -300,6 +300,12 @@ scheduler_events = {
 		# run until `sync_jobs` creates its Scheduled Job Type row on prod (see
 		# gw127/128 — the AI call review silently never fired for weeks).
 		"0 5 * * 1-5": ["crm.api.daily_standup.send_daily_standup"],
+		# Intraday Today-board pulse — a Mattermost group DM on the half hour.
+		# Same SITE-timezone (America/Chicago) rule as the standup above. The cron
+		# covers 9:00–17:30; the job itself enforces the real 9:30am–5:00pm window,
+		# so the working hours live in one readable place instead of three cron
+		# expressions. Also needs `sync_jobs` on prod before it will ever fire.
+		"*/30 9-17 * * 1-5": ["crm.api.today_pulse.send_today_pulse"],
 	},
 }
 
