@@ -134,6 +134,56 @@ duplicating. Work substantial features in a worktree of your own.
   dry-run by default). Pure app code — no ops/server-script piece. Backend only
   (no `.vue`). `crm/hooks.py` + `crm/api/name_format.py`.
 
+- **Lead-owner round robin (German ↔ Exe) on new inbound leads** — every
+  ownerless lead used to be stamped with one hardcoded owner by the ops server
+  script `Lead Default Owner`, which is why `lead_owner` said Dennis on ~99% of
+  leads even though German and Exe do the calling. A `CRM Lead` **`before_insert`**
+  hook now hands each new inbound lead to the next setter in the rotation.
+  Setting `lead_owner` is the whole job — `CRM Lead.after_insert` then does the
+  DocShare + `_assign` ToDo (verified end-to-end on prod, incl. the **Guest**
+  path the webhooks actually insert through). `crm/api/lead_round_robin.py`
+  (**new**) + `crm/hooks.py`.
+  - **Why `before_insert` in app code beats the server script**: `run_method`
+    calls `Document.hook(fn)` (all `doc_events`) and only *then*
+    `run_server_script_for_doc_event` — frappe `document.py` lines 1011 vs 1015.
+    So app hooks always win, and `Lead Default Owner` (`if not doc.lead_owner`)
+    degrades into a **safety net** that still stamps Dennis if the roster is
+    empty/disabled or this code raises. The hook swallows every exception on
+    purpose: a misrouted lead beats a lost lead.
+  - **No stored counter — the rotation is derived from the leads themselves**:
+    whoever holds fewer of *today's* leads gets the next one, ties broken by
+    alternation from whoever got the most recent one. Nothing to drift or reset,
+    and no read-modify-write to race on (two simultaneous webhook leads can both
+    pick the same person; the next lead self-corrects — verified). The daily
+    reset is the point: an all-time balance would mean a week off creates a debt
+    that dumps the next hundred leads on whoever came back. Alternation still
+    carries across midnight via the "who got the last one" tiebreak.
+  - **Scope**: only leads created with **no owner** — the inbound webhooks
+    (iSpeedToLead / Red Panda / PropertyLeads / Leadzolo), which insert as Guest.
+    UI-created leads already carry `lead_owner = current user` (`LeadModal.vue`)
+    and are left alone. **Bulk imports are excluded** (`import_hidden`): the
+    importer has its own "split between" picker, and a 500-row LeadPack would
+    swamp a daily rotation for leads that are parked rather than worked. Parked
+    leads are excluded from the *tally* too, via the NULL-safe
+    `import_hidden.isnull() | != 1` form (`!= 1` alone silently drops NULL rows —
+    the same trap `leads_dashboard.live()` documents).
+  - Roster + kill switch live in site_config (`lead_round_robin_users`,
+    `lead_round_robin_enabled`); disabled Users drop out automatically, so
+    disabling a CRM login is the vacation lever. `round_robin_status()` is the
+    whitelisted read-only "who's up next and why".
+  - **Ops consequence — `lead_ring_alert.py` `DEFAULT_OWNER` had to change.**
+    `PUSHOVER_KEYS` only maps Lance and Dennis, and an unmapped owner fell back
+    to **Lance**. That fallback was previously unreachable (every lead was
+    Dennis's); with the rotation it would have fired on *every* new lead,
+    ringing Lance at priority 2 with 5-minute re-rings for an hour. Fallback is
+    now Dennis — exactly who has been getting these alerts all along. To give the
+    setters their own ring, add their Pushover user keys to Infisical and map
+    them; the lookup already keys on `lead_owner`.
+  - **Ownership now genuinely moves**, so things keyed on `lead_owner` follow it:
+    sequence call-tasks (`crm_sequence_runner_core.py`) and agreement
+    view/sign notifications (`agreement_notify.py`) go to the setter who owns
+    the lead instead of Dennis.
+
 - **Realtime task auto-refresh (no page reload), site-wide** — `CRM Task` now
   broadcasts a `crm_task_update` realtime event (with
   `reference_doctype`/`reference_docname`) on `after_insert`/`on_update`/`on_trash`,

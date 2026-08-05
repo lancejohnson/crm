@@ -240,6 +240,14 @@ doc_events = {
 	# from here (non-sandboxed): enqueue a worker that sleeps the real waits and
 	# reuses the engine for each step. Fires on the same condition as auto-enroll.
 	"CRM Lead": {
+		# Round-robin the owner of a new ownerless (i.e. inbound webhook) lead
+		# between the setters, so German and Exe split the day's intake instead of
+		# every lead landing on one default owner. MUST stay a before_insert hook:
+		# Frappe composes doc_events[doctype] BEFORE doc_events["*"], and the ops
+		# `Lead Default Owner` server script runs via that wildcard entry — so this
+		# claims the owner first and the server script degrades to a safety net.
+		# See crm/api/lead_round_robin.py.
+		"before_insert": ["crm.api.lead_round_robin.assign_round_robin_owner"],
 		# Normalize odd-cased inbound names ("joe cholock" -> "Joe Cholock") on
 		# creation only, so later manual edits are respected. Runs before the
 		# controller rebuilds lead_name/title from the name parts in validate().
