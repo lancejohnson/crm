@@ -32,21 +32,51 @@ duplicating. Work substantial features in a worktree of your own.
   `zillowUrl`/`mapsUrl` helpers). Toasts if no address is set. Pure frontend.
   `frontend/src/pages/Lead.vue`.
 
-- **Lance-only Team Activity pulse** — a small **Team activity** button at the
-  bottom of the app sidebar (rendered only for
-  `lance.johnson@groundworkpro.com`) opens a day-by-day per-user pace report:
-  calls + talk time, human-sent Quo texts, completed CRM tasks, and completed
-  Today cards, with first/last activity, a half-hour time-of-day histogram, and
-  configurable per-user daily goals. Goals persist cross-device in Lance's
-  Frappe user defaults (no custom doctype). The backend endpoint repeats the
-  exact Lance-only permission gate; Administrator is retained only for bench
-  verification. Automated sequence texts are explicitly excluded rather than
-  credited to the owner of the Quo line. `crm/api/activity_progress.py` +
-  `frontend/src/components/ActivityProgressModal.vue` + desktop `AppSidebar.vue`
-  + mobile-drawer `MobileSidebar.vue` (both entry points are required).
-  Quo attribution support is in the ops repo: `Quo Message.sent_by` and
-  `activity_source`, stamped by manual CRM sends / the sequence runner / the
-  Quo webhook, plus a safe preview-first historical backfill.
+- **Lance-only Team Activity board** — a **Team activity** button at the bottom
+  of the app sidebar (rendered only for `lance.johnson@groundworkpro.com`)
+  opens a one-day manager report. Laid out as a dense report (Lance's
+  preferred style): summary line → **The team** table → **The day** timeline →
+  **Today board** + **Worth knowing** panels → legend. Per person: Toggl hours
+  tracked, clocked-in window, Quo calls (proportional bar + out↗/in↙), talk
+  time, human-sent texts, Today cards done/skipped, tasks completed (split
+  on-today's-list / other), active window, and goal %. Goals persist
+  cross-device in Lance's Frappe user defaults (no custom doctype).
+  `crm/api/activity_progress.py` + `frontend/src/components/ActivityProgressModal.vue`
+  + desktop `AppSidebar.vue` + mobile-drawer `MobileSidebar.vue` (**both entry
+  points are required** — mobile renders a different sidebar).
+  - **Calls are the CRM Call Log, which IS the Quo mirror** (the `call.completed`
+    webhook attributes each call to the Quo `userId` who actually dialled, not
+    the line owner). Do NOT try to read call counts live from the Quo API: there
+    is no per-user aggregate endpoint, and counting requires
+    conversations → participants → `/v1/calls` per participant — minutes of
+    rate-limited work, far too slow for a page load.
+  - **Toggl** is matched to CRM users **by email** (the workspace exposes the
+    same addresses), so no mapping field exists or is needed. Creds come from
+    site_config `toggl_username` / `toggl_password` / `toggl_workspace_id`.
+    Every Toggl call is best-effort and cached (members 1h, day 120s): an
+    outage degrades to "hours unavailable", never a broken board. Toggl stamps
+    carry the member's own offset (the setters are on -03:00) and are converted
+    with the same helper the Quo webhook uses. A **running** timer has no `stop`
+    and reports negative seconds — its band runs to now instead, or today's
+    board would read 0.0 h while people are working.
+  - **The board flags what it can't vouch for** rather than presenting it as
+    fact: a single stretch >10h (or >12h day) is called out as a probable
+    forgotten timer (Dennis, 2026-08-04: 14.5h, 7:07am–9:34pm against CRM
+    activity of 9:31am–4:40pm); someone active with zero tracked time is
+    flagged; unattributed resolved cards are counted out loud.
+  - **Cards use `resolved_by`/`resolved_at` when present, falling back to
+    `done_by`/`done_at`.** `done_*` is Done-only by design, so **Skipped cards
+    before the gw292 ops script have no owner and cannot be attributed** — the
+    UI says so instead of showing zero.
+  - Automated sequence texts are excluded rather than credited to the owner of
+    the Quo line. Quo attribution support lives in the ops repo
+    (`Quo Message.sent_by` / `activity_source`).
+  - **Tasks "from Today" are inferred**, not stamped: a completed task counts as
+    on-list when its lead had a card that day. Measured 2026-08-04: 54 of 55
+    completed tasks matched, and the task/card pairs land within a minute of
+    each other, so the inference tracks reality and works retroactively. Exact
+    stamping would need a schema field plus prop-threading through
+    Today → Activities → AllModals, and would only work going forward.
 
 - **Activity feed no longer auto-scrolls on every reload** — the Lead/Deal
   Activity timeline used to yank the viewport on every action (adding a
