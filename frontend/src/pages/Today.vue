@@ -153,7 +153,27 @@
                 :theme="PHASE[item.priority_key].theme"
                 :label="__(PHASE[item.priority_key].label)"
               />
-              <Badge variant="subtle" theme="gray" :label="item.lead_status" />
+              <div @click.stop>
+                <Dropdown
+                  :options="leadStatusOptions(item)"
+                  placement="bottom-start"
+                >
+                  <button
+                    class="flex h-6 max-w-[12rem] items-center gap-1 rounded-full bg-surface-gray-2 px-2 text-xs font-medium text-ink-gray-7 hover:bg-surface-gray-3 disabled:cursor-wait disabled:opacity-60"
+                    :disabled="savingStatusLeads.includes(item.lead)"
+                    :title="__('Change lead status')"
+                    @click.stop
+                  >
+                    <IndicatorIcon
+                      v-if="getLeadStatus(item.lead_status)"
+                      class="size-3 shrink-0"
+                      :class="getLeadStatus(item.lead_status).color"
+                    />
+                    <span class="truncate">{{ item.lead_status || __('Set status') }}</span>
+                    <FeatherIcon name="chevron-down" class="size-3 shrink-0 text-ink-gray-5" />
+                  </button>
+                </Dropdown>
+              </div>
               <span class="text-xs text-ink-gray-5">
                 {{ item.calls_today }} {{ __('logged today') }}
               </span>
@@ -210,6 +230,14 @@
     :item="selectedItem"
     @open-address="openAddress"
   />
+  <LostReasonModal
+    v-if="showLostReasonModal"
+    v-model="showLostReasonModal"
+    doctype="CRM Lead"
+    :status="pendingLeadStatus?.status"
+    :on-confirm="confirmLostStatus"
+    :on-cancel="cancelLostStatus"
+  />
   <PropertyLinkModal v-model="showPropertyLinkModal" :address="selectedAddress" />
   <TodayReportModal
     v-model="showReportModal"
@@ -248,10 +276,13 @@ import RefreshIcon from '@/components/Icons/RefreshIcon.vue'
 import TodayLeadModal from '@/components/TodayLeadModal.vue'
 import TodayPriorityModal from '@/components/TodayPriorityModal.vue'
 import TodayReportModal from '@/components/TodayReportModal.vue'
+import IndicatorIcon from '@/components/Icons/IndicatorIcon.vue'
+import LostReasonModal from '@/components/Modals/LostReasonModal.vue'
 import PropertyLinkModal from '@/components/Modals/PropertyLinkModal.vue'
 import SendTextModal from '@/components/Modals/SendTextModal.vue'
 import TaskModal from '@/components/Modals/TaskModal.vue'
 import { globalStore } from '@/stores/global'
+import { statusesStore } from '@/stores/statuses'
 import { formatDate, timeAgo } from '@/utils'
 import { callHref, formatPhone } from '@/utils/phoneFormat'
 import {
@@ -268,6 +299,7 @@ import Draggable from 'vuedraggable'
 import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 const { $socket } = globalStore()
+const { statusOptions, getLeadStatus } = statusesStore()
 const refreshing = ref(false)
 const syncStatus = ref('')
 const syncStatusTheme = ref('green')
@@ -276,6 +308,9 @@ const selectedPriority = ref('')
 const selectedSignal = ref('')
 const selectedItem = ref(null)
 const showLeadModal = ref(false)
+const savingStatusLeads = ref([])
+const pendingLeadStatus = ref(null)
+const showLostReasonModal = ref(false)
 const selectedAddress = ref('')
 const showPropertyLinkModal = ref(false)
 const showReportModal = ref(false)
@@ -450,6 +485,66 @@ function setFilter(type, value) {
 function openTodayItem(item) {
   selectedItem.value = item
   showLeadModal.value = true
+}
+
+function leadStatusOptions(item) {
+  return statusOptions('lead', [], (status) => chooseLeadStatus(item, status))
+}
+
+function chooseLeadStatus(item, status) {
+  if (!item || !status || status === item.lead_status) return
+  if (getLeadStatus(status)?.type === 'Lost') {
+    pendingLeadStatus.value = { item, status }
+    showLostReasonModal.value = true
+    return
+  }
+  updateLeadStatus(item, status)
+}
+
+function confirmLostStatus(values) {
+  const pending = pendingLeadStatus.value
+  pendingLeadStatus.value = null
+  if (!pending) return
+  updateLeadStatus(pending.item, pending.status, values)
+}
+
+function cancelLostStatus() {
+  pendingLeadStatus.value = null
+}
+
+async function updateLeadStatus(item, status, extraValues = {}) {
+  if (savingStatusLeads.value.includes(item.lead)) return
+  const oldStatus = item.lead_status
+  savingStatusLeads.value = [...savingStatusLeads.value, item.lead]
+
+  // A lead can have two independently actionable call cards. Keep both badges
+  // in step while the save is in flight rather than showing conflicting states.
+  for (const col of columns.value) {
+    for (const card of col.items) {
+      if (card.lead === item.lead) card.lead_status = status
+    }
+  }
+
+  try {
+    await call('crm.api.today_board.set_today_lead_status', {
+      item: item.name,
+      status,
+      ...extraValues,
+    })
+    await board.reload()
+  } catch (e) {
+    for (const col of columns.value) {
+      for (const card of col.items) {
+        if (card.lead === item.lead) card.lead_status = oldStatus
+      }
+    }
+    toast.error(e.messages?.[0] || __('Could not update lead status'))
+    board.reload()
+  } finally {
+    savingStatusLeads.value = savingStatusLeads.value.filter(
+      (lead) => lead !== item.lead,
+    )
+  }
 }
 
 function openTodayReport() {

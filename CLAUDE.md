@@ -147,7 +147,11 @@ duplicating. Work substantial features in a worktree of your own.
     logged before generation, only Call 2 is materialized.
   - Cards show **address and phone on separate lines**, the soonest open task
     (click → the real Task modal), and a green **incoming-text flag** with the
-    last received time. Open tasks use a neutral empty circle. When the card is
+    last received time. The lead status is a color-dot dropdown directly on the
+    card; changing it saves the full CRM Lead (status history + hooks preserved),
+    updates both call cards for that lead optimistically, and asks for the normal
+    Lost Reason before a Lost-type status can be applied. Open tasks use a neutral
+    empty circle. When the card is
     Done and a task was completed that board day, it shows the latest completed
     task with a green check instead of the next future task. Clicking the address
     on either the card or lead modal

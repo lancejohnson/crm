@@ -888,6 +888,37 @@ def get_today_lead_snapshot(lead):
 
 
 @frappe.whitelist()
+def set_today_lead_status(item, status, lost_reason=None, lost_notes=None):
+	"""Change the CRM Lead status from a Today card.
+
+	Save the full Lead document (rather than using ``db.set_value``) so status
+	history, lost-reason validation, task hygiene, and the normal Lead hooks all
+	still run. The Today item anchors the request to a card the user can see.
+	"""
+	_guard()
+	if not status or not frappe.db.exists("CRM Lead Status", status):
+		frappe.throw(_("Invalid lead status."))
+
+	item_doc = frappe.get_doc(DOCTYPE, item)
+	lead = frappe.get_doc("CRM Lead", item_doc.lead)
+	lead.check_permission("write")
+	if lead.status == status:
+		return {"ok": True, "status": status}
+
+	lead.status = status
+	if lost_reason is not None:
+		lead.lost_reason = lost_reason
+	if lost_notes is not None:
+		lead.lost_notes = lost_notes
+	lead.save()
+
+	# Lead hooks may add newly-due work asynchronously; publish immediately too
+	# so every open Today board reflects this status change after commit.
+	_publish(item_doc.for_date)
+	return {"ok": True, "status": lead.status}
+
+
+@frappe.whitelist()
 def set_today_state(item, state):
 	"""Tick a card Done / Skipped / back To Call."""
 	if state not in STATES:
