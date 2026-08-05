@@ -336,17 +336,13 @@ def build_pulse(now=None, since=None):
 	# window. The setters routinely start an hour or more after 9:30, and charging
 	# them for that time made the pulse open every day with a false "behind"
 	# warning built out of hours nobody was working.
-	# "Are we over or under where we need to be?" — compare how much of the working
-	# day is gone against how much of the board is resolved. This is the headline
-	# pace number because it answers the question directly and needs no rate
-	# arithmetic: at 40% of the day you should be at 40% of the board.
-	window_start = _window_bounds(now)[0]
-	span = (window_end - window_start).total_seconds()
-	day_frac = min(1.0, max(0.0, (now - window_start).total_seconds() / span)) if span else 0.0
-	expected = int(round(board["total"] * day_frac))
-	# Positive = ahead of where the clock says we should be, negative = behind.
-	vs_pace = board["resolved"] - expected
-
+	# NOTE: an elapsed-vs-resolved "N cards behind pace" verdict lived here and was
+	# removed deliberately. The board routinely carries more cards than a day can
+	# hold (81-111 generated against ~87 resolved on a good day), so it read
+	# "behind" almost every day — which is a statement about board size, not about
+	# the person working it, and a warning that fires daily stops being read at
+	# all. Board overload belongs in the standup's intake-capacity number, not in a
+	# half-hourly nudge. See git history if it's ever wanted back.
 	hours_left = max(0.0, (window_end - now).total_seconds() / 3600.0)
 	worked_hours = (
 		max(0.0, (now - board["first_at"]).total_seconds() / 3600.0)
@@ -370,10 +366,6 @@ def build_pulse(now=None, since=None):
 		"calls": calls,
 		"day_calls": day_calls,
 		"pace": {
-			"day_frac": day_frac,
-			"day_pct": int(round(day_frac * 100)),
-			"expected": expected,
-			"vs_pace": vs_pace,
 			"hours_left": hours_left,
 			"worked_hours": worked_hours,
 			"started_at": board.get("first_at"),
@@ -461,23 +453,6 @@ def render_markdown(d):
 		L.append("")
 		L.append("🎉 **Board clear.**")
 	elif pace["needed"] is not None:
-		# Headline: clock elapsed vs. board resolved. "40% of the day gone, 25% of
-		# the board done" answers over/under without any rate arithmetic.
-		vs = pace["vs_pace"]
-		if vs > 0:
-			verdict = f"✅ **{vs} ahead** of pace"
-		elif vs < 0:
-			verdict = f"⚠️ **{abs(vs)} behind** pace"
-		else:
-			verdict = "✅ **exactly on pace**"
-		L.append("")
-		L.append(
-			f"⏱ Day **{pace['day_pct']}%** elapsed · board **{board['pct']}%** "
-			f"done — {verdict}"
-		)
-		L.append(f"_(to finish all {board['total']}, should be at "
-		         f"~{pace['expected']} by now)_")
-
 		head = (
 			f"{board['remaining']} left · {pace['hours_left']:.1f}h to "
 			f"{_fmt_clock(d['window_end'])}"

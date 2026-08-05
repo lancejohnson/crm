@@ -194,12 +194,13 @@ duplicating. Work substantial features in a worktree of your own.
   day can still be changed. Posts to the **Acq channel** (not a DM) so the whole
   acquisitions team works off the same number, via the same `pi` bot and token as
   the standup. `crm/api/today_pulse.py` (**new**).
-  - **Headline pace is clock-elapsed vs. board-resolved**: "Day 60% elapsed ·
-    board 60% done — exactly on pace", plus the cards over/under where the day
-    says we should be. This answers "are we going to finish?" without any rate
-    arithmetic, and it self-checks: at 100% of the day, "N behind" is exactly the
-    N cards that carried over. Replayed across 8/04 it tracked the real day
-    (−20 behind at 11:30am, level by 1:30pm, −24 at close = the 24 carried).
+  - **No "N cards behind pace" verdict** — an elapsed-vs-resolved over/under
+    line was built and then removed the same day. The board routinely carries
+    more cards than a day can hold (81-111 generated against ~87 resolved on a
+    good day), so it read "behind" almost every day. That is a statement about
+    board size, not about the person working it, and a warning that fires daily
+    stops being read. Board overload belongs in the standup's intake-capacity
+    number, not in a half-hourly nudge.
   - Carries: cards resolved **since the last pulse**, the day's rolling total as a
     Done/Skipped/left progress bar, pace vs. the hours left, and **Quo talk time**.
   - **Talk time is a first-class metric, not decoration.** Cards-per-half-hour
