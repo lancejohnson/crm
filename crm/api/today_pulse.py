@@ -1,14 +1,18 @@
-"""Intraday Today-board pulse — a Mattermost group DM every 30 minutes.
+"""Intraday Today-board pulse — posted to the Acq channel every 30 minutes.
 
 The 5am standup DM says what the day looks like; the Today board is where the
 setters work it; this is the half-hourly heartbeat in between, so pace is visible
-while the day can still be changed rather than at 6pm when it can't.
+while the day can still be changed rather than at 6pm when it can't. It posts to
+the team channel rather than a DM so everyone in acquisitions is looking at the
+same number.
 
 One message carries four things:
 
   * **delta** — cards resolved since the last pulse
   * **rolling total** — where the day stands, as a progress bar
-  * **pace** — what's left vs. the hours left, against the rate actually running
+  * **pace** — how much of the working day has elapsed vs. how much of the board
+    is resolved, i.e. how many cards over or under we are right now, plus what's
+    left against the hours left
   * **talk time** — Quo minutes in the window
 
 Talk time is here deliberately. Cards-per-half-hour on its own punishes exactly
@@ -46,8 +50,10 @@ DOCTYPE = "CRM Today Item"
 #: CRM users whose progress this pulse reports on.
 DEFAULT_PULSE_USERS = ("german.haikazounian@groundworkpro.com",)
 
-#: Mattermost usernames in the group DM. Pi is included because it is the poster.
-DEFAULT_PULSE_MEMBERS = ("german.haikazounian1", "lancejohnson", "pi")
+#: Where the pulse posts. The Acq channel, so the whole acquisitions team sees
+#: the same pace the setters are working against.
+DEFAULT_PULSE_TEAM = "groundwork"
+DEFAULT_PULSE_CHANNEL = "acq"
 
 #: Watermark of the last successful post, as a Frappe default (no new doctype —
 #: same approach as the Today priority order and the activity goals).
@@ -84,11 +90,11 @@ def _pulse_users():
 	return tuple(configured or DEFAULT_PULSE_USERS)
 
 
-def _pulse_members():
-	configured = frappe.conf.get("today_pulse_members")
-	if isinstance(configured, str):
-		configured = [u.strip() for u in configured.split(",") if u.strip()]
-	return tuple(configured or DEFAULT_PULSE_MEMBERS)
+def _pulse_target():
+	return (
+		frappe.conf.get("today_pulse_team") or DEFAULT_PULSE_TEAM,
+		frappe.conf.get("today_pulse_channel") or DEFAULT_PULSE_CHANNEL,
+	)
 
 
 def _resolved_stamp_field():
@@ -330,6 +336,17 @@ def build_pulse(now=None, since=None):
 	# window. The setters routinely start an hour or more after 9:30, and charging
 	# them for that time made the pulse open every day with a false "behind"
 	# warning built out of hours nobody was working.
+	# "Are we over or under where we need to be?" — compare how much of the working
+	# day is gone against how much of the board is resolved. This is the headline
+	# pace number because it answers the question directly and needs no rate
+	# arithmetic: at 40% of the day you should be at 40% of the board.
+	window_start = _window_bounds(now)[0]
+	span = (window_end - window_start).total_seconds()
+	day_frac = min(1.0, max(0.0, (now - window_start).total_seconds() / span)) if span else 0.0
+	expected = int(round(board["total"] * day_frac))
+	# Positive = ahead of where the clock says we should be, negative = behind.
+	vs_pace = board["resolved"] - expected
+
 	hours_left = max(0.0, (window_end - now).total_seconds() / 3600.0)
 	worked_hours = (
 		max(0.0, (now - board["first_at"]).total_seconds() / 3600.0)
@@ -353,6 +370,10 @@ def build_pulse(now=None, since=None):
 		"calls": calls,
 		"day_calls": day_calls,
 		"pace": {
+			"day_frac": day_frac,
+			"day_pct": int(round(day_frac * 100)),
+			"expected": expected,
+			"vs_pace": vs_pace,
 			"hours_left": hours_left,
 			"worked_hours": worked_hours,
 			"started_at": board.get("first_at"),
@@ -440,6 +461,23 @@ def render_markdown(d):
 		L.append("")
 		L.append("🎉 **Board clear.**")
 	elif pace["needed"] is not None:
+		# Headline: clock elapsed vs. board resolved. "40% of the day gone, 25% of
+		# the board done" answers over/under without any rate arithmetic.
+		vs = pace["vs_pace"]
+		if vs > 0:
+			verdict = f"✅ **{vs} ahead** of pace"
+		elif vs < 0:
+			verdict = f"⚠️ **{abs(vs)} behind** pace"
+		else:
+			verdict = "✅ **exactly on pace**"
+		L.append("")
+		L.append(
+			f"⏱ Day **{pace['day_pct']}%** elapsed · board **{board['pct']}%** "
+			f"done — {verdict}"
+		)
+		L.append(f"_(to finish all {board['total']}, should be at "
+		         f"~{pace['expected']} by now)_")
+
 		head = (
 			f"{board['remaining']} left · {pace['hours_left']:.1f}h to "
 			f"{_fmt_clock(d['window_end'])}"
@@ -491,8 +529,8 @@ def _mm(path, token, base, method="GET", body=None):
 	return r.json()
 
 
-def send_group_dm(text):
-	"""Post to the group DM as the `pi` bot. Returns the post id.
+def send_to_channel(text):
+	"""Post to the Acq channel as the `pi` bot. Returns the post id.
 
 	Absent a token this no-ops rather than raising, matching `daily_standup.send_dm`
 	so the feature lies dormant on an unconfigured site.
@@ -505,25 +543,8 @@ def send_group_dm(text):
 		)
 		return None
 
-	me = _mm("/users/me", token, base)
-	ids = [me["id"]]
-	for username in _pulse_members():
-		if username == me["username"]:
-			continue
-		try:
-			ids.append(_mm(f"/users/username/{username}", token, base)["id"])
-		except requests.HTTPError:
-			frappe.log_error(
-				title="today pulse: unknown Mattermost user",
-				message=f"{username} could not be resolved; posting without them",
-			)
-	ids = list(dict.fromkeys(ids))
-
-	# 3+ members is a group channel; 2 is a plain DM.
-	if len(ids) > 2:
-		channel = _mm("/channels/group", token, base, "POST", ids)
-	else:
-		channel = _mm("/channels/direct", token, base, "POST", ids)
+	team, channel_name = _pulse_target()
+	channel = _mm(f"/teams/name/{team}/channels/name/{channel_name}", token, base)
 	post = _mm(
 		"/posts", token, base, "POST", {"channel_id": channel["id"], "message": text}
 	)
@@ -548,7 +569,7 @@ def send_today_pulse():
 			return
 
 		data = build_pulse(now)
-		post = send_group_dm(render_markdown(data))
+		post = send_to_channel(render_markdown(data))
 		# Only advance the watermark on a delivered post, so a failed slot folds
 		# its cards into the next message instead of losing them.
 		if post:
@@ -573,7 +594,7 @@ def preview_pulse(now=None, since=None, send=0, note=None):
 	text = render_markdown(data)
 	if note:
 		text = f"_{note}_\n\n{text}"
-	post = send_group_dm(text) if int(send or 0) else None
+	post = send_to_channel(text) if int(send or 0) else None
 	return {
 		"markdown": text,
 		"sent": bool(post),

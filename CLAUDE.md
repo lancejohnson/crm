@@ -189,10 +189,17 @@ duplicating. Work substantial features in a worktree of your own.
   - Ops: `scripts/setup_today_board.py` (idempotent, `--dry-run`).
   - **Not yet checked on a phone** — fixed-width columns + horizontal scroll;
     desktop is the primary surface unless Ger confirms otherwise.
-- **Intraday Today pulse (every 30 min, Mattermost group DM)** — the half-hourly
+- **Intraday Today pulse (every 30 min, Acq channel)** — the half-hourly
   heartbeat between the 5am standup and end of day, so pace is visible while the
-  day can still be changed. Group DM to German + Lance + `pi`, posted by the same
-  `pi` bot and token as the standup. `crm/api/today_pulse.py` (**new**).
+  day can still be changed. Posts to the **Acq channel** (not a DM) so the whole
+  acquisitions team works off the same number, via the same `pi` bot and token as
+  the standup. `crm/api/today_pulse.py` (**new**).
+  - **Headline pace is clock-elapsed vs. board-resolved**: "Day 60% elapsed ·
+    board 60% done — exactly on pace", plus the cards over/under where the day
+    says we should be. This answers "are we going to finish?" without any rate
+    arithmetic, and it self-checks: at 100% of the day, "N behind" is exactly the
+    N cards that carried over. Replayed across 8/04 it tracked the real day
+    (−20 behind at 11:30am, level by 1:30pm, −24 at close = the 24 carried).
   - Carries: cards resolved **since the last pulse**, the day's rolling total as a
     Done/Skipped/left progress bar, pace vs. the hours left, and **Quo talk time**.
   - **Talk time is a first-class metric, not decoration.** Cards-per-half-hour
