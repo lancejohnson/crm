@@ -179,12 +179,20 @@ duplicating. Work substantial features in a worktree of your own.
     `count` leads owned by that user created at/after `since`. Nothing is
     decremented — no counter to drift, no read-modify-write to race on, and it
     self-expires (the keys can then be deleted at leisure).
+    - **Shipped 2026-08-05 as 5 leads to Exe** (`since` 18:36:08). Because the
+      count is read from config on every call, it is tunable live —
+      `bench set-config lead_round_robin_ramp_count N`, effective on the next
+      lead, no deploy. It was set to 10, then changed to 5 before any lead had
+      been delivered. site_config stores it as a **string**; `_ramp_state`
+      coerces with `int()`.
     - **GOTCHA — ramp deliveries must be netted OUT of the daily tally**
       (`_todays_counts` subtracts `delivered_today`). Without that the ramp
-      undoes itself inside one day: 10 leads to Exe, the tally then reads
-      Exe 10 / German 0, and the balancer sends the next 10 to German for a net
-      effect of **zero**. Verified on prod with real inserts:
-      `EEEEEEEEEE` then `GEGEGEGEGE`, Exe still +10 at the end.
+      undoes itself inside one day: N leads to Exe, the tally then reads
+      Exe N / German 0, and the balancer sends the next N to German for a net
+      effect of **zero**. Verified on prod with real inserts (rolled back) at
+      both settings: `EEEEEEEEEE`/`EEEEE` followed by clean `GEGEGE…`
+      alternation, with Exe still +10/+5 at the end and
+      `round_robin_status().why` back to "normal rotation".
     - Every caller routes through `_choose(roster)` so the hook, `next_owner()`
       and `round_robin_status()` cannot disagree about whose turn it is.
   - **GOTCHA — `_last_owner` must exclude parked imports** (it now shares
