@@ -360,6 +360,41 @@ duplicating. Work substantial features in a worktree of your own.
   - Interactions: hover **✓ Done / ⊘ Skip / ↩ put back** (fixed-size absolute
     buttons so they cannot overflow a narrow desktop card), drag across columns,
     and drag to reorder within one. Realtime `crm_today` keeps boards in step.
+  - **Resolving a card asks what happened** (`Modals/TodayOutcomeModal.vue`).
+    Ticking ✓ or dragging into **Done** opens a five-option picker — Connected /
+    No Answer / Left a Voicemail / Booked an Appointment / **Other** — where
+    Other requires a sentence; dragging into **Skipped** asks an open-ended
+    "why" instead, because the interesting part of a skip is exactly what a fixed
+    list would throw away. Stored on `CRM Today Item.outcome` /
+    `outcome_note` (ops `setup_today_board.py`, both `has_field`-guarded via
+    `_supports_outcome()` so the app is safe to deploy first) and rendered back
+    onto the card, so a wrong answer is visible and fixable rather than
+    write-only. Re-submitting the same state only rewrites the outcome and
+    deliberately does **not** restamp `resolved_at` — the intraday pulse reads
+    that column as "resolved in this half hour", so correcting a mis-click must
+    not move a card into a later window. **Put back is never interrogated**:
+    undoing a mis-click isn't a judgement, and a prompt there would make the
+    mistake cost more than the action.
+    - **The drag path had to move from `@end` to `@change`.** `end` fires on the
+      list the drag STARTED in, which is the wrong column to ask about; `change`
+      names the destination and hands back the moved card, which is what decides
+      whether to open the modal before anything is written. Cancelling a dragged
+      drop must `board.reload()` — vuedraggable has already moved the card, so
+      abandoning the answer otherwise leaves the board lying about where it is.
+    - **GOTCHA — `reorder_today` never stamped `resolved_*`.** Only
+      `set_today_state` did, so a card *dragged* into Skipped was invisible to the
+      intraday pulse and a rep who works by dragging read as idle. Both paths now
+      share `_state_stamps(state)`, and `reorder_today` also clears the outcome
+      when a card is dragged back to To Call.
+  - **The card's task row is two hit targets.** The circle ticks the task
+    complete **and back** without leaving the board (`frappe.client.set_value`,
+    optimistic, both directions); the rest of the row opens the real Task modal
+    to edit it. Reopening matters as much as completing — the circle is a pixel
+    from the row that opens the task. This is also why `get_today_board` now
+    falls back to **a task completed today when there is no open one**
+    (`open_task or completed_task`): otherwise ticking the box made the row
+    vanish and left no way to undo. A Done card still prefers the completed task,
+    exactly as before.
   - **`reorder_today` renumbers the WHOLE destination column**, not just the
     dragged names — cards are seeded at wide priority offsets, so writing
     10/20/30 onto three dragged cards once dropped

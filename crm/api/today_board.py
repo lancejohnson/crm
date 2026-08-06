@@ -44,6 +44,18 @@ from crm.api.daily_standup import (
 DOCTYPE = "CRM Today Item"
 STATES = ("To Call", "Done", "Skipped")
 
+#: What a card records when it is ticked Done. Deliberately five short answers:
+#: the modal is a half-second interruption between two calls, and a list nobody
+#: can read at a glance gets whatever option is nearest the thumb. "Other" is
+#: the escape hatch and is the one answer that must be explained in words.
+DONE_OUTCOMES = (
+	"Connected",
+	"No Answer",
+	"Left a Voicemail",
+	"Booked an Appointment",
+	"Other",
+)
+
 #: The default personal priority order. Week-one's two calls are deliberately
 #: separated so the first pass can be finished before afternoon follow-ups begin.
 PRIORITY_ORDER = ("never", "task", "week1_am", "week1_pm", "weekly", "monthly")
@@ -93,7 +105,19 @@ def _row_fields(with_slots=False):
 	          "calls_needed", "done_by", "done_at"]
 	if with_slots:
 		fields += ["call_number", "total_calls"]
+	if _supports_outcome():
+		fields += ["outcome", "outcome_note"]
 	return fields
+
+
+def _supports_outcome() -> bool:
+	"""`outcome`/`outcome_note` are added by the same idempotent ops script that
+	provisions the doctype. Degrade quietly if the app is deployed first: the board
+	still resolves cards, it just doesn't record why."""
+	if not _available():
+		return False
+	meta = frappe.get_meta(DOCTYPE)
+	return bool(meta.has_field("outcome") and meta.has_field("outcome_note"))
 
 
 def _supports_resolved_stamp() -> bool:
@@ -103,6 +127,38 @@ def _supports_resolved_stamp() -> bool:
 		return False
 	meta = frappe.get_meta(DOCTYPE)
 	return bool(meta.has_field("resolved_at") and meta.has_field("resolved_by"))
+
+
+def _state_stamps(state, now=None):
+	"""The stamp columns that go with a state change, in ONE place.
+
+	Drag and the hover buttons take different code paths (`reorder_today` writes
+	with `db.set_value`; `set_today_state` saves the doc), and they were already
+	out of step: a card DRAGGED into Skipped never got `resolved_at`, so the
+	intraday pulse — which reads exactly that column — saw a rep who works by
+	dragging as idle.
+
+	`done_*` stays Done-only: the Today report's "completed by" list, the
+	Lance-only activity pulse and the card UI all read it with that meaning.
+	`resolved_*` covers Done AND Skipped, because a skip is a real judgement a
+	person made. Moving a card back to "To Call" un-resolves it.
+	"""
+	now = now or now_datetime()
+	updates = {}
+	if state == "Done":
+		updates["done_by"] = frappe.session.user
+		updates["done_at"] = now
+	else:
+		updates["done_by"] = None
+		updates["done_at"] = None
+	if _supports_resolved_stamp():
+		if state == "To Call":
+			updates["resolved_by"] = None
+			updates["resolved_at"] = None
+		else:
+			updates["resolved_by"] = frappe.session.user
+			updates["resolved_at"] = now
+	return updates
 
 
 def _guard():
@@ -547,11 +603,16 @@ def get_today_board(
 			r.get("total_calls") or max(1, int(r.get("calls_needed") or 1))
 		)
 		r["priority_key"] = _priority_key(r.phase, r.call_number)
-		r["task"] = (
-			completed_task_by_lead.get(r.lead)
-			if r.state == "Done" and completed_task_by_lead.get(r.lead)
-			else open_task_by_lead.get(r.lead)
-		)
+		# A Done card shows the task the rep just finished. Everywhere else the
+		# soonest OPEN task leads — but a task completed today is still shown when
+		# there is no open one, so ticking the card's checkbox doesn't make the row
+		# vanish and leave the rep no way to undo a mis-click.
+		completed_task = completed_task_by_lead.get(r.lead)
+		open_task = open_task_by_lead.get(r.lead)
+		if r.state == "Done" and completed_task:
+			r["task"] = completed_task
+		else:
+			r["task"] = open_task or completed_task
 		r["last_incoming_text"] = incoming_by_lead.get(r.lead)
 
 	# The owner selector lists everyone who has cards today, counted BEFORE the
@@ -1068,37 +1129,53 @@ def set_today_lead_status(item, status, lost_reason=None, lost_notes=None):
 
 
 @frappe.whitelist()
-def set_today_state(item, state):
-	"""Tick a card Done / Skipped / back To Call."""
+def set_today_state(item, state, outcome=None, outcome_note=None):
+	"""Tick a card Done / Skipped / back To Call, with what happened.
+
+	Resolving a card is the one moment the rep already has the answer in their
+	head, so it is the only moment the answer is cheap to collect — asking later
+	means reconstructing thirty calls from memory. A Done card carries one of
+	`DONE_OUTCOMES`; a Skipped card carries an open-ended "why" instead, because
+	the interesting thing about a skip is precisely the part a fixed list would
+	have thrown away.
+
+	Re-submitting the SAME state only rewrites the outcome: correcting a
+	mis-click must not restamp `resolved_at`, which the intraday pulse reads as
+	"this card was resolved in this half hour".
+	"""
 	if state not in STATES:
 		frappe.throw(_("Invalid state."))
 	_guard()
-	doc = frappe.get_doc(DOCTYPE, item)
-	if doc.state == state:
-		return {"ok": True, "state": state}
-	doc.state = state
-	now = now_datetime()
-	# `done_*` stays Done-only: the Today report's "completed by" list, the
-	# Lance-only activity pulse and the card UI all read it with that meaning.
+
+	outcome = (outcome or "").strip()
+	outcome_note = (outcome_note or "").strip()
 	if state == "Done":
-		doc.done_by = frappe.session.user
-		doc.done_at = now
+		if outcome and outcome not in DONE_OUTCOMES:
+			frappe.throw(_("Invalid call outcome."))
+		if outcome == "Other" and not outcome_note:
+			frappe.throw(_("Say a little more about what happened."))
 	else:
-		doc.done_by = None
-		doc.done_at = None
-	# `resolved_*` covers Done AND Skipped, because a skip is a real judgement a
-	# person made and the intraday pulse has to be able to see it happen. Moving a
-	# card back to "To Call" un-resolves it.
-	if _supports_resolved_stamp():
-		if state == "To Call":
-			doc.resolved_by = None
-			doc.resolved_at = None
-		else:
-			doc.resolved_by = frappe.session.user
-			doc.resolved_at = now
+		# "Connected" is a statement about a call that was made. A skipped card is
+		# by definition a call that wasn't, so it never carries an outcome.
+		outcome = ""
+	if state == "To Call":
+		outcome_note = ""
+
+	doc = frappe.get_doc(DOCTYPE, item)
+	same_state = doc.state == state
+	if same_state and not (outcome or outcome_note):
+		return {"ok": True, "state": state}
+
+	doc.state = state
+	if not same_state:
+		for field, value in _state_stamps(state).items():
+			setattr(doc, field, value)
+	if _supports_outcome():
+		doc.outcome = outcome
+		doc.outcome_note = outcome_note
 	doc.save(ignore_permissions=True)
 	_publish(doc.for_date)
-	return {"ok": True, "state": state}
+	return {"ok": True, "state": state, "outcome": outcome, "outcome_note": outcome_note}
 
 
 @frappe.whitelist()
@@ -1142,13 +1219,14 @@ def reorder_today(order, state=None, for_date=None):
 		if name in moved:
 			cur = frappe.db.get_value(DOCTYPE, name, "state")
 			if cur != target:
+				# Normally the client has already called `set_today_state` (that is
+				# where the outcome is collected), so this branch is the fallback for
+				# a drag that skipped it. Stamp it exactly the same way regardless.
 				updates["state"] = target
-				if target == "Done":
-					updates["done_by"] = frappe.session.user
-					updates["done_at"] = now_datetime()
-				elif cur == "Done":
-					updates["done_by"] = None
-					updates["done_at"] = None
+				updates.update(_state_stamps(target))
+				if _supports_outcome() and target == "To Call":
+					updates["outcome"] = ""
+					updates["outcome_note"] = ""
 		# db.set_value keeps a 60-card reorder to one cheap write per row; the
 		# realtime publish below is what refreshes everyone else's board.
 		frappe.db.set_value(DOCTYPE, name, updates, update_modified=False)

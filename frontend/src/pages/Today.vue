@@ -91,12 +91,15 @@
         </div>
       </div>
 
+      <!-- `change` rather than `end`: it names the destination column and hands
+           back the moved card, which is what decides whether the outcome modal
+           has to open before anything is persisted. -->
       <Draggable
         v-model="col.items"
         :group="'today'"
         item-key="name"
         class="flex min-h-[6rem] flex-1 flex-col gap-2 overflow-y-auto px-2 pb-3"
-        @end="onDrop($event, col)"
+        @change="onChange($event, col)"
       >
         <template #item="{ element: item }">
           <div
@@ -110,7 +113,7 @@
               <Tooltip v-if="item.state !== 'Done'" :text="__('Done')">
                 <button
                   class="flex size-7 items-center justify-center rounded-md hover:bg-surface-gray-2"
-                  @click.stop="setState(item, 'Done')"
+                  @click.stop="requestState(item, 'Done')"
                 >
                   <CheckIcon class="size-4 text-ink-green-3" />
                 </button>
@@ -118,7 +121,7 @@
               <Tooltip v-if="item.state !== 'Skipped'" :text="__('Skip for today')">
                 <button
                   class="flex size-7 items-center justify-center rounded-md hover:bg-surface-gray-2"
-                  @click.stop="setState(item, 'Skipped')"
+                  @click.stop="requestState(item, 'Skipped')"
                 >
                   <BanIcon class="size-4 text-ink-gray-5" />
                 </button>
@@ -126,7 +129,7 @@
               <Tooltip v-if="item.state !== 'To Call'" :text="__('Put back')">
                 <button
                   class="flex size-7 items-center justify-center rounded-md hover:bg-surface-gray-2"
-                  @click.stop="setState(item, 'To Call')"
+                  @click.stop="requestState(item, 'To Call')"
                 >
                   <UndoIcon class="size-4 text-ink-gray-5" />
                 </button>
@@ -211,32 +214,75 @@
               </div>
             </Tooltip>
 
-            <button
+            <!-- The circle is its own hit target (tick/untick without leaving the
+                 board); the rest of the row opens the task, where it can be
+                 edited and more can be added. -->
+            <div
               v-if="item.task"
-              class="mt-2 flex w-full items-center gap-1.5 rounded-md border border-outline-gray-1 bg-surface-gray-1 px-2 py-1.5 text-left hover:border-outline-gray-3 hover:bg-surface-gray-2"
-              @click.stop="openTask(item.task)"
+              class="mt-2 flex w-full items-center gap-1.5 rounded-md border border-outline-gray-1 bg-surface-gray-1 px-2 py-1.5 hover:border-outline-gray-3"
+              @click.stop
             >
-              <FeatherIcon
-                :name="item.task.is_completed ? 'check-circle' : 'circle'"
-                class="size-3.5 shrink-0"
-                :class="item.task.is_completed ? 'text-ink-green-3' : 'text-ink-gray-4'"
-              />
-              <span class="min-w-0 flex-1 truncate text-xs font-medium text-ink-gray-7">
-                {{ item.task.title }}
-              </span>
-              <span
-                v-if="item.task.completed_at || item.task.due_date"
-                class="shrink-0 text-xs text-ink-gray-5"
+              <Tooltip
+                :text="item.task.is_completed ? __('Mark as not done') : __('Mark as done')"
               >
-                {{
-                  __(
-                    timeAgo(
-                      item.task.is_completed ? item.task.completed_at : item.task.due_date,
-                    ),
-                  )
-                }}
+                <button
+                  class="flex shrink-0 items-center rounded disabled:cursor-wait disabled:opacity-60"
+                  :disabled="togglingTasks.includes(item.task.name)"
+                  @click.stop="toggleTask(item)"
+                >
+                  <FeatherIcon
+                    :name="item.task.is_completed ? 'check-circle' : 'circle'"
+                    class="size-3.5"
+                    :class="
+                      item.task.is_completed
+                        ? 'text-ink-green-3'
+                        : 'text-ink-gray-4 hover:text-ink-green-3'
+                    "
+                  />
+                </button>
+              </Tooltip>
+              <button
+                class="flex min-w-0 flex-1 items-center gap-1.5 text-left hover:opacity-80"
+                @click.stop="openTask(item.task)"
+              >
+                <span
+                  class="min-w-0 flex-1 truncate text-xs font-medium text-ink-gray-7"
+                  :class="item.task.is_completed ? 'line-through opacity-60' : ''"
+                >
+                  {{ item.task.title }}
+                </span>
+                <span
+                  v-if="item.task.completed_at || item.task.due_date"
+                  class="shrink-0 text-xs text-ink-gray-5"
+                >
+                  {{
+                    __(
+                      timeAgo(
+                        item.task.is_completed ? item.task.completed_at : item.task.due_date,
+                      ),
+                    )
+                  }}
+                </span>
+              </button>
+            </div>
+
+            <!-- What the rep said when they resolved the card, kept on the card so
+                 a wrong answer is visible (and fixable) rather than write-only. -->
+            <div v-if="item.outcome || item.outcome_note" class="mt-2 flex flex-wrap items-center gap-1.5">
+              <Badge
+                v-if="item.outcome"
+                variant="subtle"
+                :theme="item.outcome === 'Booked an Appointment' ? 'green' : 'gray'"
+                :label="__(item.outcome)"
+              />
+              <span
+                v-if="item.outcome_note"
+                class="min-w-0 flex-1 truncate text-xs text-ink-gray-5"
+                :title="item.outcome_note"
+              >
+                {{ item.outcome_note }}
               </span>
-            </button>
+            </div>
 
             <div v-if="item.reason" class="mt-1 truncate text-xs text-ink-gray-5">
               {{ item.reason }}
@@ -261,6 +307,13 @@
     :on-cancel="cancelLostStatus"
   />
   <PropertyLinkModal v-model="showPropertyLinkModal" :address="selectedAddress" />
+  <TodayOutcomeModal
+    v-model="showOutcomeModal"
+    :item="pendingOutcome?.item"
+    :state="pendingOutcome?.state || 'Done'"
+    :saving="savingOutcome"
+    @confirm="confirmOutcome"
+  />
   <TodayReportModal
     v-model="showReportModal"
     :report="todayReport.data"
@@ -303,6 +356,7 @@ import LostReasonModal from '@/components/Modals/LostReasonModal.vue'
 import PropertyLinkModal from '@/components/Modals/PropertyLinkModal.vue'
 import SendTextModal from '@/components/Modals/SendTextModal.vue'
 import TaskModal from '@/components/Modals/TaskModal.vue'
+import TodayOutcomeModal from '@/components/Modals/TodayOutcomeModal.vue'
 import { globalStore } from '@/stores/global'
 import { sessionStore } from '@/stores/session'
 import { statusesStore } from '@/stores/statuses'
@@ -348,8 +402,15 @@ const showPriorityModal = ref(false)
 const savingPriority = ref(false)
 const selectedTask = ref(null)
 const showTaskModal = ref(false)
+const togglingTasks = ref([])
 const selectedTextItem = ref(null)
 const showTextModal = ref(false)
+// The card waiting on an answer before its state is written. Holds the
+// destination column when the move came from a drag, because vuedraggable has
+// already moved the card and a cancel has to put it back.
+const pendingOutcome = ref(null)
+const showOutcomeModal = ref(false)
+const savingOutcome = ref(false)
 
 const CheckIcon = () =>
   h('svg', { viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [
@@ -652,38 +713,134 @@ function openTask(task) {
   showTaskModal.value = true
 }
 
+// Tick a task straight off the card, in either direction. Reopening matters as
+// much as completing: the checkbox is one pixel from the row that opens the
+// task, so a mis-click has to be undoable without hunting for the lead.
+async function toggleTask(item) {
+  const task = item.task
+  if (!task || togglingTasks.value.includes(task.name)) return
+  const wasCompleted = task.is_completed
+  togglingTasks.value = [...togglingTasks.value, task.name]
+  task.is_completed = !wasCompleted
+  try {
+    await call('frappe.client.set_value', {
+      doctype: 'CRM Task',
+      name: task.name,
+      fieldname: 'status',
+      value: wasCompleted ? 'Todo' : 'Done',
+    })
+    await board.reload()
+  } catch (e) {
+    task.is_completed = wasCompleted
+    toast.error(e.messages?.[0] || __('Could not update the task'))
+    board.reload()
+  } finally {
+    togglingTasks.value = togglingTasks.value.filter((name) => name !== task.name)
+  }
+}
+
 function openText(item) {
   selectedTextItem.value = item
   showTextModal.value = true
 }
 
 function finishTextItem() {
-  if (selectedTextItem.value) setState(selectedTextItem.value, 'Done')
+  if (selectedTextItem.value) requestState(selectedTextItem.value, 'Done')
 }
 
 function skipTextItem() {
-  if (selectedTextItem.value) setState(selectedTextItem.value, 'Skipped')
+  if (selectedTextItem.value) requestState(selectedTextItem.value, 'Skipped')
 }
 
-async function setState(item, state) {
+// Resolving a card asks what happened first. Putting one BACK doesn't: undoing a
+// mis-click is not a judgement worth interrogating, and a prompt there would
+// make the mistake more expensive than the action.
+function requestState(item, state) {
+  if (state === 'To Call') {
+    applyState(item, state)
+    return
+  }
+  pendingOutcome.value = { item, state, col: null, viaDrag: false }
+  showOutcomeModal.value = true
+}
+
+function onChange(evt, col) {
+  if (evt.moved) {
+    persistOrder(col)
+    return
+  }
+  if (!evt.added) return
+  const item = evt.added.element
+  if (item.state === col.state) {
+    persistOrder(col)
+    return
+  }
+  if (col.state === 'To Call') {
+    applyState(item, 'To Call', { col, alreadyMoved: true })
+    return
+  }
+  pendingOutcome.value = { item, state: col.state, col, viaDrag: true }
+  showOutcomeModal.value = true
+}
+
+async function confirmOutcome({ outcome, outcome_note }) {
+  const pending = pendingOutcome.value
+  if (!pending) return
+  pendingOutcome.value = null
+  savingOutcome.value = true
+  try {
+    await applyState(pending.item, pending.state, {
+      outcome,
+      outcome_note,
+      col: pending.col,
+      alreadyMoved: pending.viaDrag,
+    })
+  } finally {
+    savingOutcome.value = false
+    showOutcomeModal.value = false
+  }
+}
+
+// Esc, the backdrop and Cancel all land here. A dragged card is sitting in the
+// wrong column until the server is re-read, so abandoning the answer has to put
+// it back rather than leave the board lying.
+watch(showOutcomeModal, (open) => {
+  if (open) return
+  const pending = pendingOutcome.value
+  pendingOutcome.value = null
+  if (pending?.viaDrag) board.reload()
+})
+
+async function applyState(item, state, options = {}) {
+  const { outcome = '', outcome_note = '', col = null, alreadyMoved = false } = options
   const prev = item.state
   item.state = state
-  const from = columns.value.find((c) => c.state === prev)
-  const to = columns.value.find((c) => c.state === state)
-  if (from && to) {
-    const i = from.items.findIndex((x) => x.name === item.name)
-    if (i > -1) from.items.splice(i, 1)
-    to.items.unshift(item)
+  if (!alreadyMoved) {
+    const from = columns.value.find((c) => c.state === prev)
+    const to = columns.value.find((c) => c.state === state)
+    if (from && to) {
+      const i = from.items.findIndex((x) => x.name === item.name)
+      if (i > -1) from.items.splice(i, 1)
+      to.items.unshift(item)
+    }
   }
+  item.outcome = outcome
+  item.outcome_note = outcome_note
   try {
-    await call('crm.api.today_board.set_today_state', { item: item.name, state })
+    await call('crm.api.today_board.set_today_state', {
+      item: item.name,
+      state,
+      outcome,
+      outcome_note,
+    })
+    if (col) await persistOrder(col)
   } catch (e) {
     toast.error(e.messages?.[0] || __('Could not update'))
     board.reload()
   }
 }
 
-async function onDrop(evt, col) {
+async function persistOrder(col) {
   try {
     await call('crm.api.today_board.reorder_today', {
       order: col.items.map((i) => i.name),
