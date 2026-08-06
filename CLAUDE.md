@@ -388,8 +388,15 @@ duplicating. Work substantial features in a worktree of your own.
       when a card is dragged back to To Call.
   - **The card's task row is two hit targets.** The circle ticks the task
     complete **and back** without leaving the board (`frappe.client.set_value`,
-    optimistic, both directions); the rest of the row opens the real Task modal
-    to edit it. Reopening matters as much as completing — the circle is a pixel
+    optimistic, both directions); the rest of the row opens the lead's **to-do
+    list** (`TodayLeadModal` → `Activities` → `TaskTodoList`), where this task can
+    be edited *and more can be added* — Lance's explicit call over a single-task
+    `TaskModal`, which can only ever edit the one you clicked. Today.vue no
+    longer mounts `TaskModal` at all; the lead panel's own `AllModals` provides
+    it when a to-do row is clicked. The title uses a native `title` attribute
+    rather than `<Tooltip>`: Tooltip renders a wrapper element, which would
+    become the flex child and break the truncating `min-w-0 flex-1` title on a
+    narrow card. Reopening matters as much as completing — the circle is a pixel
     from the row that opens the task. This is also why `get_today_board` now
     falls back to **a task completed today when there is no open one**
     (`open_task or completed_task`): otherwise ticking the box made the row

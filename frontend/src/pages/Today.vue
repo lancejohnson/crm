@@ -215,8 +215,9 @@
             </Tooltip>
 
             <!-- The circle is its own hit target (tick/untick without leaving the
-                 board); the rest of the row opens the task, where it can be
-                 edited and more can be added. -->
+                 board); the rest of the row opens the lead's to-do list, where
+                 this task can be edited AND more can be added — rather than a
+                 single-task dialog that can only ever edit the one you clicked. -->
             <div
               v-if="item.task"
               class="mt-2 flex w-full items-center gap-1.5 rounded-md border border-outline-gray-1 bg-surface-gray-1 px-2 py-1.5 hover:border-outline-gray-3"
@@ -241,9 +242,13 @@
                   />
                 </button>
               </Tooltip>
+              <!-- native `title` rather than <Tooltip>: Tooltip renders a wrapper
+                   element, which would become the flex child and break the
+                   truncating `min-w-0 flex-1` title on a narrow card. -->
               <button
                 class="flex min-w-0 flex-1 items-center gap-1.5 text-left hover:opacity-80"
-                @click.stop="openTask(item.task)"
+                :title="__('Open to-dos — edit this one or add more')"
+                @click.stop="openTodayItem(item)"
               >
                 <span
                   class="min-w-0 flex-1 truncate text-xs font-medium text-ink-gray-7"
@@ -325,14 +330,6 @@
     :saving="savingPriority"
     @save="savePriorityOrder"
   />
-  <TaskModal
-    v-if="showTaskModal"
-    v-model="showTaskModal"
-    :task="selectedTask"
-    doctype="CRM Lead"
-    :doc="selectedTask?.reference_docname"
-    @after="board.reload()"
-  />
   <SendTextModal
     v-if="showTextModal"
     v-model="showTextModal"
@@ -355,7 +352,6 @@ import IndicatorIcon from '@/components/Icons/IndicatorIcon.vue'
 import LostReasonModal from '@/components/Modals/LostReasonModal.vue'
 import PropertyLinkModal from '@/components/Modals/PropertyLinkModal.vue'
 import SendTextModal from '@/components/Modals/SendTextModal.vue'
-import TaskModal from '@/components/Modals/TaskModal.vue'
 import TodayOutcomeModal from '@/components/Modals/TodayOutcomeModal.vue'
 import { globalStore } from '@/stores/global'
 import { sessionStore } from '@/stores/session'
@@ -400,8 +396,6 @@ const showPropertyLinkModal = ref(false)
 const showReportModal = ref(false)
 const showPriorityModal = ref(false)
 const savingPriority = ref(false)
-const selectedTask = ref(null)
-const showTaskModal = ref(false)
 const togglingTasks = ref([])
 const selectedTextItem = ref(null)
 const showTextModal = ref(false)
@@ -706,11 +700,6 @@ function openAddress(address) {
   if (!address) return
   selectedAddress.value = address
   showPropertyLinkModal.value = true
-}
-
-function openTask(task) {
-  selectedTask.value = { ...task }
-  showTaskModal.value = true
 }
 
 // Tick a task straight off the card, in either direction. Reopening matters as
