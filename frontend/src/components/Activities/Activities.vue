@@ -1190,9 +1190,12 @@ const activities = computed(() => {
       })
     }
   })
-  let sorted = sortByCreation(_activities)
-  // Activity timeline shows most recent first; other tabs stay oldest-first.
-  return title.value == 'Activity' ? sorted.reverse() : sorted
+  // Every lead view reads newest-first (Lance, 2026-08-06) — Activity, Emails,
+  // Comments, Calls, Tasks, Notes and Attachments all land here. The Text and
+  // WhatsApp threads are deliberately NOT in this computed: they render from
+  // their own chat resources and keep chat's oldest-at-top convention, where the
+  // newest message belongs at the bottom next to the composer.
+  return sortByCreation(_activities).reverse()
 })
 
 function sortByCreation(list) {
@@ -1325,8 +1328,9 @@ function scroll(hash) {
     let el
     if (!hash) {
       let e = document.getElementsByClassName('activity')
-      // Activity timeline is most-recent-first, so the newest is the first element.
-      el = title.value == 'Activity' ? e[0] : e[e.length - 1]
+      // Every tab in this feed is newest-first now, so the newest entry is always
+      // the first element — no per-tab special case left.
+      el = e[0]
     } else {
       el = document.getElementById(hash)
     }
