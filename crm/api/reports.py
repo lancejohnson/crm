@@ -21,18 +21,17 @@ import frappe
 from frappe import _
 from frappe.utils import cint, getdate, today
 
-# The Call Review tab (and the AI integrity notes it surfaces) is restricted to
-# Lance — he runs the CRM as his own user and reviews calls himself. System Manager
-# is kept so Administrator and `bench execute` still work.
-CALL_REVIEW_USER = "lance.johnson@groundworkpro.com"
+# The Call Review tab is open to the whole sales team: the reps learn most from
+# hearing their own calls back, so gating it to one reviewer wasted it. Writing
+# BACK to the AI (`review_call_now` / `reply_to_review` in call_review_ai.py) is
+# still reviewer-only — a reply teaches global house rules that reshape every
+# future review, which is a different power from reading one.
+ALLOWED_REPORT_ROLES = ("System Manager", "Sales Manager", "Sales User")
 
 
 def validate_access():
-	if frappe.session.user == CALL_REVIEW_USER:
-		return
-	if "System Manager" in frappe.get_roles():
-		return
-	frappe.throw(_("Only the call review manager can access this report."), frappe.PermissionError)
+	if not any(role in ALLOWED_REPORT_ROLES for role in frappe.get_roles()):
+		frappe.throw(_("Only sales users can access reports."), frappe.PermissionError)
 
 
 def _quo_number_map():

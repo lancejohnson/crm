@@ -13,11 +13,6 @@ import LucideColumns3 from '~icons/lucide/columns-3'
 import LucideUsersRound from '~icons/lucide/users-round'
 import LucideListChecks from '~icons/lucide/list-checks'
 
-// The Call Review tab (and its AI integrity notes) is restricted to Lance — he
-// runs the CRM as his own user and reviews calls himself. Mirrors the backend
-// CALL_REVIEW_USER gate in crm/api/reports.py.
-export const CALL_REVIEW_USER = 'lance.johnson@groundworkpro.com'
-
 // Read the logged-in user from the session cookie directly (no store import — the
 // session store imports the router, which imports this module → circular).
 export function currentUser() {
@@ -44,12 +39,9 @@ export const sidebarLinks = [
   { label: 'Call Logs', icon: PhoneIcon, to: 'Call Logs' },
   { label: 'Text Messages', icon: CommentIcon, to: 'Text Messages' },
   { label: 'Sequences', icon: StepsIcon, to: 'Sequences' },
-  {
-    label: 'Call Review',
-    icon: LucideHeadphones,
-    to: 'Call Review',
-    condition: () => currentUser() === CALL_REVIEW_USER,
-  },
+  // Open to the whole sales team — the backend gate in crm/api/reports.py
+  // (ALLOWED_REPORT_ROLES) is the one that actually enforces access.
+  { label: 'Call Review', icon: LucideHeadphones, to: 'Call Review' },
 ]
 
 // merge the saved [{label, hidden}] config with the canonical list:
