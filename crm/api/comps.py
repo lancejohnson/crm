@@ -270,6 +270,21 @@ def import_comps_file(path, dry_run=1, chunk=2000):
 		"bedrooms", "bathrooms", "square_footage", "year_built", "property_type",
 		"correlation", "source_lead",
 	]
+	# Frappe declares Int/Float/Currency columns NOT NULL, but plenty of comps are
+	# missing a year built or a lot size. Coerce to 0 rather than dropping the row:
+	# a comp with an unknown year is still a valid sale at a known price and place,
+	# and 0 is falsy so the popup simply omits the fact instead of printing "0".
+	NUMERIC = {
+		"lat", "lng", "price", "days_on_market", "days_old",
+		"bedrooms", "bathrooms", "square_footage", "year_built", "correlation",
+	}
+	# Dates stay nullable (a live listing has no removal date); text stays "".
+	NULLABLE = {"listed_date", "removed_date"}
+
+	def cell(col, value):
+		if value is None:
+			return None if col in NULLABLE else (0 if col in NUMERIC else "")
+		return value
 	seen, rows, stats = set(), [], {"read": 0, "skipped": 0, "written": 0}
 
 	def flush(batch):
@@ -310,7 +325,7 @@ def import_comps_file(path, dry_run=1, chunk=2000):
 				stats["skipped"] += 1
 				continue
 			seen.add(key)
-			rows.append([key, key, now, now, user, user] + [rec.get(c) for c in cols])
+			rows.append([key, key, now, now, user, user] + [cell(c, rec.get(c)) for c in cols])
 			stats["written"] += 1
 			if len(rows) >= int(chunk):
 				flush(rows)
