@@ -159,10 +159,33 @@ duplicating. Work substantial features in a worktree of your own.
       newest `last_seen` 2026-06-24) against a live 1.57GB server DB: 36,599 comp
       addresses versus **52,191** for the same ZIPs. Always read
       `/opt/istl-buyer/data/leads.db`.
-    - Note this refreshes the POOLED index. A newly bought lead gets comps
-      because the pool already covers its ZIP — iSpeedToLead still offers no way
-      to re-fetch a bought lead's own comps (see above), so exact per-lead comps
-      would need capturing at purchase time, while the lead is still on the feed.
+    - It **fails loudly**: a run producing <50% of the rows already in the CRM
+      refuses to import and emails Lance (via `src.alert`), as does a failed
+      import or an uncaught exception. A silently-failing cron would recreate
+      the exact staleness bug it exists to prevent. Cheap to run nightly — the
+      geocode cache means a normal run pays for only genuinely new addresses
+      (measured: 66 of 52,257).
+  - **Per-lead exact comps are NOT achievable, and this is settled — don't
+    rebuild it.** The pooled index is the architecture, not a workaround.
+    Measured 2026-08-07:
+    - Since the scraper started (2026-06-24) **every** bought lead is captured
+      in leads.db (July 114/114, Aug 32/32); the historical gap was purely
+      pre-scraper (June 14/74). So capture is not the problem.
+    - But only ~73% of bought leads carry comps, because **iSpeedToLead's
+      autocomping runs late — over days, not hours**: 58% of 1-2 day-old leads
+      have comps, 60% at 2-7 days, 79% after a week; live leads sit at 66% while
+      retired ones reach 94%. We buy fast (that is the product), so we snapshot
+      a lead early and it then leaves the feed, freezing it.
+    - And a bought lead is **permanently unreachable**: `/leads/{id}` 404s,
+      `/leads/all` ignores id filters, and every filter variant tried
+      (no filters, `status=sold`, `unholded=false`, `my_lead`, `bought`)
+      returns the same newest page containing none of our purchases. The
+      **orders API carries no comps either** — `autocomping` and
+      `autocomping_price` are None on all 200 orders, `arv`/`mao` are 0, and
+      the embedded `order.lead` has no `rent` key at all.
+    - Conclusion: a large share of bought leads will never have their own comps.
+      That is the vendor's pipeline. The pooled area index covers ~92% of leads
+      and is what makes the feature work.
   - `crm/api/comps.py` (**new**: `get_lead_comps` / `import_comps_file` /
     `address_key`) + `frontend/src/components/Modals/CompsMapModal.vue`
     (**new**, Leaflet — already a dependency, no new package) + both Lead pages.
