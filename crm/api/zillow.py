@@ -20,13 +20,29 @@ plus `priceHistory` — which contains genuine `event: "Sold"` rows sourced from
 Public Record. That is an actual transaction with a date, which is what a rep
 means by "what did it last sell for".
 
-Cost and caching
-----------------
-This is a metered RapidAPI plan (57,000 requests/month). One lookup per lead is
-plenty, so the normalized result is cached on the lead and only refetched past
-CACHE_DAYS or when explicitly forced. Everything is `has_field`-guarded, so the
-app is safe to deploy before the ops script adds the cache fields — it just
-refetches each time until they exist.
+Cost, and the SHARED key
+------------------------
+OUR spend here is small: one lookup per lead, cached 30 days, so ~764 leads is a
+few hundred requests a month even if every lead is opened.
+
+The plan itself is a RapidAPI "Ultra" tier, 57,000 requests per billing cycle,
+renewing on the 14th (anniversary-billed, not the 1st). That ceiling is NOT our
+budget though — **the key is shared**. `istl-buyer/src/zillow_api.py` runs a
+background ZIP-market job against the identical key (Infisical exposes it twice,
+as `RAPIDAPI_ZILLOW_API_KEY` and `ZILLOW_RAPIDAPI_KEY` — verified byte-identical),
+and it is the heavy consumer: 8,414 of 57,000 were already spent the day this
+shipped, ~350/day, against ~10 from the CRM.
+
+That job stops at `QUOTA_RESERVE = 5_000` remaining, commented "leave headroom
+for the other Zillow-backed app that shares this RapidAPI key" — that app is now
+us. So the CRM may use the band istl-buyer deliberately refuses to touch, but it
+keeps its own smaller floor so a runaway loop here can never zero the account for
+both apps.
+
+One lookup per lead is plenty, so the normalized result is cached on the lead and
+only refetched past CACHE_DAYS or when explicitly forced. Everything is
+`has_field`-guarded, so the app is safe to deploy before the ops script adds the
+cache fields — it just refetches each time until they exist.
 
 Every failure path is soft. A Zillow outage, a quota exhaustion or an address
 Zillow cannot resolve must degrade the popup back to the older sources, never
@@ -34,6 +50,7 @@ break the comps map.
 """
 
 import json
+import time
 
 import frappe
 from frappe import _
@@ -44,6 +61,26 @@ BASE = f"https://{HOST}"
 #: Property facts barely move; a sale a week old is still news next month.
 CACHE_DAYS = 30
 TIMEOUT = 20
+
+#: Stop fetching once the SHARED plan is this close to empty. Deliberately far
+#: below istl-buyer's 5,000 reserve: that reserve exists to leave room for THIS
+#: app, so matching it would strand 5,000 requests neither app is willing to
+#: spend. Below this floor the comps map degrades to its older fact sources
+#: rather than taking the last of a budget the ZIP-market job may still need.
+QUOTA_RESERVE = 500
+#: RapidAPI reports remaining quota on every response, so caching it briefly
+#: makes the guard free — and it reflects the OTHER app's spending too.
+#:
+#: GOTCHA — this is stored WITHOUT `expires_in_sec`, and freshness is judged from
+#: a timestamp we store alongside it. `frappe.cache().get_value()` memoizes a MISS
+#: as None into the per-request `frappe.local.cache`, while
+#: `set_value(..., expires_in_sec=...)` writes only to Redis — so the poisoned
+#: local None then shadows the value that is demonstrably sitting in Redis, and
+#: the guard silently never fires. (`get_value(..., expires=True)` does NOT help;
+#: it checks the local dict first regardless.) Storing with no TTL populates the
+#: local cache too, which overwrites the poisoned entry.
+_QUOTA_KEY = "zillow_quota_remaining"
+_QUOTA_TTL = 900
 
 #: Zillow's enum -> the vocabulary our comp inventory uses, so the subject's type
 #: can be fed straight into the comps "Type" filter and actually match.
@@ -89,6 +126,33 @@ def _api_key():
 	return frappe.conf.get("rapidapi_zillow_key") or ""
 
 
+def quota_remaining():
+	"""Last known remaining requests on the SHARED plan, or None if unknown.
+
+	Taken from the response headers of our most recent call, so it also reflects
+	whatever istl-buyer's ZIP job has spent since — which is the point.
+	"""
+	try:
+		rec = frappe.cache().get_value(_QUOTA_KEY)
+		if not isinstance(rec, dict):
+			return None
+		# Expiry enforced here rather than by Redis — see the GOTCHA on _QUOTA_KEY.
+		if time.time() - float(rec.get("t") or 0) > _QUOTA_TTL:
+			return None
+		return int(rec["n"])
+	except Exception:
+		return None
+
+
+def _remember_quota(headers):
+	try:
+		raw = headers.get("X-RateLimit-Requests-Remaining")
+		if raw is not None:
+			frappe.cache().set_value(_QUOTA_KEY, {"n": int(raw), "t": time.time()})
+	except Exception:
+		pass
+
+
 def _fetch(address: str):
 	"""One address -> Zillow's raw property blob, or None. Never raises."""
 	import urllib.parse
@@ -97,13 +161,27 @@ def _fetch(address: str):
 	key = _api_key()
 	if not key or not address:
 		return None
+
+	# Yield the last of a shared budget rather than spend it: this map degrades to
+	# its older sources, whereas istl-buyer's batch job cannot degrade at all.
+	left = quota_remaining()
+	if left is not None and left <= QUOTA_RESERVE:
+		frappe.log_error(
+			f"Zillow quota reserve reached ({left} left <= {QUOTA_RESERVE}); skipping "
+			"subject lookup. Key is shared with istl-buyer's ZIP-market job.",
+			"Zillow: quota reserve",
+		)
+		return None
+
 	url = f"{BASE}/property?" + urllib.parse.urlencode({"address": address})
 	req = urllib.request.Request(
 		url, headers={"x-rapidapi-key": key, "x-rapidapi-host": HOST}
 	)
 	try:
 		with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-			return json.loads(resp.read().decode("utf-8", "replace"))
+			body = json.loads(resp.read().decode("utf-8", "replace"))
+			_remember_quota(resp.headers)
+			return body
 	except Exception:
 		# Quota exhaustion, an unresolvable address, an outage — all of them mean
 		# "no Zillow facts today", never "break the comps map".

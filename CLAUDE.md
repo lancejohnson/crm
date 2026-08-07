@@ -263,11 +263,34 @@ duplicating. Work substantial features in a worktree of your own.
       `zillow_zpid`, 30-day TTL, `update_modified=False` so it never looks like a
       human edit — verified: `modified` stayed 08-04 while `fetched_at` was 08-07).
       **Negative results are cached too**, or an address Zillow cannot resolve is
-      re-billed on every modal open. Plan is 57,000 req/month (~48.6k free
-      mid-month); 1 lookup = 1 request.
+      re-billed on every modal open.
+    - **OUR spend is a few hundred a month** (1 lookup per lead, cached 30 days,
+      ~764 leads). The plan's 57,000/cycle ceiling is NOT our budget — **the key
+      is SHARED**: `istl-buyer/src/zillow_api.py` runs a background ZIP-market job
+      on the byte-identical key (Infisical exposes it twice, as
+      `RAPIDAPI_ZILLOW_API_KEY` and `ZILLOW_RAPIDAPI_KEY`) and is the heavy
+      consumer — 8,414 of 57,000 spent on day one at ~350/day, against ~10 from
+      the CRM. The cycle renews on the **14th**, anniversary-billed, not the 1st.
+      That job stops at 5,000 remaining "to leave headroom for the other
+      Zillow-backed app" — which is now us — so the CRM may use that band but
+      keeps its own `QUOTA_RESERVE = 500` floor (read live off the
+      `X-RateLimit-Requests-Remaining` header, cached 15 min, so it sees the ZIP
+      job's spending too). Below the floor it degrades to the older sources.
     - Needs site_config **`rapidapi_zillow_key`** (Infisical
       `RAPIDAPI_ZILLOW_API_KEY`) + ops `scripts/setup_zillow_facts.py`. Absent
       either, everything is has_column-guarded and degrades to the older sources.
+    - **GOTCHA — `frappe.cache().set_value(..., expires_in_sec=N)` is not readable
+      by `get_value()` in the same request once a MISS has been read first.**
+      `get_value` memoizes a miss as `None` into the per-request
+      `frappe.local.cache`, but the `expires_in_sec` path of `set_value` writes
+      **only to Redis** — so the poisoned local `None` shadows a value that is
+      demonstrably in Redis (`b'\x80\x04K*.'`) and the read silently returns None
+      forever in that process. `get_value(..., expires=True)` does **not** fix it
+      (it checks the local dict first regardless). This made the quota guard
+      never fire, twice, while looking correct. Fix used here: store **without**
+      a TTL (that path DOES populate the local cache, overwriting the poisoned
+      entry) and keep a timestamp in the value to judge freshness yourself. Read
+      order matters: set-then-get works, get-then-set does not.
     - **GOTCHA — top-level `dateSold`/`lastSoldPrice` are null even on homes that
       have sold.** Read `priceHistory`. And **`price` mirrors `taxAssessedValue`
       on an off-market home** (Macon: both 6005), so it is NOT a list price and is
