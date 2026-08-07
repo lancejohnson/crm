@@ -44,9 +44,16 @@ duplicating. Work substantial features in a worktree of your own.
   `crm/api/activity_progress.py` + `frontend/src/components/ActivityProgressModal.vue`
   + desktop `AppSidebar.vue` + mobile-drawer `MobileSidebar.vue` (**both entry
   points are required** — mobile renders a different sidebar).
-  - **Calls are the CRM Call Log, which IS the Quo mirror** (the `call.completed`
-    webhook attributes each call to the Quo `userId` who actually dialled, not
-    the line owner). Do NOT try to read call counts live from the Quo API: there
+  - **Calls are the CRM Call Log, which IS the Quo mirror.** The `call.completed`
+    webhook attributes each call to whoever actually handled it, not the line
+    owner — but **the field depends on direction**: `userId` is the dialer on
+    OUTGOING calls, while on INCOMING calls it is the LINE's owner and is
+    identical on every inbound call no matter who picked up; `answeredBy` names
+    the answerer. Reading `userId` for both put 47 of 122 inbound calls
+    (2026-07-20..08-06) on one person before gw303 fixed it, and an unanswered
+    call (no `answeredBy`) now leaves `receiver` **blank** rather than crediting
+    the line owner for a call nobody took.
+    Do NOT try to read call counts live from the Quo API: there
     is no per-user aggregate endpoint, and counting requires
     conversations → participants → `/v1/calls` per participant — minutes of
     rate-limited work, far too slow for a page load. **Measured 2026-08-05**: a
@@ -102,6 +109,62 @@ duplicating. Work substantial features in a worktree of your own.
     each other, so the inference tracks reality and works retroactively. Exact
     stamping would need a schema field plus prop-threading through
     Today → Activities → AllModals, and would only work going forward.
+
+- **Comps map on the lead ("View comps")** — comparable sales around a lead's
+  property, ported from the LeadMarket (`../istl-buyer`) comps view with the one
+  change that matters: **LeadMarket can only draw an ESTIMATED subject location**
+  (iSpeedToLead hides the address until you buy the lead) so it plots the
+  centroid of the comp cloud; we own these leads, so this centers on the **real
+  geocoded parcel**. Entry points: the **More ▾** menu on `Lead.vue` and a button
+  in **Details** on `MobileLead.vue` (mobile has no More menu — without it the
+  feature is unreachable on a phone).
+  - **Recency is the signal, not decoration.** Pill opacity fades with staleness
+    (smoothstep, 0d → 1.0, 360d+ → ~0.32) so the comps that actually price the
+    deal are what the eye lands on without reading a date. Amber = still listed
+    (an ASK), slate = off-market (a real sale). Fresher pills stack above faded
+    ones so the comp that matters stays clickable in a tight cluster.
+  - **Where the data comes from, and the join that took real digging.**
+    `CRM Lead.vendor_lead_id` holds the iSpeedToLead **ORDER id, not the lead
+    id** — the identical trap `istl-buyer/src/purchases.py` documents for the
+    receipt emails, repeated in the CRM webhook and undiscovered until gw303.
+    The chain is `vendor_lead_id → /orders/all order._id → order.lead._id →
+    leads.db lead_id → rent.comping.comparables` (**219 of 236** CRM leads join
+    to an order). Do NOT try to join `vendor_lead_id` to `leads.lead_id`: it
+    matches **0**.
+  - **Exact per-lead comps are thin, so the map is served from a POOLED AREA
+    index.** Only ~21 of the 219 bought leads are still in `leads.db` — bought
+    leads drop out of the `status=sale` feed, and iSpeedToLead has no way to
+    re-fetch one (`/leads/{id}` 404s; `/leads/all` ignores id filters). So every
+    comp we hold anywhere is pooled and resolved by radius: **718k comps / 604k
+    unique addresses**, filtered to our leads' 515 ZIPs → **47k records / 36.6k
+    addresses**, covering **92% of our leads** (median 75 nearby).
+  - Comps carry a street address but no coordinates, so they ship pre-geocoded
+    (Census BATCH endpoint, ~95% match — the one-at-a-time endpoint istl-buyer
+    uses would take ~50min for this volume). The **subject** is geocoded on
+    demand and cached on `CRM Lead.property_lat/lng` (`update_modified=False`, so
+    caching a coordinate never looks like a human edit).
+  - **GOTCHA — Frappe's `between` filter means DATES.** It routes through
+    `get_between_date_filter`, so a numeric lat/lng bounding box comes out as
+    malformed SQL. Use explicit `>=`/`<=`. Bounding box first (indexed), then
+    haversine to trim the box's corners to a true circle.
+  - `crm/api/comps.py` (**new**: `get_lead_comps` / `import_comps_file` /
+    `address_key`) + `frontend/src/components/Modals/CompsMapModal.vue`
+    (**new**, Leaflet — already a dependency, no new package) + both Lead pages.
+    Everything is guarded on the doctype existing, so the app is safe to deploy
+    before the data. Ops: `scripts/setup_comps.py` (CRM Comp doctype, autoname
+    `format:{address_key}` so re-import updates in place; + the lead lat/lng
+    cache fields).
+
+- **Every lead view reads newest-first** (gw303) — only the Activity timeline was
+  most-recent-first; Comments, Calls, Tasks, Notes and Attachments made you
+  scroll to the bottom to find out what just happened. `Activities.vue` now
+  reverses the whole merged feed. **Text and WhatsApp are deliberately
+  excluded** — they render from their own chat resources (`smsMessages` /
+  `whatsappMessages`, both `sortByCreation` ascending) and keep chat's
+  convention, where the newest message belongs at the bottom next to the
+  composer. The mount-scroll lost its per-tab special case with it, since
+  "newest" is now always the first element. Applies to the Buyer page too, which
+  mounts the same component.
 
 - **Activity feed no longer auto-scrolls on every reload** — the Lead/Deal
   Activity timeline used to yank the viewport on every action (adding a
@@ -312,6 +375,32 @@ duplicating. Work substantial features in a worktree of your own.
     make concurrent runs safe. New scheduler method
     `crm.api.today_board.run_today_sync` requires `sync_jobs` after deploy.
     Existing Done/Skipped state and manual ordering are never touched.
+  - **The streak is PERSONAL, not team-wide** (gw303, reversing the original
+    decision at Lance's request). `get_today_report(owner=…)` now scopes
+    `by_day` — and therefore the streak and the recent-day history — to that
+    owner's leads, so a rep who clears their own board gets the day even when a
+    teammate still has cards open. Verified on prod: German 62 cards / 0 left →
+    streak 2 through today, while the team (89 cards, 1 left) read 1 through
+    yesterday, and the per-owner splits reconcile exactly to the team totals.
+    `owner="all"` still returns the team streak and `scope` reports which meaning
+    is in force; `TodayReportModal.vue` swaps its labels ('Your streak' /
+    'Recent business days (yours)') off that flag. **GOTCHA — frontend and
+    backend must ship together**: a frontend-only deploy labels team-wide data
+    as "Your streak", which is exactly what live verification caught. Ownership
+    is still read off the lead at request time, so a reassigned lead takes its
+    whole history with it — a personal streak describes the leads you own NOW.
+  - **Resolving a card writes the outcome onto the lead's timeline** (gw303) —
+    `_log_outcome_comment()` posts a Comment on the CRM Lead ("Today board —
+    marked Skipped (call 2)" + the reason). The board is where the judgement is
+    made, but the lead page is where anyone later asks what happened, so a skip
+    reason now survives past 5pm. Both resolve paths log: `set_today_state`
+    (with the outcome, and again as "outcome corrected to …" if the rep
+    re-answers) and `reorder_today`'s fallback branch for a drag that skipped the
+    modal — the normal drag already went through `set_today_state`, so
+    `cur != target` is what stops it double-logging. **Put-backs are never
+    logged**: undoing a mis-click is not a judgement, and logging it would bury
+    the entries that are. Best-effort — a timeline write can never fail a rep's
+    click.
   - **Today report + team streak** — the flame button opens current Total/Done/
     Skipped/Remaining progress, who completed today's cards, and recent business-
     day resolved rates (Done + Skipped). A perfect streak day means every card has been resolved
@@ -772,7 +861,8 @@ duplicating. Work substantial features in a worktree of your own.
   key the ops chapter-gen uses; JSON response schema; model config-swappable via
   `call_review_model`, e.g. `gemini-2.5-pro`). Per-call result stored in a new ops
   doctype `CRM Call AI Review`, surfaced in the Lead/Deal-adjacent **Call Review**
-  tab — which is now **restricted to Lance only** (sidebar + route + backend gate).
+  tab — which is **open to the whole sales team** (gw303; it was Lance-only until
+  then, which wasted it — the reps learn most from hearing their own calls back).
   - `crm/api/call_review_ai.py` — **new**: `run_daily_integrity_report` (daily_long),
     `review_call_now` (whitelisted, Lance/System-Manager, on-demand + testing),
     `_review_one`/`_build_llm_input`/`_lead_context`/`_call_claude`/`_persist_review`/
@@ -783,12 +873,17 @@ duplicating. Work substantial features in a worktree of your own.
     (endpoint is now a thin wrapper) so the bot reuses clean rep/lead dialogue.
   - `crm/templates/emails/crm_call_review_report.html` — **new** digest template.
   - `crm/hooks.py` — `run_daily_integrity_report` added to `daily_long`.
-  - `crm/api/reports.py` — `validate_access` now Lance/System-Manager only
-    (`CALL_REVIEW_USER`); `get_call_review` attaches `ai_review` per call from
-    `CRM Call AI Review` (guarded by `db.exists`).
-  - `frontend/src/utils/sidebarLinks.js` (`CALL_REVIEW_USER` + `currentUser()` +
-    Call Review `condition`), `router.js` (route guard), `pages/CallReview.vue`
-    (per-call AI panel: flag badge → expand → motivation, integrity issues, coaching).
+  - `crm/api/reports.py` — `validate_access` is the **sales-role gate**
+    (`ALLOWED_REPORT_ROLES`) again as of gw303; `get_call_review` attaches
+    `ai_review` per call from `CRM Call AI Review` (guarded by `db.exists`).
+    **Writing back to the AI is still reviewer-only**: `review_call_now` and
+    `reply_to_review` (`crm/api/call_review_ai.py`, which keeps its own
+    `CALL_REVIEW_USER`) re-run Gemini and teach GLOBAL house rules that reshape
+    every future review — a different power from reading one.
+  - `frontend/src/utils/sidebarLinks.js` (the Call Review `condition` and the
+    `CALL_REVIEW_USER` export are gone), `router.js` (route guard removed),
+    `pages/CallReview.vue` (per-call AI panel: flag badge → expand → motivation,
+    integrity issues, coaching).
   - Ops (`../frappe-crm-deploy`): `scripts/setup_call_ai_review.py` creates the
     `CRM Call AI Review` doctype (autoname by `call_log`; fields motivation_score/
     motivation_reason/integrity_issues JSON/overall_flag/lead_status/
@@ -1940,7 +2035,9 @@ duplicating. Work substantial features in a worktree of your own.
   call. Three-state (unset/Yes/No) so "not asked" is distinct from "No".
   - **Lead-page sidebar card** (top of the sidebar, above Tax Info): plain-English
     questions with big Yes/No buttons (green Yes / red No), a mini 2x2 grid that
-    lights up the cell the lead lands in, and a color-coded guidance band (per-
+    lights up the cell the lead lands in — columns are **Off price | On price**
+    so the best read (motivated + on price) sits **top-right**, the corner the
+    eye treats as "best" (gw303; it was top-left until then), and a color-coded guidance band (per-
     quadrant next-action sentence) + "Set by X · date" stamp. Tap the active
     choice again to clear it.
     `frontend/src/components/FirstCallReadCard.vue` (new), mounted in
