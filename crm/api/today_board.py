@@ -33,7 +33,7 @@ from datetime import timedelta
 import frappe
 from bs4 import BeautifulSoup
 from frappe import _
-from frappe.utils import getdate, now_datetime
+from frappe.utils import escape_html, getdate, now_datetime
 
 from crm.api.daily_standup import (
 	build_standup,
@@ -127,6 +127,56 @@ def _supports_resolved_stamp() -> bool:
 		return False
 	meta = frappe.get_meta(DOCTYPE)
 	return bool(meta.has_field("resolved_at") and meta.has_field("resolved_by"))
+
+
+def _log_outcome_comment(card, state, outcome="", outcome_note="", corrected=False):
+	"""Write a Today-board disposition onto the lead's own activity timeline.
+
+	The board is where the judgement gets made, but the lead page is where anyone
+	later asks "what happened when we called this person?" — so the answer has to
+	live there too, not only on a card that scrolls out of the day and is never
+	seen again. This is what makes a skip reason survive past 5pm.
+
+	Best-effort by design: a timeline entry is never worth failing a rep's click
+	over, so every failure is logged and swallowed.
+
+	Put-backs are deliberately NOT logged. Undoing a mis-click is not a judgement
+	about the seller, and a timeline full of "moved back to To Call" would bury the
+	entries that are — the same reasoning that keeps the outcome modal from
+	interrogating a put-back.
+	"""
+	if state not in ("Done", "Skipped"):
+		return
+	lead = card.get("lead") if isinstance(card, dict) else getattr(card, "lead", None)
+	if not lead:
+		return
+	try:
+		label = _("Done") if state == "Done" else _("Skipped")
+		head = (
+			_("Today board — outcome corrected to {0}").format(label)
+			if corrected
+			else _("Today board — marked {0}").format(label)
+		)
+		call_no = (card.get("call_number") if isinstance(card, dict) else getattr(card, "call_number", 0)) or 0
+		if call_no and int(call_no) > 1:
+			head += " " + _("(call {0})").format(int(call_no))
+		detail = " · ".join(escape_html(b) for b in (outcome, outcome_note) if b)
+		content = "<div><b>{0}</b>{1}</div>".format(
+			escape_html(head), "<br>{0}".format(detail) if detail else ""
+		)
+		frappe.get_doc(
+			{
+				"doctype": "Comment",
+				"comment_type": "Comment",
+				"reference_doctype": "CRM Lead",
+				"reference_name": lead,
+				"content": content,
+				"comment_email": frappe.session.user,
+				"comment_by": frappe.session.user,
+			}
+		).insert(ignore_permissions=True)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Today outcome comment failed")
 
 
 def _state_stamps(state, now=None):
@@ -695,19 +745,6 @@ def _scope_rows_to_owner(rows, owner):
 	return [row for row in rows if owners.get(row.lead, UNASSIGNED) == owner]
 
 
-def _report_day_from(day, rows):
-	"""Build one report day's stats from an already-scoped set of cards."""
-	stats = _empty_report_day(day)
-	for row in rows:
-		stats["total"] += 1
-		if row.state == "Done":
-			stats["done"] += 1
-		elif row.state == "Skipped":
-			stats["skipped"] += 1
-	_finish_report_day(stats)
-	return stats
-
-
 def _empty_report_day(day):
 	return {
 		"date": str(getdate(day)),
@@ -738,14 +775,20 @@ def get_today_report(for_date=None, history_days=10, owner=None):
 	Both Done and Skipped cards count toward the streak. An unfinished current day
 	does not erase the streak earned through the previous business day.
 
-	`owner` scopes TODAY's numbers to one person's leads so the progress figures
-	agree with the board that is actually on screen — a bar reading 12/87 while the
+	`owner` scopes the numbers to one person's leads so the progress figures agree
+	with the board that is actually on screen — a bar reading 12/87 while the
 	visible board holds 30 cards is worse than no bar at all.
 
-	The streak and the recent-day history stay deliberately TEAM-WIDE. The streak
-	was built as a shared artifact ("every Today card resolved"), and quietly
-	turning it into a personal stat would rewrite what the number has meant since
-	it shipped. `scope` in the response says which is which.
+	The streak follows that same scope: a rep's streak is now "every card on MY
+	board resolved", not the team's (Lance, 2026-08-06). It shipped team-wide as a
+	shared artifact, so this deliberately CHANGES what the number means; `scope` in
+	the response reports which meaning is in force, and the team streak is still
+	what `owner="all"` returns.
+
+	Caveat worth knowing: ownership is read off the lead at request time (see
+	`_scope_rows_to_owner`), so a reassigned lead moves its whole history with it.
+	A personal streak is therefore a statement about the leads you own NOW, not a
+	frozen record of who resolved what on the day.
 	"""
 	_guard()
 	today = getdate(for_date or now_datetime())
@@ -772,6 +815,12 @@ def get_today_report(for_date=None, history_days=10, owner=None):
 		limit_page_length=50000,
 	)
 
+	# Scope EVERY day to the owner, not just today — `by_day` is what the streak is
+	# computed from, so this is the one line that makes the streak personal. Done
+	# once, up front, so the whole history costs a single extra lead lookup.
+	if owner != ALL_OWNERS:
+		rows = _scope_rows_to_owner(rows, owner)
+
 	by_day = {}
 	for row in rows:
 		day = getdate(row.for_date)
@@ -784,14 +833,8 @@ def get_today_report(for_date=None, history_days=10, owner=None):
 	for stats in by_day.values():
 		_finish_report_day(stats)
 
-	# `by_day` stays team-wide throughout: it is what the streak is computed from.
-	# Only the headline "today" figures are re-derived for one person's leads.
 	todays_rows = [row for row in rows if getdate(row.for_date) == today]
-	if owner != ALL_OWNERS:
-		todays_rows = _scope_rows_to_owner(todays_rows, owner)
-		today_stats = _report_day_from(today, todays_rows)
-	else:
-		today_stats = by_day.get(today, _empty_report_day(today))
+	today_stats = by_day.get(today, _empty_report_day(today))
 	business_dates = sorted(day for day in by_day if is_business_day(day))
 	first_day = business_dates[0] if business_dates else today
 
@@ -824,6 +867,7 @@ def get_today_report(for_date=None, history_days=10, owner=None):
 				run = 0
 		cursor += timedelta(days=1)
 
+	scope = "owner" if owner != ALL_OWNERS else "team"
 	recent = [by_day[day] for day in sorted(business_dates, reverse=True)[:history_days]]
 	recent_total = sum(day["total"] for day in recent)
 	recent_resolved = sum(day["done"] + day["skipped"] for day in recent)
@@ -861,10 +905,15 @@ def get_today_report(for_date=None, history_days=10, owner=None):
 			"through": through,
 		},
 		"owner": owner,
-		# Today's figures follow the board on screen; the streak and the recent-day
-		# history are the team's. The UI labels them so the two aren't confused.
-		"scope": {"today": "owner" if owner != ALL_OWNERS else "team", "streak": "team"},
-		"definition": _("A streak day requires every Today card to be resolved as Done or Skipped."),
+		# Every figure in this response now describes the same card set, so one scope
+		# covers all of them. The keys stay separate because the UI labels them
+		# individually and a future divergence shouldn't need a payload change.
+		"scope": {"today": scope, "streak": scope, "recent": scope},
+		"definition": (
+			_("A streak day requires every Today card on your board to be resolved as Done or Skipped.")
+			if scope == "owner"
+			else _("A streak day requires every Today card to be resolved as Done or Skipped.")
+		),
 	}
 
 
@@ -1174,6 +1223,10 @@ def set_today_state(item, state, outcome=None, outcome_note=None):
 		doc.outcome = outcome
 		doc.outcome_note = outcome_note
 	doc.save(ignore_permissions=True)
+	# `same_state` here means the rep re-answered an already-resolved card, i.e.
+	# corrected a mis-click. Worth its own timeline line: without it the lead keeps
+	# showing the answer that was withdrawn.
+	_log_outcome_comment(doc, state, outcome, outcome_note, corrected=same_state)
 	_publish(doc.for_date)
 	return {"ok": True, "state": state, "outcome": outcome, "outcome_note": outcome_note}
 
@@ -1214,11 +1267,13 @@ def reorder_today(order, state=None, for_date=None):
 	moved = set(order)
 	final = list(order) + [n for n in column if n not in moved]
 
+	newly_resolved = []
 	for i, name in enumerate(final):
 		updates = {"sort_order": (i + 1) * 10}
 		if name in moved:
 			cur = frappe.db.get_value(DOCTYPE, name, "state")
 			if cur != target:
+				newly_resolved.append(name)
 				# Normally the client has already called `set_today_state` (that is
 				# where the outcome is collected), so this branch is the fallback for
 				# a drag that skipped it. Stamp it exactly the same way regardless.
@@ -1231,6 +1286,14 @@ def reorder_today(order, state=None, for_date=None):
 		# realtime publish below is what refreshes everyone else's board.
 		frappe.db.set_value(DOCTYPE, name, updates, update_modified=False)
 	frappe.db.commit()
+	# Only the cards this drag actually RESOLVED get a timeline entry, and only on
+	# the fallback path — the normal drag already went through `set_today_state`,
+	# which logged it with the outcome the rep gave. Logging here too would double
+	# every entry.
+	for name in newly_resolved:
+		card = frappe.db.get_value(DOCTYPE, name, ["lead", "call_number"], as_dict=True)
+		if card:
+			_log_outcome_comment(card, target)
 	_publish(day)
 	return {"ok": True, "moved": len(order), "renumbered": len(final)}
 

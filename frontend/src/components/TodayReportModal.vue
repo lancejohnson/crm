@@ -11,7 +11,9 @@
         <div class="rounded-xl border border-outline-orange-1 bg-surface-orange-1 p-4">
           <div class="flex items-start justify-between gap-4">
             <div>
-              <div class="text-sm font-medium text-ink-orange-3">{{ __('Team streak') }}</div>
+              <div class="text-sm font-medium text-ink-orange-3">
+                {{ isScoped ? __('Your streak') : __('Team streak') }}
+              </div>
               <div class="mt-1 text-2xl font-semibold text-ink-gray-9">
                 🔥 {{ streak.current }}
                 {{ streak.current === 1 ? __('business day') : __('business days') }}
@@ -74,7 +76,7 @@
         <div>
           <div class="mb-2 flex items-center justify-between gap-3">
             <div class="text-sm font-semibold text-ink-gray-8">
-              {{ isScoped ? __('Recent business days (team)') : __('Recent business days') }}
+              {{ isScoped ? __('Recent business days (yours)') : __('Recent business days') }}
             </div>
             <div class="text-xs text-ink-gray-5">
               {{ __('Average: {0}%', [report?.recent_average || 0]) }}
@@ -142,13 +144,13 @@ const today = computed(() =>
 )
 const streak = computed(() => props.report?.streak || { current: 0, best: 0, through: null })
 
-// Today's figures follow whichever board is on screen; the streak and the
-// recent-day history stay team-wide (see get_today_report). Say so, rather than
-// letting one panel quietly mix two different card sets.
+// Every figure in the panel now describes the SAME card set — when a board is
+// scoped to one person, so are their streak and recent-day history (see
+// get_today_report). The team numbers are still what the "all" board shows.
 const isScoped = computed(() => props.report?.scope?.today === 'owner')
 const scopeDescription = computed(() =>
   isScoped.value
-    ? __('Your progress on today’s calling queue. The streak below is the team’s.')
+    ? __('Your progress and streak on today’s calling queue.')
     : __('Shared progress for today’s calling queue.'),
 )
 
