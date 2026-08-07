@@ -90,6 +90,7 @@ import { Dialog, Button, FormControl, call, toast } from 'frappe-ui'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import { zillowUrl } from '@/utils/propertyLinks'
 
 const props = defineProps({
   lead: { type: String, required: true },
@@ -219,6 +220,14 @@ function popupHtml(c) {
   ]
     .filter(Boolean)
     .join(' · ')
+  // Deep-link straight to the comp on Zillow. Same slug builder the Lead page
+  // uses, so a comp and a lead resolve the same way. rel=noopener because these
+  // open in a new tab from injected popup HTML.
+  const zurl = zillowUrl(c.address)
+  const zlink = zurl
+    ? `<div style="margin-top:6px"><a href="${escapeHtml(zurl)}" target="_blank" rel="noopener noreferrer"
+         style="color:#2563c9;font-weight:600;text-decoration:underline">${__('Open on Zillow')} ↗</a></div>`
+    : ''
   return `<div style="min-width:190px;font:12px/1.45 system-ui,sans-serif;color:#161614">
       <div style="font-weight:700;margin-bottom:2px">${escapeHtml(c.address)}</div>
       <div style="font-size:15px;font-weight:700;margin:2px 0">${priceShort(c.price)}</div>
@@ -228,6 +237,7 @@ function popupHtml(c) {
       <div style="color:#5c5a55">${when}</div>
       ${facts ? `<div style="color:#8a877e;margin-top:2px">${escapeHtml(facts)}</div>` : ''}
       <div style="color:#8a877e;margin-top:2px">${__('{0} mi away', [c.distance_mi])}</div>
+      ${zlink}
     </div>`
 }
 
