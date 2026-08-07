@@ -147,6 +147,22 @@ duplicating. Work substantial features in a worktree of your own.
     `get_between_date_filter`, so a numeric lat/lng bounding box comes out as
     malformed SQL. Use explicit `>=`/`<=`. Bounding box first (indexed), then
     haversine to trim the box's corners to a true circle.
+  - **Kept fresh by a nightly job, NOT a one-off import.** `CRM Comp` is a
+    projection of `leads.db`, so left alone it is a snapshot that silently ages.
+    `../istl-buyer/scripts/sync_comps_to_crm.py` (cron **05:20**, after the 04:50
+    `src.purchases sync`) re-extracts, geocodes only genuinely new addresses
+    (cached in `geocode_cache`) and upserts. It runs ON the app server, because
+    `/opt/istl-buyer` and the CRM container share a box — no transport, no second
+    copy to drift.
+    - **GOTCHA — the laptop's `leads.db` is NOT authoritative.** The first import
+      was taken from a local copy that was **six weeks stale** (32,545 leads,
+      newest `last_seen` 2026-06-24) against a live 1.57GB server DB: 36,599 comp
+      addresses versus **52,191** for the same ZIPs. Always read
+      `/opt/istl-buyer/data/leads.db`.
+    - Note this refreshes the POOLED index. A newly bought lead gets comps
+      because the pool already covers its ZIP — iSpeedToLead still offers no way
+      to re-fetch a bought lead's own comps (see above), so exact per-lead comps
+      would need capturing at purchase time, while the lead is still on the feed.
   - `crm/api/comps.py` (**new**: `get_lead_comps` / `import_comps_file` /
     `address_key`) + `frontend/src/components/Modals/CompsMapModal.vue`
     (**new**, Leaflet — already a dependency, no new package) + both Lead pages.
@@ -154,6 +170,16 @@ duplicating. Work substantial features in a worktree of your own.
     before the data. Ops: `scripts/setup_comps.py` (CRM Comp doctype, autoname
     `format:{address_key}` so re-import updates in place; + the lead lat/lng
     cache fields).
+  - **GOTCHA — Frappe declares Int/Float/Currency columns NOT NULL.** Plenty of
+    comps have no year built or square footage, so the importer coerces missing
+    numerics to 0 and text to "" (dates stay nullable — a live listing genuinely
+    has no removal date). 0 is falsy, so the popup omits the fact rather than
+    printing "0".
+  - **GOTCHA — frappe-ui renders `type="select"` as a button-driven combobox**,
+    not a native `<select>`, so `@change` on it is not reliable; watch the
+    v-model instead. The modal also loads `onMounted` when `show` is already
+    true, or a v-if host / hot reload leaves an empty map claiming "no comps"
+    (the same trap `ImportBuyersModal` hit).
 
 - **Every lead view reads newest-first** (gw303) — only the Activity timeline was
   most-recent-first; Comments, Calls, Tasks, Notes and Attachments made you
