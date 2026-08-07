@@ -375,6 +375,11 @@
     doctype="CRM Lead"
     :document="document"
   />
+  <CompsMapModal
+    v-model="showCompsMap"
+    :lead="leadId"
+    :address="doc.property_address"
+  />
   <PhotoGalleryModal
     v-if="showPhotoGallery"
     v-model="showPhotoGallery"
@@ -413,6 +418,7 @@ import SLASection from '@/components/SLASection.vue'
 import CustomActions from '@/components/CustomActions.vue'
 import FirstCallReadCard from '@/components/FirstCallReadCard.vue'
 import PhotosCard from '@/components/PhotosCard.vue'
+import CompsMapModal from '@/components/Modals/CompsMapModal.vue'
 import PhotoGalleryModal from '@/components/Modals/PhotoGalleryModal.vue'
 import TaxInfoCard from '@/components/TaxInfoCard.vue'
 import AgreementsCard from '@/components/AgreementsCard.vue'
@@ -596,6 +602,14 @@ const moreActions = computed(() => {
         : toast.error(__('Set a property address to create an underwriting sheet')),
   })
   items.push({
+    label: __('View comps'),
+    icon: 'map-pin',
+    onClick: () =>
+      d.property_address
+        ? (showCompsMap.value = true)
+        : toast.error(__('Set a property address to see comps')),
+  })
+  items.push({
     label: __('Photos'),
     icon: 'image',
     onClick: () =>
@@ -610,6 +624,7 @@ const moreActions = computed(() => {
 // gallery modal is mounted here rather than threaded through AllModals because
 // nothing else needs to open it.
 const showPhotoGallery = ref(false)
+const showCompsMap = ref(false)
 
 onMounted(async () => {
   if (document.doc) await triggerOnRender()
