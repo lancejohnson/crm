@@ -36,7 +36,6 @@
               size="sm"
               :options="radiusOptions"
               v-model="radius"
-              @change="load"
             />
             <Button
               variant="ghost"
@@ -88,7 +87,7 @@
  * the comps that actually count without reading a single date.
  */
 import { Dialog, Button, FormControl, call, toast } from 'frappe-ui'
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
@@ -341,6 +340,14 @@ async function load() {
   }
 }
 
+// Watch the value rather than binding @change on the control: frappe-ui renders
+// `type="select"` as a button-driven dropdown, not a native <select>, so a
+// `change` event is not guaranteed to reach us. Watching v-model works whichever
+// way the control chooses to emit.
+watch(radius, () => {
+  if (show.value) load()
+})
+
 watch(show, (v) => {
   if (v) {
     nextTick(load)
@@ -348,6 +355,12 @@ watch(show, (v) => {
     map.remove()
     map = null
   }
+})
+
+// If this ever mounts with `show` already true (a v-if host, or a hot reload),
+// the watcher above never fires and the map would sit empty claiming "no comps".
+onMounted(() => {
+  if (show.value) nextTick(load)
 })
 </script>
 
