@@ -69,6 +69,17 @@ MAX_COMPS = 200
 #: answer. Five is the smallest set a reviewer can see a middle in.
 MIN_USABLE_COMPS = 5
 
+#: Default recency window for OFF-MARKET comps. A sale older than a year is a
+#: different market, so the preset never reaches further back than this until the
+#: ladder is forced to. Active listings are deliberately exempt — see `_matches`.
+DEFAULT_WITHIN_DAYS = 365
+
+#: Per-lead, TEAM-WIDE record of which comps a human hid or picked. Not per-user:
+#: a junk comp is junk for everyone, and "the comps we used" is a deal artifact
+#: the next person to open the lead needs to see.
+HIDDEN_FIELD = "comps_hidden"
+SELECTED_FIELD = "comps_selected"
+
 CENSUS_URL = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
 UA = {"User-Agent": "groundwork-crm/1.0 (+groundworkpro.com; comps map)"}
 
@@ -445,8 +456,12 @@ def _matches(row, f, today):
 	if status == "active" and not _is_active(row.get("status")):
 		return False
 
+	# Recency gates OFF-MARKET comps ONLY. A sale from three years ago is a
+	# different market, but a house that has sat on the market for 18 months is
+	# live evidence about what is being asked TODAY — dropping it for being "old"
+	# would hide exactly the stale listings that tell you the area is not moving.
 	within = _num(f.get("within_days"))
-	if within:
+	if within and not _is_active(row.get("status")):
 		days = _recency_days(row, today)
 		if days is not None and days > within:
 			return False
@@ -528,15 +543,17 @@ def _preset_tiers(facts, radius):
 			f["property_types"] = [ptype]
 		tiers.append({"key": key, "label": label, "filters": f})
 
+	# The window opens at 12 months and STAYS there while the shape loosens: a
+	# poorly-matching sale from this year beats a well-matching one from 2022, so
+	# similarity is spent before recency is.
 	if has_shape:
-		tier("similar", _("Recent · similar"), 180, 1, 1, 0.25, 20, True)
-		tier("wider", _("Last year · similar"), 365, 1, 1, 0.35, 30, True)
+		tier("similar", _("Last 12 months · similar"), DEFAULT_WITHIN_DAYS, 1, 1, 0.25, 20, True)
+		tier("wider", _("Last 12 months · wider"), DEFAULT_WITHIN_DAYS, 1, 1, 0.35, 30, True)
 		tier("loose", _("Last 2 years · loosely similar"), 730, 2, None, 0.50, None, False)
 	else:
 		# Nothing is known about the subject, so "similar" has no meaning here and
 		# pretending otherwise would filter on air. Recency is still real.
-		tier("recent", _("Recent"), 180, None, None, None, None, False)
-		tier("wider", _("Last year"), 365, None, None, None, None, False)
+		tier("recent", _("Last 12 months"), DEFAULT_WITHIN_DAYS, None, None, None, None, False)
 		tier("loose", _("Last 2 years"), 730, None, None, None, None, False)
 	tiers.append({
 		"key": "all",
@@ -547,10 +564,80 @@ def _preset_tiers(facts, radius):
 
 
 # ---------------------------------------------------------------------------------
+# Human judgement: hidden / selected comps
+# ---------------------------------------------------------------------------------
+def _state_supported() -> bool:
+	"""False until the ops script adds the fields; everything degrades quietly."""
+	return frappe.db.has_column("CRM Lead", HIDDEN_FIELD) and frappe.db.has_column(
+		"CRM Lead", SELECTED_FIELD
+	)
+
+
+def _load_list(doc, field):
+	raw = doc.get(field)
+	if not raw:
+		return []
+	try:
+		val = json.loads(raw)
+		return [str(x) for x in val] if isinstance(val, list) else []
+	except Exception:
+		return []
+
+
+def _comp_state(doc):
+	"""(hidden, selected) as sets of comp docnames for this lead."""
+	if not _state_supported():
+		return set(), set()
+	return set(_load_list(doc, HIDDEN_FIELD)), set(_load_list(doc, SELECTED_FIELD))
+
+
+@frappe.whitelist()
+def set_comp_state(lead, comp, state):
+	"""Mark one comp as `selected`, `hidden`, or `none` for this lead.
+
+	Deliberately TEAM-WIDE rather than per-user: a comp that is obviously not
+	comparable is wrong for everyone, and the set someone actually priced the deal
+	on is a deal artifact the next person needs to see, not a private view setting.
+
+	The two states are mutually exclusive — picking a comp you hid un-hides it,
+	which is the only sane reading of the two clicks.
+	"""
+	_guard()
+	if state not in ("selected", "hidden", "none"):
+		frappe.throw(_("Unknown comp state {0}").format(state))
+	if not frappe.db.exists("CRM Lead", lead):
+		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)
+	if not _state_supported():
+		return {"ok": False, "error": "comps_hidden/comps_selected fields are missing"}
+
+	doc = frappe.get_doc("CRM Lead", lead)
+	hidden, selected = _comp_state(doc)
+	comp = str(comp)
+	hidden.discard(comp)
+	selected.discard(comp)
+	if state == "hidden":
+		hidden.add(comp)
+	elif state == "selected":
+		selected.add(comp)
+
+	# db.set_value, not doc.save: this is a view judgement on a lead, and running
+	# the whole CRM Lead save path (SLA, hooks, assignment) for it would be absurd.
+	frappe.db.set_value(
+		"CRM Lead", lead,
+		{
+			HIDDEN_FIELD: json.dumps(sorted(hidden)),
+			SELECTED_FIELD: json.dumps(sorted(selected)),
+		},
+		update_modified=False,
+	)
+	return {"ok": True, "hidden": len(hidden), "selected": len(selected), "state": state}
+
+
+# ---------------------------------------------------------------------------------
 # Read API
 # ---------------------------------------------------------------------------------
 @frappe.whitelist()
-def get_lead_comps(lead, radius_mi=None, limit=None, filters=None, auto=0):
+def get_lead_comps(lead, radius_mi=None, limit=None, filters=None, auto=0, include_hidden=0):
 	"""Comps near a lead, nearest first, with the subject's real position.
 
 	The bounding box is a cheap indexed pre-filter; haversine then trims the
@@ -628,6 +715,10 @@ def get_lead_comps(lead, radius_mi=None, limit=None, filters=None, auto=0):
 
 	today = frappe.utils.today()
 	self_key = (subject or {}).get("self_comp_key")
+	hidden, selected = _comp_state(doc)
+	base["selected"] = sorted(selected)
+	base["hidden"] = sorted(hidden)
+	base["state_supported"] = _state_supported()
 	out = []
 	for row in rows:
 		if row.lat is None or row.lng is None:
@@ -642,6 +733,8 @@ def get_lead_comps(lead, radius_mi=None, limit=None, filters=None, auto=0):
 			continue
 		row = dict(row)
 		row["distance_mi"] = round(dist, 2)
+		row["selected"] = row["name"] in selected
+		row["hidden"] = row["name"] in hidden
 		# Computed while the dates are still dates, and returned so the client can
 		# show "3 mo ago" without re-deriving "recent" a second, divergent way.
 		row["recency_days"] = _recency_days(row, today)
@@ -654,6 +747,14 @@ def get_lead_comps(lead, radius_mi=None, limit=None, filters=None, auto=0):
 
 	out.sort(key=lambda r: r["distance_mi"])
 	base["total_in_radius"] = len(out)
+
+	# A comp a human hid is gone from every count and every tier decision — leaving
+	# it in the pool would let junk keep a tier "usable" and suppress the widening
+	# that the rep actually needs.
+	hidden_here = [r for r in out if r["hidden"]]
+	base["hidden_count"] = len(hidden_here)
+	if not int(include_hidden or 0):
+		out = [r for r in out if not r["hidden"]]
 
 	explicit = _coerce_filters(filters)
 	if explicit is not None:
@@ -688,6 +789,17 @@ def get_lead_comps(lead, radius_mi=None, limit=None, filters=None, auto=0):
 		base["filters"] = {"status": "all", "radius_mi": radius}
 		base["preset"] = None
 		base["relaxed"] = False
+
+	# An explicit human pick outranks any derived filter: a comp someone marked as
+	# one they are pricing off must not vanish because the preset later tightened.
+	# Same principle as the Today board — the machine decides what LANDS, the human
+	# owns it afterwards.
+	if selected:
+		seen = {r["name"] for r in matched}
+		pinned = [r for r in out if r["selected"] and r["name"] not in seen]
+		if pinned:
+			matched = sorted(matched + pinned, key=lambda r: r["distance_mi"])
+	base["selected_count"] = sum(1 for r in matched if r["selected"])
 
 	base["total_matched"] = len(matched)
 	base["comps"] = matched[:cap]

@@ -33,148 +33,14 @@
             </div>
           </div>
           <div class="flex items-center gap-2">
-            <!-- Same shape as the CRM's list/kanban Filter control: a labelled
-                 button carrying a count badge, with a clear affordance welded to
-                 its right edge. Comps have a fixed, small filter set, so the rows
-                 inside are named outright instead of a field/operator builder. -->
-            <Popover placement="bottom-end">
-              <template #target="{ togglePopover }">
-                <div class="flex items-center">
-                  <Button
-                    :label="__('Filters')"
-                    :class="activeFilterCount ? 'rounded-r-none' : ''"
-                    :iconLeft="FilterIcon"
-                    @click="togglePopover"
-                  >
-                    <template v-if="activeFilterCount" #suffix>
-                      <div
-                        class="flex h-5 w-5 items-center justify-center rounded-[5px] bg-surface-white pt-px text-xs font-medium text-ink-gray-8 shadow-sm"
-                      >
-                        {{ activeFilterCount }}
-                      </div>
-                    </template>
-                  </Button>
-                  <Button
-                    v-if="activeFilterCount"
-                    :tooltip="__('Clear all filters')"
-                    class="rounded-l-none border-l"
-                    icon="x"
-                    @click.stop="clearAll"
-                  />
-                </div>
-              </template>
-              <template #body>
-                <div
-                  class="my-2 rounded-lg bg-surface-modal shadow-2xl ring-1 ring-black ring-opacity-5 focus:outline-none"
-                >
-                  <!-- max-w is load-bearing on a phone: without it the panel took
-                       its content's preferred width (480px inside a 390px screen)
-                       and every "max" input, all three dropdowns and Clear all sat
-                       off the right edge. Capping it makes the min-w-0 flex children
-                       actually shrink. The Lead page has a mobile twin, so this
-                       panel genuinely renders at 390px. -->
-                  <div
-                    class="min-w-72 max-w-[calc(100vw-1.5rem)] p-3 sm:min-w-[420px]"
-                  >
-                    <div class="mb-2.5 flex items-baseline justify-between gap-2">
-                      <span class="text-base font-medium text-ink-gray-8">
-                        {{ __('Filter comps') }}
-                      </span>
-                      <span class="text-xs text-ink-gray-5">
-                        {{
-                          __('{0} of {1} nearby', [
-                            data?.total_matched ?? 0,
-                            data?.total_in_radius ?? 0,
-                          ])
-                        }}
-                      </span>
-                    </div>
-
-                    <div class="flex flex-col gap-2">
-                      <div class="flex items-center gap-2">
-                        <div class="w-20 shrink-0 text-end text-sm text-ink-gray-5">
-                          {{ __('Status') }}
-                        </div>
-                        <FormControl
-                          class="flex-1"
-                          type="select"
-                          size="sm"
-                          :options="statusOptions"
-                          v-model="draft.status"
-                        />
-                      </div>
-                      <div class="flex items-center gap-2">
-                        <div class="w-20 shrink-0 text-end text-sm text-ink-gray-5">
-                          {{ __('Within') }}
-                        </div>
-                        <FormControl
-                          class="flex-1"
-                          type="select"
-                          size="sm"
-                          :options="withinOptions"
-                          v-model="draft.within_days"
-                        />
-                      </div>
-
-                      <div
-                        v-for="r in rangeRows"
-                        :key="r.key"
-                        class="flex items-center gap-2"
-                      >
-                        <div class="w-20 shrink-0 text-end text-sm text-ink-gray-5">
-                          {{ r.label }}
-                        </div>
-                        <FormControl
-                          class="min-w-0 flex-1"
-                          type="number"
-                          size="sm"
-                          :step="r.step"
-                          :placeholder="__('min')"
-                          v-model="draft[r.key + '_min']"
-                        />
-                        <span class="shrink-0 text-ink-gray-4">–</span>
-                        <FormControl
-                          class="min-w-0 flex-1"
-                          type="number"
-                          size="sm"
-                          :step="r.step"
-                          :placeholder="__('max')"
-                          v-model="draft[r.key + '_max']"
-                        />
-                      </div>
-
-                      <div class="flex items-center gap-2">
-                        <div class="w-20 shrink-0 text-end text-sm text-ink-gray-5">
-                          {{ __('Type') }}
-                        </div>
-                        <FormControl
-                          class="flex-1"
-                          type="select"
-                          size="sm"
-                          :options="typeOptions"
-                          v-model="draft.property_types"
-                        />
-                      </div>
-                    </div>
-
-                    <div class="mt-3 flex items-center justify-between gap-2">
-                      <Button
-                        class="!text-ink-gray-5"
-                        variant="ghost"
-                        :label="__('Reset to suggested')"
-                        @click="resetToSuggested"
-                      />
-                      <Button
-                        class="!text-ink-gray-5"
-                        variant="ghost"
-                        :label="__('Clear all')"
-                        @click="clearAll"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </template>
-            </Popover>
+            <!-- Details toggle: the pills carry beds/baths/sqft/year, but on a
+                 dense board the overview is sometimes worth more than the facts. -->
+            <Button
+              :label="showDetail ? __('Details on') : __('Details off')"
+              :variant="showDetail ? 'subtle' : 'ghost'"
+              :tooltip="__('Show beds/baths/sqft/year on pills') + ' (D)'"
+              @click="showDetail = !showDetail"
+            />
 
             <!-- Radius stays its own control: a rural lead needs a wider net than
                  an infill lot, and the right answer is obvious once you see the
@@ -191,6 +57,107 @@
               :loading="loading"
               @click="() => load()"
             />
+          </div>
+        </div>
+
+        <!-- Filters are VISIBLE, not behind a popover: they are the whole point
+             of the tool, and a rep should be able to widen a beds range without
+             first discovering a button. Wraps to as many rows as it needs, which
+             is what keeps it usable at 390px. -->
+        <div
+          class="rounded-lg border border-outline-gray-2 bg-surface-gray-1 px-3 py-2.5"
+        >
+          <div class="flex flex-wrap items-end gap-x-4 gap-y-2.5">
+            <div class="flex min-w-0 flex-col gap-1">
+              <span class="text-2xs font-semibold uppercase tracking-wide text-ink-gray-5">
+                {{ __('Status') }}
+              </span>
+              <FormControl
+                type="select"
+                size="sm"
+                :options="statusOptions"
+                v-model="draft.status"
+              />
+            </div>
+            <div class="flex min-w-0 flex-col gap-1">
+              <span class="text-2xs font-semibold uppercase tracking-wide text-ink-gray-5">
+                {{ __('Sold within') }}
+              </span>
+              <FormControl
+                type="select"
+                size="sm"
+                :options="withinOptions"
+                v-model="draft.within_days"
+              />
+            </div>
+
+            <div
+              v-for="r in rangeRows"
+              :key="r.key"
+              class="flex min-w-0 flex-col gap-1"
+            >
+              <span class="text-2xs font-semibold uppercase tracking-wide text-ink-gray-5">
+                {{ r.label }}
+              </span>
+              <div class="flex items-center gap-1">
+                <FormControl
+                  class="w-16"
+                  type="number"
+                  size="sm"
+                  :step="r.step"
+                  :placeholder="__('min')"
+                  v-model="draft[r.key + '_min']"
+                />
+                <span class="text-ink-gray-4">–</span>
+                <FormControl
+                  class="w-16"
+                  type="number"
+                  size="sm"
+                  :step="r.step"
+                  :placeholder="__('max')"
+                  v-model="draft[r.key + '_max']"
+                />
+              </div>
+            </div>
+
+            <div class="flex min-w-0 flex-col gap-1">
+              <span class="text-2xs font-semibold uppercase tracking-wide text-ink-gray-5">
+                {{ __('Type') }}
+              </span>
+              <FormControl
+                type="select"
+                size="sm"
+                :options="typeOptions"
+                v-model="draft.property_types"
+              />
+            </div>
+
+            <div class="ml-auto flex items-center gap-1.5">
+              <Button
+                v-if="data?.hidden_count"
+                :label="
+                  revealHidden
+                    ? __('Hide {0} hidden', [data.hidden_count])
+                    : __('{0} hidden', [data.hidden_count])
+                "
+                variant="ghost"
+                @click="toggleRevealHidden"
+              />
+              <Button
+                v-if="activeFilterCount"
+                :label="__('Reset to suggested')"
+                variant="ghost"
+                @click="resetToSuggested"
+              />
+              <Button :label="__('Clear all')" variant="ghost" @click="clearAll" />
+            </div>
+          </div>
+          <div class="mt-2 text-2xs text-ink-gray-5">
+            {{
+              __(
+                '“Sold within” applies to off-market comps only — an active listing stays on the map however long it has been listed.',
+              )
+            }}
           </div>
         </div>
 
@@ -236,7 +203,18 @@
             {{ __('Still listed') }}
           </span>
           <span class="text-ink-gray-5">{{ __('Fainter = older') }}</span>
-          <span class="text-ink-gray-4">{{ __('Click any pin for details') }}</span>
+          <span v-if="data?.selected_count" class="flex items-center gap-1.5">
+            <span
+              class="size-2.5 rounded-full ring-2 ring-offset-1"
+              :style="{ background: OFF_MARKET, '--tw-ring-color': SUBJECT }"
+            />
+            {{ __('{0} used as comps', [data.selected_count]) }}
+          </span>
+          <span class="text-ink-gray-4">
+            {{ __('Click a pin to use or hide it') }} ·
+            <b>D</b> {{ __('details') }} · <b>U</b> {{ __('use') }} ·
+            <b>H</b> {{ __('hide') }}
+          </span>
         </div>
       </div>
     </template>
@@ -264,12 +242,13 @@
  * Touching any control switches to explicit mode — from then on the server runs
  * exactly what is on screen, even if that matches nothing.
  */
-import { Dialog, Button, FormControl, Popover, call, toast } from 'frappe-ui'
+import { Dialog, Button, FormControl, call, toast } from 'frappe-ui'
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { zillowUrl } from '@/utils/propertyLinks'
 import FilterIcon from '@/components/Icons/FilterIcon.vue'
+import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
 
 const props = defineProps({
   lead: { type: String, required: true },
@@ -309,11 +288,13 @@ const statusOptions = [
 // the fix; `currentFilters` maps it back to "unconstrained".
 const ANY = 'any'
 
+// Labelled "Sold within" because it no longer means the same thing for both kinds
+// of pin: an active listing is exempt, however long it has been sitting there.
 const withinOptions = [
   { label: __('Any time'), value: ANY },
   { label: __('Last 90 days'), value: 90 },
   { label: __('Last 6 months'), value: 180 },
-  { label: __('Last year'), value: 365 },
+  { label: __('Last 12 months'), value: 365 },
   { label: __('Last 2 years'), value: 730 },
 ]
 
@@ -355,6 +336,19 @@ for (const k of RANGE_KEYS) draft[k] = ''
 const userTouched = ref(false)
 let syncing = false
 let applyTimer = null
+
+// Whether pills carry beds/baths/sqft/year, or collapse to the bare price.
+// Persisted per user like dispoView / activityScope — it is a view preference,
+// and having to re-set it on every lead would make the shortcut pointless.
+const showDetail = ref(localStorage.getItem('compsPillDetail') !== '0')
+watch(showDetail, (v) => {
+  localStorage.setItem('compsPillDetail', v ? '1' : '0')
+  render()
+})
+
+// Which comp's popup is open — the target for the h / u shortcuts.
+const focusedComp = ref(null)
+const revealHidden = ref(false)
 
 const comps = computed(() => data.value?.comps || [])
 const emptyMessage = computed(
@@ -497,23 +491,70 @@ function escapeHtml(s) {
   )
 }
 
+/** "3/2 · 1,395sf · 1910" — the facts line under the price on a detailed pill. */
+function pillFacts(c) {
+  const bb = c.bedrooms || c.bathrooms ? `${c.bedrooms || '?'}/${c.bathrooms || '?'}` : ''
+  const sf = c.square_footage
+    ? `${Number(c.square_footage).toLocaleString()}sf`
+    : ''
+  const yr = c.year_built ? String(c.year_built) : ''
+  return [bb, sf, yr].filter(Boolean).join(' · ')
+}
+
+/**
+ * Design B: price bold, facts beneath in small type.
+ *
+ * Measured against the one-line alternative on a real 418-comp board: 115px wide
+ * vs 186px, which is the difference between readable and a wall of overlapping
+ * pills in a tight cluster. `showDetail` collapses it back to the bare price pill
+ * (the `d` shortcut), because on a dense urban board the overview is sometimes
+ * worth more than the facts.
+ *
+ * A SELECTED comp gets a white ring and always shows its facts — it is the one
+ * someone is actually pricing off, so it should never be the pin you lose.
+ */
 function pillIcon(c) {
   const active = isActive(c.status)
-  const label = priceShort(c.price)
   const opacity = pillOpacity(stalenessDays(c))
   const bg = active ? ACTIVE : OFF_MARKET
-  const w = Math.max(40, Math.ceil(18 + label.length * 7.4))
+  const price = priceShort(c.price)
+  const facts = pillFacts(c)
+  const detailed = (showDetail.value || c.selected) && facts
+  const ring = c.selected
+    ? 'box-shadow:0 0 0 2px #fff,0 0 0 4px #2563c9,0 1px 3px rgba(0,0,0,.4);'
+    : 'box-shadow:0 1px 3px rgba(0,0,0,.35);'
+  const border = `1px solid ${active ? '#b45309' : '#334155'}`
+  // A selected pill is never faded: an explicit pick outranks the recency signal.
+  const op = (c.selected ? 1 : opacity).toFixed(3)
+
+  if (!detailed) {
+    const w = Math.max(40, Math.ceil(18 + price.length * 7.4))
+    return L.divIcon({
+      className: 'comps-price-pill',
+      html: `<div style="display:flex;align-items:center;justify-content:center;
+          box-sizing:border-box;width:${w}px;height:24px;background:${bg};color:#fff;
+          font:700 11px/1 ui-sans-serif,system-ui,sans-serif;border-radius:999px;
+          border:${border};${ring}white-space:nowrap;
+          opacity:${op}">${price}</div>`,
+      iconSize: [w, 24],
+      iconAnchor: [w / 2, 12],
+      popupAnchor: [0, -14],
+    })
+  }
+  const w = Math.max(58, Math.ceil(14 + Math.max(price.length * 7.0, facts.length * 5.05)))
   return L.divIcon({
     className: 'comps-price-pill',
-    html: `<div style="display:flex;align-items:center;justify-content:center;
-        box-sizing:border-box;width:${w}px;height:24px;background:${bg};color:#fff;
-        font:700 11px/1 ui-sans-serif,system-ui,sans-serif;border-radius:999px;
-        border:1px solid ${active ? '#b45309' : '#334155'};
-        box-shadow:0 1px 3px rgba(0,0,0,.35);white-space:nowrap;
-        opacity:${opacity.toFixed(3)}">${label}</div>`,
-    iconSize: [w, 24],
-    iconAnchor: [w / 2, 12],
-    popupAnchor: [0, -14],
+    html: `<div style="display:flex;flex-direction:column;align-items:center;
+        justify-content:center;box-sizing:border-box;width:${w}px;height:34px;
+        background:${bg};color:#fff;border-radius:9px;border:${border};${ring}
+        white-space:nowrap;line-height:1;opacity:${op}">
+        <div style="font:700 11.5px/1 ui-sans-serif,system-ui,sans-serif">${price}</div>
+        <div style="font:500 9px/1 ui-sans-serif,system-ui,sans-serif;opacity:.9;
+          margin-top:2px">${escapeHtml(facts)}</div>
+      </div>`,
+    iconSize: [w, 34],
+    iconAnchor: [w / 2, 17],
+    popupAnchor: [0, -19],
   })
 }
 
@@ -675,6 +716,19 @@ function popupHtml(c) {
     ? `<div style="margin-top:6px"><a href="${escapeHtml(zurl)}" target="_blank" rel="noopener noreferrer"
          style="color:#2563c9;font-weight:600;text-decoration:underline">${__('Open on Zillow')} ↗</a></div>`
     : ''
+  // Hide / use live in the popup rather than on the pill: a pill is 24px tall and
+  // already the click target for "tell me about this one".
+  const actions = `<div style="display:flex;gap:6px;margin-top:8px;padding-top:7px;
+      border-top:1px solid #e5e3de">
+      <button data-comp-use="${escapeHtml(c.name)}" style="flex:1;cursor:pointer;
+        font:600 11px/1 ui-sans-serif,system-ui;padding:6px 8px;border-radius:6px;
+        border:1px solid ${c.selected ? '#2563c9' : '#e5e3de'};
+        background:${c.selected ? '#2563c9' : '#fff'};color:${c.selected ? '#fff' : '#44423d'}">
+        ${c.selected ? `✓ ${__('Using')}` : __('Use as comp')}</button>
+      <button data-comp-hide="${escapeHtml(c.name)}" style="cursor:pointer;
+        font:600 11px/1 ui-sans-serif,system-ui;padding:6px 8px;border-radius:6px;
+        border:1px solid #e5e3de;background:#fff;color:#8a877e">${__('Hide')}</button>
+    </div>`
   return `<div style="min-width:190px;font:12px/1.45 system-ui,sans-serif;color:#161614">
       <div style="font-weight:700;margin-bottom:2px">${escapeHtml(c.address)}</div>
       <div style="font-size:15px;font-weight:700;margin:2px 0">${priceShort(c.price)}</div>
@@ -687,6 +741,7 @@ function popupHtml(c) {
         ago ? ` · ${ago}` : ''
       }</div>
       ${zlink}
+      ${actions}
     </div>`
 }
 
@@ -746,12 +801,19 @@ function render() {
     // Fresher pills stack above faded ones where markers overlap, so the comp
     // that matters is the one you can actually click in a tight cluster.
     const fresh = Math.round(pillOpacity(stalenessDays(c)) * 100)
-    L.marker([c.lat, c.lng], {
+    const marker = L.marker([c.lat, c.lng], {
       icon: pillIcon(c),
-      zIndexOffset: (isActive(c.status) ? 200 : 100) + fresh,
+      // A selected comp sits above everything so it stays clickable in a cluster.
+      zIndexOffset: (c.selected ? 600 : isActive(c.status) ? 200 : 100) + fresh,
+      opacity: c.hidden ? 0.45 : 1,
     })
       .addTo(map)
       .bindPopup(popupHtml(c), { maxWidth: 280 })
+    // Remember which comp is open so h / u know what they act on.
+    marker.on('popupopen', () => (focusedComp.value = c.name))
+    marker.on('popupclose', () => {
+      if (focusedComp.value === c.name) focusedComp.value = null
+    })
     bounds.push([c.lat, c.lng])
   }
 
@@ -782,9 +844,27 @@ function render() {
       /* single point / degenerate bounds — keep the default view */
     }
   }
+  // Popup HTML is injected, so its buttons cannot carry Vue handlers. One
+  // delegated listener on the map container covers every popup instead.
+  map.getContainer().addEventListener('click', onPopupClick)
+
   // Leaflet mis-measures a container that was display:none when it mounted,
   // which is exactly what a modal is until the moment it opens.
   setTimeout(() => map && map.invalidateSize(), 120)
+}
+
+function onPopupClick(e) {
+  const use = e.target?.closest?.('[data-comp-use]')
+  if (use) {
+    e.preventDefault()
+    toggleUse(use.getAttribute('data-comp-use'))
+    return
+  }
+  const hide = e.target?.closest?.('[data-comp-hide]')
+  if (hide) {
+    e.preventDefault()
+    setCompState(hide.getAttribute('data-comp-hide'), 'hidden')
+  }
 }
 
 /** Draft -> the server's filter shape. Blank means "unconstrained", not zero. */
@@ -818,11 +898,43 @@ function syncDraft(f) {
   })
 }
 
+/**
+ * Mark a comp as one we are pricing off, or hide it. Team-wide by design.
+ *
+ * Optimistic on the pill, then reloaded: hiding removes a pin, which changes the
+ * counts and can change which preset tier applies, and re-deriving that on the
+ * client would be a second, divergent copy of the ladder.
+ */
+async function setCompState(comp, state) {
+  if (!props.lead || !comp) return
+  try {
+    const res = await call('crm.api.comps.set_comp_state', {
+      lead: props.lead,
+      comp,
+      state,
+    })
+    if (res?.ok === false) {
+      toast.error(__('Comp selection is not set up on this site yet.'))
+      return
+    }
+    if (state === 'hidden') toast.success(__('Comp hidden'))
+    await load()
+  } catch (e) {
+    toast.error(e.messages?.[0] || __('Could not update that comp.'))
+  }
+}
+
+function toggleUse(name) {
+  const c = comps.value.find((x) => x.name === name)
+  setCompState(name, c?.selected ? 'none' : 'selected')
+}
+
 async function load({ explicit = userTouched.value } = {}) {
   if (!props.lead) return
   loading.value = true
   try {
     const payload = { lead: props.lead, radius_mi: radius.value }
+    if (revealHidden.value) payload.include_hidden = 1
     if (explicit) {
       payload.filters = JSON.stringify(currentFilters())
       payload.auto = 0
@@ -843,6 +955,11 @@ async function load({ explicit = userTouched.value } = {}) {
 function resetToSuggested() {
   userTouched.value = false
   load({ explicit: false })
+}
+
+function toggleRevealHidden() {
+  revealHidden.value = !revealHidden.value
+  load()
 }
 
 function clearAll() {
@@ -886,6 +1003,23 @@ watch(show, (v) => {
     map.remove()
     map = null
   }
+})
+
+// GOTCHA — useKeyboardShortcuts defaults to skipWhenDialogOpen:true, and this IS
+// a Dialog, so the shortcuts would silently never fire. It is turned off here and
+// the modal's own `show` gates them instead. `ignoreTyping` (on by default) is
+// what stops "d" toggling pills while someone types in a filter box.
+useKeyboardShortcuts({
+  active: () => !!show.value,
+  skipWhenDialogOpen: false,
+  shortcuts: [
+    { keys: ['d', 'D'], action: () => (showDetail.value = !showDetail.value) },
+    {
+      keys: ['h', 'H'],
+      action: () => focusedComp.value && setCompState(focusedComp.value, 'hidden'),
+    },
+    { keys: ['u', 'U'], action: () => focusedComp.value && toggleUse(focusedComp.value) },
+  ],
 })
 
 // If this ever mounts with `show` already true (a v-if host, or a hot reload),
