@@ -60,24 +60,26 @@
     <!-- Mini 2x2: lights up the cell this lead lands in -->
     <div class="mt-4 grid grid-cols-[3rem_1fr_1fr] gap-1.5">
       <div></div>
-      <div class="text-center text-2xs uppercase tracking-wide text-ink-gray-5">
-        {{ __('On price') }}
-      </div>
+      <!-- Off price is the LEFT column so the best read (motivated + on price)
+           lands top-right, the corner the eye treats as "best" on a 2x2. -->
       <div class="text-center text-2xs uppercase tracking-wide text-ink-gray-5">
         {{ __('Off price') }}
+      </div>
+      <div class="text-center text-2xs uppercase tracking-wide text-ink-gray-5">
+        {{ __('On price') }}
       </div>
 
       <div class="flex items-center justify-end text-2xs uppercase tracking-wide text-ink-gray-5">
         {{ __('Motiv.') }}
       </div>
-      <div :class="cellClass('Yes', 'Yes')">{{ cellMark('Yes', 'Yes') }}</div>
       <div :class="cellClass('Yes', 'No')">{{ cellMark('Yes', 'No') }}</div>
+      <div :class="cellClass('Yes', 'Yes')">{{ cellMark('Yes', 'Yes') }}</div>
 
       <div class="flex items-center justify-end text-2xs uppercase tracking-wide text-ink-gray-5">
         {{ __('Not') }}
       </div>
-      <div :class="cellClass('No', 'Yes')">{{ cellMark('No', 'Yes') }}</div>
       <div :class="cellClass('No', 'No')">{{ cellMark('No', 'No') }}</div>
+      <div :class="cellClass('No', 'Yes')">{{ cellMark('No', 'Yes') }}</div>
     </div>
 
     <!-- Result band -->
