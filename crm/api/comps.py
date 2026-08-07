@@ -204,12 +204,17 @@ def get_lead_comps(lead, radius_mi=None, limit=None):
 	dlat = radius / 69.0
 	cos_lat = max(math.cos(math.radians(lat)), 0.01)
 	dlng = radius / (69.0 * cos_lat)
+	# Explicit >=/<= rather than `between`: Frappe's `between` operator routes
+	# through get_between_date_filter and treats its bounds as DATES, which turns a
+	# numeric bounding box into malformed SQL.
 	rows = frappe.get_all(
 		DOCTYPE,
-		filters={
-			"lat": ["between", [lat - dlat, lat + dlat]],
-			"lng": ["between", [lng - dlng, lng + dlng]],
-		},
+		filters=[
+			[DOCTYPE, "lat", ">=", lat - dlat],
+			[DOCTYPE, "lat", "<=", lat + dlat],
+			[DOCTYPE, "lng", ">=", lng - dlng],
+			[DOCTYPE, "lng", "<=", lng + dlng],
+		],
 		fields=[
 			"name", "address", "city", "state", "zip", "lat", "lng", "price", "status",
 			"listed_date", "removed_date", "days_on_market", "days_old",
