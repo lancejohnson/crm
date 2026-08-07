@@ -203,6 +203,73 @@ duplicating. Work substantial features in a worktree of your own.
     v-model instead. The modal also loads `onMounted` when `show` is already
     true, or a v-if host / hot reload leaves an empty map claiming "no comps"
     (the same trap `ImportBuyersModal` hit).
+  - **Filters, PRE-SET around the property.** An unfiltered 2-mile dump is not a
+    comp set (234 pins of condos and mansions around a 900sqft bungalow), so the
+    map opens with status / recency / beds / baths / sqft / year / price / type
+    already set from the subject, in the CRM's own Filter idiom (button + count
+    badge + popover + clear). Filtering happens **server-side BEFORE the 200-pin
+    cap** — capping first would take the 200 nearest and then filter those,
+    silently hiding better-fitting comps further out.
+    - **The preset is a LADDER, not a filter** (`_preset_tiers`): `Recent ·
+      similar` (180d, beds ±1, sqft ±25%, year ±20, same type) → `Last year ·
+      similar` → `Last 2 years · loosely similar` → `Everything nearby`. The
+      tightest tier yielding ≥`MIN_USABLE_COMPS` (5) wins, and the response says
+      which tier ran (`preset`/`relaxed`/`fell_through`) so the UI states it out
+      loud instead of showing a map full of houses nothing like the subject.
+      Measured on prod: 7 `similar`, 1 `wider`, 3 `all` of 11 leads — and all
+      three `all` cases had ZERO comps in radius, so nothing was being hidden.
+    - **Touching any control switches to explicit mode** (`auto=0` + `filters`):
+      from then on the server runs exactly what is on screen even if it matches
+      nothing. Quietly widening a deliberate filter is how a tool stops being
+      trusted. `auto` defaults **off** server-side so the endpoint stays
+      byte-compatible for any caller predating this (verified: 0 mismatches over
+      11 leads), which is what let the backend deploy independently.
+    - **Lead beds/baths/sqft/year are pick-list TEXT, not numbers** — the whole
+      measured vocabulary is `"3 Bedroom"`, `"1.5 Bathroom"`, `"More than 5"`,
+      `"1000 - 2000"`, `"5000+"`, `"1900-1950"`, `"None"`. `_parse_band` returns
+      the **interval the source named**, never a midpoint: collapsing
+      `"1000 - 2000"` to 1500 and then widening ±25% invents precision the data
+      does not have. So a vague seller answer yields a loose filter and a
+      listing-sourced number a tight one — confidence follows the source.
+    - **A missing numeric is 0, not zero bedrooms**, so an unknown value PASSES
+      every range filter. Excluding it would drop real sales for missing
+      metadata.
+  - **The subject pin shows the property's own facts** (beds/baths/sqft/year,
+    type, condition, last list price + listed→off-market dates, assessed/tax).
+    Sources are merged best-first and **labelled**: the property's own row in the
+    comp inventory > the lead's pick-list fields > the tax pull. It is called a
+    **list price, never a sale** — this inventory carries the last ask and going
+    off-market is not a confirmed close.
+    - **~5% of leads have their own address in `CRM Comp`** (13 of a 250 sample),
+      which is where the "last sale, if any" comes from — and it means the
+      subject **was comping against itself**: its own row rendered as a pill at
+      distance 0 under the subject dot, inflating the count. Now excluded by
+      `self_comp_key`.
+  - **GOTCHA — reka-ui forbids an empty-string Select item value.** frappe-ui's
+    `Select` wraps reka-ui, which reserves `''` for the placeholder and silently
+    **drops** any item declared with it. `{label:'Any time', value:''}` simply
+    never rendered, leaving no way to lift the recency filter from the dropdown
+    at all — the control looked complete and was missing an option. Use a
+    non-empty sentinel (`ANY = 'any'`) mapped back to "unconstrained". NOTE
+    `CallReview.vue`'s `{label:'All reps', value:''}` is the same latent bug.
+  - **GOTCHA — `Date.parse('YYYY-MM-DD')` is UTC MIDNIGHT**, so
+    `toLocaleDateString` renders the PREVIOUS day everywhere west of Greenwich:
+    every comp date in this modal read a day early in Chicago (a sale on Oct 9
+    showed as Oct 8). Date-only values are calendar dates with no timezone —
+    build them as local (`new Date(y, m-1, d)`) and only send timestamped values
+    through `Date.parse`.
+  - **GOTCHA — a Leaflet `divIcon` with `iconSize:[0,0]` is not centred and has
+    no hit area.** `transform:translate(-50%,-50%)` on a BLOCK child of a
+    zero-width icon resolves to `0px` horizontally, so the subject dot was drawn
+    ~9px RIGHT of the parcel it claims to mark and could not be clicked at all —
+    on the one pin now expected to be clicked for the subject's details. Give an
+    interactive marker a real `iconSize`/`iconAnchor`; for the non-interactive
+    ring labels `display:inline-block` gives the transform a width to halve.
+  - **GOTCHA — the filter popover needs a `max-w`.** Without one it takes its
+    content's preferred width (480px) inside a 390px phone, pushing every "max"
+    input, all three dropdowns and Clear all off-screen; `min-w-0` children only
+    shrink once the container is capped. `MobileLead.vue` opens this same modal
+    from its **Details** tab, so the panel genuinely renders at 390px.
 
 - **Every lead view reads newest-first** (gw303) — only the Activity timeline was
   most-recent-first; Comments, Calls, Tasks, Notes and Attachments made you
