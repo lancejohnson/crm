@@ -235,16 +235,47 @@ duplicating. Work substantial features in a worktree of your own.
       every range filter. Excluding it would drop real sales for missing
       metadata.
   - **The subject pin shows the property's own facts** (beds/baths/sqft/year,
-    type, condition, last list price + listed→off-market dates, assessed/tax).
-    Sources are merged best-first and **labelled**: the property's own row in the
-    comp inventory > the lead's pick-list fields > the tax pull. It is called a
-    **list price, never a sale** — this inventory carries the last ask and going
-    off-market is not a confirmed close.
+    type, condition, **what it last SOLD for**, last ask, assessed/tax/Zestimate).
+    Sources are merged best-first and **labelled**: **Zillow** > the property's
+    own row in the comp inventory > the lead's pick-list fields > the tax pull.
+    - **`crm/api/zillow.py` (new) is the good source.** RapidAPI
+      `us-property-market1` `/property?address=` resolves our ordinary address
+      strings (3/3 test leads, incl. a manufactured home) and returns REAL
+      beds/baths/livingArea/yearBuilt/homeType/coords — replacing pick-list bands
+      with numbers, which is what makes the preset filters tight. Measured: the
+      Aurora lead went 16 matched → **6** once the sqft came from Zillow (1155)
+      instead of a band. Bruno collection + `QUIRKS.md` live in
+      `~/Projects/bruno-collections/Zillow RapidAPI`.
+    - **A real sale, at last.** `priceHistory` carries `event: "Sold"` rows
+      (e.g. Aurora `$97,000` 2010-12-06, `source: "Public Record"`), which IS a
+      verified transaction — shown as **Last sold**, separate from and above the
+      comp inventory's last ask, with the row's `source` printed because
+      `Agent Provided` is weaker evidence than `Public Record`. Not every home
+      has one (Orlando has none), hence "if any".
+    - **Each fact falls through INDEPENDENTLY**, because Zillow nulls individual
+      facts (Aurora: `bathrooms 1.5` but `bedrooms None`, so beds came from the
+      listing record). Picking one source for the whole set throws away good data.
+    - **Facts often contradict the seller.** Orlando lead 00016: the form said
+      "1000 - 2000 sqft / 1970-1980"; Zillow says **924 sqft, built 1993,
+      Manufactured**. That is underwriting-relevant, which is the point of
+      labelling every fact with its source.
+    - **Cached on the lead** (`zillow_facts` JSON / `zillow_fetched_at` /
+      `zillow_zpid`, 30-day TTL, `update_modified=False` so it never looks like a
+      human edit — verified: `modified` stayed 08-04 while `fetched_at` was 08-07).
+      **Negative results are cached too**, or an address Zillow cannot resolve is
+      re-billed on every modal open. Plan is 57,000 req/month (~48.6k free
+      mid-month); 1 lookup = 1 request.
+    - Needs site_config **`rapidapi_zillow_key`** (Infisical
+      `RAPIDAPI_ZILLOW_API_KEY`) + ops `scripts/setup_zillow_facts.py`. Absent
+      either, everything is has_column-guarded and degrades to the older sources.
+    - **GOTCHA — top-level `dateSold`/`lastSoldPrice` are null even on homes that
+      have sold.** Read `priceHistory`. And **`price` mirrors `taxAssessedValue`
+      on an off-market home** (Macon: both 6005), so it is NOT a list price and is
+      deliberately never rendered as one.
     - **~5% of leads have their own address in `CRM Comp`** (13 of a 250 sample),
-      which is where the "last sale, if any" comes from — and it means the
-      subject **was comping against itself**: its own row rendered as a pill at
-      distance 0 under the subject dot, inflating the count. Now excluded by
-      `self_comp_key`.
+      which is the fallback "last ask" — and it means the subject **was comping
+      against itself**: its own row rendered as a pill at distance 0 under the
+      subject dot, inflating the count. Now excluded by `self_comp_key`.
   - **GOTCHA — reka-ui forbids an empty-string Select item value.** frappe-ui's
     `Select` wraps reka-ui, which reserves `''` for the placeholder and silently
     **drops** any item declared with it. `{label:'Any time', value:''}` simply

@@ -563,6 +563,28 @@ function subjectPopupHtml(s) {
     )
   }
 
+  // What it ACTUALLY SOLD for. Zillow's priceHistory carries Public Record `Sold`
+  // rows, which is a real transaction with a date — a different and much stronger
+  // claim than the comp inventory's last ask below, so it is shown separately and
+  // first, and is the one thing here allowed to use the word "sold".
+  const sale = s.last_sale
+  if (sale && (sale.price || sale.date)) {
+    const sp = fmtMoney(sale.price)
+    rows.push(
+      `<div style="margin-top:6px;padding-top:6px;border-top:1px solid #e5e3de">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;
+          letter-spacing:.04em;color:#8a877e">${__('Last sold')}</div>
+        ${sp ? `<div style="font-size:15px;font-weight:700;color:#161614">${sp}</div>` : ''}
+        <div style="color:#5c5a55">${fmtDate(sale.date)}</div>
+        ${
+          sale.source
+            ? `<div style="color:#8a877e;font-size:10px">${escapeHtml(sale.source)}</div>`
+            : ''
+        }
+      </div>`,
+    )
+  }
+
   // Last time this house itself was on the market, when we happen to hold it.
   const ll = s.last_listing
   if (ll && (ll.price || ll.listed_date)) {
@@ -587,9 +609,11 @@ function subjectPopupHtml(s) {
   }
 
   const extras = [
+    fmtMoney(s.zestimate) ? `${__('Zestimate')} ${fmtMoney(s.zestimate)}` : '',
     fmtMoney(s.assessed_value) ? `${__('Assessed')} ${fmtMoney(s.assessed_value)}` : '',
     fmtMoney(s.annual_tax) ? `${__('Tax')} ${fmtMoney(s.annual_tax)}/yr` : '',
     fmtMoney(s.asking_price) ? `${__('Asking')} ${fmtMoney(s.asking_price)}` : '',
+    s.lot_size ? `${__('Lot')} ${s.lot_size}` : '',
   ].filter(Boolean)
   if (extras.length) {
     rows.push(
@@ -599,9 +623,14 @@ function subjectPopupHtml(s) {
 
   const sources = Object.values(s.source || {})
   if (sources.length) {
-    const label = sources.includes('listing')
-      ? __('Details from this property’s own listing record')
-      : __('Details as reported by the seller')
+    // Name the strongest source present. A rep reading "1,438 sqft" deserves to
+    // know whether that came from Zillow, from a listing record, or from whatever
+    // a motivated seller typed into a web form.
+    const label = sources.includes('zillow')
+      ? __('Details from Zillow')
+      : sources.includes('listing')
+        ? __('Details from this property’s own listing record')
+        : __('Details as reported by the seller')
     rows.push(
       `<div style="margin-top:6px;font-size:10px;color:#8a877e">${label}</div>`,
     )

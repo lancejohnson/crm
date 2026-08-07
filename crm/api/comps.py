@@ -284,19 +284,35 @@ def _self_listing(doc):
 def _subject_facts(doc):
 	"""Everything we can honestly say about the subject, best source first.
 
-	1. its own listing in the comp inventory (real numbers, and a last list price)
-	2. the iSpeedToLead pick-list fields on the lead (bands)
-	3. the BatchData tax pull (assessed value / annual tax), already on the lead
+	1. ZILLOW (`crm.api.zillow`) — real numbers for beds/baths/sqft/year/type, and a
+	   genuine last SALE out of priceHistory's Public Record rows
+	2. its own listing in the comp inventory (real numbers, but a last ASK, and
+	   present for only ~5% of leads)
+	3. the iSpeedToLead pick-list fields on the lead (bands, not numbers)
+	4. the BatchData tax pull (assessed value / annual tax), already on the lead
 
-	Every fact carries the source it came from, because "3 bd" from a listing and
-	"3 bd" from a seller-typed web form are not the same claim.
+	Every fact carries the source it came from, because "3 bd" from Zillow, from a
+	listing record, and typed into a web form by a motivated seller are not the same
+	claim — and the preset filters widen according to which one it is.
 	"""
 	listing = _self_listing(doc)
+	zillow = None
+	try:
+		from crm.api import zillow as zillow_api
+
+		zillow = zillow_api.facts_for_lead(doc)
+	except Exception:
+		# A third-party lookup must never take the comps map down with it.
+		frappe.log_error(frappe.get_traceback(), "Comps: Zillow facts failed")
 	facts = {"source": {}}
 
-	def take(key, lead_field, listing_field=None, unit=""):
+	def take(key, lead_field, listing_field=None, zillow_key=None, unit=""):
+		z = (zillow or {}).get(zillow_key or key)
 		listing_val = (listing or {}).get(listing_field or lead_field)
-		if listing_val:  # importer coerces missing numerics to 0, so 0 == unknown
+		if z:
+			band = (float(z), float(z), True)
+			facts["source"][key] = "zillow"
+		elif listing_val:  # importer coerces missing numerics to 0, so 0 == unknown
 			band = (float(listing_val), float(listing_val), True)
 			facts["source"][key] = "listing"
 		else:
@@ -308,15 +324,29 @@ def _subject_facts(doc):
 		facts[key] = _band_mid(band)
 		facts[f"{key}_label"] = _band_label(band, unit)
 
+	# Each fact falls through INDEPENDENTLY: Zillow returns null for a fact it lacks
+	# (measured — a home with bathrooms but no bedrooms), so picking one source for
+	# the whole set would throw away good data from the others.
 	take("beds", "bedrooms")
 	take("baths", "bathrooms")
-	take("sqft", "square_footage")
+	take("sqft", "square_footage", zillow_key="sqft")
 	take("year_built", "year_built")
 
-	ptype = (listing or {}).get("property_type") or None
+	z_type = (zillow or {}).get("property_type")
+	ptype = z_type or (listing or {}).get("property_type") or None
 	facts["property_type"] = ptype
 	if ptype:
-		facts["source"]["property_type"] = "listing"
+		facts["source"]["property_type"] = "zillow" if z_type else "listing"
+
+	# The headline: what it actually SOLD for, and when. A Public Record transaction
+	# out of Zillow's priceHistory is a far stronger claim than the comp inventory's
+	# last ask, so it is kept separate and labelled a sale rather than folded in.
+	facts["last_sale"] = (zillow or {}).get("last_sale") or None
+	facts["zestimate"] = (zillow or {}).get("zestimate") or None
+	facts["rent_zestimate"] = (zillow or {}).get("rent_zestimate") or None
+	facts["lot_size"] = (zillow or {}).get("lot_size") or None
+	facts["zpid"] = (zillow or {}).get("zpid") or None
+	facts["has_zillow"] = bool(zillow)
 
 	# What it last asked, and when it left the market. Deliberately NOT called a
 	# sale price: this inventory carries the last LIST price, and going off-market
@@ -343,6 +373,11 @@ def _subject_facts(doc):
 			val = val.strip()
 			val = val if val and val.lower() not in ("not provided", "none", "n/a") else None
 		facts[key] = val or None
+	# BatchData's assessed value costs $0.10 a pull and is only fetched on demand;
+	# Zillow ships one with the facts we already have, so it fills the gap for free.
+	if not facts.get("assessed_value") and (zillow or {}).get("tax_assessed_value"):
+		facts["assessed_value"] = zillow["tax_assessed_value"]
+		facts["source"]["assessed_value"] = "zillow"
 	return facts
 
 
