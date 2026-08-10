@@ -299,6 +299,51 @@ duplicating. Work substantial features in a worktree of your own.
       which is the fallback "last ask" — and it means the subject **was comping
       against itself**: its own row rendered as a pill at distance 0 under the
       subject dot, inflating the count. Now excluded by `self_comp_key`.
+  - **Filters are VISIBLE, not a popover** (gw315) — they are the point of the
+    tool, so a rep should not have to find a button before widening a beds range.
+    One wrapping bar above the map; it wraps to more rows at 390px.
+  - **Recency gates OFF-MARKET comps only** (gw315), so the control is labelled
+    **"Sold within"** and defaults to **12 months** (`DEFAULT_WITHIN_DAYS`). A
+    sale from 3 years ago is a different market, but a house that has sat listed
+    for 18 months is live evidence about what is being asked TODAY — dropping it
+    as "old" would hide exactly the stale listings that say an area is not moving.
+    Measured on prod at `within=90`: the board keeps **124 active listings, 62 of
+    them listed >90 days**. The ladder spends SIMILARITY before recency (loosens
+    shape twice at 12 months before reaching back to 2 years) because a
+    poorly-matching recent sale beats a well-matching stale one.
+  - **Pills carry beds/baths/sqft/year** — price bold, facts beneath. Chosen from
+    three mockups rendered against a real 418-comp board: the one-line variant
+    measured **186px** wide vs **113px** two-line, the difference between readable
+    and a wall of overlap. **`D` toggles the facts off** (54px price-only pill),
+    persisted per user in `localStorage['compsPillDetail']`.
+    - **Year rides on the TOP line beside the price** — a width decision, not a
+      cosmetic one. A pill is as wide as its widest line and the facts line was
+      it; moving the four year digits up beside the short price shortens the line
+      that set the width and lengthens the one that did not. Measured over 400
+      real comps: avg **120 → 82px (32% narrower)**, 31% less total pill area;
+      live DOM confirms **113x33 → 76x33**. Full facts stay in the `title`.
+  - **Hide / use a comp** (`set_comp_state`; `CRM Lead.comps_hidden` /
+    `comps_selected` JSON; ops `setup_comp_selection.py`). **TEAM-WIDE, not
+    per-user**: a junk comp is junk for everyone, and "the comps we priced off" is
+    a deal artifact the next person needs. Three rules earn their keep:
+    - a **hidden** comp leaves the pool entirely, including the tier count —
+      otherwise junk keeps a tier "usable" and suppresses the widening the rep
+      needs;
+    - a **selected** comp is PINNED past every filter and never faded — an
+      explicit human pick outranks a derived filter, the Today-board rule that the
+      machine decides what LANDS and the human owns it afterwards;
+    - the two are mutually exclusive, so picking a comp you hid un-hides it.
+    Shortcuts **U** / **H** act on the open popup.
+  - **GOTCHA — `useKeyboardShortcuts` defaults to `skipWhenDialogOpen: true`**,
+    and every modal in this app IS a Dialog, so shortcuts registered the obvious
+    way silently never fire. Pass `skipWhenDialogOpen: false` and gate on the
+    modal's own `show` instead.
+  - **GOTCHA — `chrome_key` does not deliver plain letter keys** through the
+    pi-chrome bridge: a window-level *capture* probe logged ZERO events for `d`,
+    and the same is true of `Escape` (which is why a popover would not close
+    earlier the same session). A shortcut verified that way looks broken when it
+    is fine — dispatch a `KeyboardEvent` instead, which confirmed the toggle
+    end-to-end (button label, pill text, 113x33 → 54x24, localStorage).
   - **GOTCHA — reka-ui forbids an empty-string Select item value.** frappe-ui's
     `Select` wraps reka-ui, which reserves `''` for the placeholder and silently
     **drops** any item declared with it. `{label:'Any time', value:''}` simply
