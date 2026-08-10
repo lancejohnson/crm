@@ -987,7 +987,11 @@ function render() {
   const s = data.value?.subject
   if (!s?.lat) return
 
-  map = L.map(mapEl.value, { center: [s.lat, s.lng], zoom: 14, scrollWheelZoom: true })
+  // scrollWheelZoom OFF deliberately. The map sits above the property list on a
+  // full page, so a wheel over the map used to be swallowed by Leaflet and the
+  // list below was unreachable on a laptop-height window (caught in review).
+  // Zoom is still available via the +/- control and pinch on a trackpad.
+  map = L.map(mapEl.value, { center: [s.lat, s.lng], zoom: 14, scrollWheelZoom: false })
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
     attribution: '© OpenStreetMap',

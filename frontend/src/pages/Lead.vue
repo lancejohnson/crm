@@ -622,7 +622,15 @@ const showPhotoGallery = ref(false)
 // cross-referencing the lead, so it needs to sit beside the lead rather than on
 // top of it. noopener because this is a user-initiated window.open.
 function openComps() {
-  window.open(`/crm/leads/${props.leadId}/comps`, '_blank', 'noopener')
+  const url = `/crm/leads/${props.leadId}/comps`
+  // NOT window.open(url, '_blank', 'noopener'): passing `noopener` makes the
+  // call return null BY SPEC, so a blocked popup and a successful one are
+  // indistinguishable -- and a blocked one looks exactly like a dead button.
+  // Opening plainly and severing `opener` afterwards gives the same isolation
+  // while still letting us detect the block and fall back to navigating here.
+  const win = window.open(url, '_blank')
+  if (win) win.opener = null
+  else router.push({ name: 'Comps', params: { leadId: props.leadId } })
 }
 
 onMounted(async () => {
