@@ -491,14 +491,28 @@ function escapeHtml(s) {
   )
 }
 
-/** "3/2 · 1,395sf · 1910" — the facts line under the price on a detailed pill. */
-function pillFacts(c) {
+/**
+ * The pieces of a detailed pill, split across two lines.
+ *
+ * Year rides on the TOP line next to the price rather than in the facts line,
+ * and that is a width decision, not a cosmetic one: the pill is as wide as its
+ * widest line, and "3/2 · 1,395sf · 1910" was the widest thing on it. Moving the
+ * four year digits up beside the short price shortens the line that was setting
+ * the width, and lengthens the one that wasn't.
+ */
+function pillBits(c) {
   const bb = c.bedrooms || c.bathrooms ? `${c.bedrooms || '?'}/${c.bathrooms || '?'}` : ''
-  const sf = c.square_footage
-    ? `${Number(c.square_footage).toLocaleString()}sf`
-    : ''
-  const yr = c.year_built ? String(c.year_built) : ''
-  return [bb, sf, yr].filter(Boolean).join(' · ')
+  const sf = c.square_footage ? `${Number(c.square_footage).toLocaleString()}sf` : ''
+  return {
+    year: c.year_built ? String(c.year_built) : '',
+    line2: [bb, sf].filter(Boolean).join(' · '),
+  }
+}
+
+/** Everything a detailed pill says, for the title tooltip / measurement. */
+function pillFacts(c) {
+  const { year, line2 } = pillBits(c)
+  return [line2, year].filter(Boolean).join(' · ')
 }
 
 /**
@@ -518,8 +532,8 @@ function pillIcon(c) {
   const opacity = pillOpacity(stalenessDays(c))
   const bg = active ? ACTIVE : OFF_MARKET
   const price = priceShort(c.price)
-  const facts = pillFacts(c)
-  const detailed = (showDetail.value || c.selected) && facts
+  const { year, line2 } = pillBits(c)
+  const detailed = (showDetail.value || c.selected) && (year || line2)
   const ring = c.selected
     ? 'box-shadow:0 0 0 2px #fff,0 0 0 4px #2563c9,0 1px 3px rgba(0,0,0,.4);'
     : 'box-shadow:0 1px 3px rgba(0,0,0,.35);'
@@ -541,16 +555,29 @@ function pillIcon(c) {
       popupAnchor: [0, -14],
     })
   }
-  const w = Math.max(58, Math.ceil(14 + Math.max(price.length * 7.0, facts.length * 5.05)))
+  // Line 1 = bold price + small dim year; line 2 = beds/baths · sqft. The pill is
+  // sized to whichever line is actually wider.
+  const top = price.length * 7.0 + (year ? 3 + year.length * 5.0 : 0)
+  const w = Math.max(52, Math.ceil(12 + Math.max(top, line2.length * 5.05)))
+  const yearHtml = year
+    ? `<span style="font:500 9px/1 ui-sans-serif,system-ui,sans-serif;opacity:.72;
+         margin-left:3px">${year}</span>`
+    : ''
+  const line2Html = line2
+    ? `<div style="font:500 9px/1 ui-sans-serif,system-ui,sans-serif;opacity:.9;
+         margin-top:2px">${escapeHtml(line2)}</div>`
+    : ''
   return L.divIcon({
     className: 'comps-price-pill',
-    html: `<div style="display:flex;flex-direction:column;align-items:center;
+    html: `<div title="${escapeHtml(pillFacts(c))}"
+        style="display:flex;flex-direction:column;align-items:center;
         justify-content:center;box-sizing:border-box;width:${w}px;height:34px;
         background:${bg};color:#fff;border-radius:9px;border:${border};${ring}
         white-space:nowrap;line-height:1;opacity:${op}">
-        <div style="font:700 11.5px/1 ui-sans-serif,system-ui,sans-serif">${price}</div>
-        <div style="font:500 9px/1 ui-sans-serif,system-ui,sans-serif;opacity:.9;
-          margin-top:2px">${escapeHtml(facts)}</div>
+        <div style="display:flex;align-items:baseline;justify-content:center">
+          <span style="font:700 11.5px/1 ui-sans-serif,system-ui,sans-serif">${price}</span>${yearHtml}
+        </div>
+        ${line2Html}
       </div>`,
     iconSize: [w, 34],
     iconAnchor: [w / 2, 17],
