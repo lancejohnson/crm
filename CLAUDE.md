@@ -322,6 +322,40 @@ duplicating. Work substantial features in a worktree of your own.
       that set the width and lengthens the one that did not. Measured over 400
       real comps: avg **120 → 82px (32% narrower)**, 31% less total pill area;
       live DOM confirms **113x33 → 76x33**. Full facts stay in the `title`.
+  - **Comps is a PAGE, not a modal** (`/leads/:leadId/comps`, opened in a new tab
+    from both `Lead.vue` and `MobileLead.vue`). `components/CompsView.vue` holds
+    the whole thing; `pages/Comps.vue` is a thin wrapper. When it stopped being a
+    modal, `show` became a plain always-true ref so every existing guard, watcher
+    and shortcut gate kept working untouched.
+  - **A property list sits under the map**, one row per comp, and hovering either
+    a row or a pin highlights the other. A map answers "where", a list answers
+    "which". Every pill also carries a hover-only ✕ that removes it, wired to the
+    same handler as the popup's Hide.
+  - **Underwrite straight from the comps you picked** —
+    `underwriting.create_underwriting_from_comps(lead, comps)`. The template needs
+    NO change: its comp block is rows **14–20, column A = a Zillow link**, and the
+    sheet computes address / sale date / distance / sqft / price / $/sqft itself,
+    averages G14:G20 at row 21 and turns that into the ARV at row 22 that drives
+    the offer. Verified end-to-end on prod: 4 links in → `Average $/SF $101`,
+    `Subj Price Based on Average $113,419`.
+    - **It ALWAYS creates a NEW sheet** (Lance's call), unlike
+      `create_underwriting_workbook`, which is one-per-lead and re-opens the
+      existing one. A colleague may already have comps in theirs and silently
+      overwriting their work is worth a few cents of Drive storage to avoid.
+      Second and later sheets are named `<address> (N)`.
+    - **GOTCHA — the sheet's `z*` functions only accept a `/homedetails/…_zpid/`
+      URL**, never the `/homes/…_rb/` search URL `zillowUrl()` builds. Comps are
+      resolved through `_zillow_detail_url()` (1 API call each, ≤4 per sheet), and
+      any that fail to resolve are REPORTED to the user rather than written as a
+      link that would never populate.
+    - **NOTE the sheet's numbers legitimately differ from the map's.** Our comp
+      inventory is the last LIST price from the iSpeedToLead feed; the sheet pulls
+      Zillow's actual sold data. On the verification run 2538 N Talbott read
+      $289k/1,395sqft on the map and $225,000/2,040sqft in the sheet. That is two
+      sources, not a bug — but it will be asked about.
+    - `rapidapi_key` and `rapidapi_zillow_key` in site_config are the SAME key
+      (verified identical); underwriting reads the former, `crm/api/zillow.py` the
+      latter.
   - **The pin popup leads with the metric that matters for that STATUS.** "99
     days" means opposite things on the two kinds of pin — 99 days ON the market
     for a live listing (it is not selling) versus 99 days SINCE it left for an

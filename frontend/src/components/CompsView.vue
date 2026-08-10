@@ -28,7 +28,20 @@
             </div>
           </div>
           <div class="flex items-center gap-2">
-            <!-- Details toggle: the pills carry beds/baths/sqft/year, but on a
+            <!-- Underwriting from the comps you picked. Enabled only once something is
+     selected, and the label carries the count so "up to 4" is visible
+     before the click rather than as an error after it. -->
+<Button
+  v-if="pageMode"
+  :label="underwritingLabel"
+  :variant="selectedNames.length ? 'solid' : 'subtle'"
+  :disabled="!selectedNames.length || creatingSheet"
+  :loading="creatingSheet"
+  iconLeft="grid"
+  @click="createUnderwriting"
+/>
+
+<!-- Details toggle: the pills carry beds/baths/sqft/year, but on a
                  dense board the overview is sometimes worth more than the facts.
                  A checkbox rather than a button because it reports its own state
                  — a button reading "Details off" is ambiguous about whether that
@@ -349,6 +362,9 @@ import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
 const props = defineProps({
   lead: { type: String, required: true },
   address: { type: String, default: '' },
+  // Only the full page offers underwriting; it needs the room, and the action
+  // belongs where the comps are actually chosen.
+  pageMode: { type: Boolean, default: false },
 })
 // This used to be a modal driven by `defineModel()`. It is now a full page, so
 // "open" is simply always true -- which keeps every existing `show.value` guard,
@@ -1183,6 +1199,64 @@ function resetToSuggested() {
 function toggleRevealHidden() {
   revealHidden.value = !revealHidden.value
   load()
+}
+
+const MAX_SHEET_COMPS = 4
+const creatingSheet = ref(false)
+const selectedNames = computed(() => comps.value.filter((c) => c.selected).map((c) => c.name))
+
+const underwritingLabel = computed(() => {
+  const n = selectedNames.value.length
+  if (!n) return __('Select comps to underwrite')
+  return __('Underwrite with {0} of {1} comps', [Math.min(n, MAX_SHEET_COMPS), MAX_SHEET_COMPS])
+})
+
+/**
+ * Send the chosen comps to a NEW underwriting sheet.
+ *
+ * Always a new sheet, never an edit of an existing one: a colleague may already
+ * have comps in theirs, and silently overwriting their work is the one outcome
+ * worth a few cents of Drive storage to avoid.
+ */
+async function createUnderwriting() {
+  const picked = selectedNames.value
+  if (!picked.length) return
+  if (picked.length > MAX_SHEET_COMPS) {
+    toast.error(
+      __('Pick at most {0} comps — you have {1} selected.', [MAX_SHEET_COMPS, picked.length]),
+    )
+    return
+  }
+  creatingSheet.value = true
+  try {
+    const res = await call('crm.api.underwriting.create_underwriting_from_comps', {
+      lead: props.lead,
+      comps: JSON.stringify(picked),
+    })
+    // Name the shortfall rather than opening a sheet with quietly missing rows:
+    // the sheet's formulas need a Zillow homedetails URL and not every address
+    // resolves to one.
+    if (res?.unresolved?.length) {
+      toast.warning(
+        __("{0} comp(s) couldn't be linked to Zillow and were left out", [
+          res.unresolved.length,
+        ]),
+      )
+    }
+    toast.success(
+      res?.sheet_number > 1
+        ? __('Created underwriting sheet #{0} with {1} comps', [
+            res.sheet_number,
+            res.comps_written,
+          ])
+        : __('Created underwriting sheet with {0} comps', [res?.comps_written ?? 0]),
+    )
+    if (res?.sheet_url) window.open(res.sheet_url, '_blank', 'noopener')
+  } catch (e) {
+    toast.error(e.messages?.[0] || __('Could not create the underwriting sheet.'))
+  } finally {
+    creatingSheet.value = false
+  }
 }
 
 function clearAll() {
