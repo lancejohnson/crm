@@ -153,27 +153,29 @@ def _remember_quota(headers):
 		pass
 
 
-def _fetch(address: str):
-	"""One address -> Zillow's raw property blob, or None. Never raises."""
+def _request(path: str, params: dict, error_title: str):
+	"""One guarded RapidAPI GET, or None. Every caller degrades softly."""
 	import urllib.parse
 	import urllib.request
 
 	key = _api_key()
-	if not key or not address:
+	if not key or not params:
 		return None
 
-	# Yield the last of a shared budget rather than spend it: this map degrades to
-	# its older sources, whereas istl-buyer's batch job cannot degrade at all.
+	# Yield the last of a shared budget rather than spend it: both subject facts and
+	# an on-demand comp gallery are optional, whereas istl-buyer's batch job cannot
+	# degrade at all. This check runs before EACH request, so a property lookup that
+	# lands on the reserve does not spend one more request fetching its photos.
 	left = quota_remaining()
 	if left is not None and left <= QUOTA_RESERVE:
 		frappe.log_error(
 			f"Zillow quota reserve reached ({left} left <= {QUOTA_RESERVE}); skipping "
-			"subject lookup. Key is shared with istl-buyer's ZIP-market job.",
+			f"{path}. Key is shared with istl-buyer's ZIP-market job.",
 			"Zillow: quota reserve",
 		)
 		return None
 
-	url = f"{BASE}/property?" + urllib.parse.urlencode({"address": address})
+	url = f"{BASE}{path}?" + urllib.parse.urlencode(params)
 	req = urllib.request.Request(
 		url, headers={"x-rapidapi-key": key, "x-rapidapi-host": HOST}
 	)
@@ -183,10 +185,31 @@ def _fetch(address: str):
 			_remember_quota(resp.headers)
 			return body
 	except Exception:
-		# Quota exhaustion, an unresolvable address, an outage — all of them mean
-		# "no Zillow facts today", never "break the comps map".
-		frappe.log_error(frappe.get_traceback(), "Zillow: property lookup failed")
+		frappe.log_error(frappe.get_traceback(), error_title)
 		return None
+
+
+def _fetch(address: str):
+	"""One address -> Zillow's raw property blob, or None. Never raises."""
+	if not address:
+		return None
+	return _request("/property", {"address": address}, "Zillow: property lookup failed")
+
+
+def property_details(address: str):
+	"""Raw details for an explicitly opened comp. Kept separate from lead caching."""
+	return _fetch(address)
+
+
+def property_photos(zpid):
+	"""Raw `/photos` response for a Zillow property id, or None on any failure."""
+	if not zpid:
+		return None
+	body = _request("/photos", {"zpid": zpid}, "Zillow: photo lookup failed")
+	# RapidAPI can report endpoint errors inside an HTTP-200 JSON body. Treat only
+	# the documented list shape as success; `{status:'error', errors:[…]}` must get
+	# the short retry cache rather than hiding photos for 30 days.
+	return body if isinstance(body, dict) and isinstance(body.get("photos"), list) else None
 
 
 def _price_history(raw):
@@ -250,6 +273,78 @@ def _normalize(raw):
 		"home_status": raw.get("homeStatus"),
 		"address": raw.get("streetAddress"),
 	}
+
+
+def normalize_detail(raw):
+	"""Zillow's large property blob -> the useful facts in a comp detail panel."""
+	if not isinstance(raw, dict) or not raw.get("zpid"):
+		return None
+	reso = raw.get("resoFacts") or {}
+	sale, listing = _price_history(raw)
+	home_type = str(raw.get("homeType") or "").strip().upper()
+	status = str(raw.get("homeStatus") or "").strip().upper()
+	# Zillow's top-level `price` is an assessed value on many off-market homes.
+	# Only call it an asking price while the property is actually marketed.
+	asking_statuses = {"FOR_SALE", "FOR_RENT", "PENDING", "CONTINGENT", "COMING_SOON"}
+	url = raw.get("url") or ""
+	if url.startswith("/"):
+		url = "https://www.zillow.com" + url
+	address = raw.get("address") if isinstance(raw.get("address"), dict) else {}
+
+	def text_list(value):
+		if isinstance(value, list):
+			return ", ".join(str(v) for v in value if v)
+		return str(value or "")
+
+	return {
+		"zpid": raw.get("zpid"),
+		"address": raw.get("streetAddress") or address.get("streetAddress"),
+		"city": raw.get("city") or address.get("city"),
+		"state": raw.get("state") or address.get("state"),
+		"zip": raw.get("zipcode") or address.get("zipcode"),
+		"beds": _num(raw.get("bedrooms")),
+		"baths": _num(raw.get("bathrooms")),
+		"sqft": _num(raw.get("livingArea") or raw.get("livingAreaValue")),
+		"year_built": _num(raw.get("yearBuilt")),
+		"property_type": HOME_TYPES.get(home_type) or (home_type.title().replace("_", " ") or None),
+		"lot_size": reso.get("lotSize") or None,
+		"home_status": raw.get("homeStatus"),
+		"asking_price": _num(raw.get("price")) if status in asking_statuses else None,
+		"zestimate": _num(raw.get("zestimate")),
+		"rent_zestimate": _num(raw.get("rentZestimate")),
+		"hoa_fee": _num(raw.get("monthlyHoaFee") or reso.get("hoaFee")),
+		"parking": text_list(reso.get("parkingFeatures")),
+		"heating": text_list(reso.get("heating")),
+		"cooling": text_list(reso.get("cooling")),
+		"description": raw.get("description") or "",
+		"last_sale": sale,
+		"last_listing": listing,
+		"zillow_url": url,
+		"cover_photo": raw.get("imgSrc") or "",
+		"photo_count": int(_num(raw.get("photoCount")) or 0),
+	}
+
+
+def photo_urls(raw, limit=60):
+	"""Choose one useful Zillow CDN URL per photo, preferring ~1152px JPEGs."""
+	if not isinstance(raw, dict):
+		return []
+	out = []
+	for photo in raw.get("photos") or []:
+		sources = (photo or {}).get("mixedSources") or {}
+		options = sources.get("jpeg") or sources.get("webp") or []
+		options = [o for o in options if isinstance(o, dict) and o.get("url")]
+		if not options:
+			continue
+		# Big enough to inspect without pulling the largest 1536px image into a
+		# modal. If all variants are smaller/larger, take the nearest useful one.
+		under = [o for o in options if float(o.get("width") or 0) <= 1152]
+		chosen = max(under or options, key=lambda o: float(o.get("width") or 0))
+		if chosen["url"] not in out:
+			out.append(chosen["url"])
+		if len(out) >= int(limit):
+			break
+	return out
 
 
 def _cached(doc):

@@ -29,7 +29,7 @@
         </div>
 
         <div class="flex min-h-0 flex-1 flex-col md:flex-row">
-          <aside class="shrink-0 border-b p-4 md:w-64 md:overflow-y-auto md:border-b-0 md:border-r sm:p-5">
+          <aside class="max-h-[42vh] shrink-0 overflow-y-auto border-b p-4 md:max-h-none md:w-72 md:border-b-0 md:border-r sm:p-5">
             <div class="flex flex-col gap-2 text-sm text-ink-gray-6">
               <a
                 v-if="item?.mobile_no"
@@ -63,12 +63,36 @@
               </div>
               {{ item.reason }}
             </div>
+
+            <!-- The exact same editable 2×2 used on the full Lead page. Keeping
+                 one component means a Today answer immediately becomes the lead's
+                 durable First-Call Read rather than modal-only state. -->
+            <div v-if="leadDoc && item?.lead" class="-mx-4 mt-4 sm:-mx-5">
+              <FirstCallReadCard
+                :lead="item.lead"
+                :motivated="leadDoc.first_call_motivated"
+                :on-price="leadDoc.first_call_on_price"
+                :set-by="leadDoc.first_call_by"
+                :set-at="leadDoc.first_call_at"
+                @saved="loadLead(true)"
+              />
+            </div>
+            <div
+              v-else-if="leadLoading"
+              class="mt-4 h-52 animate-pulse rounded-lg bg-surface-gray-2"
+            />
           </aside>
 
-          <!-- Reuse the lead page's actual activity surface. This keeps calls,
-               texts, comments, the To-do quick-add, completion checkboxes, and
-               realtime behavior identical instead of maintaining a second copy. -->
+          <!-- Keep the lead page's ACTUAL Activity surface mounted. Comps is a
+               compact glance panel above it, not a replacement tab or a second
+               timeline, so calls/texts/to-dos/realtime retain their exact behavior. -->
           <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface-white">
+            <TodayCompsPanel
+              v-if="item?.lead"
+              :lead="item.lead"
+              :address="item.address"
+              :active="show"
+            />
             <Activities
               v-if="show && item?.lead"
               :key="item.lead"
@@ -94,8 +118,10 @@
 
 <script setup>
 import Activities from '@/components/Activities/Activities.vue'
+import FirstCallReadCard from '@/components/FirstCallReadCard.vue'
+import TodayCompsPanel from '@/components/TodayCompsPanel.vue'
 import { callHref, formatPhone } from '@/utils/phoneFormat'
-import { Badge, Button, Dialog, FeatherIcon } from 'frappe-ui'
+import { Badge, Button, Dialog, FeatherIcon, call } from 'frappe-ui'
 import { ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -108,11 +134,48 @@ const show = defineModel({ type: Boolean })
 const router = useRouter()
 const tabIndex = ref(0)
 const tabs = [{ name: 'Activity', label: __('Activity') }]
+const leadDoc = ref(null)
+const leadLoading = ref(false)
+const leadCache = new Map()
+let leadRequestToken = 0
 
 watch(
   () => props.item?.lead,
-  () => (tabIndex.value = 0),
+  (lead) => {
+    tabIndex.value = 0
+    // Never render the previous lead's answers against the new lead id while its
+    // document is loading — a click in that window would save the wrong state.
+    leadDoc.value = leadCache.get(lead) || null
+  },
 )
+watch(
+  () => [show.value, props.item?.lead],
+  ([open]) => {
+    if (open && props.item?.lead) loadLead()
+  },
+  { immediate: true },
+)
+
+async function loadLead(force = false) {
+  const lead = props.item?.lead
+  if (!lead) return
+  if (!force && leadCache.has(lead)) {
+    leadDoc.value = leadCache.get(lead)
+    return
+  }
+  const token = ++leadRequestToken
+  leadLoading.value = true
+  try {
+    const doc = await call('frappe.client.get', { doctype: 'CRM Lead', name: lead })
+    if (token !== leadRequestToken) return
+    leadDoc.value = doc
+    leadCache.set(lead, doc)
+  } catch {
+    if (token === leadRequestToken && !force) leadDoc.value = null
+  } finally {
+    if (token === leadRequestToken) leadLoading.value = false
+  }
+}
 
 function openFullLead() {
   if (!props.item?.lead) return

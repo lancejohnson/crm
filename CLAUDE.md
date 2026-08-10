@@ -705,6 +705,23 @@ duplicating. Work substantial features in a worktree of your own.
     The message icon opens the standard Send Text modal with
     the cursor already in the composer; Today adds **Skip / Send / Send & finish**
     so the card can be judged without returning to the board.
+  - **The Today lead modal is now a qualify + comp + work surface**, without
+    replacing the real Activity feed it already mounted. The left rail reuses
+    `FirstCallReadCard` (Motivation × Price 2×2, saved onto the CRM Lead); a
+    horizontal **Comparable homes** strip sits above Activity with the subject
+    baseline and each comp's transparent `N/5 fit` using the SAME type/beds/
+    baths/sqft/year tolerances as the comps preset. Price, facts, differences,
+    distance and listing state are visible without opening anything; selected
+    comps sort first, and **Open all comps** still hands off to the full map page.
+    Clicking a card opens `CompDetailModal`: basic Zillow facts + a scrollable
+    thumbnail/next-prev gallery, while closing it leaves the Today modal and its
+    Activity scroll/state mounted. Details are deliberately LAZY (nothing is
+    billed just for opening a lead): `crm.api.comps.get_comp_details` makes the
+    Zillow property + `/photos` calls only after a click, normalizes one ~1152px
+    URL per image, and caches the result 30 days in Redis (partial failures retry
+    after 1h). No schema/ops piece. `TodayLeadModal.vue` +
+    `TodayCompsPanel.vue` + `CompDetailModal.vue` + `utils/comps.js` +
+    `crm/api/comps.py` / `zillow.py`.
   - **Filters** cover lead status, priority, incoming texts, and open tasks. A
     draggable **Priority order** modal saves each user's order cross-device via a
     standard Frappe user default (no custom field). Default = Never called → Task

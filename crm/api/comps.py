@@ -74,6 +74,13 @@ MIN_USABLE_COMPS = 5
 #: ladder is forced to. Active listings are deliberately exempt — see `_matches`.
 DEFAULT_WITHIN_DAYS = 365
 
+#: Clicking a comp can spend two shared RapidAPI requests (property + photos), so
+#: keep the normalized result rather than paying again every time another setter
+#: opens the same house. A failed/partial lookup gets a short retry window.
+DETAIL_CACHE_SECONDS = 30 * 24 * 60 * 60
+DETAIL_RETRY_SECONDS = 60 * 60
+DETAIL_CACHE_VERSION = 1
+
 #: Per-lead, TEAM-WIDE record of which comps a human hid or picked. Not per-user:
 #: a junk comp is junk for everyone, and "the comps we used" is a deal artifact
 #: the next person to open the lead needs to see.
@@ -636,6 +643,79 @@ def set_comp_state(lead, comp, state):
 # ---------------------------------------------------------------------------------
 # Read API
 # ---------------------------------------------------------------------------------
+def _detail_cache_key(comp):
+	return f"crm:comp-detail:v{DETAIL_CACHE_VERSION}:{comp}"
+
+
+def _shape_detail(row):
+	"""Fetch and normalize one comp only after a person explicitly opens it."""
+	from crm.api import zillow as zillow_api
+
+	raw = zillow_api.property_details(row.address)
+	details = zillow_api.normalize_detail(raw) if raw else None
+	photo_raw = zillow_api.property_photos(details.get("zpid")) if details else None
+	photos = zillow_api.photo_urls(photo_raw)
+	if details and details.get("cover_photo") and not photos:
+		photos = [details["cover_photo"]]
+
+	comp = dict(row)
+	for key in ("listed_date", "removed_date"):
+		if comp.get(key):
+			comp[key] = str(comp[key])
+	return {
+		"available": bool(details),
+		"comp": comp,
+		"details": details,
+		"photos": photos,
+		"photos_available": photo_raw is not None,
+		"message": "" if details else _("Zillow details are unavailable for this property."),
+	}
+
+
+@frappe.whitelist()
+def get_comp_details(lead, comp):
+	"""On-demand Zillow facts + scrollable photos for one comp.
+
+	The compact Today view already has the comparison facts from `CRM Comp`; this
+	endpoint is deliberately lazy so merely opening a lead never spends one or two
+	third-party calls PER HOUSE. Results are cached by the immutable comp name for
+	30 days. Access remains sales-role gated and the lead anchor must be real.
+	"""
+	_guard()
+	if not frappe.db.exists("CRM Lead", lead):
+		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)
+	if not _available():
+		return {"available": False, "comp": None, "details": None, "photos": []}
+
+	row = frappe.db.get_value(
+		DOCTYPE,
+		comp,
+		[
+			"name", "address", "city", "state", "zip", "price", "status",
+			"listed_date", "removed_date", "days_on_market", "days_old",
+			"bedrooms", "bathrooms", "square_footage", "year_built", "property_type",
+		],
+		as_dict=True,
+	)
+	if not row:
+		frappe.throw(_("Comparable property {0} does not exist.").format(comp), frappe.DoesNotExistError)
+
+	key = _detail_cache_key(comp)
+	cached = frappe.cache().get_value(key)
+	if isinstance(cached, dict):
+		return {**cached, "cached": True}
+
+	result = _shape_detail(row)
+	result["cached"] = False
+	# A complete photo response is stable property data. A quota/outage partial is
+	# useful now but should retry soon rather than hiding photos for a month.
+	ttl = DETAIL_CACHE_SECONDS if result.get("available") and result.get("photos_available") else DETAIL_RETRY_SECONDS
+	frappe.cache().set_value(key, result, expires_in_sec=ttl)
+	# Do not read the cache again in this request: Frappe memoizes cache misses in
+	# `frappe.local.cache`, and an expiring set does not replace that local miss.
+	return result
+
+
 @frappe.whitelist()
 def get_lead_comps(lead, radius_mi=None, limit=None, filters=None, auto=0, include_hidden=0):
 	"""Comps near a lead, nearest first, with the subject's real position.
