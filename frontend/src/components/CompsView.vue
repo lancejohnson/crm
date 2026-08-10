@@ -1,32 +1,27 @@
 <template>
-  <Dialog
-    v-model="show"
-    :options="{ title: __('Comparable sales'), size: '5xl' }"
-  >
-    <template #body-content>
-      <div class="flex flex-col gap-3">
-        <!-- Address + counts -->
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <div class="min-w-0">
-            <div class="truncate text-sm font-medium text-ink-gray-8">
-              {{ data?.address || address || __('This property') }}
-            </div>
-            <div class="mt-0.5 text-xs text-ink-gray-5">
-              <template v-if="loading">{{ __('Finding comps…') }}</template>
-              <template v-else-if="comps.length">
-                {{ __('{0} comps', [data?.total_matched ?? comps.length]) }}
-                <template v-if="presetLabel"> · {{ presetLabel }}</template>
-                <span class="text-ink-gray-4">
-                  ·
-                  {{
-                    __('of {0} within {1} mi', [
-                      data?.total_in_radius ?? comps.length,
-                      data?.radius_mi,
-                    ])
-                  }}
-                </span>
-                <template v-if="(data?.total_matched ?? 0) > comps.length">
-                  · {{ __('showing the {0} nearest', [comps.length]) }}
+  <div class="flex flex-col gap-3">
+  <!-- Address + counts -->
+  <div class="flex flex-wrap items-center justify-between gap-2">
+    <div class="min-w-0">
+      <div class="truncate text-sm font-medium text-ink-gray-8">
+        {{ data?.address || address || __('This property') }}
+      </div>
+      <div class="mt-0.5 text-xs text-ink-gray-5">
+        <template v-if="loading">{{ __('Finding comps…') }}</template>
+        <template v-else-if="comps.length">
+          {{ __('{0} comps', [data?.total_matched ?? comps.length]) }}
+          <template v-if="presetLabel"> · {{ presetLabel }}</template>
+          <span class="text-ink-gray-4">
+            ·
+            {{
+              __('of {0} within {1} mi', [
+                data?.total_in_radius ?? comps.length,
+                data?.radius_mi,
+              ])
+            }}
+          </span>
+          <template v-if="(data?.total_matched ?? 0) > comps.length">
+            · {{ __('showing the {0} nearest', [comps.length]) }}
                 </template>
               </template>
               <template v-else>{{ emptyMessage }}</template>
@@ -192,7 +187,106 @@
           class="h-[26rem] w-full overflow-hidden rounded-lg border border-outline-gray-2 bg-surface-gray-1 sm:h-[32rem]"
         />
 
-        <!-- Legend: the map is unreadable without saying what the fade means. -->
+        <!-- Every comp as a row, because a map answers "where" and a list answers
+     "which". Hovering either one lights up the other, so a row in the table and
+     a pin on the map are obviously the same property. -->
+<div
+  v-if="comps.length"
+  class="overflow-hidden rounded-lg border border-outline-gray-2"
+>
+  <div
+    class="flex items-center justify-between border-b border-outline-gray-2 bg-surface-gray-1 px-3 py-2"
+  >
+    <span class="text-sm font-medium text-ink-gray-8">
+      {{ __('{0} properties', [comps.length]) }}
+    </span>
+    <span class="text-xs text-ink-gray-5">
+      {{ __('Hover a row to find it on the map') }}
+    </span>
+  </div>
+  <div class="max-h-80 overflow-auto">
+    <table class="w-full min-w-[560px] text-sm">
+      <thead
+        class="sticky top-0 z-10 bg-surface-white text-xs text-ink-gray-5 shadow-[0_1px_0_0_var(--outline-gray-2)]"
+      >
+        <tr>
+          <th class="px-3 py-1.5 text-left font-medium">{{ __('Price') }}</th>
+          <th class="px-2 py-1.5 text-left font-medium">{{ __('Bd/Ba') }}</th>
+          <th class="px-2 py-1.5 text-right font-medium">{{ __('Sq ft') }}</th>
+          <th class="px-2 py-1.5 text-right font-medium">{{ __('Built') }}</th>
+          <th class="px-2 py-1.5 text-left font-medium">{{ __('Status') }}</th>
+          <th class="px-2 py-1.5 text-right font-medium">{{ __('Dist') }}</th>
+          <th class="w-20 px-2 py-1.5"></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr
+          v-for="c in comps"
+          :key="c.name"
+          class="cursor-default border-t border-outline-gray-1"
+          :class="
+            hoveredComp === c.name
+              ? 'bg-surface-gray-2'
+              : c.selected
+                ? 'bg-surface-blue-1'
+                : ''
+          "
+          @mouseenter="hoveredComp = c.name"
+          @mouseleave="hoveredComp = null"
+        >
+          <td class="whitespace-nowrap px-3 py-1.5 font-medium text-ink-gray-8">
+            {{ priceShort(c.price) }}
+          </td>
+          <td class="whitespace-nowrap px-2 py-1.5 text-ink-gray-7">
+            {{ c.bedrooms || '?' }}/{{ c.bathrooms || '?' }}
+          </td>
+          <td class="whitespace-nowrap px-2 py-1.5 text-right tabular-nums text-ink-gray-7">
+            {{ c.square_footage ? Number(c.square_footage).toLocaleString() : '—' }}
+          </td>
+          <td class="whitespace-nowrap px-2 py-1.5 text-right tabular-nums text-ink-gray-7">
+            {{ c.year_built || '—' }}
+          </td>
+          <!-- The metric that matters for THIS status, same rule as the popup. -->
+          <td class="whitespace-nowrap px-2 py-1.5 text-xs">
+            <span :class="isActive(c.status) ? 'text-ink-amber-3' : 'text-ink-gray-6'">
+              {{
+                isActive(c.status)
+                  ? __('For sale · {0}', [agoLabel(c.recency_days) || '—'])
+                  : __('Off-market {0}', [fmtDate(c.removed_date)])
+              }}
+            </span>
+          </td>
+          <td class="whitespace-nowrap px-2 py-1.5 text-right tabular-nums text-ink-gray-6">
+            {{ c.distance_mi }} mi
+          </td>
+          <td class="whitespace-nowrap px-2 py-1.5 text-right">
+            <button
+              class="rounded px-1.5 py-0.5 text-xs font-medium"
+              :class="
+                c.selected
+                  ? 'bg-surface-blue-2 text-ink-blue-2'
+                  : 'text-ink-gray-5 hover:text-ink-gray-8'
+              "
+              :title="__('Use as comp')"
+              @click="toggleUse(c.name)"
+            >
+              {{ c.selected ? '✓' : '+' }}
+            </button>
+            <button
+              class="ml-1 rounded px-1.5 py-0.5 text-xs text-ink-gray-4 hover:text-ink-gray-7"
+              :title="__('Remove from map')"
+              @click="setCompState(c.name, 'hidden')"
+            >
+              ✕
+            </button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Legend: the map is unreadable without saying what the fade means. -->
         <div class="flex flex-wrap items-center gap-3 text-xs text-ink-gray-6">
           <span class="flex items-center gap-1.5">
             <span class="size-2.5 rounded-full" :style="{ background: SUBJECT }" />
@@ -220,9 +314,7 @@
             <b>H</b> {{ __('hide') }}
           </span>
         </div>
-      </div>
-    </template>
-  </Dialog>
+  </div>
 </template>
 
 <script setup>
@@ -246,7 +338,7 @@
  * Touching any control switches to explicit mode — from then on the server runs
  * exactly what is on screen, even if that matches nothing.
  */
-import { Dialog, Button, FormControl, call, toast } from 'frappe-ui'
+import { Button, FormControl, call, toast } from 'frappe-ui'
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -258,7 +350,10 @@ const props = defineProps({
   lead: { type: String, required: true },
   address: { type: String, default: '' },
 })
-const show = defineModel()
+// This used to be a modal driven by `defineModel()`. It is now a full page, so
+// "open" is simply always true -- which keeps every existing `show.value` guard,
+// watcher and keyboard-shortcut gate working exactly as before.
+const show = ref(true)
 
 // Canvas/marker colours live in JS because Leaflet can't read Tailwind tokens.
 // Blue/amber rather than red/green: safe for dichromats.
@@ -353,6 +448,34 @@ watch(showDetail, (v) => {
 // Which comp's popup is open — the target for the h / u shortcuts.
 const focusedComp = ref(null)
 const revealHidden = ref(false)
+
+// The row/pin the pointer is over, in EITHER direction. Kept as a plain name so
+// the map and the table are pointing at one shared idea of "this one".
+const hoveredComp = ref(null)
+const markersByName = new Map()
+
+/**
+ * Emphasise one pin without re-rendering the map.
+ *
+ * Deliberately a class toggle on the existing element rather than swapping the
+ * icon: rebuilding a divIcon on every mouseenter would thrash 200 markers and
+ * drop the popup that may be open.
+ */
+watch(hoveredComp, (name, prev) => {
+  const off = markersByName.get(prev)
+  if (off) off.getElement()?.classList.remove('comps-pill-hot')
+  const on = markersByName.get(name)
+  const el = on?.getElement()
+  if (el) {
+    el.classList.add('comps-pill-hot')
+    // Lift it above its neighbours so an emphasised pin is never half-buried.
+    el.style.zIndex = 900
+  }
+  if (off) {
+    const prevEl = off.getElement()
+    if (prevEl) prevEl.style.zIndex = ''
+  }
+})
 
 const comps = computed(() => data.value?.comps || [])
 const emptyMessage = computed(
@@ -531,6 +654,23 @@ function pillFacts(c) {
  * A SELECTED comp gets a white ring and always shows its facts — it is the one
  * someone is actually pricing off, so it should never be the pin you lose.
  */
+/**
+ * The hover-only ✕ that drops a comp off the map.
+ *
+ * Rendered into every pill but hidden until the pill is hovered (CSS at the
+ * bottom of this file), so removing an obviously-wrong comp is one click on the
+ * thing itself rather than click → read popup → find button. Same delegated
+ * handler as the popup's Hide button, so both paths write the same state.
+ */
+function hideBadge(c) {
+  return `<span class="comps-pill-x" data-comp-hide="${escapeHtml(c.name)}"
+      title="${__('Remove from map')}"
+      style="position:absolute;top:-6px;right:-6px;width:15px;height:15px;
+      border-radius:50%;background:#fff;color:#44423d;border:1px solid #cfccc5;
+      box-shadow:0 1px 2px rgba(0,0,0,.3);font:700 10px/13px ui-sans-serif,system-ui;
+      text-align:center;cursor:pointer">✕</span>`
+}
+
 function pillIcon(c) {
   const active = isActive(c.status)
   const opacity = pillOpacity(stalenessDays(c))
@@ -549,23 +689,39 @@ function pillIcon(c) {
     const w = Math.max(40, Math.ceil(18 + price.length * 7.4))
     return L.divIcon({
       className: 'comps-price-pill',
-      html: `<div style="display:flex;align-items:center;justify-content:center;
+      html: `<div class="comps-pill-body" style="position:relative;display:flex;
+          align-items:center;justify-content:center;
           box-sizing:border-box;width:${w}px;height:24px;background:${bg};color:#fff;
           font:700 11px/1 ui-sans-serif,system-ui,sans-serif;border-radius:999px;
           border:${border};${ring}white-space:nowrap;
-          opacity:${op}">${price}</div>`,
+          opacity:${op}">${price}${hideBadge(c)}</div>`,
       iconSize: [w, 24],
       iconAnchor: [w / 2, 12],
       popupAnchor: [0, -14],
     })
   }
-  // Line 1 = bold price + small dim year; line 2 = beds/baths · sqft. The pill is
-  // sized to whichever line is actually wider.
-  const top = price.length * 7.0 + (year ? 3 + year.length * 5.0 : 0)
+  // Line 1 = bold price + small dim year + age; line 2 = beds/baths · sqft. The
+  // pill is sized to whichever line is actually wider, which is why age rides up
+  // here: line 1 had slack and line 2 was the binding constraint. Measured over
+  // 200 real comps, this costs 82 -> 90px average, where putting it on line 2
+  // would have cost 113px and undone the whole point of the two-line layout.
+  //
+  // The age reads differently by status and the PILL COLOUR is what says which:
+  // amber (still listed) → how long it has sat unsold; slate (off-market) → how
+  // long since it left. Same rule the popup spells out in words.
+  const age = agoShort(c.recency_days)
+  const top =
+    price.length * 7.0 +
+    (year ? 3 + year.length * 5.0 : 0) +
+    (age ? 3 + age.length * 5.0 : 0)
   const w = Math.max(52, Math.ceil(12 + Math.max(top, line2.length * 5.05)))
   const yearHtml = year
     ? `<span style="font:500 9px/1 ui-sans-serif,system-ui,sans-serif;opacity:.72;
          margin-left:3px">${year}</span>`
+    : ''
+  const ageHtml = age
+    ? `<span style="font:500 9px/1 ui-sans-serif,system-ui,sans-serif;opacity:.72;
+         margin-left:3px">${age}</span>`
     : ''
   const line2Html = line2
     ? `<div style="font:500 9px/1 ui-sans-serif,system-ui,sans-serif;opacity:.9;
@@ -573,15 +729,16 @@ function pillIcon(c) {
     : ''
   return L.divIcon({
     className: 'comps-price-pill',
-    html: `<div title="${escapeHtml(pillFacts(c))}"
-        style="display:flex;flex-direction:column;align-items:center;
+    html: `<div class="comps-pill-body" title="${escapeHtml(pillFacts(c))}"
+        style="position:relative;display:flex;flex-direction:column;align-items:center;
         justify-content:center;box-sizing:border-box;width:${w}px;height:34px;
         background:${bg};color:#fff;border-radius:9px;border:${border};${ring}
         white-space:nowrap;line-height:1;opacity:${op}">
         <div style="display:flex;align-items:baseline;justify-content:center">
-          <span style="font:700 11.5px/1 ui-sans-serif,system-ui,sans-serif">${price}</span>${yearHtml}
+          <span style="font:700 11.5px/1 ui-sans-serif,system-ui,sans-serif">${price}</span>${yearHtml}${ageHtml}
         </div>
         ${line2Html}
+        ${hideBadge(c)}
       </div>`,
     iconSize: [w, 34],
     iconAnchor: [w / 2, 17],
@@ -715,6 +872,22 @@ function subjectPopupHtml(s) {
     </div>`
 }
 
+/**
+ * The same age with no words, for the pill — "9d", "4mo", "2y".
+ *
+ * The pill is sized by its widest line, so " ago" is not free: it measured 103px
+ * per pill against 90px without it. The popup and the list keep the wordy form,
+ * where there is room and the sentence reads better.
+ */
+function agoShort(days) {
+  const d = Number(days)
+  if (!Number.isFinite(d) || d < 0) return ''
+  if (d < 31) return `${Math.round(d)}d`
+  if (d < 365) return `${Math.round(d / 30.44)}mo`
+  const y = d / 365.25
+  return `${y < 2 ? y.toFixed(1) : Math.round(y)}y`
+}
+
 /** "4 mo ago" from the server's own recency figure — the same number the fade uses. */
 function agoLabel(days) {
   const d = Number(days)
@@ -792,6 +965,9 @@ function render() {
     map.remove()
     map = null
   }
+  // Markers are rebuilt below; stale entries would otherwise leak and the hover
+  // watcher would try to light up an element no longer on the map.
+  markersByName.clear()
   const s = data.value?.subject
   if (!s?.lat) return
 
@@ -855,6 +1031,12 @@ function render() {
     marker.on('popupclose', () => {
       if (focusedComp.value === c.name) focusedComp.value = null
     })
+    // Hover the pin -> highlight its row, and vice versa via `hoveredComp`.
+    marker.on('mouseover', () => (hoveredComp.value = c.name))
+    marker.on('mouseout', () => {
+      if (hoveredComp.value === c.name) hoveredComp.value = null
+    })
+    markersByName.set(c.name, marker)
     bounds.push([c.lat, c.lng])
   }
 
@@ -1075,5 +1257,32 @@ onMounted(() => {
 .comps-price-pill {
   background: transparent;
   border: 0;
+}
+
+/* The remove-✕ is hover-only: 200 pins each wearing a permanent ✕ would be
+   louder than the prices they exist to show. */
+.comps-pill-x {
+  display: none;
+}
+.comps-price-pill:hover .comps-pill-x {
+  display: block;
+}
+
+/* Hovering the row (or the pin) outlines the matching pill and brings it to full
+   strength; the JS also lifts its z-index so it is never half-buried.
+
+   NOTE: a `transform: scale()` was tried here first and is deliberately gone --
+   it silently does nothing on a Leaflet divIcon child. Verified directly: with
+   the rule matching (its `outline` applied fine) the computed transform stayed
+   `matrix(1,0,0,1,0,0)` at 600ms, and even setting `style.transform` inline on
+   the element did not take. Outline + opacity are what actually render, so they
+   are what the highlight is built from. */
+.comps-price-pill.comps-pill-hot .comps-pill-body {
+  opacity: 1 !important;
+  outline: 3px solid #161614;
+  outline-offset: 2px;
+}
+.comps-pill-body {
+  transition: opacity 90ms ease-out;
 }
 </style>

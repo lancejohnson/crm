@@ -216,7 +216,7 @@
             class="w-full"
             :label="__('View comps')"
             icon-left="map-pin"
-            @click="showCompsMap = true"
+            @click="openComps()"
           />
           <PhotosCard :lead="leadId" @open="showPhotoGallery = true" />
           <TaxInfoCard :lead="leadId" @fetch="detailModals?.fetchTaxInfo()" />
@@ -285,11 +285,6 @@
     doctype="CRM Lead"
     :document="document"
   />
-  <CompsMapModal
-    v-model="showCompsMap"
-    :lead="leadId"
-    :address="doc.property_address"
-  />
   <PhotoGalleryModal
     v-if="showPhotoGallery"
     v-model="showPhotoGallery"
@@ -325,7 +320,6 @@ import CustomActions from '@/components/CustomActions.vue'
 import FirstCallReadCard from '@/components/FirstCallReadCard.vue'
 import PhotosCard from '@/components/PhotosCard.vue'
 import PhotoGalleryModal from '@/components/Modals/PhotoGalleryModal.vue'
-import CompsMapModal from '@/components/Modals/CompsMapModal.vue'
 import TaxInfoCard from '@/components/TaxInfoCard.vue'
 import AgreementsCard from '@/components/AgreementsCard.vue'
 import UnderwritingCard from '@/components/UnderwritingCard.vue'
@@ -374,7 +368,10 @@ const showDeleteLinkedDocModal = ref(false)
 // Property photos (shared Google Drive). Mobile Details renders its own copy of
 // the sidebar cards, so the gallery modal is mounted here too — see Lead.vue.
 const showPhotoGallery = ref(false)
-const showCompsMap = ref(false)
+// Same as desktop: comps is a page, opened in a new tab.
+function openComps() {
+  window.open(`/crm/leads/${props.leadId}/comps`, '_blank', 'noopener')
+}
 
 const {
   triggerOnChange,

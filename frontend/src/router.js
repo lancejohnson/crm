@@ -40,6 +40,15 @@ const routes = [
     props: true,
   },
   {
+    // Opened in a NEW TAB from the lead, so a rep can keep it beside the lead
+    // while underwriting rather than losing the lead behind a modal. Distinct
+    // from '/leads/:leadId' -- a param never matches across a '/'.
+    path: '/leads/:leadId/comps',
+    name: 'Comps',
+    component: () => import('@/pages/Comps.vue'),
+    props: true,
+  },
+  {
     alias: '/deals',
     path: '/deals/view/:viewType?',
     name: 'Deals',
