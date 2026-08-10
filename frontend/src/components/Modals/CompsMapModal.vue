@@ -34,13 +34,17 @@
           </div>
           <div class="flex items-center gap-2">
             <!-- Details toggle: the pills carry beds/baths/sqft/year, but on a
-                 dense board the overview is sometimes worth more than the facts. -->
-            <Button
-              :label="showDetail ? __('Details on') : __('Details off')"
-              :variant="showDetail ? 'subtle' : 'ghost'"
-              :tooltip="__('Show beds/baths/sqft/year on pills') + ' (D)'"
-              @click="showDetail = !showDetail"
-            />
+                 dense board the overview is sometimes worth more than the facts.
+                 A checkbox rather than a button because it reports its own state
+                 — a button reading "Details off" is ambiguous about whether that
+                 is the current state or what clicking will do. -->
+            <label
+              class="flex cursor-pointer select-none items-center gap-1.5 whitespace-nowrap text-sm text-ink-gray-7"
+              :title="__('Show beds/baths/sqft/year on pills') + ' (D)'"
+            >
+              <FormControl type="checkbox" size="sm" v-model="showDetail" />
+              {{ __('Details') }}
+            </label>
 
             <!-- Radius stays its own control: a rural lead needs a wider net than
                  an infill lot, and the right answer is obvious once you see the
@@ -724,9 +728,23 @@ function agoLabel(days) {
 function popupHtml(c) {
   const active = isActive(c.status)
   const ago = agoLabel(c.recency_days)
+  const dom =
+    c.days_on_market != null ? __('{0}d on market', [Math.round(c.days_on_market)]) : ''
+  // Lead with the number that actually matters for THIS status. "99 days" means
+  // opposite things on the two kinds of pin — 99 days ON the market for a live
+  // listing (it is not selling), versus 99 days SINCE it left for an off-market
+  // one (how current the evidence is) — so they are not rendered the same way.
+  // For an off-market comp the date it left is the headline and DOM is context;
+  // for a live listing it is the other way round.
+  //
+  // Deliberately "off-market", never "sold": this inventory carries the last ASK
+  // and leaving the market is not a confirmed close.
+  const headline = active
+    ? `${__('For sale')}${dom ? ` · ${dom}` : ''}`
+    : `${__('Off-market {0}', [fmtDate(c.removed_date)])}${ago ? ` · ${ago}` : ''}`
   const when = active
     ? __('Listed {0}', [fmtDate(c.listed_date)])
-    : `${__('Listed {0}', [fmtDate(c.listed_date)])} → ${__('removed {0}', [fmtDate(c.removed_date)])}`
+    : `${__('Listed {0}', [fmtDate(c.listed_date)])}${dom ? ` · ${dom}` : ''}`
   const facts = [
     c.bedrooms ? `${c.bedrooms} bd` : '',
     c.bathrooms ? `${c.bathrooms} ba` : '',
@@ -759,14 +777,10 @@ function popupHtml(c) {
   return `<div style="min-width:190px;font:12px/1.45 system-ui,sans-serif;color:#161614">
       <div style="font-weight:700;margin-bottom:2px">${escapeHtml(c.address)}</div>
       <div style="font-size:15px;font-weight:700;margin:2px 0">${priceShort(c.price)}</div>
-      <div style="color:#5c5a55">${active ? __('Active (still listed)') : __('Off-market')}${
-        c.days_on_market != null ? ` · ${Math.round(c.days_on_market)}d DOM` : ''
-      }</div>
+      <div style="color:${active ? '#b45309' : '#44423d'};font-weight:600">${headline}</div>
       <div style="color:#5c5a55">${when}</div>
       ${facts ? `<div style="color:#8a877e;margin-top:2px">${escapeHtml(facts)}</div>` : ''}
-      <div style="color:#8a877e;margin-top:2px">${__('{0} mi away', [c.distance_mi])}${
-        ago ? ` · ${ago}` : ''
-      }</div>
+      <div style="color:#8a877e;margin-top:2px">${__('{0} mi away', [c.distance_mi])}</div>
       ${zlink}
       ${actions}
     </div>`

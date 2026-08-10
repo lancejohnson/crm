@@ -322,6 +322,20 @@ duplicating. Work substantial features in a worktree of your own.
       that set the width and lengthens the one that did not. Measured over 400
       real comps: avg **120 → 82px (32% narrower)**, 31% less total pill area;
       live DOM confirms **113x33 → 76x33**. Full facts stay in the `title`.
+  - **The pin popup leads with the metric that matters for that STATUS.** "99
+    days" means opposite things on the two kinds of pin — 99 days ON the market
+    for a live listing (it is not selling) versus 99 days SINCE it left for an
+    off-market one (how current the evidence is) — so they are not rendered the
+    same way:
+    - off-market: `Off-market Jul 31, 2026 · 9d ago` then `Listed May 15 · 77d on
+      market` (when it left is the headline, DOM is context);
+    - for sale: `For sale · 50d on market` then `Listed Mar 30, 2026`.
+    Deliberately **"off-market", never "sold"** — this inventory is the last ASK
+    and leaving the market is not a confirmed close. Data supports it with no
+    gaps: 42,230 inactive comps are **100%** populated for `removed_date`, and
+    10,009 active are 100% populated for DOM.
+  - The details toggle is a **checkbox**, not a button: a button reading "Details
+    off" is ambiguous about whether that is the state or the action.
   - **Hide / use a comp** (`set_comp_state`; `CRM Lead.comps_hidden` /
     `comps_selected` JSON; ops `setup_comp_selection.py`). **TEAM-WIDE, not
     per-user**: a junk comp is junk for everyone, and "the comps we priced off" is
