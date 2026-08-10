@@ -687,6 +687,71 @@ function hideBadge(c) {
       text-align:center;cursor:pointer">✕</span>`
 }
 
+/**
+ * The subject as a pill, in the same two-line shape as the comps.
+ *
+ * It used to be an 18px dot, which marked the spot but said nothing — you had to
+ * click it to find out what you were comparing against. Rendering it like a comp
+ * (bd/ba · sqft, year on the top line) means the subject's own numbers sit in the
+ * same visual grammar as the numbers you are judging it by, so "is this comp
+ * bigger or smaller than mine" is a glance rather than a memory test.
+ *
+ * Blue with a heavier white ring so it never reads as one of the comps, and it
+ * keeps the centre anchor so the pill's middle still marks the real parcel.
+ */
+function subjectIcon(s) {
+  const year = s.year_built_label || ''
+  const bb =
+    s.beds_label || s.baths_label ? `${s.beds_label || '?'}/${s.baths_label || '?'}` : ''
+  const sf = s.sqft_label ? `${s.sqft_label}sf` : ''
+  const line2 = [bb, sf].filter(Boolean).join(' · ')
+  const label = __('Subject')
+
+  // With details off (the D toggle) the comps collapse to a bare price, so the
+  // subject collapses to a bare label rather than staying loud on its own.
+  if (!showDetail.value || (!year && !line2)) {
+    const w = Math.max(52, Math.ceil(18 + label.length * 6.6))
+    return L.divIcon({
+      className: 'comps-price-pill',
+      html: `<div class="comps-pill-body" style="display:flex;align-items:center;
+          justify-content:center;box-sizing:border-box;width:${w}px;height:24px;
+          background:${SUBJECT};color:#fff;font:700 11px/1 ui-sans-serif,system-ui,sans-serif;
+          border-radius:999px;border:2px solid #fff;
+          box-shadow:0 1px 6px rgba(0,0,0,.5);white-space:nowrap">${label}</div>`,
+      iconSize: [w, 24],
+      iconAnchor: [w / 2, 12],
+      popupAnchor: [0, -14],
+    })
+  }
+
+  const top = label.length * 6.6 + (year ? 3 + year.length * 5.0 : 0)
+  const w = Math.max(58, Math.ceil(14 + Math.max(top, line2.length * 5.05)))
+  const yearHtml = year
+    ? `<span style="font:500 9px/1 ui-sans-serif,system-ui,sans-serif;opacity:.8;
+         margin-left:3px">${escapeHtml(year)}</span>`
+    : ''
+  const line2Html = line2
+    ? `<div style="font:500 9px/1 ui-sans-serif,system-ui,sans-serif;opacity:.95;
+         margin-top:2px">${escapeHtml(line2)}</div>`
+    : ''
+  return L.divIcon({
+    className: 'comps-price-pill',
+    html: `<div class="comps-pill-body" style="display:flex;flex-direction:column;
+        align-items:center;justify-content:center;box-sizing:border-box;width:${w}px;
+        height:34px;background:${SUBJECT};color:#fff;border-radius:9px;
+        border:2px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.55);
+        white-space:nowrap;line-height:1">
+        <div style="display:flex;align-items:baseline;justify-content:center">
+          <span style="font:700 11px/1 ui-sans-serif,system-ui,sans-serif">${label}</span>${yearHtml}
+        </div>
+        ${line2Html}
+      </div>`,
+    iconSize: [w, 34],
+    iconAnchor: [w / 2, 17],
+    popupAnchor: [0, -19],
+  })
+}
+
 function pillIcon(c) {
   const active = isActive(c.status)
   const opacity = pillOpacity(stalenessDays(c))
@@ -1065,17 +1130,10 @@ function render() {
     zIndexOffset: 1000,
     // A real iconSize + centre anchor, NOT the 0x0-plus-transform trick the rings
     // use. With a zero-width container the horizontal translate(-50%) collapsed to
-    // 0, so the dot marking "the real parcel" was drawn ~9px to the RIGHT of the
-    // coordinate it claims to mark — and its hit area sat off the dot too, on the
-    // one pin that is now expected to be clicked for the subject's details.
-    icon: L.divIcon({
-      className: '',
-      html: `<div style="width:18px;height:18px;border-radius:50%;background:${SUBJECT};
-          border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.5);box-sizing:border-box"></div>`,
-      iconSize: [18, 18],
-      iconAnchor: [9, 9],
-      popupAnchor: [0, -10],
-    }),
+    // 0, so the marker for "the real parcel" was drawn ~9px to the RIGHT of the
+    // coordinate it claims to mark — and its hit area sat off it too, on the one
+    // pin that is expected to be clicked for the subject's details.
+    icon: subjectIcon(s),
   })
     .addTo(map)
     .bindPopup(subjectPopupHtml(s), { maxWidth: 300 })

@@ -327,6 +327,15 @@ duplicating. Work substantial features in a worktree of your own.
     the whole thing; `pages/Comps.vue` is a thin wrapper. When it stopped being a
     modal, `show` became a plain always-true ref so every existing guard, watcher
     and shortcut gate kept working untouched.
+  - **The subject is a PILL too**, in the same two-line grammar as the comps
+    (`Subject 1910` / `2/1 · 1118sf`), blue with a heavier white ring so it never
+    reads as one of them. It was an 18px dot, which marked the spot but said
+    nothing — you had to click it to learn what you were comparing against.
+    Putting its numbers in the same shape as the comps' makes "is this one bigger
+    or smaller than mine" a glance instead of a memory test. It honours the `D`
+    toggle (collapsing to a bare "Subject") and keeps the centre anchor, so the
+    pill's middle still marks the real parcel — verified: pill centre == marker
+    centre == the geocoded point.
   - **A property list sits under the map**, one row per comp, and hovering either
     a row or a pin highlights the other. A map answers "where", a list answers
     "which". Every pill also carries a hover-only ✕ that removes it, wired to the
