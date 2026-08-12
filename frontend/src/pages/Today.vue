@@ -865,8 +865,9 @@ async function syncList() {
     // `closed` has to be said out loud: after 5pm the sync deliberately adds
     // nothing, and "List is up to date" would read as a lie to anyone who knows
     // a lead just came in.
+    // Kept short: this renders as a Badge in an already-crowded header row.
     const message = r.closed
-      ? __('The list is closed for today — new leads go on tomorrow’s list')
+      ? __('Closed for today — new leads go on tomorrow’s list')
       : r.created
         ? __('Added {0} new call(s)', [r.created])
         : __('List is up to date')
