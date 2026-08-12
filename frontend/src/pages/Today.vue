@@ -862,10 +862,15 @@ async function syncList() {
   try {
     const r = await call('crm.api.today_board.generate_today')
     await Promise.all([board.reload(), todayReport.reload()])
-    const message = r.created
-      ? __('Added {0} new call(s)', [r.created])
-      : __('List is up to date')
-    syncStatusTheme.value = 'green'
+    // `closed` has to be said out loud: after 5pm the sync deliberately adds
+    // nothing, and "List is up to date" would read as a lie to anyone who knows
+    // a lead just came in.
+    const message = r.closed
+      ? __('The list is closed for today — new leads go on tomorrow’s list')
+      : r.created
+        ? __('Added {0} new call(s)', [r.created])
+        : __('List is up to date')
+    syncStatusTheme.value = r.closed ? 'orange' : 'green'
     syncStatus.value = message
     toast.success(message)
   } catch (e) {

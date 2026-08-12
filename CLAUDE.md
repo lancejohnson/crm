@@ -642,11 +642,36 @@ duplicating. Work substantial features in a worktree of your own.
   - **The list stays current after the 5am snapshot.** Header **Sync list**
     manually re-runs the shared cadence and reports how many cards it added.
     New leads and every lead-task mutation enqueue the same add-only sync after
-    commit; an every-five-minute business-day scheduler is the race/failure
-    safety net. Jobs dedupe during import bursts, and structural card autonames
+    commit; a five-minute scheduler is the race/failure safety net — note it is
+    on `*/5 * * * *`, i.e. **round the clock**, not business hours as this file
+    long claimed. Jobs dedupe during import bursts, and structural card autonames
     make concurrent runs safe. New scheduler method
     `crm.api.today_board.run_today_sync` requires `sync_jobs` after deploy.
     Existing Done/Skipped state and manual ordering are never touched.
+  - **The board CLOSES to new cards at 5pm CT** (`BOARD_CLOSE_HOUR`, gw316).
+    Working a card after 5pm is fine and always was — what is not fine is the
+    board growing after everyone has gone home, because a card added at 11pm is
+    unresolvable and silently reads as a rep who did not finish. Measured: German
+    and Exe resolved **every** card on both 2026-08-10 and 08-11, and both days
+    still scored 71%/68% and 94%/93%, because 20 inbound leads landed at
+    23:20–23:57 on the Monday (40 cards) and 4 more at 23:33 on the Tuesday (8).
+    Those late cards were the entire unresolved remainder of both days.
+    - **Nothing is lost by holding them back**: all 20 and all 4 of those leads
+      appeared on the NEXT morning's board anyway (20/20, 4/4), so the late add
+      was pure duplication that only cost the score. The nightly generation is
+      what picks them up, and a never-called lead is still due the next day.
+    - `_board_is_closed(day)` gates `_generate_today`, so all three callers obey
+      it: the manual button, the new-lead/task hook (which also stops before
+      enqueuing, so a late-evening import doesn't queue a job per commit for a
+      board that will refuse every one) and the round-the-clock scheduler. A day
+      already past is closed too — materialising fresh work onto a board nobody
+      will look at again is the same mistake.
+    - **Sync list says so out loud** ("The list is closed for today — new leads go
+      on tomorrow's list", amber). "List is up to date" would read as a lie to
+      anyone who knows a lead just came in.
+    - The 48 orphaned cards from Aug 10/11 were deleted on prod under exactly
+      those conditions (after-5pm creation + never touched + lead present on a
+      later board), restoring both days to 100% and both reps to a 5-day streak.
   - **The streak is PERSONAL, not team-wide** (gw303, reversing the original
     decision at Lance's request). `get_today_report(owner=…)` now scopes
     `by_day` — and therefore the streak and the recent-day history — to that

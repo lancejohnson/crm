@@ -370,11 +370,50 @@ def generate_today(for_date=None):
 	return _generate_today(getdate(for_date or now_datetime()))
 
 
+#: The board's working day ends at 5pm CT. Cards are only ever added to an OPEN
+#: board: work that arrives after the close belongs to the next list, not to a
+#: day nobody is working any more.
+#:
+#: This is not a nicety. Measured on prod: German and Exe resolved EVERY card on
+#: their boards on both 2026-08-10 and 08-11 — and both days still read as failed
+#: streak days, because 20 new leads landed at 23:20–23:57 on the Monday (40
+#: cards) and 4 more at 23:33 on the Tuesday (8 cards). Those late cards were the
+#: entire unresolved remainder of both days. Nothing is lost by holding them
+#: back, either: all 20 and all 4 of those leads appeared on the NEXT day's board
+#: anyway, so the late add was pure duplication that only cost the streak.
+BOARD_CLOSE_HOUR = 17
+
+
+def _board_is_closed(day, now=None):
+	"""Has this board's working day already ended?
+
+	True after 5pm on the day itself, and for any day already past — materialising
+	fresh work onto a board nobody will look at again is the same mistake either
+	way. A future day is open: generation for tomorrow is exactly what the nightly
+	job does.
+	"""
+	now = now or now_datetime()
+	day, today = getdate(day), getdate(now)
+	if day != today:
+		return day < today
+	return now.hour >= BOARD_CLOSE_HOUR
+
+
 def _generate_today(day):
 	"""Internal sync used by the manual button, hooks, and five-minute safety job."""
 	if not _available():
 		return {"created": 0, "existing": 0, "due": 0, "available": False}
 	day = getdate(day or now_datetime())
+	if _board_is_closed(day):
+		# Deliberately reported rather than silently skipped: the manual "Sync list"
+		# button has to be able to say why it added nothing, or it looks broken.
+		return {
+			"created": 0,
+			"existing": frappe.db.count(DOCTYPE, {"for_date": day}),
+			"due": 0,
+			"available": True,
+			"closed": True,
+		}
 	data = build_standup(day)
 	due = data["setter"]["due"]
 	with_slots = _supports_call_slots()
@@ -459,6 +498,11 @@ def enqueue_today_sync(doc=None, method=None):
 		day = getdate(now_datetime())
 		if not _available() or not is_business_day(day):
 			return
+		# A lead that arrives at 11pm is tomorrow's work. Stop here rather than in
+		# the job so a late-evening import doesn't queue a sync per commit for a
+		# board that will refuse all of them anyway.
+		if _board_is_closed(day):
+			return
 		if doc and doc.doctype == "CRM Lead":
 			if method == "on_update" and not doc.has_value_changed("status"):
 				return
@@ -487,6 +531,11 @@ def run_today_sync():
 	day = getdate(now_datetime())
 	if not is_business_day(day):
 		return {"created": 0, "available": _available(), "skipped": "non-business day"}
+	if _board_is_closed(day):
+		# This job is on `*/5 * * * *` — every five minutes ROUND THE CLOCK, despite
+		# what the notes say about business hours. Without this it is the other half
+		# of the late-night card problem, alongside the new-lead hook.
+		return {"created": 0, "available": _available(), "skipped": "board closed"}
 	try:
 		return _generate_today(day)
 	except Exception:
