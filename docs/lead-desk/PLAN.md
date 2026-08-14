@@ -175,12 +175,24 @@ purchase (open question: CRM `after_insert` vs earlier in `istl-buyer`).
       parked); now 362. NULL-safe `isnull() | != 1`.
 - [ ] Deploy (app code is committed, NOT yet built into an image)
 - [ ] Frontend: draw neighbourhood + parcels on the desk map
+- [ ] **verify_ui the desk page** (required before calling any of this done)
+- [ ] Seed `crm-test` — it has **0 leads**, so UI work still uses the
+      prod-backed dev server (`CRM_DEV_TARGET=... yarn dev`). crm-test is for
+      telephony and writes, not for looking at leads.
 - [ ] Parcel enrichment + cookie lifecycle
 - [ ] CRM hook + backfill (stage it — 362 leads × ~3k parcels ≈ 1M rows)
 
 ### 2. Vue port of v17
-- [ ] Shell + panes against real `CompsView`
-- [ ] Offer math, repair matrix, 2x2 (reuse `first_call.py`)
+- [~] **Slice 1: route + shell.** `/leads/:leadId/desk` -> `pages/LeadDesk.vue`,
+      embedding the real `CompsView` (NOT the mockup's hand-rolled map -- 1,424
+      lines of hard-won behaviour would be thrown away). `pageMode` deliberately
+      not passed: underwriting belongs on the comps page, the desk computes the
+      offer live.
+      **`yarn build` passes; chunk `LeadDesk-*.js` emits; route is in the bundle.
+      NOT visually verified -- no verify_ui run yet. Do that before trusting it.**
+      Worktree needed its own `node_modules` (472 MB).
+- [ ] Right rail: offer math, repair matrix, 2x2 (reuse `first_call.py`)
+- [ ] Left rail: copilot (blocked on the Telnyx decision)
 - [ ] Save determination (needs schema)
 - [ ] Shortcuts + palette contributions
 
