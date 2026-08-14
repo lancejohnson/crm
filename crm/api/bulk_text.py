@@ -20,7 +20,7 @@ import frappe
 import requests
 from frappe import _
 
-from crm.api.do_not_contact import is_blocked
+from crm.api.do_not_contact import is_blocked, is_blocked_number
 from crm.api.investorlift_ingest import BUYER_DOCTYPE
 
 OPENPHONE_MESSAGES_API = "https://api.openphone.com/v1/messages"
@@ -89,6 +89,18 @@ def send_buyer_text(buyer, content, from_number=None):
 	e164 = _e164(b.phone)
 	if not e164:
 		frappe.throw(_("{0} has no valid phone number.").format(b.buyer_name or buyer))
+
+	# Second stop, keyed on the NUMBER rather than the record. Once Quo and Telnyx
+	# run side by side the same person can exist as more than one row -- a duplicate
+	# created by the IL webhook race, or a buyer reached on a Telnyx line whose
+	# opt-out was recorded against a different record. The flag is a statement about
+	# a person, so the last thing checked before we hand a number to a carrier is
+	# that number itself.
+	if is_blocked_number(e164):
+		frappe.throw(
+			_("{0} is on the do-not-contact list under another record. Clear it first.")
+			.format(e164)
+		)
 
 	from_num = _resolve_from_number(from_number)
 

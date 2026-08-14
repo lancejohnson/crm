@@ -1,0 +1,196 @@
+"""Client for the groundwork-geo service (neighbourhood properties + parcels).
+
+The service is source-agnostic — it takes coordinates and knows nothing about a
+CRM Lead. This module owns the mapping in the other direction: lead -> point,
+and lead -> "warm the neighbourhood".
+
+WHY WARM AT PURCHASE. A dense two-mile sweep is ~75s across ~49 upstream calls,
+and enriching its parcels is ~45 minutes at 6.6/s. Neither can happen while a
+rep waits on a page. So the work starts when the lead lands and the desk reads
+whatever is ready — the same shape as the Zillow facts cache, one order of
+magnitude slower.
+
+Config-gated like `contract_parser_url`: with no `geo_service_url` in
+site_config every entry point is a no-op, so the app is safe to deploy before
+the service exists and degrades quietly if it goes away.
+"""
+
+import frappe
+import requests
+from frappe import _
+
+DEFAULT_RADIUS_M = 1609.344 * 2  # 2 miles — the desk's outer ring
+TIMEOUT = 10
+
+
+def _base_url():
+	return (frappe.conf.get("geo_service_url") or "").strip().rstrip("/")
+
+
+def _enabled():
+	return bool(_base_url())
+
+
+def _lead_point(lead):
+	"""(lat, lng) for a lead, geocoding and caching on first use.
+
+	Reuses comps._subject_point so the desk, the comps map and the geo warm can
+	never disagree about where a lead is — and so a lead is geocoded once, not
+	once per feature.
+
+	NOTE `property_lat` is 0.0, not NULL, on an ungeocoded lead (3 of the 6
+	newest on prod). 0.0 is a real latitude, so the "is it set" test has to be
+	truthiness rather than `is not None`. _subject_point already gets this right;
+	don't 'fix' it.
+	"""
+	from crm.api.comps import _subject_point
+
+	doc = frappe.get_doc("CRM Lead", lead)
+	lat, lng, _cached = _subject_point(doc)
+	if lat is None or lng is None:
+		return None, None
+	return float(lat), float(lng)
+
+
+def warm_lead(lead, radius_m=None):
+	"""Ask the service to sweep this lead's neighbourhood. Returns a status dict.
+
+	Best-effort by construction: every failure path returns rather than raises,
+	because a geo outage must never be able to fail a lead insert.
+	"""
+	if not _enabled():
+		return {"ok": False, "reason": "geo_service_url not configured"}
+
+	lat, lng = _lead_point(lead)
+	if lat is None:
+		return {"ok": False, "reason": "lead has no geocodable address", "lead": lead}
+
+	try:
+		r = requests.post(
+			f"{_base_url()}/warm",
+			json={"lat": lat, "lng": lng, "radius_m": float(radius_m or DEFAULT_RADIUS_M)},
+			timeout=TIMEOUT,
+		)
+		r.raise_for_status()
+		return {"ok": True, "lead": lead, "lat": lat, "lng": lng, **(r.json() or {})}
+	except Exception as e:
+		# Logged, not raised. The desk still works without a warm neighbourhood;
+		# it just has less to draw.
+		frappe.log_error(frappe.get_traceback(), "geo: warm failed")
+		return {"ok": False, "reason": str(e)[:200], "lead": lead}
+
+
+def on_lead_insert(doc, method=None):
+	"""CRM Lead after_insert — warm this lead's neighbourhood in the background.
+
+	Enqueued, never inline. The sweep takes ~75 seconds; doing it in the request
+	would hold a webhook open long enough to time out and make iSpeedToLead retry,
+	creating duplicate leads. The whole point of warming at purchase is that the
+	rep never waits, so the insert must not wait either.
+	"""
+	if not _enabled():
+		return
+	try:
+		frappe.enqueue(
+			"crm.api.geo.warm_lead",
+			queue="long",
+			job_name=f"geo-warm-{doc.name}",
+			enqueue_after_commit=True,
+			lead=doc.name,
+		)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "geo: enqueue warm failed")
+
+
+@frappe.whitelist()
+def get_neighborhood(lead, radius_m=None, live=0):
+	"""Properties around a lead, as GeoJSON, for the desk map."""
+	if not _enabled():
+		return {"ok": False, "reason": "geo service not configured", "features": []}
+
+	lat, lng = _lead_point(lead)
+	if lat is None:
+		return {"ok": False, "reason": "lead has no geocodable address", "features": []}
+
+	try:
+		r = requests.get(
+			f"{_base_url()}/properties",
+			params={
+				"lat": lat,
+				"lng": lng,
+				"radius": float(radius_m or DEFAULT_RADIUS_M),
+				"live": "true" if str(live) not in ("0", "", "false", "False") else "false",
+			},
+			timeout=TIMEOUT if not live else 120,
+		)
+		r.raise_for_status()
+		return {"ok": True, "lat": lat, "lng": lng, **(r.json() or {})}
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "geo: get_neighborhood failed")
+		return {"ok": False, "reason": str(e)[:200], "features": []}
+
+
+@frappe.whitelist()
+def get_parcels(lead, bbox=None):
+	"""Lot-line polygons for a map viewport. `bbox` is 'west,south,east,north'."""
+	if not _enabled():
+		return {"ok": False, "reason": "geo service not configured", "parcels": []}
+	if not bbox:
+		return {"ok": False, "reason": "bbox required", "parcels": []}
+	try:
+		r = requests.get(f"{_base_url()}/parcels", params={"bbox": bbox}, timeout=TIMEOUT)
+		r.raise_for_status()
+		return {"ok": True, **(r.json() or {})}
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "geo: get_parcels failed")
+		return {"ok": False, "reason": str(e)[:200], "parcels": []}
+
+
+@frappe.whitelist()
+def warm_backfill(dry_run=1, limit=None, radius_m=None):
+	"""Warm the neighbourhoods of existing live leads.
+
+	Staged on purpose. 362 leads x a few thousand parcels is ~1M rows, and the
+	first run should be measured on a handful rather than turned loose:
+
+	    bench execute crm.api.geo.warm_backfill --kwargs '{"dry_run":1}'
+	    bench execute crm.api.geo.warm_backfill --kwargs '{"dry_run":0,"limit":10}'
+	"""
+	dry_run = str(dry_run) not in ("0", "false", "False", "")
+	if not _enabled():
+		return {"ok": False, "reason": "geo_service_url not configured"}
+
+	# Parked import leads are excluded. They are bulk-loaded inventory nobody is
+	# working, and warming them would sweep ~500 neighbourhoods for no rep --
+	# ~1.5M parcels of pure waste. Caught by a dry run reporting 876 leads when
+	# only ~362 are live.
+	#
+	# The NULL-safe form matters: `import_hidden != 1` alone silently drops every
+	# row where the column is NULL, which is most of them. Same trap documented
+	# for leads_dashboard.live().
+	Lead = frappe.qb.DocType("CRM Lead")
+	q = (
+		frappe.qb.from_(Lead)
+		.select(Lead.name, Lead.property_address)
+		.where(Lead.converted != 1)
+		.orderby(Lead.creation, order=frappe.qb.desc)
+	)
+	if frappe.db.has_column("CRM Lead", "import_hidden"):
+		q = q.where(Lead.import_hidden.isnull() | (Lead.import_hidden != 1))
+	if limit:
+		q = q.limit(int(limit))
+	leads = q.run(as_dict=True)
+	leads = [l for l in leads if (l.get("property_address") or "").strip()]
+	if dry_run:
+		return {"ok": True, "dry_run": True, "would_warm": len(leads),
+		        "sample": [l["name"] for l in leads[:10]]}
+
+	warmed, failed = 0, []
+	for l in leads:
+		res = warm_lead(l["name"], radius_m=radius_m)
+		if res.get("ok"):
+			warmed += 1
+		else:
+			failed.append({"lead": l["name"], "reason": res.get("reason")})
+	return {"ok": True, "dry_run": False, "warmed": warmed,
+	        "failed": len(failed), "failures": failed[:20]}

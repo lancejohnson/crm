@@ -109,6 +109,82 @@ def is_blocked(buyer):
 	return bool(frappe.db.get_value(BUYER_DOCTYPE, buyer, "do_not_contact"))
 
 
+def _last10(phone):
+	"""Last ten digits — the only phone comparison that survives formatting."""
+	digits = re.sub(r"\D", "", phone or "")
+	return digits[-10:] if len(digits) >= 10 else ""
+
+
+def is_blocked_number(phone):
+	"""Is this PHONE NUMBER opted out, whoever it belongs to?
+
+	The record-keyed `is_blocked` is not sufficient once more than one telephony
+	provider is live. During the Quo -> Telnyx parallel run the same human can be
+	reached two ways, and a provider that sends by number rather than by record
+	would never consult the buyer row at all. An opt-out is a statement about a
+	person, so the check has to be answerable from the thing every provider
+	actually has: the number it is about to text.
+
+	Scans buyers rather than joining, because the flag is rare (a handful of rows)
+	and the phone columns are free-text, so a last-10 comparison in Python is both
+	correct and cheaper than a LIKE across formats.
+	"""
+	target = _last10(phone)
+	if not target:
+		return False
+	if not frappe.get_meta(BUYER_DOCTYPE).has_field("do_not_contact"):
+		return False
+	for row in frappe.get_all(
+		BUYER_DOCTYPE,
+		filters={"do_not_contact": 1},
+		fields=["name", "phone"],
+		limit_page_length=0,
+	):
+		if _last10(row.get("phone")) == target:
+			return True
+	return False
+
+
+def record_inbound_opt_out(
+	content,
+	direction=None,
+	reference_doctype=None,
+	reference_docname=None,
+	provider=None,
+):
+	"""Provider-agnostic core: flag a record whose inbound message asks us to stop.
+
+	Takes plain values, not a document, so any provider's inbound handler can call
+	it -- the Quo Message hook, a Telnyx webhook, or a backfill. Returns True when
+	the flag actually changed.
+
+	This exists because the detector used to be reachable only through
+	`Quo Message.after_insert`. Standing up a second provider without this would
+	mean an opt-out sent to a Telnyx number never registers, and the next bulk text
+	reaches someone who told us to stop -- the exact failure gw296 was written to
+	prevent, reintroduced by the migration rather than by a bug.
+	"""
+	if direction is not None and str(direction).lower() not in ("incoming", "inbound"):
+		return False
+	if reference_doctype != BUYER_DOCTYPE or not reference_docname:
+		return False
+	if not is_opt_out(content):
+		return False
+
+	snippet = (content or "").strip()[:200]
+	source = f"Automatic (inbound text{', ' + provider if provider else ''})"
+	if mark_do_not_contact(
+		reference_docname,
+		reason=_("Replied: {0}").format(snippet),
+		set_by=source,
+	):
+		frappe.logger("do_not_contact").info(
+			f"auto do-not-contact {reference_docname} via {provider or 'unknown'}: {snippet!r}"
+		)
+		return True
+	return False
+
+
 def mark_do_not_contact(buyer, reason=None, set_by=None, enabled=True):
 	"""Set/clear the flag. Written with db.set_value + update_modified=False so it
 	never fights the IL sync's own writes or bumps `modified` on a machine touch.
@@ -152,27 +228,23 @@ def set_buyer_do_not_contact(buyer, enabled=1, reason=None):
 
 
 def check_inbound_opt_out(doc, method=None):
-	"""after_insert on Quo Message — auto-flag a buyer who texts an opt-out.
+	"""after_insert on Quo Message — the Quo adapter over `record_inbound_opt_out`.
 
-	Only inbound buyer messages are considered. Wrapped so a detector failure can
-	never break message storage or the realtime emit that rides on the same hook.
+	Kept as a thin shim so `hooks.py` is unchanged and Quo keeps behaving exactly
+	as before. A Telnyx inbound handler calls `record_inbound_opt_out` directly
+	with the same five values; neither provider owns the rule.
+
+	Wrapped so a detector failure can never break message storage or the realtime
+	emit that rides on the same hook.
 	"""
 	try:
-		if (doc.get("direction") or "").lower() not in ("incoming", "inbound"):
-			return
-		if doc.get("reference_doctype") != BUYER_DOCTYPE or not doc.get("reference_docname"):
-			return
-		if not is_opt_out(doc.get("content")):
-			return
-		snippet = (doc.get("content") or "").strip()[:200]
-		if mark_do_not_contact(
-			doc.reference_docname,
-			reason=_("Replied: {0}").format(snippet),
-			set_by="Automatic (inbound text)",
-		):
-			frappe.logger("do_not_contact").info(
-				f"auto do-not-contact {doc.reference_docname}: {snippet!r}"
-			)
+		record_inbound_opt_out(
+			content=doc.get("content"),
+			direction=doc.get("direction"),
+			reference_doctype=doc.get("reference_doctype"),
+			reference_docname=doc.get("reference_docname"),
+			provider="Quo",
+		)
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "do-not-contact opt-out check failed")
 
