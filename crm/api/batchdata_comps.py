@@ -69,6 +69,11 @@ DEFAULT_TAKE = 10
 #: "No limit" is also wrong — decade-old sales drag the median down.
 SALE_WINDOW_DAYS = 730
 
+#: Shown to the rep in the provenance banner. Says only the WINDOW — both callers
+#: already say "recorded sales", and repeating it read as
+#: "recorded sales from BatchData (recorded sales, last 2 years)".
+WINDOW_LABEL = "last 2 years"
+
 #: Cache fields on CRM Lead. Absent until the ops script adds them, in which case
 #: the whole feature degrades quietly — same contract as `comps._state_supported`.
 CACHE_FIELD = "batchdata_comps"

@@ -937,7 +937,7 @@ def _batchdata_fallback(doc, base):
 		"source": "batchdata",
 		"used": True,
 		"count": len(comps),
-		"basis": "recorded sales, last 2 years",
+		"basis": batchdata_comps.WINDOW_LABEL,
 	}
 
 

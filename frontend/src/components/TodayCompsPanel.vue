@@ -25,8 +25,17 @@
       />
     </div>
 
+    <!-- Bought from BatchData because we hold nothing here. Takes precedence over
+         the relaxed note: where the comps CAME FROM matters more than how wide the
+         filter had to go, and in this path the filter never ran at all. -->
     <div
-      v-if="data?.relaxed"
+      v-if="fallbackMessage"
+      class="mt-2 rounded-md bg-surface-gray-2 px-2.5 py-1.5 text-xs text-ink-gray-7"
+    >
+      {{ fallbackMessage }}
+    </div>
+    <div
+      v-else-if="data?.relaxed"
       class="mt-2 rounded-md bg-surface-amber-1 px-2.5 py-1.5 text-xs text-ink-amber-3"
     >
       {{ relaxedMessage }}
@@ -147,6 +156,22 @@ const relaxedMessage = computed(() => {
     return __('No recent, similar set was found nearby — these are the closest available properties.')
   }
   return __('The close-match set was small, so these use a wider similarity range.')
+})
+
+/**
+ * Provenance, when the pooled index held nothing and we bought a set instead.
+ *
+ * These are RECORDED SALES rather than our listing-derived comps, so the rep is
+ * told plainly. Returns '' when the fallback did not run, which is the common case.
+ */
+const fallbackMessage = computed(() => {
+  const f = data.value?.fallback
+  if (!f?.used) return ''
+  if (!f.count) return __('No comps here, and no recorded sales nearby either.')
+  return __('We hold no comps here — showing {0} recorded sales ({1}).', [
+    f.count,
+    f.basis || __('last 2 years'),
+  ])
 })
 
 watch(
