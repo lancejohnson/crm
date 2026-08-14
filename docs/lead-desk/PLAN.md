@@ -155,8 +155,17 @@ purchase (open question: CRM `after_insert` vs earlier in `istl-buyer`).
 - [x] Deployed: `groundworkpro/groundwork-geo`, `/opt/groundwork-geo`,
       `geo-api.service` on 127.0.0.1:**8110** (8100 is Documenso), database
       `geo` on the native PostGIS. `store.py` verified live.
-- [ ] Wire the CRM to it — NOTE loopback does not serve Docker's 172.17.0.1
-- [ ] Enrich in distance order so the map fills from the subject outwards
+- [x] **CRM can reach the service.** A container reaches the host on its OWN
+      bridge gateway — `frappe-crm_default` = **172.20.0.1**, not docker0's
+      172.17.0.1. `bin/serve.sh` resolves it at start (compose subnets are
+      dynamic). Verified: container gets 200, public IP refuses.
+      **Never bind 0.0.0.0 there** — no firewall (ufw inactive, INPUT ACCEPT)
+      on a public IP.
+- [x] Enrich nearest-first, so the parcels around the subject land in seconds
+      rather than after the full ~45 min. **Had to order on `geography`** — KNN
+      on plain `geometry` sorts by DEGREES and was non-monotonic in metres
+      (66m ahead of 53m). Same flaw fixed in `properties_near`.
+- [ ] CRM-side client + `after_insert` warm hook
 - [ ] Parcel enrichment + cookie lifecycle
 - [ ] CRM hook + backfill (stage it — 362 leads × ~3k parcels ≈ 1M rows)
 
