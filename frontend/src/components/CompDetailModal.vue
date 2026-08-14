@@ -235,7 +235,8 @@ watch(
     photoIndex.value = 0
     load()
   },
-  // TodayCompsPanel mounts this with v-if AFTER showDetail is already true. A
+  // CompsView mounts this with v-if on the chosen comp, which is set in the same
+  // tick as `show` — so the component's first render already has show=true. A
   // non-immediate watcher would never see a transition and the gallery would
   // sit forever on its empty fallback despite the endpoint returning photos.
   { immediate: true },
