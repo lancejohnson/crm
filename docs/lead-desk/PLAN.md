@@ -295,9 +295,31 @@ an nginx vhost — not six more containers on a box with ~4 GB free.
 - Tradeoff, accepted: shares the worker/scheduler pool with prod, so a runaway
   test job competes with real work. If that bites, next step is a separate box.
 - Run `docker system prune` first — **~20 GB is reclaimable** (16.5 GB build cache).
-- [ ] `bench new-site`, nginx vhost, TLS
-- [ ] Decide data: fresh, or a sanitised prod copy (phone numbers scrubbed so a
-      test cannot text a real seller)
+- [x] **`crm-test.groundworkpro.com` created** — second site in the existing
+      containers, crm app installed. Cost: one MariaDB database, no new
+      containers.
+- [x] **Fresh, not a prod copy** — and that turned out to be the whole safety
+      story. Every integration is gated on a per-site `site_config` key
+      (`quo_api_key`, `mattermost_token`, `gemini_api_key`, `docuseal_api_token`,
+      `investorlift_*`, `rapidapi_*`, `google_sa_json`, `contract_parser_url`).
+      A fresh site has **none** of them, so nothing can text a seller, post to
+      Mattermost, sign a document or spend an API credit. Verified: the config
+      holds only db/dev keys.
+- [x] Safety posture: `pause_scheduler: 1`, `mute_emails: 1`, `developer_mode: 1`.
+      Frappe also disables the scheduler on a new site by default — belt and
+      braces, because `sequence_drain.drain_due` is on `* * * * *` and
+      `today_board.run_today_sync` on `*/5`, and those send real texts.
+- [x] Prod verified unaffected (876 leads, unchanged) and reachable as before.
+- [x] Reclaimed **16.5 GB** of docker build cache first: 39 GB -> 51 GB free.
+      **Build cache only** — `docker system prune -a` would delete the older
+      `crm:gw*` images, which are the rollback targets.
+- [ ] **DNS record needed**: `crm-test.groundworkpro.com` does not resolve, so
+      there is no browser access and no TLS yet. Until then reach it with a Host
+      header against the backend upstream, or an SSH tunnel:
+          ssh -L 8090:127.0.0.1:8090 groundwork-apps
+          curl -H 'Host: crm-test.groundworkpro.com' localhost:8090/api/method/ping
+      Verified working: returns `{"message":"pong"}`.
+- [ ] nginx vhost + cert once DNS exists
 
 **NOTE — this reverses a standing instruction.** `CLAUDE.md` says the local backend
 mirror was removed 2026-06-19 and "one should not be recreated." That was correct
