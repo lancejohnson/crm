@@ -1686,6 +1686,72 @@ duplicating. Work substantial features in a worktree of your own.
     `EXCLUDE_BY_DEFAULT`), previewing what will actually be pre-selected (e.g.
     "Text these (53)" for a 58-buyer property with 5 Not Interested); the header
     "N buyers" still shows the true filtered total.
+- **Kanban render: the N² is gone** (gw325) — the board was "frequently slow and
+  laggy" and the query was never the reason. Measured on prod: `get_data` returns
+  354 cards in **195ms in-process** and ~400ms over HTTP, but the board then
+  **blocked the main thread for 4,303ms** rendering 268 cards. Cloning and
+  re-laying-out that same 21,000-node DOM by hand takes **110ms**, so ~97% of the
+  cost was JavaScript above the DOM — and it grew as **N²** (108 cards 1,050ms;
+  268 cards 4,303ms; fit T ≈ 5.4ms·N + 0.040ms·N²). Now **linear**: 108 → 275ms,
+  **275 → 519ms (8.3x)**.
+  - **Everything expensive was per-FIELD-per-CARD.** `KanbanCardField` is mounted
+    once per field per card — 7 × 287 = ~2,000 instances — and each one:
+    (a) called `getMeta()`, which built a **fresh `createResource` every call**;
+    (b) ran `getFields()` inside a computed, filtering+mapping all **138** CRM
+    Lead fields through a deep `reactive()` proxy (~276,000 proxied reads, each
+    also **registering a dependency link**); and (c) mounted a `Tooltip` **and** a
+    `Popover` that are invisible until you hover.
+  - **The N² term was a write, not a scan.** `getFields()` did
+    `f.fieldtype = 'User'` on **every call** — a mutation of shared reactive state
+    that all ~2,000 computeds had just subscribed to, so each call invalidated all
+    the others. `stores/meta.js` now memoizes the API object and the derived field
+    list per doctype, reads the **raw** meta (`toRaw`) with a single `metaVersion`
+    ref as the only dependency, and **shallow-copies** the fields that need
+    reshaping instead of mutating the store.
+  - **Don't build what nobody is looking at.** The hover affordances moved into
+    `KanbanCardFieldAction.vue`, mounted on `pointerenter`; the per-card actions
+    `Dropdown` mounts the same way via `HoverMount.vue` (which **replays the click
+    that woke it**, so it still opens on the first click, including on touch). The
+    three counter `Tooltip`s only ever showed a fixed string — a native `title`
+    does that for free, the same trade the Today card documents. Buttons per board
+    **635 → 193**, DOM nodes per card **~84 → ~60**.
+  - `getRow()`/`getRawValue()` scanned the whole row array on **every** call,
+    ~25× per card; both are now Map lookups, and `getRow` memoizes its result
+    (it allocated a fresh `{label}` wrapper each time). Same fix in `Deals.vue`
+    and `Tasks.vue`, which had copies of the pattern.
+  - **GOTCHA — `KanbanView`'s `columns` computed wrote to its own dependency**
+    (`column.column.color = …` inside the getter). Harmless only because statuses
+    always have colours, so the branch never ran; it is now a watcher.
+  - **Realtime no longer refetches the board.** `crm_task_update` and
+    `crm_first_call` are broadcast **site-wide**, so any task anyone completed —
+    **35-116 a day** — made every open board refetch ~300KB and re-render, i.e.
+    the lag was usually caused by somebody ELSE's click. They now refresh the one
+    affected card through the new whitelisted **`crm.api.doc.get_kanban_card`**
+    (verified on prod: one 162ms call, no `get_data`), coalescing bursts over
+    250ms, and fall back to a full reload only when the card changed column,
+    vanished, or the request failed. `PSEUDO_FIELDS` is now a shared constant so
+    the endpoint and `get_data` cannot disagree about what is computed vs stored.
+  - **GOTCHA — the site was on HTTP/1.1 and that, not the server, was most of the
+    cold-load wait.** The SPA is **106 asset requests**; a browser allows ~6
+    connections per origin, so the first API call (`get_users`) sat **3,442ms
+    STALLED** — it is 65ms when a connection is free — and since the bootstrap
+    chains off it, `get_data` wasn't requested until **t=7.1s**. With h2 enabled:
+    stall **6ms**, `get_data` starts at **t=3.1s**. NOTE nginx applies `listen`
+    protocol options **per socket, not per server block**, so this turned on h2
+    for every site on `:443`.
+  - Ops (`../frappe-crm-deploy`, gw325): h2 in `nginx/crm.groundworkpro.com.conf`;
+    gunicorn **2 → 4 workers** via a `command:` override in `docker-compose.yml`
+    (the image hardcodes `--workers=2`; there is no env var) — `gthread` advertises
+    2×4 but Frappe is CPU-bound Python, so the **GIL** means only WORKERS run at
+    once, which is why `get_views` took 719ms during a page load and 62ms alone;
+    and `scripts/setup_kanban_indexes.py`, which adds the missing
+    `(reference_doctype, reference_docname)` index to **`tabCRM Call Log`** and
+    **`tabQuo Message`** — `tabComment` had it, those two didn't, and they were the
+    two slowest queries in `apply_counts` despite holding a third as many rows.
+  - **Still on the table if the board grows**: virtualizing the columns. Nothing
+    above renders fewer cards — they render much more cheaply. Past ~300 cards
+    the honest fix is to stop rendering the off-screen ones.
+
 - **Filters: user pickers, no phantom queries, and a 10x faster kanban**
   (gw222/gw223) — Lance: "filters aren't really working… assigned to isn't
   working really… adding filters in the gui is pretty laggy." Three distinct
