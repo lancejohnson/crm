@@ -142,8 +142,11 @@ purchase (open question: CRM `after_insert` vs earlier in `istl-buyer`).
       priced**. Pills must render without a price.
 - [x] Timing: dense 2-mi sweep ~75s / 49 calls — proves prefetch is mandatory,
       this can never run on page load.
-- [ ] `geo/store.py` — PostGIS persistence (`/properties` currently 501s
-      without `live=true`)
+- [~] `geo/store.py` — written: properties/parcels/sweeps tables, upserts,
+      `properties_near`, `parcels_in_bbox`, `unparcelled_near` enrich queue.
+      **NOT VERIFIED** — never run against live PostGIS. This laptop has Postgres
+      14 while Homebrew PostGIS targets 17/18, and the Docker daemon is down.
+      Next session: `brew install postgresql@17` on a spare port, or start Docker.
 - [ ] Parcel enrichment + WAF cookie lifecycle on a headless box
 - [ ] systemd unit + deploy to `/opt/groundwork-geo`
 - [ ] Parcel enrichment + cookie lifecycle
@@ -240,7 +243,14 @@ and every downstream reader gets a discriminator for free, no schema change.
 SMS has no equivalent yet: `Quo Message` needs a `provider` column (cheaper than
 renaming a doctype with 4,357 rows).
 
-- [ ] Provider-agnostic do-not-contact (**blocks all Telnyx sending**)
+- [x] **Provider-agnostic do-not-contact** (was blocking all Telnyx sending).
+      `record_inbound_opt_out()` takes plain values, not a Quo Message doc, so any
+      provider's inbound handler calls the same rule; `check_inbound_opt_out` is
+      now a thin Quo adapter and `hooks.py` is untouched. Added
+      `is_blocked_number()` — a flag is a statement about a PERSON, and with two
+      providers live the same human can exist as more than one row. Verified on
+      prod read-only: blocks `(602) 320-1169`, `6023201169`, `+16023201169`,
+      `1-602-320-1169`; passes an unrelated number. 10 buyers flagged.
 - [ ] `provider` column on Quo Message; re-stamp `telephony_medium` on Call Log
 - [ ] Per-provider line mapping (extend `CRM Telephony Agent`)
 - [ ] Union both providers in every report before Telnyx carries real traffic
@@ -306,3 +316,6 @@ test site lands, rather than silently contradicting it.
 - Approved: make do-not-contact provider-agnostic (**blocks Telnyx sending**).
 - Built `groundwork-geo` — separate repo, adaptive sweep proven at 9.44x the
   naive call in Indianapolis. Service skeleton verified end to end.
+- Made do-not-contact provider-agnostic + number-keyed; verified against prod.
+- Wrote `geo/store.py` (PostGIS). **Unverified** — no working PostGIS target on
+  this machine. That is the first thing to fix next session.
