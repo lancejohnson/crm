@@ -44,8 +44,23 @@ import requests
 
 SEARCH_URL = "https://api.batchdata.com/api/v1/property/search"
 
-#: Rows to buy. 10 x $0.030 = $0.30/lead. Raising this is a real cost decision.
-TAKE = 10
+#: Rows to buy. 25 x $0.030 = $0.75/lead, against a lead that cost $29 -- 2.6%.
+#:
+#: The cost is not the argument, though; pool size is. Because the response is not
+#: relevance-ordered, `take` decides how much there is to CHOOSE from, and the
+#: choosing is what produces comps. Measured on the Brooklyn lead (3bd, 1444sf,
+#: 1930), best-6 after ranking:
+#:
+#:              mean score   median dist   median $/sf
+#:   take=10       1.91         0.85mi        $788
+#:   take=25       1.19         0.59mi        $919
+#:
+#: FIVE of the best six at take=25 were invisible at take=10 -- including a 3bd
+#: 1544sf 1930 house 0.30mi away, which is very nearly the subject. And the median
+#: $/sf moved 17%, so the smaller pull was not merely "slightly worse comps": it
+#: was a materially different ARV, on a deal where being wrong costs far more than
+#: $0.45.
+TAKE = 25
 
 #: Hard ceiling. Lance: "definitely nothing over 2 mi". compAddress has no radius
 #: control and has been observed matching out to ~3mi, so this is enforced here or
