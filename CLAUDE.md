@@ -1789,9 +1789,43 @@ duplicating. Work substantial features in a worktree of your own.
     Grepping the wrong one made a Tailwind rule that had emitted correctly look
     missing, and nearly sent a working fix back for a redesign. Resolve the
     newest (`ls -t`) before concluding a class didn't compile.
-  - **Still on the table if the board grows**: virtualizing the columns. Nothing
-    above renders fewer cards — they render much more cheaply. Past ~300 cards
-    the honest fix is to stop rendering the off-screen ones.
+  - **A drag no longer refetches the board** (gw329). A CROSS-column drag was
+    always cheap (`applyKanbanDrag` just `set_value`s the status and lets
+    vuedraggable keep the card where it was dropped), but every other drag fell
+    through to `applyKanbanViewUpdate`, which ended in an unconditional
+    `list.reload()`. Reordering two cards inside one column — or dragging a
+    column sideways, or recolouring one — therefore cost a full board round trip
+    plus a full re-render, **~0.5s of frozen board**, to be handed back the
+    arrangement already on screen. The client already knows the answer; the order
+    it is about to persist IS the answer. It now reloads only when the shape of
+    the DATA changes: different `kanban_fields`, a different `column_field` /
+    `title_field`, or a column brought back from deleted (whose cards were never
+    fetched). Measured before → after on a real drag: refetch **yes → no**,
+    blocked main thread **~490ms → 124ms**. The view is still saved either way —
+    verified the reordered order survives a full page reload, which is the check
+    that matters, since skipping the refetch must not skip the save.
+  - **Virtualizing the board is NOT the next win — measured, don't re-litigate.**
+    90% of rendered cards are off-screen (11 of 108 visible at 1200px; 4 of 15
+    columns), which sounds damning, but:
+    - **scrolling is already 60fps** — avg frame **16.6ms**, p95 18.6ms, max
+      18.7ms, horizontally AND vertically inside a column. There is nothing to
+      win. The browser does not care about 6,500 nodes.
+    - **back-navigation already paints from cache.** The list resource carries
+      `cache: [doctype, view, viewType]`, and frappe-ui's `createResource`
+      returns the *same resource with its data intact* on a cache hit. Measured
+      returning from a lead: first card in the DOM at **236ms** while the
+      revalidating `get_data` didn't resolve until 4,058ms — i.e. the network is
+      already off the perceived path (stale-while-revalidate, for free).
+    - and virtualization actively **fights vuedraggable**, which needs the
+      destination column mounted to drop into.
+    The only thing left is ~200ms of off-screen render on a cold board, and the
+    cure is worse than the disease at this size. Revisit only if a column
+    routinely holds many hundreds of cards.
+  - **GOTCHA — don't count network calls with
+    `performance.getEntriesByType('resource')`.** Its buffer caps at 250 entries
+    and silently drops the oldest, so `entries.slice(baselineIndex)` quietly
+    returns the wrong window. It reported "0 API calls" for a drag that had
+    demonstrably saved the view to the database. Wrap `window.fetch` instead.
   - **GOTCHA — measure render in a FOREGROUND tab.** Chrome throttles rAF and
     defers paint in a background tab, so a headless/background harness reports a
     first-contentful-paint of 7.8s for a page that paints in 384ms. Block-time
