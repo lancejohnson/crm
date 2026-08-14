@@ -1759,8 +1759,28 @@ duplicating. Work substantial features in a worktree of your own.
     and hover-revealed at the card's bottom-right, exactly like the copy/pencil
     affordances on the field rows — nothing is hidden at rest, and it hit-tests
     as itself with 11px of clearance. `group/card relative` on the card in
-    `KanbanView.vue` is what the reveal hangs off. (17 busy cards still overflow
-    their counters by ~20px on their own; that is untouched and pre-existing.)
+    `KanbanView.vue` is what the reveal hangs off.
+  - **GOTCHA — a hover-only trigger for a MODAL menu positions itself at (0,0).**
+    reka-ui's dropdown sets `pointer-events: none` on `<body>` while open, so the
+    card instantly loses `:hover`, a `group-hover`-only trigger collapses to
+    `display:none`, and Popper then anchors the open menu to a 0x0 box at the
+    origin — the menu lands in the **top-left corner of the window**, ~750px from
+    the card. reka sets `data-state="open"` on the trigger, so
+    `has-[[data-state=open]]:flex` pins the container open for exactly as long as
+    its menu is. This is the second time this bug has appeared here:
+    `KanbanCardFieldAction` already carries an `editorOpen` ref and a comment
+    saying the same thing about its Popover. Any hover-revealed control that
+    OPENS something needs one of the two.
+  - The counters were also made to fit rather than be clipped: gaps went
+    `gap-1.5 → gap-1` between groups and `gap-1 → gap-0.5` inside them, which
+    recovers ~20px. Verified over 168 cards: **0** with footer overflow, **0**
+    where a counter passes the card edge, worst case (`79↑ 205↓`) 15px clear.
+    The hover chip does still paint over the tail of the last counter on ~31
+    dense cards — hover-only, and the same trade the field-row affordances make.
+  - **GOTCHA — `emptyOutDir: false` means `assets/` holds OLD `index-*.css`.**
+    Grepping the wrong one made a Tailwind rule that had emitted correctly look
+    missing, and nearly sent a working fix back for a redesign. Resolve the
+    newest (`ls -t`) before concluding a class didn't compile.
   - **Still on the table if the board grows**: virtualizing the columns. Nothing
     above renders fewer cards — they render much more cheaply. Past ~300 cards
     the honest fix is to stop rendering the off-screen ones.
