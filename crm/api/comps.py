@@ -883,6 +883,35 @@ def get_lead_comps(lead, radius_mi=None, limit=None, filters=None, auto=0, inclu
 
 	base["total_matched"] = len(matched)
 	base["comps"] = matched[:cap]
+
+	# Nothing of our own anywhere in radius -> buy a small set from BatchData.
+	#
+	# Gated on `total_in_radius`, not on `matched`: matching zero after filtering is
+	# the tier ladder doing its job on inventory we HAVE, and paying to widen a
+	# deliberate filter would be the same broken behaviour the ladder avoids. This
+	# fires only where `CRM Comp` genuinely has nothing -- a ZIP outside the
+	# iSpeedToLead feed, e.g. Brooklyn 11230, which holds 0 rows.
+	#
+	# Costs ~$0.30 (10 rows x $0.030) and is cached 30 days on the lead, including
+	# a negative result, so a rep refreshing the desk does not re-buy it.
+	if not base["total_in_radius"] and subject:
+		try:
+			from crm.api import comps_batchdata
+
+			fallback = comps_batchdata.fetch(doc, lat, lng, subject_facts=subject)
+			if fallback:
+				base["comps"] = fallback
+				base["total_matched"] = len(fallback)
+				base["total_in_radius"] = len(fallback)
+				# Say so out loud. These are bought comps with different provenance
+				# and no listing history, and a rep pricing a deal off them should
+				# know that rather than assume they are our usual inventory.
+				base["comp_source"] = "batchdata"
+				base["fell_through"] = False
+		except Exception:
+			# A paid fallback failing must never take the map down with it.
+			frappe.log_error(frappe.get_traceback(), "comps: BatchData fallback failed")
+
 	return base
 
 
