@@ -197,7 +197,8 @@
 
         <div
           ref="mapEl"
-          class="h-[26rem] w-full overflow-hidden rounded-lg border border-outline-gray-2 bg-surface-gray-1 sm:h-[32rem]"
+          class="w-full overflow-hidden rounded-lg border border-outline-gray-2 bg-surface-gray-1"
+          :class="pageMode ? 'h-[26rem] sm:h-[32rem]' : 'h-[20rem] sm:h-[24rem]'"
         />
 
         <!-- Every comp as a row, because a map answers "where" and a list answers
@@ -273,8 +274,18 @@
             {{ c.distance_mi }} mi
           </td>
           <td class="whitespace-nowrap px-2 py-1.5 text-right">
+            <!-- Photos live one click from the row as well as from the pin: the
+                 list is how you work through comps in order, and having to find
+                 each one's pin again to look at it is the long way round. -->
             <button
-              class="rounded px-1.5 py-0.5 text-xs font-medium"
+              class="rounded px-1.5 py-0.5 text-ink-gray-4 hover:text-ink-gray-7"
+              :title="__('Photos & details')"
+              @click="openCompDetail(c.name)"
+            >
+              <FeatherIcon name="image" class="size-3.5" />
+            </button>
+            <button
+              class="ml-1 rounded px-1.5 py-0.5 text-xs font-medium"
               :class="
                 c.selected
                   ? 'bg-surface-blue-2 text-ink-blue-2'
@@ -328,6 +339,16 @@
           </span>
         </div>
   </div>
+
+  <!-- Photos + Zillow facts for one comp. Mounted here rather than in each host
+       so the map, the list and the Today modal all reach the same gallery. -->
+  <CompDetailModal
+    v-if="detailComp"
+    v-model="showCompDetail"
+    :lead="lead"
+    :comp="detailComp"
+    :subject="data?.subject || null"
+  />
 </template>
 
 <script setup>
@@ -351,11 +372,12 @@
  * Touching any control switches to explicit mode — from then on the server runs
  * exactly what is on screen, even if that matches nothing.
  */
-import { Button, FormControl, call, toast } from 'frappe-ui'
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { Button, FeatherIcon, FormControl, call, toast } from 'frappe-ui'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { zillowUrl } from '@/utils/propertyLinks'
+import CompDetailModal from '@/components/CompDetailModal.vue'
 import FilterIcon from '@/components/Icons/FilterIcon.vue'
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
 
@@ -383,6 +405,7 @@ const data = ref(null)
 const loading = ref(false)
 const radius = ref(2)
 let map = null
+let sizeObserver = null
 
 const radiusOptions = [
   { label: '½ mile', value: 0.5 },
@@ -465,6 +488,10 @@ watch(showDetail, (v) => {
 // Which comp's popup is open — the target for the h / u shortcuts.
 const focusedComp = ref(null)
 const revealHidden = ref(false)
+
+// The comp whose photos/facts are open, if any.
+const detailComp = ref(null)
+const showCompDetail = ref(false)
 
 // The row/pin the pointer is over, in EITHER direction. Kept as a plain name so
 // the map and the table are pointing at one shared idea of "this one".
@@ -1016,9 +1043,17 @@ function popupHtml(c) {
     ? `<div style="margin-top:6px"><a href="${escapeHtml(zurl)}" target="_blank" rel="noopener noreferrer"
          style="color:#2563c9;font-weight:600;text-decoration:underline">${__('Open on Zillow')} ↗</a></div>`
     : ''
+  // Photos are the fastest way to know whether a comp is really comparable —
+  // square footage says nothing about a gutted shell next to a renovated flip.
+  // Full width and above the use/hide row because it is the thing most worth
+  // doing before deciding either.
+  const details = `<button data-comp-details="${escapeHtml(c.name)}" style="width:100%;
+      cursor:pointer;margin-top:8px;font:600 11px/1 ui-sans-serif,system-ui;
+      padding:7px 8px;border-radius:6px;border:1px solid #e5e3de;background:#fff;
+      color:#2563c9">${__('Photos & details')}</button>`
   // Hide / use live in the popup rather than on the pill: a pill is 24px tall and
   // already the click target for "tell me about this one".
-  const actions = `<div style="display:flex;gap:6px;margin-top:8px;padding-top:7px;
+  const actions = `<div style="display:flex;gap:6px;margin-top:6px;padding-top:7px;
       border-top:1px solid #e5e3de">
       <button data-comp-use="${escapeHtml(c.name)}" style="flex:1;cursor:pointer;
         font:600 11px/1 ui-sans-serif,system-ui;padding:6px 8px;border-radius:6px;
@@ -1037,6 +1072,7 @@ function popupHtml(c) {
       ${facts ? `<div style="color:#8a877e;margin-top:2px">${escapeHtml(facts)}</div>` : ''}
       <div style="color:#8a877e;margin-top:2px">${__('{0} mi away', [c.distance_mi])}</div>
       ${zlink}
+      ${details}
       ${actions}
     </div>`
 }
@@ -1162,11 +1198,32 @@ function onPopupClick(e) {
     toggleUse(use.getAttribute('data-comp-use'))
     return
   }
+  const detail = e.target?.closest?.('[data-comp-details]')
+  if (detail) {
+    e.preventDefault()
+    openCompDetail(detail.getAttribute('data-comp-details'))
+    return
+  }
   const hide = e.target?.closest?.('[data-comp-hide]')
   if (hide) {
     e.preventDefault()
     setCompState(hide.getAttribute('data-comp-hide'), 'hidden')
   }
+}
+
+/**
+ * Open one comp's photo gallery + Zillow facts.
+ *
+ * Resolved from `comps` by name rather than passed by reference so the popup
+ * (whose HTML is injected and therefore holds only strings) and the list row
+ * reach the identical object -- and so a reload cannot leave the modal showing a
+ * comp that is no longer on the map.
+ */
+function openCompDetail(name) {
+  const comp = comps.value.find((c) => c.name === name)
+  if (!comp) return
+  detailComp.value = comp
+  showCompDetail.value = true
 }
 
 /** Draft -> the server's filter shape. Blank means "unconstrained", not zero. */
@@ -1377,8 +1434,12 @@ watch(show, (v) => {
 // a Dialog, so the shortcuts would silently never fire. It is turned off here and
 // the modal's own `show` gates them instead. `ignoreTyping` (on by default) is
 // what stops "d" toggling pills while someone types in a filter box.
+//
+// Because that opt-out is blanket, the photo gallery has to be excluded by hand:
+// it is a Dialog stacked on top of this one, and without the guard `h` would hide
+// the very comp whose photos the user is looking at.
 useKeyboardShortcuts({
-  active: () => !!show.value,
+  active: () => !!show.value && !showCompDetail.value,
   skipWhenDialogOpen: false,
   shortcuts: [
     { keys: ['d', 'D'], action: () => (showDetail.value = !showDetail.value) },
@@ -1394,7 +1455,39 @@ useKeyboardShortcuts({
 // the watcher above never fires and the map would sit empty claiming "no comps".
 onMounted(() => {
   if (show.value) nextTick(() => load({ explicit: false }))
+  observeMapSize()
 })
+
+onBeforeUnmount(() => {
+  sizeObserver?.disconnect()
+  sizeObserver = null
+  if (map) {
+    map.remove()
+    map = null
+  }
+})
+
+/**
+ * Re-measure the map whenever its container changes size.
+ *
+ * Leaflet measures once, at init, and a container that was display:none measures
+ * 0x0 -- so a host that keeps this mounted behind a hidden tab (the Today lead
+ * modal) gets tiles crammed into the corner the first time the tab is opened.
+ * The one-shot `invalidateSize` after render() only covers the case where the
+ * container becomes visible within 120ms of loading, which a tab does not.
+ *
+ * Observing the element means every show, hide and window resize fixes itself
+ * and no host has to remember to tell us it revealed the map.
+ */
+function observeMapSize() {
+  if (!mapEl.value || typeof ResizeObserver === 'undefined') return
+  sizeObserver = new ResizeObserver(() => {
+    // Deferred a frame: calling back into layout from inside the callback is what
+    // produces "ResizeObserver loop completed with undelivered notifications".
+    requestAnimationFrame(() => map && map.invalidateSize())
+  })
+  sizeObserver.observe(mapEl.value)
+}
 </script>
 
 <style>

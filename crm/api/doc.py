@@ -10,6 +10,7 @@ from frappe.query_builder.functions import Count, Max
 from frappe.utils import make_filter_tuple
 from pypika import Criterion
 
+from crm.api import dispo_buyers
 from crm.api.views import get_views
 from crm.fcrm.doctype.crm_form_script.crm_form_script import get_form_script
 from crm.utils import get_dynamic_linked_docs, get_linked_docs, is_frappe_version
@@ -22,7 +23,13 @@ COUNT_NAME = (
 
 # Kanban card values that are computed per record in `apply_counts`, not stored.
 # They must never reach frappe.get_list, which would treat them as columns.
-PSEUDO_FIELDS = ("_last_comm", "_next_task_due", "_first_call", "_new_lead_color")
+PSEUDO_FIELDS = (
+	"_last_comm",
+	"_next_task_due",
+	"_first_call",
+	"_new_lead_color",
+	"_dispo_buyers",
+)
 
 
 @frappe.whitelist()
@@ -1009,6 +1016,7 @@ def apply_counts(rows, doctype):
 		meta = lead_meta.get(name, {})
 		d["_first_call"] = meta.get("_first_call", "|")
 		d["_new_lead_color"] = meta.get("_new_lead_color", "")
+		d["_dispo_buyers"] = meta.get("_dispo_buyers")
 
 	return rows
 
@@ -1034,6 +1042,11 @@ def _lead_card_meta(doctype, names):
 	fields = ["name", "status", "creation"]
 	if has_first_call:
 		fields += ["first_call_motivated", "first_call_on_price"]
+	# Location for the disposition-buyer badges. Guarded because these are custom
+	# fields: a site without them still gets a board, just no badges.
+	has_location = frappe.db.has_column("CRM Lead", "property_state")
+	if has_location:
+		fields += ["property_city", "property_state", "property_county"]
 
 	leads = frappe.get_all("CRM Lead", filters={"name": ("in", names)}, fields=fields)
 
@@ -1047,7 +1060,23 @@ def _lead_card_meta(doctype, names):
 		if lead.status == "New" and lead.creation:
 			color = "red" if getdate(lead.creation) < getdate() else "amber"
 
-		meta[lead.name] = {"_first_call": first_call, "_new_lead_color": color}
+		# Pure in-memory dict lookups against a bundled snapshot -- no query, no
+		# network -- so this costs nothing per card. `summary` returns None when
+		# neither buyer covers the area, which keeps "No" off the wire for the
+		# ~42% of leads nobody buys in.
+		buyers = None
+		if has_location:
+			buyers = dispo_buyers.summary(
+				lead.get("property_city"),
+				lead.get("property_state"),
+				lead.get("property_county"),
+			)
+
+		meta[lead.name] = {
+			"_first_call": first_call,
+			"_new_lead_color": color,
+			"_dispo_buyers": buyers,
+		}
 
 	return meta
 

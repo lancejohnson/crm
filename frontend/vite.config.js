@@ -142,12 +142,28 @@ const crmBuildId = buildId()
 // `yarn dev` with no coordination and none of them can land on another's.
 // strictPort stays on either way: a collision must fail, never silently bump
 // onto a port that already belongs to a different worktree.
+// GOTCHA -- this asks by CONNECTING, not by binding, and both halves of that
+// matter. A bind probe got this wrong twice: bound to 127.0.0.1 it misses a
+// server holding only ::1 (vite binds `localhost`, which resolves to ::1 first
+// here), and bound to the wildcard it *still* succeeds, because Node sets
+// SO_REUSEADDR and macOS then lets a wildcard bind coexist with a specific one.
+// Either way we claimed a port another worktree was serving on, and strictPort
+// killed our own start with "Port 8080 is already in use" -- while that port
+// visibly worked in a browser, because it was somebody else's app answering.
+// A successful connection to `localhost` is unambiguous: something is there.
 function portIsFree(port) {
   return new Promise((resolve) => {
-    const s = net.createServer()
-    s.once('error', () => resolve(false))
-    s.once('listening', () => s.close(() => resolve(true)))
-    s.listen(port, '127.0.0.1')
+    const s = net.connect({ port, host: 'localhost' })
+    const done = (free) => {
+      s.destroy()
+      resolve(free)
+    }
+    s.setTimeout(400)
+    s.once('connect', () => done(false))
+    // ECONNREFUSED is the answer we want; a timeout means something is holding
+    // the port open without answering, which is equally not ours to take.
+    s.once('timeout', () => done(false))
+    s.once('error', (e) => done(e.code === 'ECONNREFUSED'))
   })
 }
 async function resolveDevPort() {
