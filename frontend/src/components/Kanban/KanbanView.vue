@@ -81,16 +81,22 @@
             >
               <template #item="{ element: fields }">
                 <component
-                  :is="options.getRoute ? 'router-link' : 'div'"
+                  :is="
+                    options.onClick ? 'a' : options.getRoute ? 'router-link' : 'div'
+                  "
                   :class="[
                     'group/card relative pt-3 px-3.5 pb-2.5 rounded-lg border bg-surface-white text-base flex flex-col text-ink-gray-9',
                     options.cardColor ? dueTint(options.cardColor(fields)) : '',
                   ]"
                   :data-name="fields.name"
                   v-bind="{
-                    to: options.getRoute ? options.getRoute(fields) : undefined,
+                    to:
+                      !options.onClick && options.getRoute
+                        ? options.getRoute(fields)
+                        : undefined,
+                    href: options.onClick ? cardHref(fields) : undefined,
                     onClick: options.onClick
-                      ? () => options.onClick(fields)
+                      ? (e) => options.onClick(fields, e)
                       : undefined,
                   }"
                 >
@@ -196,8 +202,9 @@ import { isTouchScreenDevice, colors, parseColor, dueTint } from '@/utils'
 import Draggable from 'vuedraggable'
 import { Dropdown, Popover } from 'frappe-ui'
 import { computed, watch } from 'vue'
+import { useRouter } from 'vue-router'
 
-defineProps({
+const props = defineProps({
   options: {
     type: Object,
     default: () => ({
@@ -209,6 +216,40 @@ defineProps({
 })
 
 const emit = defineEmits(['update', 'loadMore'])
+
+const router = useRouter()
+
+// The card element is a plain <a> (not <router-link>) whenever the host supplies
+// an onClick, because RouterLink will not let a click handler win: it registers
+// its own navigate handler on the anchor and that runs BEFORE a fallthrough
+// onClick attr, so by the time our handler calls preventDefault the router has
+// already pushed -- guardEvent only checks defaultPrevented at ITS turn, which
+// has passed. Verified live: the handler ran, defaultPrevented was true
+// afterwards, and the page navigated anyway.
+//
+// A real href is kept either way, so cmd/middle-click still opens the record in
+// a background tab (the browser does that natively and never fires our handler).
+// Hosts that pass no onClick keep the original RouterLink and SPA navigation.
+//
+// NOTE none of this may be explained in a comment inside <template #item>:
+// vuedraggable requires each item to have exactly ONE root node, and in dev the
+// compiler keeps comments as vnodes, so a comment there turns the item into a
+// fragment, leaves $el undefined and kills the board with
+// "Cannot read properties of undefined (reading 'updated')".
+//
+// Resolve the destination getRoute already describes into a real URL, so a card
+// that handles its own clicks still behaves like a link for everything the
+// browser does natively: status-bar preview, cmd/middle-click, copy link address.
+function cardHref(fields) {
+  if (!props.options?.getRoute) return undefined
+  try {
+    return router.resolve(props.options.getRoute(fields)).href
+  } catch (e) {
+    // A malformed route must not take the whole board down; the card just stops
+    // being a link and its click handler still works.
+    return undefined
+  }
+}
 
 const kanban = defineModel({ type: Object })
 

@@ -779,21 +779,57 @@ duplicating. Work substantial features in a worktree of your own.
     so the card can be judged without returning to the board.
   - **The Today lead modal is now a qualify + comp + work surface**, without
     replacing the real Activity feed it already mounted. The left rail reuses
-    `FirstCallReadCard` (Motivation × Price 2×2, saved onto the CRM Lead); a
-    horizontal **Comparable homes** strip sits above Activity with the subject
-    baseline and each comp's transparent `N/5 fit` using the SAME type/beds/
-    baths/sqft/year tolerances as the comps preset. Price, facts, differences,
-    distance and listing state are visible without opening anything; selected
-    comps sort first, and **Open all comps** still hands off to the full map page.
-    Clicking a card opens `CompDetailModal`: basic Zillow facts + a scrollable
-    thumbnail/next-prev gallery, while closing it leaves the Today modal and its
-    Activity scroll/state mounted. Details are deliberately LAZY (nothing is
-    billed just for opening a lead): `crm.api.comps.get_comp_details` makes the
-    Zillow property + `/photos` calls only after a click, normalizes one ~1152px
-    URL per image, and caches the result 30 days in Redis (partial failures retry
-    after 1h). No schema/ops piece. `TodayLeadModal.vue` +
-    `TodayCompsPanel.vue` + `CompDetailModal.vue` + `utils/comps.js` +
-    `crm/api/comps.py` / `zillow.py`.
+    `FirstCallReadCard` (Motivation × Price 2×2, saved onto the CRM Lead), and the
+    right column is **two peer tabs, `Activity` and `Comps`** — the second being
+    the REAL `CompsView` map, not a summary of it. Details are deliberately LAZY
+    (nothing is billed just for opening a lead): `crm.api.comps.get_comp_details`
+    makes the Zillow property + `/photos` calls only after a click, normalizes one
+    ~1152px URL per image, and caches the result 30 days in Redis (partial
+    failures retry after 1h). No schema/ops piece. `TodayLeadModal.vue` +
+    `CompDetailModal.vue` + `utils/comps.js` + `crm/api/comps.py` / `zillow.py`.
+    - **`TodayCompsPanel.vue` is GONE** (gw330). It was a horizontal strip of up
+      to 8 comp cards — price, facts, `N/5 fit`, distance — and Lance's verdict
+      was that the list is useless. It is: **a card can say "0.8 mi" but not
+      WHERE**, and which side of the highway a sale is on is most of whether it
+      comps at all. It also re-implemented in miniature what the map already did
+      properly and could not do the things that make the map worth having — no
+      filters, no recency fade, no hide/use, no radius, no ladder notice.
+    - **Tabs, not a taller strip.** The modal's content area is ~655px at 88vh and
+      the map alone needs ~550px with its filter bar, so stacking them would have
+      left the Activity feed a hundred pixels. Both panes stay MOUNTED (`v-show`),
+      so switching costs neither a refetch nor the Activity scroll position, and
+      the pane choice is **not reset per lead** (unlike the Activity sub-tab): a
+      rep comping a run of cards is in comping mode, and dropping them back on the
+      timeline at every card would make them re-click it every time.
+    - Comps mount **lazily on first use of the tab** (`compsOpened`), because a
+      lead we have not looked up in 30 days costs a billed Zillow lookup and
+      nobody should pay it for a lead they opened to read the timeline. The map is
+      keyed on the lead, since `CompsView` loads `onMounted` and has no watcher on
+      its `lead` prop.
+    - Underwriting stays page-only (it needs the room), so the tab bar carries an
+      **Open comps page** button rather than relying on the rep remembering.
+  - **The map absorbed the one thing the strip did better: photos.** The pin popup
+    and every property-list row now open `CompDetailModal` (`data-comp-details`
+    through the same delegated popup-click listener as use/hide). That is a
+    straight win on the full page too, where photos previously did not exist at
+    all — and photos are the fastest way to know a comp is not comparable, since
+    square footage says nothing about a gutted shell beside a renovated flip.
+    - **GOTCHA — `useKeyboardShortcuts` is opted out of `skipWhenDialogOpen` here**
+      (it had to be, back when comps was itself a Dialog), so the gallery had to
+      be excluded from `active` BY HAND. Without it `H` hides the very comp whose
+      photos are on screen.
+    - **GOTCHA — Leaflet measures its container ONCE, at init, and a hidden one
+      measures 0×0.** The existing one-shot `invalidateSize` 120ms after render
+      only covers a container revealed within that window, which a tab is not, so
+      the map arrived crammed in a corner. `CompsView` now owns a **ResizeObserver**
+      on the map element instead — every show/hide/resize re-measures itself and no
+      host has to remember to tell it. The callback defers a frame, or it trips
+      "ResizeObserver loop completed with undelivered notifications".
+    - Verified live at 1200px: map 696×384 with 12/12 OSM tiles painted, 12 comp
+      pills + the Subject pill, identical size after switching to Activity and
+      back (twice), popup → gallery → close leaving the Today modal intact, 0
+      console errors. **Escape does not close the stacked gallery** (✕ does) —
+      pre-existing, the strip nested it the same way.
   - **Filters** cover lead status, priority, incoming texts, and open tasks. A
     draggable **Priority order** modal saves each user's order cross-device via a
     standard Frappe user default (no custom field). Default = Never called → Task
@@ -2869,6 +2905,16 @@ CRM_DEV_TARGET=https://crm.groundworkpro.com yarn dev    # same command in every
   `[crm-dev] worktree "<dir>" (<branch>) -> http://localhost:<port>/crm`.
   Run the identical command in five worktrees and you get five servers. Set
   `CRM_DEV_PORT` only if you want a fixed one; it is then honoured strictly.
+  - **GOTCHA — the free-port probe must CONNECT, not bind** (fixed gw330; it
+    got this wrong two different ways first). Bound to `127.0.0.1` it misses a
+    server holding only `::1`, and vite binds `localhost`, which resolves to
+    `::1` FIRST here — so another worktree's live server read as free. Bound to
+    the wildcard instead it *still* succeeds, because Node sets `SO_REUSEADDR`
+    and macOS lets a wildcard bind coexist with a specific one. Either way we
+    claimed a port someone else was serving on and `strictPort` then killed our
+    OWN start with "Port 8080 is already in use" — while that port visibly
+    worked in a browser, because it was the other agent's app answering. A
+    successful TCP connect to `localhost` is the unambiguous question.
 - **`strictPort: true` regardless.** Vite's default is to bump a busy port,
   which is the dangerous failure: you open 8080 and get a *different
   worktree's* bundle with nothing to indicate it — the same trap as the

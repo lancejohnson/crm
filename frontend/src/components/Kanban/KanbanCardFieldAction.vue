@@ -10,14 +10,46 @@
     287-card board that was ~2,000 copies of everything below, all built up front
     to render affordances that are invisible until you hover.
   -->
+  <!--
+    The backdrop is frosted rather than a solid colour. This chip overlays the
+    right end of the field row, so it genuinely needs to mask the text beneath
+    (an address easily runs past it). But a solid `bg-surface-white` only
+    matches a card whose background IS surface-white: on a due/new tinted card
+    (`dueTint` paints red-400/25 over it) the chip rendered as a flat untinted
+    rectangle sitting on a coloured card, which is what "the edit button isn't
+    centered properly when the card is coloured" was describing -- the geometry
+    was always right, the colour was not.
+
+    `backdrop-blur` composites whatever is actually behind the chip, so it
+    matches the card's own colour for free -- tinted or not, light theme or
+    dark -- and keeps masking the text. No prop-threading of the tint class
+    from KanbanView down through the field slots, and nothing to keep in sync
+    the next time a tint colour is added.
+  -->
   <div
-    class="absolute right-0 top-1/2 -translate-y-1/2 items-center rounded bg-surface-white pl-1"
+    class="absolute right-0 top-1/2 -translate-y-1/2 items-center rounded bg-transparent pl-1 backdrop-blur-sm"
     :class="editorOpen ? 'flex' : 'hidden group-hover/kbf:flex'"
   >
     <!-- Copy: phone & address fields -->
     <Tooltip v-if="action === 'copy'" :text="__('Copy')">
+      <!--
+        The pointer-is-on-me wash DARKENS THE BACKDROP instead of painting an
+        opaque `surface-gray-2`. An opaque grey is only neutral on a card that
+        is actually white; on a tinted card it reappears as exactly the flat
+        off-colour square this chip's backdrop was just fixed to avoid, and
+        that direct-hover state is the one the bug report screenshotted (the
+        Edit tooltip is visible in it, which only happens on direct hover).
+
+        An alpha wash off a semantic token would be the obvious fix and does
+        NOT work: `bg-ink-gray-9/10` silently compiles to nothing, because the
+        ink tokens are bare CSS vars with no <alpha-value> slot. Verified by
+        looking for the rule in the built stylesheet -- it does not exist.
+        A backdrop filter needs no colour at all: it just darkens whatever the
+        card actually is, so it is correct on plain, red and amber cards
+        without naming any of them.
+      -->
       <button
-        class="flex rounded p-1 text-ink-gray-5 hover:bg-surface-gray-2 hover:text-ink-gray-8"
+        class="flex rounded p-1 text-ink-gray-5 hover:backdrop-brightness-90 hover:text-ink-gray-8"
         @click.stop.prevent="copyToClipboard(copyText)"
       >
         <FeatherIcon name="copy" class="h-3.5 w-3.5" />
@@ -33,7 +65,7 @@
       <template #target="{ togglePopover }">
         <Tooltip :text="__('Edit')">
           <button
-            class="flex rounded p-1 text-ink-gray-5 hover:bg-surface-gray-2 hover:text-ink-gray-8"
+            class="flex rounded p-1 text-ink-gray-5 hover:backdrop-brightness-90 hover:text-ink-gray-8"
             @click.stop.prevent="togglePopover()"
           >
             <EditIcon class="h-3.5 w-3.5" />
