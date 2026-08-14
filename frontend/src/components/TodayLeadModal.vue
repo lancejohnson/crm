@@ -83,25 +83,71 @@
             />
           </aside>
 
-          <!-- Keep the lead page's ACTUAL Activity surface mounted. Comps is a
-               compact glance panel above it, not a replacement tab or a second
-               timeline, so calls/texts/to-dos/realtime retain their exact behavior. -->
+          <!-- Activity and the comps MAP are peers here, not a strip stacked above
+               a feed. The horizontal card list this replaced could show eight
+               comps with no sense of where any of them were, which is the one
+               thing that decides whether a sale is comparable; the map answers
+               that first and carries the filters, recency fade, hide/use and
+               photos with it. Both panes stay mounted, so switching costs neither
+               a refetch nor the Activity scroll position, and Activity keeps the
+               lead page's ACTUAL surface — calls, texts, to-dos and realtime
+               behave exactly as they do there. -->
           <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface-white">
-            <TodayCompsPanel
-              v-if="item?.lead"
-              :lead="item.lead"
-              :address="item.address"
-              :active="show"
-            />
-            <Activities
-              v-if="show && item?.lead"
-              :key="item.lead"
-              v-model:tabIndex="tabIndex"
-              doctype="CRM Lead"
-              :docname="item.lead"
-              :tabs="tabs"
-              :scroll-on-mount="false"
-            />
+            <div class="flex shrink-0 items-center gap-4 border-b px-5 sm:px-6">
+              <button
+                v-for="p in panes"
+                :key="p.value"
+                class="-mb-px whitespace-nowrap border-b-2 py-2.5 text-base transition"
+                :class="
+                  pane === p.value
+                    ? 'border-outline-gray-5 font-medium text-ink-gray-9'
+                    : 'border-transparent text-ink-gray-5 hover:text-ink-gray-7'
+                "
+                @click="pane = p.value"
+              >
+                {{ p.label }}
+              </button>
+              <!-- Underwriting deliberately lives only on the full page, so the way
+                   to it has to be visible from here rather than remembered. -->
+              <Button
+                v-if="pane === 'comps' && item?.lead"
+                class="ml-auto"
+                variant="ghost"
+                :label="__('Open comps page')"
+                @click="openCompsPage"
+              >
+                <template #suffix>
+                  <FeatherIcon name="arrow-up-right" class="size-4" />
+                </template>
+              </Button>
+            </div>
+
+            <div
+              v-show="pane === 'activity'"
+              class="flex min-h-0 flex-1 flex-col overflow-hidden"
+            >
+              <Activities
+                v-if="show && item?.lead"
+                :key="item.lead"
+                v-model:tabIndex="tabIndex"
+                doctype="CRM Lead"
+                :docname="item.lead"
+                :tabs="tabs"
+                :scroll-on-mount="false"
+              />
+            </div>
+
+            <!-- Mounted only once the pane has actually been opened: comps cost a
+                 server round trip and, on a lead we have not looked up before, a
+                 billed Zillow lookup. Nobody should pay that for a lead they only
+                 opened to read the timeline. -->
+            <div
+              v-if="compsOpened && show && item?.lead"
+              v-show="pane === 'comps'"
+              class="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5"
+            >
+              <CompsView :key="item.lead" :lead="item.lead" :address="item.address" />
+            </div>
           </div>
         </div>
 
@@ -118,11 +164,11 @@
 
 <script setup>
 import Activities from '@/components/Activities/Activities.vue'
+import CompsView from '@/components/CompsView.vue'
 import FirstCallReadCard from '@/components/FirstCallReadCard.vue'
-import TodayCompsPanel from '@/components/TodayCompsPanel.vue'
 import { callHref, formatPhone } from '@/utils/phoneFormat'
 import { Badge, Button, Dialog, FeatherIcon, call } from 'frappe-ui'
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 const props = defineProps({
@@ -134,6 +180,19 @@ const show = defineModel({ type: Boolean })
 const router = useRouter()
 const tabIndex = ref(0)
 const tabs = [{ name: 'Activity', label: __('Activity') }]
+
+// Which pane is open. Deliberately NOT reset per lead, unlike the Activity tab
+// below: a rep comping a run of leads is in comping mode, and dropping them back
+// on the timeline at every card would make them re-click it every time.
+const pane = ref('activity')
+const panes = computed(() => [
+  { value: 'activity', label: __('Activity') },
+  { value: 'comps', label: __('Comps') },
+])
+const compsOpened = ref(false)
+watch(pane, (v) => {
+  if (v === 'comps') compsOpened.value = true
+})
 const leadDoc = ref(null)
 const leadLoading = ref(false)
 const leadCache = new Map()
@@ -181,5 +240,14 @@ function openFullLead() {
   if (!props.item?.lead) return
   show.value = false
   router.push({ name: 'Lead', params: { leadId: props.item.lead } })
+}
+
+// A new tab, matching both Lead pages: the comps page is something a rep leaves
+// open beside the board, and navigating away would close the card they are on.
+function openCompsPage() {
+  if (!props.item?.lead) return
+  const win = window.open(`/crm/leads/${props.item.lead}/comps`, '_blank')
+  if (win) win.opener = null
+  else router.push({ name: 'Comps', params: { leadId: props.item.lead } })
 }
 </script>
