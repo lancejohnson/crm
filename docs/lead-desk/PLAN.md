@@ -147,8 +147,16 @@ purchase (open question: CRM `after_insert` vs earlier in `istl-buyer`).
       **NOT VERIFIED** — never run against live PostGIS. This laptop has Postgres
       14 while Homebrew PostGIS targets 17/18, and the Docker daemon is down.
       Next session: `brew install postgresql@17` on a spare port, or start Docker.
-- [ ] Parcel enrichment + WAF cookie lifecycle on a headless box
-- [ ] systemd unit + deploy to `/opt/groundwork-geo`
+- [x] **Parcel enrichment — and the WAF cookie turned out to be unnecessary.**
+      60 parcels at 6.6/s from the box with NO cookie: 59 polygons, 1 no-polygon,
+      0 errors, zero 403s. lux's Playwright requirement does not apply at our
+      rates. `enrich.py` is cookie-optimistic and stops cleanly on 403.
+      Cost: ~45 min to fully enrich a dense 2-mile neighbourhood.
+- [x] Deployed: `groundworkpro/groundwork-geo`, `/opt/groundwork-geo`,
+      `geo-api.service` on 127.0.0.1:**8110** (8100 is Documenso), database
+      `geo` on the native PostGIS. `store.py` verified live.
+- [ ] Wire the CRM to it — NOTE loopback does not serve Docker's 172.17.0.1
+- [ ] Enrich in distance order so the map fills from the subject outwards
 - [ ] Parcel enrichment + cookie lifecycle
 - [ ] CRM hook + backfill (stage it — 362 leads × ~3k parcels ≈ 1M rows)
 
