@@ -400,84 +400,65 @@ test site lands, rather than silently contradicting it.
 
 ---
 
-## BatchData comps fallback (decided 2026-08-14: AUTOMATIC when comps = 0)
+## BatchData comps fallback — SHIPPED (gw336), one module
 
-`CRM Comp` covers only iSpeedToLead ZIPs — **0 rows for Brooklyn 11230**, which is
-why the first desk verification showed an empty map. When `get_lead_comps` returns
-zero, fall back to BatchData automatically (Lance's call — not a button).
+`CRM Comp` only covers iSpeedToLead ZIPs. Sampling the 45 most recent leads,
+**18% land on an empty map** — Brooklyn 11230 holds 0 rows. When nothing of ours
+is in radius we buy a small set from BatchData. Automatic (Lance's call).
 
-Key: `BATCHDATA_API_KEY` (Infisical). Endpoint
-`POST https://api.batchdata.com/api/v1/property/search`, same one `pull_tax_info`
-already uses. Rate limit header `x-ratelimit-limit: 3000`; a `take:5` call
-decremented remaining by **1**, so billing looks per-REQUEST not per-record —
-unlike Regrid. Confirm before turning it loose.
+### TWO AGENTS BUILT THIS INDEPENDENTLY — read this before touching it
 
-### GOTCHA — `geoLocation` / `radiusMiles` is SILENTLY IGNORED
+`batchdata_comps.py` (kept) and `comps_batchdata.py` (deleted) existed at once,
+near-identical names, incompatible config keys and cache fields. The in-flight
+check exists to prevent exactly this and did not, because the other agent's work
+was on an unpushed branch on the MBP.
 
-```json
-{"searchCriteria":{"geoLocation":{"latitude":40.6195,"longitude":-73.9623,
-                                  "radiusMiles":0.5},
-                   "quickLists":["recently-sold"]},"options":{"take":5}}
-```
-returns **HTTP 200 with 5 properties** — in Austin, Miami and elsewhere. It matched
-only `quickLists` and ignored the geography entirely. No error, no warning. Built
-on this, a Brooklyn lead would have shown Miami comps on the map and poisoned the
-ARV. Same failure family as Redfin's silent cap: a plausible answer to a question
-that was never asked.
+**`batchdata_comps.py` won**, and the deciding reason was not style: it sets
+`selected` / `hidden` / `recency_days` on every comp, so the map's hide-use
+buttons and recency fade keep working. The deleted one did not — its comps would
+have rendered as un-hideable pills that never faded.
 
-### The shape that actually works: bare ZIP in `query`
+Ported in from the deleted one:
+- **`DEFAULT_TAKE = 25`.** Not affordability. The response is NOT
+  relevance-ordered, so `take` decides how much there is to CHOOSE from.
+  Measured, Brooklyn lead (3bd/1444sf/1930), best-6 after ranking:
+  take=10 -> mean score 1.91, median 0.85mi, median $788/sf;
+  take=25 -> mean score 1.19, median 0.59mi, median $919/sf.
+  **Five of the best six were invisible at take=10** and the median $/sf moved
+  **17%** — a different ARV, not tidier comps.
+- **`MAX_MILES = 2.0`, dropping not padding.** `compAddress` has no radius
+  control and has been seen matching to ~3mi.
+- **Shape ranking** (distance dominant, sqft/beds/year adjust). The provider
+  returns no similarity score. A missing fact is never scored as a bad match, or
+  every sparse row sinks.
 
-| criteria | result |
-|---|---|
-| `{"query":"11230"}` | **5/5 in ZIP 11230, Brooklyn** ✅ |
-| `{"address":{"zip":"11230"}}` | HTTP **400** |
-| `{"query":"Brooklyn, NY 11230"}` | Brooklyn, but ZIPs 11215/11231/11235/11201 — city matched, ZIP did not constrain |
+### Names — one of each, the orphans are gone
+    config     batchdata_comps_api_key        (site_config)
+    cache      CRM Lead.batchdata_comps       {"t": ..., "comps": [...]}
+    stamp      CRM Lead.batchdata_comps_fetched_at
+    TTL        90d hit / 14d miss
+`batchdata_comps_key` and `batchdata_comps_at` were mine and have been dropped
+from prod. **The two modules stored different JSON shapes in the same field** —
+a bare list vs `{"t","comps"}` — so a payload written by the deleted module is
+unreadable by the survivor. Verified 0 remain.
 
-So scope by **bare ZIP string**, then trim by true distance using each result's
-`address.latitude/longitude`. ZIP-level is the right grain anyway: `CRM Comp`
-is already organised by ZIP.
+### Traps, all paid for
+- **`geoLocation`/`radiusMiles` is SILENTLY IGNORED.** HTTP 200, properties from
+  other states. Only `compAddress` constrains geography.
+- **`sale.lastSaleDate` accepts `minDate`/`maxDate` ONLY.** min/max, start/end,
+  from/to, gte/lte and ISO datetimes all fail "Invalid Date", and an
+  unrecognised key is silently ignored — paying for stale rows, never told.
+- **Prices are `sale.lastSale.price`, NOT `deedHistory`** (this token returns no
+  deedHistory at all). Reading deedHistory makes every comp look $0.
+- **Two tokens, 21x apart**: `BATCHDATA_COMPS_API_KEY` $0.030/row vs
+  `BATCHDATA_API_KEY` $0.640/row. Billing is **per row returned**, verified by
+  wallet-balance deltas — not per request, which a rate-limit header wrongly
+  suggested.
 
-Useful fields per property: `building.{bedroomCount,bathroomCount,
-livingAreaSquareFeet,yearBuilt}`, `deedHistory[]` with real `salePrice`/`saleDate`
-(better than RealEstateAPI, which returns `lastSalePrice: 0` in non-disclosure
-states), `valuation`, `address.{latitude,longitude}`.
-
-- [x] **Built** — `crm/api/comps_batchdata.py`, wired into `get_lead_comps`.
-      `take=25` (~$0.75), hard 2-mile cap that DROPS rather than pads, ranked
-      client-side, keep 6. Fires only when `total_in_radius == 0`.
-- [x] **Billing is PER ROW, not per request** — my earlier per-request guess from
-      the rate-limit header was wrong; QUIRKS.md says so plainly. Two tokens:
-      `BATCHDATA_COMPS_API_KEY` $0.030/row vs `BATCHDATA_API_KEY` $0.640/row.
-      The module reads `batchdata_comps_key` and **will not** fall back to the
-      expensive one.
-- [x] **25 rows beats 10 — measured**, and not on cost grounds. The response is
-      not relevance-ordered, so `take` sets how much there is to choose from.
-      Brooklyn lead (3bd/1444sf/1930), best-6 after ranking:
-      take=10 -> mean score 1.91, median 0.85mi, median $788/sf
-      take=25 -> mean score 1.19, median 0.59mi, median $919/sf
-      **5 of the best 6 were invisible at take=10**, and the median $/sf moved
-      17% — a different ARV, not just tidier comps.
-- [x] **Ops script written**: `../frappe-crm-deploy/scripts/setup_batchdata_comps.py`
-      (committed + pushed). Dry-run verified against prod — both fields absent,
-      both would be added.
-- [ ] **GO LIVE — one deliberate act, because it starts spending:**
-      1. `python3 scripts/setup_batchdata_comps.py`
-      2. `bench --site crm.groundworkpro.com set-config batchdata_comps_key <BATCHDATA_COMPS_API_KEY>`
-      3. deploy the app code (`crm/api/comps_batchdata.py` + the `comps.py` hook)
-      Script deliberately NOT run yet: creating the fields and setting the key is
-      the moment money starts moving, and that should be intentional rather than a
-      side effect. The app self-disables until both exist.
-- [x] **AVM comps are dropped, not labelled.** Reading `CompsView` first showed a
-      label was insufficient: `isActive()` matches `"active"` exactly, so
-      `"estimate"` fell through to `OFF_MARKET` — the colour that file defines as
-      *"an actual transaction"*. An AVM was pixel-identical to a confirmed sale.
-      Deeper problem: averaging AVMs into a $/sf ARV is circular. So a comp with
-      no recorded sale price is dropped; the AVM rides along as `avm` context
-      only. Costs nothing measurable at take=25 — Brooklyn 25/25 kept, San
-      Antonio (non-disclosure, the hard case) 16/25 kept, both >> the 6 shown.
-
-
----
+### Live, verified on prod
+`{'source':'batchdata','used':True,'count':6,'basis':'last 2 years'}` — six
+Brooklyn comps 0.21-0.75mi, all 3bd against a 3bd subject, 1248-1727sf against
+1444, none over the cap, hide/select/recency populated. ~$0.75/lead, cached.
 
 ## Deploy readiness (2026-08-14)
 
