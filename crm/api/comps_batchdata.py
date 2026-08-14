@@ -148,12 +148,25 @@ def _shape(p, subject_lat, subject_lng, haversine):
 	if dist > MAX_MILES:
 		return None
 
-	# Prefer a real recorded sale; fall back to the AVM and say so via `status`.
+	# A comp must be a TRANSACTION. If BatchData has no recorded sale price we drop
+	# the property rather than substituting its AVM.
+	#
+	# Two reasons, and the second is the serious one:
+	#
+	# 1. Averaging AVMs to derive an ARV is circular — it is a model's opinion of
+	#    value being laundered into evidence of value.
+	# 2. The map has exactly two visual states, and `isActive()` matches "active"
+	#    exactly, so anything else renders slate — the colour whose own definition
+	#    in CompsView is "off-market = an actual transaction". An AVM-priced comp
+	#    would therefore be pixel-identical to a confirmed sale. A rep cannot be
+	#    expected to price a deal correctly off a distinction the UI does not draw.
+	#
+	# Dropping them fails visibly (fewer comps) instead of misleadingly (fake ones).
+	# The AVM is still carried as context for the popup, never as the price.
 	price = _num(sale.get("price"))
-	status = "sold"
 	if not price:
-		price = _num(val.get("estimatedValue"))
-		status = "estimate"
+		return None
+	status = "sold"
 
 	street = (addr.get("street") or "").strip()
 	if not street:
@@ -179,6 +192,8 @@ def _shape(p, subject_lat, subject_lng, haversine):
 		"removed_date": (sale.get("saleDate") or "")[:10] or None,
 		"distance_mi": round(dist, 2),
 		"source": "batchdata",
+		# Context only. Never the comp price — see the drop rule above.
+		"avm": _num(val.get("estimatedValue")),
 	}
 
 
@@ -200,8 +215,6 @@ def _score(c, subj):
 	s_yr, c_yr = subj.get("year_built"), c.get("year_built")
 	if s_yr and c_yr:
 		score += min(abs(c_yr - s_yr) / 50.0, 1.0) * 0.3
-	if c.get("status") == "estimate":
-		score += 0.5  # a real sale outranks an AVM at equal distance
 	return score
 
 
