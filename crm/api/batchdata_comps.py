@@ -62,7 +62,24 @@ CONF_KEY = "batchdata_comps_api_key"
 
 #: Lance's call, from the session that specified this: "pull the most similar
 #: five-ten". Ten is the top of that range and still only $0.30.
-DEFAULT_TAKE = 10
+#: 25 x $0.030 = $0.75/lead, against a lead that cost $29. Cost is not the
+#: argument though — the response is NOT relevance-ordered, so `take` decides how
+#: much there is to CHOOSE from, and the choosing is what makes them comps.
+#: Measured on a Brooklyn lead (3bd/1444sf/1930), best-6 after ranking:
+#:     take=10 -> mean score 1.91, median 0.85mi, median $788/sf
+#:     take=25 -> mean score 1.19, median 0.59mi, median $919/sf
+#: FIVE of the best six at 25 were invisible at 10, and the median $/sf moved
+#: 17% — a different ARV, not merely tidier comps.
+DEFAULT_TAKE = 25
+
+#: Hard ceiling on how far a "comp" may be. `compAddress` has NO radius control
+#: and has been observed matching out to ~3mi, so this is enforced by us or not at
+#: all. It DROPS rather than pads: four honest comps beat ten with three from
+#: across town.
+MAX_MILES = 2.0
+
+#: How many survive ranking and reach the map.
+KEEP = 6
 
 #: Two years, not one. Measured on a real San Antonio subject: a 12-month window
 #: left 3 usable comps and read ~4% low, while 2 years gave 9-11 and converged.

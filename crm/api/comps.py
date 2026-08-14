@@ -924,6 +924,30 @@ def _batchdata_fallback(doc, base):
 		c["selected"] = False
 		c["hidden"] = False
 		c["recency_days"] = _recency_days(c, frappe.utils.today())
+
+	# BatchData applies no radius and returns no similarity score, so both are ours
+	# to impose. Drop first: a comp 2.8mi away is not a comp here, and padding the
+	# list with one is worse than showing five.
+	comps = [c for c in comps if c["distance_mi"] <= batchdata_comps.MAX_MILES]
+
+	# Then rank on shape, not just proximity. Distance still dominates because it is
+	# the one fact always present; sqft and beds are frequently missing, and a
+	# missing fact must not score as a bad match or every sparse row sinks.
+	subj = base.get("subject") or {}
+	s_sqft, s_beds, s_year = subj.get("sqft"), subj.get("beds"), subj.get("year_built")
+
+	def _fit(c):
+		score = c["distance_mi"] * 2.0
+		if s_sqft and c.get("square_footage"):
+			score += abs(c["square_footage"] - s_sqft) / max(s_sqft, 1) * 1.5
+		if s_beds and c.get("bedrooms"):
+			score += abs(c["bedrooms"] - s_beds) * 0.3
+		if s_year and c.get("year_built"):
+			score += min(abs(c["year_built"] - s_year) / 50.0, 1.0) * 0.3
+		return score
+
+	comps.sort(key=_fit)
+	comps = comps[: batchdata_comps.KEEP]
 	comps.sort(key=lambda r: r["distance_mi"])
 
 	base["comps"] = comps
