@@ -140,19 +140,83 @@ purchase (open question: CRM `after_insert` vs earlier in `istl-buyer`).
 - [ ] Save determination (needs schema)
 - [ ] Shortcuts + palette contributions
 
-### 3. Telnyx migration
-Replaces Quo/OpenPhone. Unblocks the live copilot.
-- Media Streaming: `stream_url` wss + `stream_track: both_tracks` (separate rep/seller
-  tracks — speaker separation free, unlike Quo where it's guessed).
-- Codecs: L16 16 kHz recommended for AI (no transcoding overhead).
-- Telnyx ships reference integrations for Deepgram + OpenAI speech-to-speech.
-- [ ] Scope what depends on Quo today (big: sms.py, call logs, webhooks, contacts sync)
+### 3. Telnyx migration — its own project, bigger than the lead desk
+Replaces Quo/OpenPhone entirely. Unblocks the live copilot.
 
-### 4. Test environment
-Prod is currently the only backend — the Vite dev server proxies to it. That was
-acceptable for pure-frontend work and is **not** acceptable for telephony (real
-calls, real money) or a data service that writes.
-- [ ] Decide shape (see open questions)
+**Media Streaming** (verified 2026-08-14)
+- `stream_url` wss + `stream_track: both_tracks` — rep and seller on **separate
+  tracks**, so speaker separation is free. Today `call_transcript.py` infers it
+  heuristically (`speaker` → `userId` → last-10-digit match).
+- Codecs: PCMU/PCMA/G722/OPUS/AMR-WB/**L16 16 kHz**. L16 is the one Telnyx calls
+  out for AI — no transcoding overhead. Chunks 20ms–30s. 1 bidirectional RTP
+  stream per call.
+- Telnyx ships reference integrations for **Deepgram** and **OpenAI
+  speech-to-speech** (`team-telnyx/demo-node-telnyx/websocket-demos`).
+
+**Frappe CRM already has a telephony FRAMEWORK — use it, don't reinvent**
+- `crm/integrations/api.py` — `telephony_medium` abstraction,
+  `_get_recording_credentials(medium)`, `is_call_integration_enabled()`.
+- **`CRM Telephony Agent`** doctype = per-user default calling medium.
+- `components/Telephony/CallUI.vue` (generic) + `TwilioCallUI.vue` (provider skin);
+  `composables/twilio.js`; `Settings/Telephony/*`.
+- `twilio/api.py` `generate_access_token()` → **browser softphone over WebRTC**.
+  Telnyx's `@telnyx/webrtc` fits the same slot.
+- Ships with **twilio + exotel only — there is NO Telnyx provider**. We write it.
+- **Our Quo integration bypasses this framework entirely** (own doctype, own
+  webhooks, own UI). Moving to Telnyx along these seams pulls us back toward
+  upstream, which helps future rebases off frappe/crm.
+- The framework covers **calls only**. SMS stays ours — just repointed.
+
+**Surface to migrate (measured)**
+- **30+ app files**, **20+ ops files**, `Quo Message` = **4,357 rows**.
+- Heaviest: `quo_contacts.py` (92 refs), `activity_progress.py` (26), `sms.py` (25).
+- Categories: SMS inbox + per-lead threads + bulk text + buyer texts · call logs ·
+  recordings · transcripts · AI review · call classification · contact two-way sync ·
+  activity report · standup · intraday pulse · do-not-contact · agreement notifications.
+
+**Non-obvious dependencies that WILL break if forgotten**
+- `investorlift_2fa.py` — the IL scraper captures its 2FA codes from **inbound SMS**
+  through the Quo webhook. Losing it silently breaks the InvestorLift sync.
+- `agreement_notify.py` — sends from a dedicated "Notifications" line
+  (+1 952 395 3833), not a rep line.
+- `do_not_contact.py` — opt-out keyword detection runs on `Quo Message` after_insert.
+- Sequence texts + `sequence_drain.py`.
+- `User.custom_quo_number` — per-user sending line, threaded through many surfaces.
+- The `caller` → `receiver` → `custom_quo_number` attribution chain is shared by
+  `activity_progress.py`, `today_pulse.py` and `lead_owner_backfill.py`. They must
+  keep agreeing about whose call it was.
+- **Direction matters**: `userId` is the dialer on OUTGOING calls but the LINE owner
+  on INCOMING. Any Telnyx mapping must preserve that distinction (gw303).
+
+**Strategy**
+- `CRM Call Log` is already the stable interface — the Quo mirror writes into it and
+  everything downstream reads it. Keep that boundary; swap what fills it.
+- [ ] Provider abstraction for SMS mirroring the calls one
+- [ ] `crm/integrations/telnyx/` + `TelnyxCallUI.vue` + settings doctype
+- [ ] Port number inventory + per-user line mapping
+- [ ] Cutover plan (parallel-run window? historical `Quo Message` stays read-only?)
+
+### 4. Test environment — DECIDED: second Frappe site
+Prod is currently the only backend — the Vite dev server proxies to it. Fine for
+pure-frontend work, **not** fine for telephony (real calls, real money) or a data
+service that writes.
+
+**Shape:** `crm-test.groundworkpro.com` as a second site inside the *existing*
+containers. Frappe is natively multi-site, so this costs one MariaDB database and
+an nginx vhost — not six more containers on a box with ~4 GB free.
+- Telnyx test numbers point their webhooks here. **Never at prod.**
+- Tradeoff, accepted: shares the worker/scheduler pool with prod, so a runaway
+  test job competes with real work. If that bites, next step is a separate box.
+- Run `docker system prune` first — **~20 GB is reclaimable** (16.5 GB build cache).
+- [ ] `bench new-site`, nginx vhost, TLS
+- [ ] Decide data: fresh, or a sanitised prod copy (phone numbers scrubbed so a
+      test cannot text a real seller)
+
+**NOTE — this reverses a standing instruction.** `CLAUDE.md` says the local backend
+mirror was removed 2026-06-19 and "one should not be recreated." That was correct
+when this was frontend-only work against prod data. It stops being correct once we
+place real calls and write parcel data. Amend that line with the reason when the
+test site lands, rather than silently contradicting it.
 
 ---
 
@@ -166,6 +230,12 @@ calls, real money) or a data service that writes.
 3. **Copilot scope for v1** — now that live is possible, how much of it is live
    transcription vs. screen-driven commands?
 4. **Geo repo name/location** — `groundwork-geo`? Under `~/Projects/Groundwork/`.
+5. **Telnyx cutover shape** — do we port existing numbers (rep continuity, but a
+   porting window where texts can drop), or stand up new Telnyx numbers and run
+   both in parallel? Affects whether `Quo Message` history stays live or archives.
+6. **Does the live copilot run on the Telnyx stream, or on the CRM?** The websocket
+   consumer has to live somewhere reachable by Telnyx. Candidate: the geo service
+   grows a sibling, or its own small service.
 
 ---
 
