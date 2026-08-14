@@ -453,19 +453,51 @@
           exactly as long as the menu is. KanbanCardFieldAction solves the same
           problem with its `editorOpen` ref; this is the CSS equivalent.
         -->
+        <!--
+          No background. It carried `bg-surface-white` to mask the counters it
+          used to sit on top of, back when the email counter made this row
+          229-258px wide inside a 238px footer. gw328 stopped rendering that
+          counter (this site has never had a single Communication row), and the
+          row is now short enough that the chip clears it outright: measured
+          over all 113 cards on the board, the SMALLEST gap between the end of
+          the counters and the start of this chip is 46px, on the busiest card
+          there is ("21^ 5v . 79^ 205v").
+
+          So the mask no longer hides anything -- it only painted a flat
+          untinted rectangle onto every due/new tinted card, which is half of
+          what "the + isn't centered properly when the card is coloured" was
+          reporting. Dropping it lets the card's own tint show through.
+        -->
         <div
-          class="absolute -right-1 top-1/2 hidden -translate-y-1/2 items-center rounded bg-surface-white pl-1 group-hover/card:flex has-[[data-state=open]]:flex"
+          class="absolute -right-1 top-1/2 hidden -translate-y-1/2 items-center rounded pl-1 group-hover/card:flex has-[[data-state=open]]:flex"
         >
+          <!--
+            `variant="ghost"` hovers to an OPAQUE surface-gray-3, which is only
+            neutral on a white card; on a tinted one it paints back the same
+            flat off-colour square the wrapper above just stopped painting.
+            Darkening the backdrop instead needs no colour token, so it is
+            correct on plain, red and amber cards and in both themes. The `!`
+            is what beats the variant's own hover background; without killing
+            that the filter would just tint an opaque grey square.
+          -->
           <HoverMount @click.stop.prevent>
             <Dropdown
               class="flex items-center gap-2"
               :options="actions(itemName)"
               variant="ghost"
             >
-              <Button icon="plus" variant="ghost" />
+              <Button
+                icon="plus"
+                variant="ghost"
+                class="hover:!bg-transparent hover:backdrop-brightness-90"
+              />
             </Dropdown>
             <template #placeholder>
-              <Button icon="plus" variant="ghost" />
+              <Button
+                icon="plus"
+                variant="ghost"
+                class="hover:!bg-transparent hover:backdrop-brightness-90"
+              />
             </template>
           </HoverMount>
         </div>
