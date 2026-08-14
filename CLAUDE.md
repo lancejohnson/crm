@@ -1748,9 +1748,48 @@ duplicating. Work substantial features in a worktree of your own.
     `(reference_doctype, reference_docname)` index to **`tabCRM Call Log`** and
     **`tabQuo Message`** — `tabComment` had it, those two didn't, and they were the
     two slowest queries in `apply_counts` despite holding a third as many rows.
+  - **The card's "+" menu left the flow** (gw327). The three counters are
+    229-258px inside a 238px footer, so `justify-between` had nowhere to put the
+    button and pushed it **27px past the card's right edge**, where the next
+    column covers it — `elementFromPoint` returned the neighbouring column for
+    all but ~4px of it. Clipping the counters to make room was tried and
+    **reverted**: it kept the button inside (0 of 108 cards overflowing) but hid
+    the email counter on **every** card, and trading a fiddly button for
+    permanently missing information is the worse deal. The button is now absolute
+    and hover-revealed at the card's bottom-right, exactly like the copy/pencil
+    affordances on the field rows — nothing is hidden at rest, and it hit-tests
+    as itself with 11px of clearance. `group/card relative` on the card in
+    `KanbanView.vue` is what the reveal hangs off. (17 busy cards still overflow
+    their counters by ~20px on their own; that is untouched and pre-existing.)
   - **Still on the table if the board grows**: virtualizing the columns. Nothing
     above renders fewer cards — they render much more cheaply. Past ~300 cards
     the honest fix is to stop rendering the off-screen ones.
+  - **GOTCHA — measure render in a FOREGROUND tab.** Chrome throttles rAF and
+    defers paint in a background tab, so a headless/background harness reports a
+    first-contentful-paint of 7.8s for a page that paints in 384ms. Block-time
+    measurements happened to survive it (before/after were measured identically),
+    but any absolute timing taken in a background tab is not real.
+  - **`get_data` is not fired "late" in normal use** — measured warm, foreground:
+    FCP **384ms**, the nine bootstrap calls fire in PARALLEL at ~310ms and finish
+    by ~425ms, `get_data` runs **724ms → 1508ms**, everything done by 1.76s. The
+    t=2.8s/7.1s figures quoted during diagnosis were a cold asset cache right
+    after a deploy (every chunk re-hashes) plus background-tab throttling. In-app
+    navigation doesn't re-run the bootstrap at all: lead → board is ~220ms of
+    render. So the cold-load waterfall was never what "laggy" meant.
+
+- **Stale quick-filter searches on personal views** (gw327) — typing in the
+  "Full Name" box writes `lead_name LIKE %…%` into your saved standard view and
+  leaves it there. Intended (views remember filters) and visible (`quickFilterList`
+  seeds the box back), but in practice people search one lead, navigate away, and
+  never clear it. Found on prod 2026-08-14: **German's kanban was showing 1 of 353
+  leads** (`%simmons%`, set the previous morning), **Exe's 1 of 353** (`%shel%`),
+  and German's list 5 of 353 (`%patrick%`). Both setters had effectively lost
+  their board. Cleared with ops `scripts/clear_stale_view_searches.py` (dry-run by
+  default, `--apply` to write); both boards are back to 108 cards / 15 columns.
+  Deliberately narrow: only `lead_name` LIKE, only PERSONAL views (never a public
+  one like the ISTL LeadPack boards, which are filtered on purpose), and only that
+  one key is dropped so a deliberate status filter alongside it survives. **Worth
+  re-running if someone says the board "is empty" or "lost my leads".**
 
 - **Filters: user pickers, no phantom queries, and a 10x faster kanban**
   (gw222/gw223) — Lance: "filters aren't really working… assigned to isn't

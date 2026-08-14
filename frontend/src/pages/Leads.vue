@@ -357,15 +357,19 @@
         pointless until aimed at, so it is mounted on approach.
       -->
       <!--
-        KNOWN, PRE-EXISTING: the three counters are 229-258px wide inside a 238px
-        card footer, so `justify-between` pushes the "+" past the card's right
-        edge where the next column covers all but a few clickable pixels. Left
-        alone deliberately — the only ways to fix it are to hide a counter, clip
-        one, or float the button over the card, and all three change what the
-        card SHOWS. That is a product call, not something to slip into a
-        performance change.
+        The three counters are 229-258px wide inside a 238px card footer, so
+        while the "+" was in flow `justify-between` had nowhere to put it and
+        pushed it PAST the card's right edge, where the neighbouring column
+        covers all but ~4 clickable pixels.
+
+        Clipping the counters to make room hid the email counter on every card,
+        which is a worse trade. Instead the menu leaves the flow entirely and
+        behaves like every other control on a card: hidden at rest, revealed on
+        hover over its bottom-right corner. Nothing is lost at rest, and the
+        button is fully clickable when you actually reach for it — the same
+        pattern as the copy/pencil affordances on the field rows above.
       -->
-      <div class="flex gap-2 items-center justify-between">
+      <div class="relative flex items-center justify-between gap-2">
         <div class="text-ink-gray-7 flex items-center gap-1.5">
           <div class="flex items-center gap-1" :title="__('Calls out / in')">
             <PhoneIcon class="h-4 w-4" />
@@ -385,18 +389,22 @@
             <span>{{ getRow(itemName, '_email_in_count').label ?? 0 }}&#8595;</span>
           </div>
         </div>
-        <HoverMount @click.stop.prevent>
-          <Dropdown
-            class="flex items-center gap-2"
-            :options="actions(itemName)"
-            variant="ghost"
-          >
-            <Button icon="plus" variant="ghost" />
-          </Dropdown>
-          <template #placeholder>
-            <Button icon="plus" variant="ghost" />
-          </template>
-        </HoverMount>
+        <div
+          class="absolute -right-1 top-1/2 hidden -translate-y-1/2 items-center rounded bg-surface-white pl-1 group-hover/card:flex"
+        >
+          <HoverMount @click.stop.prevent>
+            <Dropdown
+              class="flex items-center gap-2"
+              :options="actions(itemName)"
+              variant="ghost"
+            >
+              <Button icon="plus" variant="ghost" />
+            </Dropdown>
+            <template #placeholder>
+              <Button icon="plus" variant="ghost" />
+            </template>
+          </HoverMount>
+        </div>
       </div>
     </template>
   </KanbanView>
