@@ -71,6 +71,46 @@
       @click="promoteList"
     />
   </div>
+  <!--
+    A filter you forgot is the most expensive kind. Typing in the "Full Name" box
+    writes a `lead_name LIKE %…%` into your saved view and leaves it there, and on
+    2026-08-14 both setters were working a board showing ONE of 353 leads —
+    German's since the previous morning. Two signals already existed (the text
+    sitting in the box, the count badge on the Filter button) and both were
+    missed, because both say what the STATE is and neither says what it COSTS.
+    This one says the consequence out loud, names the filter, and clears it in
+    one click.
+
+    Personal standard views only: a named/public view like the ISTL LeadPack
+    board is filtered on purpose and says so in the breadcrumb.
+  -->
+  <div
+    v-if="activeFilters.length"
+    class="mx-3 mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 rounded bg-surface-amber-1 px-3 py-2 text-sm"
+  >
+    <LucideFilter class="size-4 shrink-0 text-ink-amber-3" />
+    <span class="text-ink-gray-8">
+      {{ __('This board is filtered') }} —
+      <span class="font-medium">
+        {{
+          leads.data?.total_count === 1
+            ? __('showing 1 lead')
+            : __('showing {0} leads', [leads.data?.total_count ?? 0])
+        }}
+      </span>
+    </span>
+    <span v-for="f in activeFilters" :key="f.key" class="text-ink-gray-6">
+      · {{ f.label }} {{ f.op }}
+      <span class="font-medium">{{ f.value }}</span>
+    </span>
+    <Button
+      class="ml-auto"
+      variant="subtle"
+      :label="__('Clear filters')"
+      iconLeft="x"
+      @click="viewControls.clearFilters()"
+    />
+  </div>
   <ViewControls
     ref="viewControls"
     v-model="leads"
@@ -390,12 +430,17 @@
             <span>{{ getRow(itemName, '_text_out_count').label ?? 0 }}&#8593;</span>
             <span>{{ getRow(itemName, '_text_in_count').label ?? 0 }}&#8595;</span>
           </div>
-          <span class="text-3xl leading-[0]"> &middot; </span>
-          <div class="flex items-center gap-0.5" :title="__('Emails out / in')">
-            <EmailAtIcon class="h-4 w-4" />
-            <span>{{ getRow(itemName, '_email_out_count').label ?? 0 }}&#8593;</span>
-            <span>{{ getRow(itemName, '_email_in_count').label ?? 0 }}&#8595;</span>
-          </div>
+          <template v-if="hasEmailActivity(itemName)">
+            <span class="text-3xl leading-[0]"> &middot; </span>
+            <div
+              class="flex items-center gap-0.5"
+              :title="__('Emails out / in')"
+            >
+              <EmailAtIcon class="h-4 w-4" />
+              <span>{{ getRow(itemName, '_email_out_count').label ?? 0 }}&#8593;</span>
+              <span>{{ getRow(itemName, '_email_in_count').label ?? 0 }}&#8595;</span>
+            </div>
+          </template>
         </div>
         <!--
           `has-[[data-state=open]]:flex` keeps this visible while its own menu is
@@ -898,6 +943,49 @@ const rows = computed(() => {
     return parseRows(leads.value?.data.data, leads.value.data.columns)
   }
 })
+
+// The user-applied filters currently narrowing this board, for the warning
+// banner. Deliberately excludes:
+//   * named/public views (route.query.view) — those are filtered on purpose;
+//   * anything in `listFilters`, i.e. the dashboard drill-down and the
+//     tasks-due scope, which are injected as default_filters and already have
+//     their own banner/dropdown. Filter.vue draws the same distinction.
+const activeFilters = computed(() => {
+  if (route.query.view) return []
+  const applied = leads.value?.params?.filters || {}
+  const injected = listFilters.value || {}
+  const fields = leads.value?.data?.fields || []
+
+  return Object.keys(applied)
+    .filter((key) => !(key in injected))
+    .map((key) => {
+      const raw = applied[key]
+      const isRange = Array.isArray(raw)
+      const operator = isRange ? String(raw[0] ?? '').toLowerCase() : '='
+      return {
+        key,
+        label: fields.find((f) => f.fieldname === key)?.label || key,
+        op: operator.includes('like') ? __('contains') : __('is'),
+        // strip the %wildcards% a LIKE carries so it reads as what was typed
+        value: String((isRange ? raw[1] : raw) ?? '').replace(/%/g, ''),
+      }
+    })
+})
+
+// The Communication table is EMPTY on this site (0 rows, ever) because there is
+// no email integration in use, so the email counter rendered "@ 0↑ 0↓" on every
+// card forever — ~70px of the widest row on a 268px card, spent on nothing. It
+// was also what pushed the counters past the card edge and what the hover menu
+// had to overlap. Show it when there is something to show.
+//
+// Calls and texts stay unconditional on purpose: a zero there is a real signal a
+// setter acts on ("never called"), not an absence.
+function hasEmailActivity(name) {
+  return (
+    Number(getRow(name, '_email_out_count').label || 0) > 0 ||
+    Number(getRow(name, '_email_in_count').label || 0) > 0
+  )
+}
 
 // name -> parsed (display-formatted) row, rebuilt only when `rows` changes.
 const rowsByName = computed(() => {

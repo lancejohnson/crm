@@ -1454,9 +1454,19 @@ function likeDoc({ name, liked }) {
   })
 }
 
+// Drop every user-applied filter (the injected default_filters — a dashboard
+// drill-down, the tasks-due scope — live outside `filters` and are unaffected).
+// Exposed so a page can offer a "clear" affordance of its own; everything still
+// funnels through updateFilter, so persistence and reload behave identically to
+// clearing from the Filter popover.
+function clearFilters() {
+  updateFilter({})
+}
+
 defineExpose({
   applyFilter,
   applyLikeFilter,
+  clearFilters,
   likeDoc,
   updateSort,
   updateKanbanSettings,
