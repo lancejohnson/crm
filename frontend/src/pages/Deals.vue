@@ -319,7 +319,7 @@ import { callEnabled } from '@/composables/settings'
 import { formatDate, timeAgo, website, formatTime, dueColor, parseColor } from '@/utils'
 import { formatPhone, callHref } from '@/utils/phoneFormat'
 import { myQuoNumber } from '@/composables/quoSender'
-import { Tooltip, Avatar, Dropdown } from 'frappe-ui'
+import { Tooltip, Avatar, Dropdown, call } from 'frappe-ui'
 import { useRoute } from 'vue-router'
 import { ref, reactive, computed, h, onMounted, onBeforeUnmount } from 'vue'
 
@@ -354,7 +354,8 @@ function getRow(name, field) {
     }
     return { label: value }
   }
-  return getValue(rows.value?.find((row) => row.name == name)[field])
+  const row = rowsByName.value.get(name)
+  return getValue(row ? row[field] : undefined)
 }
 
 function reloadKanban() {
@@ -364,13 +365,57 @@ function reloadKanban() {
 // A task changed (created/completed/deleted). The Kanban next-task-due badge is
 // computed server-side, so refetch the board — only on the Kanban view and only
 // when the affected deal is currently shown.
+// Site-wide broadcast, server-computed badge — see the longer note in Leads.vue.
+// Refresh the one affected card rather than refetching the whole board.
+const pendingCardRefresh = new Set()
+let cardRefreshTimer = null
+
+function findCard(name) {
+  for (const col of deals.value?.data?.data || []) {
+    const index = (col.data || []).findIndex((r) => r.name === name)
+    if (index !== -1) return { col, index }
+  }
+  return null
+}
+
 function onTaskUpdate(data) {
   if (data?.reference_doctype !== 'CRM Deal') return
   if (route.params.viewType !== 'kanban') return
-  const onBoard = (deals.value?.data?.data || []).some((col) =>
-    col.data?.some((r) => r.name === data.reference_docname),
-  )
-  if (onBoard) reloadKanban()
+  const name = data.reference_docname
+  if (!name || !findCard(name)) return
+
+  pendingCardRefresh.add(name)
+  clearTimeout(cardRefreshTimer)
+  cardRefreshTimer = setTimeout(flushCardRefresh, 250)
+}
+
+async function flushCardRefresh() {
+  const names = [...pendingCardRefresh]
+  pendingCardRefresh.clear()
+  if (!names.length) return
+
+  const groupField = deals.value?.data?.column_field
+  const rowFields = deals.value?.data?.rows || []
+
+  for (const name of names) {
+    const hit = findCard(name)
+    if (!hit) continue
+    try {
+      const fresh = await call('crm.api.doc.get_kanban_card', {
+        doctype: 'CRM Deal',
+        name,
+        rows: JSON.stringify(rowFields),
+      })
+      if (!fresh || (groupField && fresh[groupField] !== hit.col.column.name)) {
+        reloadKanban()
+        return
+      }
+      Object.assign(hit.col.data[hit.index], fresh)
+    } catch (e) {
+      reloadKanban()
+      return
+    }
+  }
 }
 
 onMounted(() => {
@@ -378,6 +423,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   $socket.off('crm_task_update', onTaskUpdate)
+  clearTimeout(cardRefreshTimer)
 })
 
 // Rows
@@ -395,6 +441,14 @@ const rows = computed(() => {
   } else {
     return parseRows(deals.value?.data.data, deals.value.data.columns)
   }
+})
+
+// getRow() is called ~20x per kanban card from the template; scanning `rows`
+// on every call made board rendering quadratic in card count. Index once.
+const rowsByName = computed(() => {
+  const map = new Map()
+  for (const row of rows.value || []) map.set(row.name, row)
+  return map
 })
 
 const columns = computed(() => {

@@ -20,6 +20,10 @@ COUNT_NAME = (
 	else "count(name) as total_count"
 )
 
+# Kanban card values that are computed per record in `apply_counts`, not stored.
+# They must never reach frappe.get_list, which would treat them as columns.
+PSEUDO_FIELDS = ("_last_comm", "_next_task_due", "_first_call", "_new_lead_color")
+
 
 @frappe.whitelist()
 def sort_options(doctype: str):
@@ -533,13 +537,9 @@ def get_data(
 			if fieldname not in rows:
 				rows.append(fieldname)
 
-		# computed pseudo-fields (filled per-card in getCounts) — not DB columns,
+		# computed pseudo-fields (filled per-card in apply_counts) — not DB columns,
 		# so they must never reach frappe.get_list
-		rows = [
-			row
-			for row in rows
-			if row not in ("_last_comm", "_next_task_due", "_first_call", "_new_lead_color")
-		]
+		rows = [row for row in rows if row not in PSEUDO_FIELDS]
 
 		all_cards = []
 
@@ -1056,6 +1056,44 @@ def getCounts(d, doctype):
 	"""Single-record wrapper around apply_counts (kept for external callers)."""
 	apply_counts([d], doctype)
 	return d
+
+
+@frappe.whitelist()
+def get_kanban_card(doctype: str, name: str, rows: str | list | None = None):
+	"""One kanban card, refreshed — the same shape `get_data` puts in a column.
+
+	Exists so a realtime nudge (a task ticked, a First-Call Read saved) can update
+	the ONE card it concerns instead of refetching the whole board. A full board
+	fetch is ~300KB and a few hundred ms of server time, and `crm_task_update` is
+	broadcast site-wide — so every task anyone completed used to re-render every
+	open Leads board in the company.
+
+	Returns None when the record is gone or the caller can't see it; the client
+	treats that as "fall back to a full reload", which also covers the card having
+	moved to a column this board isn't showing.
+	"""
+	rows = frappe.parse_json(rows or "[]")
+
+	# Only ever select real columns: pseudo-fields are computed below, and an
+	# arbitrary client-supplied string has no business reaching the query builder.
+	meta = frappe.get_meta(doctype)
+	allowed = {"name", "owner", "creation", "modified", "modified_by", "_assign", "_liked_by"}
+	fields = [
+		row
+		for row in rows
+		if row not in PSEUDO_FIELDS and (row in allowed or meta.get_field(row))
+	]
+	if "name" not in fields:
+		fields.append("name")
+
+	# get_list applies permissions and permission query conditions, so a user only
+	# ever refreshes a card they were entitled to see in the first place.
+	records = frappe.get_list(doctype, fields=fields, filters={"name": name}, page_length=1)
+	if not records:
+		return None
+
+	apply_counts(records, doctype)
+	return records[0]
 
 
 @frappe.whitelist()

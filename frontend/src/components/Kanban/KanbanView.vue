@@ -195,7 +195,7 @@ import IndicatorIcon from '@/components/Icons/IndicatorIcon.vue'
 import { isTouchScreenDevice, colors, parseColor, dueTint } from '@/utils'
 import Draggable from 'vuedraggable'
 import { Dropdown, Popover } from 'frappe-ui'
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 
 defineProps({
   options: {
@@ -219,8 +219,17 @@ const titleField = computed(() => {
 // kanban_fields entries are either a bare fieldname (legacy / no custom label)
 // or { fieldname, label, showBlank } when the user set a card label and/or
 // "show if blank" in Kanban Settings.
+//
+// Memoized on the source array: this is called from the template once per
+// COLUMN on every render, and every column is handed the same `kanban_fields`
+// array. Returning a stable reference also stops Vue re-keying the inner v-for
+// each time the board re-renders.
+const normalizedFieldsCache = new WeakMap()
 function normalizeFields(fieldsList) {
-  return (fieldsList || []).map((f) =>
+  if (!fieldsList) return []
+  const cached = normalizedFieldsCache.get(fieldsList)
+  if (cached) return cached
+  const normalized = fieldsList.map((f) =>
     typeof f === 'string'
       ? { fieldname: f, label: '', showBlank: false }
       : {
@@ -229,21 +238,33 @@ function normalizeFields(fieldsList) {
           showBlank: !!f.showBlank,
         },
   )
+  normalizedFieldsCache.set(fieldsList, normalized)
+  return normalized
 }
 
 const columns = computed(() => {
   if (!kanban.value?.data?.data || kanban.value.data.view_type != 'kanban')
     return []
-  let _columns = kanban.value.data.data
-
-  let has_color = _columns.some((column) => column.column?.color)
-  if (!has_color) {
-    _columns.forEach((column, i) => {
-      column.column['color'] = colors[i % colors.length]
-    })
-  }
-  return _columns
+  return kanban.value.data.data
 })
+
+// Fallback column colors are assigned OUTSIDE the computed above. Doing it in
+// the getter meant a computed that wrote to the very data it read — a
+// self-invalidating dependency, and the kind of thing that turns into a render
+// loop the moment a board legitimately has no colors. The write still has to
+// happen (updateColumn ships `column.color` back to the server, and the colour
+// picker writes to the same place), just not during evaluation.
+watch(
+  columns,
+  (cols) => {
+    if (!cols?.length) return
+    if (cols.some((column) => column.column?.color)) return
+    cols.forEach((column, i) => {
+      if (column.column) column.column.color = colors[i % colors.length]
+    })
+  },
+  { immediate: true },
+)
 
 const deletedColumns = computed(() => {
   const _columns = kanban.value?.data?.kanban_columns || []

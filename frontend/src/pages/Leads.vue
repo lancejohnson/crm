@@ -348,40 +348,46 @@
       </KanbanCardField>
     </template>
     <template #actions="{ itemName }">
+      <!--
+        Everything in this row is per-card, so component choice here is
+        multiplied by the size of the board. The three counters used a <Tooltip>
+        each purely to show a fixed string; a native `title` says the same thing
+        for free (the same trade the Today card documents). The actions menu is
+        a Dropdown — trigger + portal + content + context per card — and is
+        pointless until aimed at, so it is mounted on approach.
+      -->
       <div class="flex gap-2 items-center justify-between">
         <div class="text-ink-gray-7 flex items-center gap-1.5">
-          <Tooltip :text="__('Calls out / in')">
-            <div class="flex items-center gap-1">
-              <PhoneIcon class="h-4 w-4" />
-              <span>{{ getRow(itemName, '_call_out_count').label ?? 0 }}&#8593;</span>
-              <span>{{ getRow(itemName, '_call_in_count').label ?? 0 }}&#8595;</span>
-            </div>
-          </Tooltip>
+          <div class="flex items-center gap-1" :title="__('Calls out / in')">
+            <PhoneIcon class="h-4 w-4" />
+            <span>{{ getRow(itemName, '_call_out_count').label ?? 0 }}&#8593;</span>
+            <span>{{ getRow(itemName, '_call_in_count').label ?? 0 }}&#8595;</span>
+          </div>
           <span class="text-3xl leading-[0]"> &middot; </span>
-          <Tooltip :text="__('Texts out / in')">
-            <div class="flex items-center gap-1">
-              <CommentIcon class="h-4 w-4" />
-              <span>{{ getRow(itemName, '_text_out_count').label ?? 0 }}&#8593;</span>
-              <span>{{ getRow(itemName, '_text_in_count').label ?? 0 }}&#8595;</span>
-            </div>
-          </Tooltip>
+          <div class="flex items-center gap-1" :title="__('Texts out / in')">
+            <CommentIcon class="h-4 w-4" />
+            <span>{{ getRow(itemName, '_text_out_count').label ?? 0 }}&#8593;</span>
+            <span>{{ getRow(itemName, '_text_in_count').label ?? 0 }}&#8595;</span>
+          </div>
           <span class="text-3xl leading-[0]"> &middot; </span>
-          <Tooltip :text="__('Emails out / in')">
-            <div class="flex items-center gap-1">
-              <EmailAtIcon class="h-4 w-4" />
-              <span>{{ getRow(itemName, '_email_out_count').label ?? 0 }}&#8593;</span>
-              <span>{{ getRow(itemName, '_email_in_count').label ?? 0 }}&#8595;</span>
-            </div>
-          </Tooltip>
+          <div class="flex items-center gap-1" :title="__('Emails out / in')">
+            <EmailAtIcon class="h-4 w-4" />
+            <span>{{ getRow(itemName, '_email_out_count').label ?? 0 }}&#8593;</span>
+            <span>{{ getRow(itemName, '_email_in_count').label ?? 0 }}&#8595;</span>
+          </div>
         </div>
-        <Dropdown
-          class="flex items-center gap-2"
-          :options="actions(itemName)"
-          variant="ghost"
-          @click.stop.prevent
-        >
-          <Button icon="plus" variant="ghost" />
-        </Dropdown>
+        <HoverMount @click.stop.prevent>
+          <Dropdown
+            class="flex items-center gap-2"
+            :options="actions(itemName)"
+            variant="ghost"
+          >
+            <Button icon="plus" variant="ghost" />
+          </Dropdown>
+          <template #placeholder>
+            <Button icon="plus" variant="ghost" />
+          </template>
+        </HoverMount>
       </div>
     </template>
   </KanbanView>
@@ -455,6 +461,7 @@ import LeadsListView from '@/components/ListViews/LeadsListView.vue'
 import EmptyState from '@/components/ListViews/EmptyState.vue'
 import KanbanView from '@/components/Kanban/KanbanView.vue'
 import KanbanCardField from '@/components/Kanban/KanbanCardField.vue'
+import HoverMount from '@/components/Kanban/HoverMount.vue'
 import LeadModal from '@/components/Modals/LeadModal.vue'
 import ImportLeadsModal from '@/components/Modals/ImportLeadsModal.vue'
 import NoteModal from '@/components/Modals/NoteModal.vue'
@@ -717,24 +724,33 @@ function clearDrill() {
   nextTick(() => viewControls.value?.reload())
 }
 
+// Both lookups below are called from the Kanban card template ~25 times per
+// card (once per v-if branch, per field). Scanning `rows` with .find() on each
+// call made board rendering quadratic in card count — 287 cards cost ~7,000
+// scans of a 287-element array. Index once per data change instead.
+//
+// The results are memoized as well, because getRow allocated a fresh
+// `{ label }` wrapper on every call. Returning a stable object also lets Vue
+// skip patching a child whose props haven't actually changed.
 function getRow(name, field) {
-  function getValue(value) {
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      return value
-    }
-    return { label: value }
-  }
-  return getValue(rows.value?.find((row) => row.name == name)[field])
+  const cache = rowValueCache.value
+  const key = name + '\u0000' + field
+  let value = cache.get(key)
+  if (value !== undefined) return value
+
+  const row = rowsByName.value.get(name)
+  const raw = row ? row[field] : undefined
+  value =
+    raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : { label: raw }
+  cache.set(key, value)
+  return value
 }
 
 // rows.value holds formatted/display values; the inline Kanban-card editor
 // needs the raw stored value, which lives on the un-parsed kanban data.
 function getRawValue(name, field) {
-  for (const col of leads.value?.data?.data || []) {
-    const lead = col.data?.find((r) => r.name === name)
-    if (lead) return lead[field]
-  }
-  return ''
+  const lead = rawRowsByName.value.get(name)
+  return lead ? lead[field] : ''
 }
 
 // Re-fetch the board after an inline card edit so values (and any column move
@@ -751,33 +767,71 @@ function cardTint(row) {
   return mostUrgentTint(row._new_lead_color, dueColor(row._next_task_due))
 }
 
-// A task changed somewhere (created/completed/deleted). The Kanban next-task-due
-// badge (_next_task_due) is computed server-side, so refetch the board — but only
-// when we're on the Kanban view and the affected lead is currently shown, to avoid
-// needless reloads.
-function onTaskUpdate(data) {
-  if (data?.reference_doctype !== 'CRM Lead') return
-  if (route.params.viewType !== 'kanban') return
-  const onBoard = (leads.value?.data?.data || []).some((col) =>
-    col.data?.some((r) => r.name === data.reference_docname),
-  )
-  if (onBoard) reloadKanban()
+// `crm_task_update` and `crm_first_call` are broadcast SITE-WIDE (every logged-in
+// user sits in the site room), and the badges they affect (_next_task_due,
+// _first_call) are computed server-side. This used to answer by refetching the
+// whole board — ~300KB and a few hundred ms of server time, then a full
+// re-render — for one changed card, usually triggered by somebody else's click.
+// At 35-116 task changes on a normal day, an idle open board froze over and
+// over for reasons its owner never caused.
+//
+// Refresh just the affected card instead, and coalesce bursts.
+const pendingCardRefresh = new Set()
+let cardRefreshTimer = null
+
+function findCard(name) {
+  for (const col of leads.value?.data?.data || []) {
+    const index = (col.data || []).findIndex((r) => r.name === name)
+    if (index !== -1) return { col, index }
+  }
+  return null
 }
 
-// A First-Call Read was recorded somewhere. The quadrant chip (_first_call) is
-// computed server-side, so refetch the board on the same on-board guard.
-function onFirstCallUpdate(data) {
+function queueCardRefresh(data) {
   if (data?.reference_doctype !== 'CRM Lead') return
   if (route.params.viewType !== 'kanban') return
-  const onBoard = (leads.value?.data?.data || []).some((col) =>
-    col.data?.some((r) => r.name === data.reference_docname),
-  )
-  if (onBoard) reloadKanban()
+  const name = data.reference_docname
+  if (!name || !findCard(name)) return // not on this board — nothing to show
+
+  pendingCardRefresh.add(name)
+  clearTimeout(cardRefreshTimer)
+  cardRefreshTimer = setTimeout(flushCardRefresh, 250)
+}
+
+async function flushCardRefresh() {
+  const names = [...pendingCardRefresh]
+  pendingCardRefresh.clear()
+  if (!names.length) return
+
+  const groupField = leads.value?.data?.column_field
+  const rowFields = leads.value?.data?.rows || []
+
+  for (const name of names) {
+    const hit = findCard(name)
+    if (!hit) continue
+    try {
+      const fresh = await call('crm.api.doc.get_kanban_card', {
+        doctype: 'CRM Lead',
+        name,
+        rows: JSON.stringify(rowFields),
+      })
+      // Deleted, no longer visible to this user, or moved to another column:
+      // the board's shape changed, so do the honest thing and refetch it.
+      if (!fresh || (groupField && fresh[groupField] !== hit.col.column.name)) {
+        reloadKanban()
+        return
+      }
+      Object.assign(hit.col.data[hit.index], fresh)
+    } catch (e) {
+      reloadKanban()
+      return
+    }
+  }
 }
 
 onMounted(() => {
-  $socket.on('crm_task_update', onTaskUpdate)
-  $socket.on('crm_first_call', onFirstCallUpdate)
+  $socket.on('crm_task_update', queueCardRefresh)
+  $socket.on('crm_first_call', queueCardRefresh)
   // Restore a persisted "Tasks due" filter: re-resolve the matching lead names
   // fresh (the stored scope is the source of truth; names go stale), then let
   // applyTaskDue reload the board with them. Skip while a dashboard drill is
@@ -787,8 +841,9 @@ onMounted(() => {
   }
 })
 onBeforeUnmount(() => {
-  $socket.off('crm_task_update', onTaskUpdate)
-  $socket.off('crm_first_call', onFirstCallUpdate)
+  $socket.off('crm_task_update', queueCardRefresh)
+  $socket.off('crm_first_call', queueCardRefresh)
+  clearTimeout(cardRefreshTimer)
 })
 
 // Rows
@@ -806,6 +861,29 @@ const rows = computed(() => {
   } else {
     return parseRows(leads.value?.data.data, leads.value.data.columns)
   }
+})
+
+// name -> parsed (display-formatted) row, rebuilt only when `rows` changes.
+const rowsByName = computed(() => {
+  const map = new Map()
+  for (const row of rows.value || []) map.set(row.name, row)
+  return map
+})
+
+// Memo for getRow(), thrown away (by being recomputed) whenever the underlying
+// rows change, so it can never serve a stale cell.
+const rowValueCache = computed(() => {
+  rowsByName.value
+  return new Map()
+})
+
+// name -> raw server row, across every kanban column.
+const rawRowsByName = computed(() => {
+  const map = new Map()
+  for (const col of leads.value?.data?.data || []) {
+    for (const row of col.data || []) map.set(row.name, row)
+  }
+  return map
 })
 
 const columns = computed(() => {

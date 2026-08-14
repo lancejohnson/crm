@@ -240,7 +240,8 @@ function getRow(name, field) {
     }
     return { label: value }
   }
-  return getValue(rows.value?.find((row) => row.name == name)[field])
+  const row = rowsByName.value.get(name)
+  return getValue(row ? row[field] : undefined)
 }
 
 const rows = computed(() => {
@@ -252,6 +253,14 @@ const rows = computed(() => {
 
   openTaskFromURL()
   return parseRows(tasks.value?.data.data, tasks.value?.data.columns)
+})
+
+// getRow() is called once per v-if branch per field per kanban card; scanning
+// `rows` on every call made rendering quadratic in card count. Index once.
+const rowsByName = computed(() => {
+  const map = new Map()
+  for (const row of rows.value || []) map.set(row.name, row)
+  return map
 })
 
 const columns = computed(() => {
