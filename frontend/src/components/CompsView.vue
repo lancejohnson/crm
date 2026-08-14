@@ -369,6 +369,7 @@ const props = defineProps({
 // This used to be a modal driven by `defineModel()`. It is now a full page, so
 // "open" is simply always true -- which keeps every existing `show.value` guard,
 // watcher and keyboard-shortcut gate working exactly as before.
+const emit = defineEmits(['subject'])
 const show = ref(true)
 
 // Canvas/marker colours live in JS because Leaflet can't read Tailwind tokens.
@@ -1243,6 +1244,14 @@ async function load({ explicit = userTouched.value } = {}) {
       payload.auto = 1
     }
     data.value = await call('crm.api.comps.get_lead_comps', payload)
+    // Hand the resolved subject facts to whoever is hosting us. `get_lead_comps`
+    // is the only place that merges them best-first and labels each with its
+    // source (Zillow > the property's own comp row > the lead's pick-list bands
+    // > the tax pull), so a host that read CRM Lead directly would show the
+    // vague band -- "1900-1950" -- next to a map pill already saying 1930.
+    // Emitting costs the host nothing and avoids a second call to a function
+    // that geocodes and can hit a paid Zillow lookup.
+    emit('subject', data.value?.subject || null)
     syncDraft(data.value?.filters)
     await nextTick()
     render()

@@ -15,10 +15,13 @@
       </div>
 
       <div class="flex shrink-0 items-center gap-1.5">
-        <Badge v-if="lead?.no_of_bedrooms" variant="subtle" :label="`BD ${lead.no_of_bedrooms}`" />
-        <Badge v-if="lead?.no_of_bathrooms" variant="subtle" :label="`BA ${lead.no_of_bathrooms}`" />
-        <Badge v-if="lead?.property_area" variant="subtle" :label="`SQFT ${lead.property_area}`" />
-        <Badge v-if="lead?.year_built" variant="subtle" :label="`YR ${lead.year_built}`" />
+        <Badge
+          v-for="f in facts"
+          :key="f.key"
+          variant="subtle"
+          :label="`${f.key} ${f.value}`"
+          :title="f.title"
+        />
       </div>
 
       <div class="ml-auto flex shrink-0 items-center gap-2">
@@ -30,7 +33,12 @@
     <div class="flex min-h-0 flex-1">
       <!-- Centre: the real comps surface, not a reimplementation. -->
       <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <CompsView v-if="leadId" :lead="leadId" :address="address" />
+        <CompsView
+          v-if="leadId"
+          :lead="leadId"
+          :address="address"
+          @subject="onSubject"
+        />
       </div>
     </div>
   </div>
@@ -61,7 +69,7 @@
  * this is a working surface on a ~1280x800 laptop, and a rep mid-call should
  * never have to scroll to find the offer.
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { createResource, Badge, Button } from 'frappe-ui'
 import CompsView from '@/components/CompsView.vue'
@@ -80,6 +88,63 @@ const leadResource = createResource({
 })
 
 const lead = computed(() => leadResource.data || null)
+
+/**
+ * The subject's facts come from CompsView's `subject` emit, NOT from the lead
+ * record. `get_lead_comps` merges them best-first and labels each with where it
+ * came from — Zillow, then the property's own row in the comp inventory, then
+ * the lead's pick-list bands, then the tax pull.
+ *
+ * Reading CRM Lead directly is what the first cut did, and verification caught
+ * it: the header showed `YR 1900-1950` (a seller-entered band) while the map
+ * pill three inches below already said 1930, and beds/baths/sqft were blank
+ * because the lead's own fields were empty even though Zillow had 3/2/1444sf.
+ * One screen must not show two different answers to "what is this house".
+ */
+const subject = ref(null)
+function onSubject(s) {
+  subject.value = s || null
+}
+
+/**
+ * The payload shape, which is NOT what the first cut assumed. get_lead_comps
+ * returns FLAT scalars with parallel sidecars, not {value, source} objects:
+ *
+ *   beds: 2.0, beds_label: "2", beds_exact: true,
+ *   source: { beds: "zillow", baths: "zillow", ... }
+ *
+ * Guessing the shape produced an empty badge row, which looked like "this lead
+ * has no data" rather than like a bug -- the failure mode that hides itself.
+ *
+ * Use the *_label the backend already formatted: it renders a real half-bath as
+ * "1.5" and a vague seller answer as the band actually given ("1000 - 2000"),
+ * which is precisely the distinction *_exact then lets the tooltip admit to.
+ */
+const FACTS = [
+  ['BD', 'beds'],
+  ['BA', 'baths'],
+  ['SQFT', 'sqft'],
+  ['YR', 'year_built'],
+]
+
+const facts = computed(() => {
+  const s = subject.value
+  if (!s) return []
+  const src = s.source || {}
+  const out = []
+  for (const [key, field] of FACTS) {
+    const label = s[`${field}_label`]
+    if (label == null || label === '') continue
+    const source = src[field] || ''
+    const note = s[`${field}_exact`] === false ? ' (range, not exact)' : ''
+    out.push({
+      key,
+      value: String(label),
+      title: source ? `source: ${source}${note}` : note.trim(),
+    })
+  }
+  return out
+})
 
 /**
  * Compose the full address the same way the comps/agreement code does: a
