@@ -397,3 +397,50 @@ test site lands, rather than silently contradicting it.
 - Made do-not-contact provider-agnostic + number-keyed; verified against prod.
 - Wrote `geo/store.py` (PostGIS). **Unverified** — no working PostGIS target on
   this machine. That is the first thing to fix next session.
+
+---
+
+## BatchData comps fallback (decided 2026-08-14: AUTOMATIC when comps = 0)
+
+`CRM Comp` covers only iSpeedToLead ZIPs — **0 rows for Brooklyn 11230**, which is
+why the first desk verification showed an empty map. When `get_lead_comps` returns
+zero, fall back to BatchData automatically (Lance's call — not a button).
+
+Key: `BATCHDATA_API_KEY` (Infisical). Endpoint
+`POST https://api.batchdata.com/api/v1/property/search`, same one `pull_tax_info`
+already uses. Rate limit header `x-ratelimit-limit: 3000`; a `take:5` call
+decremented remaining by **1**, so billing looks per-REQUEST not per-record —
+unlike Regrid. Confirm before turning it loose.
+
+### GOTCHA — `geoLocation` / `radiusMiles` is SILENTLY IGNORED
+
+```json
+{"searchCriteria":{"geoLocation":{"latitude":40.6195,"longitude":-73.9623,
+                                  "radiusMiles":0.5},
+                   "quickLists":["recently-sold"]},"options":{"take":5}}
+```
+returns **HTTP 200 with 5 properties** — in Austin, Miami and elsewhere. It matched
+only `quickLists` and ignored the geography entirely. No error, no warning. Built
+on this, a Brooklyn lead would have shown Miami comps on the map and poisoned the
+ARV. Same failure family as Redfin's silent cap: a plausible answer to a question
+that was never asked.
+
+### The shape that actually works: bare ZIP in `query`
+
+| criteria | result |
+|---|---|
+| `{"query":"11230"}` | **5/5 in ZIP 11230, Brooklyn** ✅ |
+| `{"address":{"zip":"11230"}}` | HTTP **400** |
+| `{"query":"Brooklyn, NY 11230"}` | Brooklyn, but ZIPs 11215/11231/11235/11201 — city matched, ZIP did not constrain |
+
+So scope by **bare ZIP string**, then trim by true distance using each result's
+`address.latitude/longitude`. ZIP-level is the right grain anyway: `CRM Comp`
+is already organised by ZIP.
+
+Useful fields per property: `building.{bedroomCount,bathroomCount,
+livingAreaSquareFeet,yearBuilt}`, `deedHistory[]` with real `salePrice`/`saleDate`
+(better than RealEstateAPI, which returns `lastSalePrice: 0` in non-disclosure
+states), `valuation`, `address.{latitude,longitude}`.
+
+- [ ] Build it: zero-comp -> ZIP query -> haversine trim -> map into the comp shape
+- [ ] Confirm per-request vs per-record billing before enabling for all leads
