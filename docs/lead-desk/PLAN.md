@@ -1,7 +1,7 @@
 # Lead Desk — working plan
 
 **Branch:** `feature/lead-desk` · **Worktree:** `~/crm-worktrees/lead-desk`
-**Started:** 2026-08-14 · **Last updated:** 2026-08-14 (geo service scaffolded + sweep proven)
+**Started:** 2026-08-14 · **Last updated:** 2026-08-14 (geo service live on the box; CRM client wired)
 
 > This file is the memory for a project that spans many days and two machines.
 > Read it first. Update it at the end of every session — decisions, measured
@@ -165,7 +165,16 @@ purchase (open question: CRM `after_insert` vs earlier in `istl-buyer`).
       rather than after the full ~45 min. **Had to order on `geography`** — KNN
       on plain `geometry` sorts by DEGREES and was non-monotonic in metres
       (66m ahead of 53m). Same flaw fixed in `properties_near`.
-- [ ] CRM-side client + `after_insert` warm hook
+- [x] **CRM client + warm-at-purchase hook** (`crm/api/geo.py`). Reuses
+      `comps._subject_point` so nothing disagrees about a lead's location.
+      Enqueued, never inline — an inline 75s sweep would hold the inbound
+      webhook open until the vendor retries and duplicates the lead.
+      Config-gated on `geo_service_url`; verified it no-ops when unset.
+      Verified live from inside the container: Brooklyn lead -> 824 features.
+      **Backfill excludes parked imports** — dry run said 876 (= 362 live + 514
+      parked); now 362. NULL-safe `isnull() | != 1`.
+- [ ] Deploy (app code is committed, NOT yet built into an image)
+- [ ] Frontend: draw neighbourhood + parcels on the desk map
 - [ ] Parcel enrichment + cookie lifecycle
 - [ ] CRM hook + backfill (stage it — 362 leads × ~3k parcels ≈ 1M rows)
 
