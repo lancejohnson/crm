@@ -1035,6 +1035,31 @@ function applyKanbanViewUpdate(data) {
   if (!defaultParams.value) {
     defaultParams.value = getParams()
   }
+
+  // Does the SERVER have anything new to say? Reordering cards inside a column,
+  // or reordering/recolouring the columns themselves, changes nothing it would
+  // send back: vuedraggable has already applied the arrangement locally and the
+  // order is carried in kanban_columns, which we are about to persist anyway.
+  // Reloading there cost a full board round trip plus a full re-render — ~0.5s
+  // of frozen board — to be handed back exactly what was already on screen.
+  //
+  // It genuinely does need refetching when the shape of the DATA changes: a
+  // different set of card fields, a different grouping or title field (both
+  // change which columns get SELECTed), or a column brought back from deleted,
+  // whose cards were never fetched in the first place.
+  const previousColumns = list.value.data?.kanban_columns || []
+  const wasDeleted = new Set(
+    previousColumns.filter((c) => c.delete).map((c) => c.name),
+  )
+  const restoredColumn = (data.kanban_columns || []).some(
+    (c) => !c.delete && wasDeleted.has(c.name),
+  )
+  const needsRefetch =
+    restoredColumn ||
+    !!data.kanban_fields ||
+    !!(data.column_field && data.column_field != view.value.column_field) ||
+    !!(data.title_field && data.title_field != view.value.title_field)
+
   list.value.params = defaultParams.value
   if (data.kanban_columns) {
     list.value.params.kanban_columns = data.kanban_columns
@@ -1055,7 +1080,9 @@ function applyKanbanViewUpdate(data) {
     view.value.title_field = data.title_field
   }
 
-  list.value.reload()
+  if (needsRefetch) {
+    list.value.reload()
+  }
 
   if (!route.query.view) {
     createOrUpdateStandardView()
