@@ -356,6 +356,15 @@
         a Dropdown — trigger + portal + content + context per card — and is
         pointless until aimed at, so it is mounted on approach.
       -->
+      <!--
+        KNOWN, PRE-EXISTING: the three counters are 229-258px wide inside a 238px
+        card footer, so `justify-between` pushes the "+" past the card's right
+        edge where the next column covers all but a few clickable pixels. Left
+        alone deliberately — the only ways to fix it are to hide a counter, clip
+        one, or float the button over the card, and all three change what the
+        card SHOWS. That is a product call, not something to slip into a
+        performance change.
+      -->
       <div class="flex gap-2 items-center justify-between">
         <div class="text-ink-gray-7 flex items-center gap-1.5">
           <div class="flex items-center gap-1" :title="__('Calls out / in')">
