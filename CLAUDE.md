@@ -1773,10 +1773,18 @@ duplicating. Work substantial features in a worktree of your own.
     OPENS something needs one of the two.
   - The counters were also made to fit rather than be clipped: gaps went
     `gap-1.5 → gap-1` between groups and `gap-1 → gap-0.5` inside them, which
-    recovers ~20px. Verified over 168 cards: **0** with footer overflow, **0**
-    where a counter passes the card edge, worst case (`79↑ 205↓`) 15px clear.
-    The hover chip does still paint over the tail of the last counter on ~31
-    dense cards — hover-only, and the same trade the field-row affordances make.
+    recovers ~20px.
+  - **The email counter is gone, and that is what actually fixed the crowding**
+    (gw328). `tabCommunication` on this site is **EMPTY — 0 rows, ever**, because
+    no email integration is in use, so `@ 0↑ 0↓` rendered on all 108 cards
+    forever: ~70px of the widest row on a 268px card, showing nothing, and the
+    reason everything else ran out of room. It now renders only when that lead
+    has email activity, so it comes back by itself if email is ever adopted.
+    **Calls and texts stay unconditional on purpose** — a zero there is a real
+    signal a setter acts on ("never called"), not an absence. Measured after:
+    **0** cards showing it, **0** with footer overflow, **0** where the hover
+    chip can occlude anything; the tightest card went from **1px** free to
+    **75px** for a 32px chip.
   - **GOTCHA — `emptyOutDir: false` means `assets/` holds OLD `index-*.css`.**
     Grepping the wrong one made a Tailwind rule that had emitted correctly look
     missing, and nearly sent a working fix back for a redesign. Resolve the
@@ -1810,6 +1818,23 @@ duplicating. Work substantial features in a worktree of your own.
   one like the ISTL LeadPack boards, which are filtered on purpose), and only that
   one key is dropped so a deliberate status filter alongside it survives. **Worth
   re-running if someone says the board "is empty" or "lost my leads".**
+  - **And the trap itself is closed** (gw328): the Leads board now carries an
+    amber banner naming every active filter **and what it leaves you with** —
+    *"This board is filtered — showing 1 lead · Full Name contains simmons"* —
+    with one-click Clear. Two signals already existed (the text sitting in the
+    quick-filter box; the count badge on the Filter button) and **both were
+    missed for a day**, because both describe the STATE and neither describes the
+    COST. Persistence itself is unchanged — views are supposed to remember
+    filters; what was missing was consequence.
+  - Scoped so it can't become wallpaper: **personal standard views only**
+    (`!route.query.view`, the same condition `createOrUpdateStandardView` uses),
+    and it ignores the injected `default_filters` behind the dashboard drill-down
+    and the tasks-due scope, which already have their own UI — the same
+    distinction `Filter.vue` draws. `ViewControls` gained `clearFilters()`, which
+    funnels through the existing `updateFilter` so persistence and reload behave
+    exactly like clearing from the Filter popover. Applies to the list view too.
+    **Deals was deliberately not given the banner** — there are zero CRM Deal
+    records, so it would be untested surface for no benefit.
 
 - **Filters: user pickers, no phantom queries, and a 10x faster kanban**
   (gw222/gw223) — Lance: "filters aren't really working… assigned to isn't
