@@ -457,9 +457,15 @@ states), `valuation`, `address.{latitude,longitude}`.
       take=25 -> mean score 1.19, median 0.59mi, median $919/sf
       **5 of the best 6 were invisible at take=10**, and the median $/sf moved
       17% — a different ARV, not just tidier comps.
-- [ ] **Ops before it can fire** (it self-disables until both exist):
-      `bench set-config batchdata_comps_key <BATCHDATA_COMPS_API_KEY>` and a
-      script adding `CRM Lead.batchdata_comps` (Long Text) +
-      `batchdata_comps_at` (Datetime).
+- [x] **Ops script written**: `../frappe-crm-deploy/scripts/setup_batchdata_comps.py`
+      (committed + pushed). Dry-run verified against prod — both fields absent,
+      both would be added.
+- [ ] **GO LIVE — one deliberate act, because it starts spending:**
+      1. `python3 scripts/setup_batchdata_comps.py`
+      2. `bench --site crm.groundworkpro.com set-config batchdata_comps_key <BATCHDATA_COMPS_API_KEY>`
+      3. deploy the app code (`crm/api/comps_batchdata.py` + the `comps.py` hook)
+      Script deliberately NOT run yet: creating the fields and setting the key is
+      the moment money starts moving, and that should be intentional rather than a
+      side effect. The app self-disables until both exist.
 - [ ] UI: label `status: "estimate"` comps visibly — an AVM is a model's opinion,
       not a sale, and a rep must not price off one unknowingly.
