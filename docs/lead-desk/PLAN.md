@@ -188,9 +188,27 @@ purchase (open question: CRM `after_insert` vs earlier in `istl-buyer`).
       lines of hard-won behaviour would be thrown away). `pageMode` deliberately
       not passed: underwriting belongs on the comps page, the desk computes the
       offer live.
-      **`yarn build` passes; chunk `LeadDesk-*.js` emits; route is in the bundle.
-      NOT visually verified -- no verify_ui run yet. Do that before trusting it.**
+      **Verified (desktop-chrome, 2 verifier runs + a targeted DOM check).**
+      On CRM-LEAD-2026-00854: 76 price pills, 76 comp rows, filters, Subject pill,
+      ring labels, clean console, 'Open lead' navigates.
       Worktree needed its own `node_modules` (472 MB).
+
+      Two bugs the verification caught, both now fixed:
+      1. Header read CRM Lead directly -> showed the seller's band 'YR 1900-1950'
+         while the map pill said 1930. CompsView now **emits** the resolved
+         subject facts; `get_lead_comps` is the only place that merges them
+         best-first and labels the source. Emitting avoids a second call that
+         re-geocodes and can hit a paid Zillow lookup.
+      2. The fix's first cut guessed the payload as `{value, source}` objects. It
+         is **flat scalars + sidecars** (`beds: 2.0`, `beds_label: "2"`,
+         `beds_exact: true`, plus a sibling `source` map). Every lookup returned
+         null and the badge row rendered EMPTY -- which reads as 'no data', not
+         as a bug. Now uses `*_label`, with `*_exact` driving a
+         '(range, not exact)' tooltip note.
+
+      **Test-lead choice matters:** the first run used a Brooklyn lead and got
+      zero comps. That was not a page bug -- `CRM Comp` has **0 rows for ZIP
+      11230**. Use a lead with real coverage; Chicago 00854 has 561.
 - [ ] Right rail: offer math, repair matrix, 2x2 (reuse `first_call.py`)
 - [ ] Left rail: copilot (blocked on the Telnyx decision)
 - [ ] Save determination (needs schema)
