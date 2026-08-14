@@ -104,11 +104,19 @@
               }}
             </span>
           </div>
-          <Select
-            v-model="openMode"
-            class="w-40 shrink-0"
-            :options="openModeOptions"
-          />
+          <!--
+            The width has to be on a WRAPPER. frappe-ui's Select puts `w-full` on
+            its own trigger, which beats a `w-40` passed in as a class, so the
+            control grew to fill the row: it pushed past the panel's right edge,
+            squeezed the label column to ~90px (wrapping the description one word
+            per line) and gave the whole Preferences pane a horizontal scrollbar
+            that clipped every label on the left. The Language/Timezone rows
+            above get away with `class="w-40"` because Link and Combobox do not
+            force their own width.
+          -->
+          <div class="w-40 shrink-0">
+            <Select v-model="openMode" :options="openModeOptions" />
+          </div>
         </div>
       </div>
     </template>
