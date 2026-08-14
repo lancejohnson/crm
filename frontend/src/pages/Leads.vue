@@ -244,7 +244,7 @@
     </template>
     <template #fields="{ fieldName, fieldLabel, showBlank, itemName }">
       <KanbanCardField
-        v-if="getRow(itemName, fieldName).label || showBlank"
+        v-if="showsField(itemName, fieldName, showBlank)"
         doctype="CRM Lead"
         :name="itemName"
         :fieldName="fieldName"
@@ -972,6 +972,21 @@ function getRow(name, field) {
 
 // rows.value holds formatted/display values; the inline Kanban-card editor
 // needs the raw stored value, which lives on the un-parsed kanban data.
+// Fields rendered purely as a graphic, with no text label of their own.
+//
+// They need their own visibility rule, and getting this wrong is not a silent
+// no-op: the generic guard is "does this field have a label", a badge field has
+// none, so the slot emits nothing -- and Vue treats a comment-only slot as EMPTY
+// and falls back to <KanbanView>'s default row, which prints the raw field
+// value. That is how `_dispo_buyers` shipped to production rendering its own
+// JSON as text on 70 cards.
+const BADGE_ONLY_FIELDS = new Set(['_dispo_buyers'])
+
+function showsField(name, field, showBlank) {
+  if (BADGE_ONLY_FIELDS.has(field)) return Boolean(getRawValue(name, field))
+  return Boolean(getRow(name, field).label || showBlank)
+}
+
 function getRawValue(name, field) {
   const lead = rawRowsByName.value.get(name)
   return lead ? lead[field] : ''
@@ -1353,6 +1368,11 @@ function parseRows(rows, columns = []) {
       label: _fc.quad ? __(_fc.quad.label) : '',
       color: _fc.quad ? _fc.quad.theme : '',
     }
+    // Rendered by <DispoBuyerBadges> off the RAW value. The blank label is
+    // deliberate: without an entry here the generic parser hands back the
+    // field's JSON, which then becomes the card's copy-to-clipboard text and,
+    // if any guard slips, gets printed on the card verbatim.
+    _rows['_dispo_buyers'] = { label: '' }
     return _rows
   })
 }
