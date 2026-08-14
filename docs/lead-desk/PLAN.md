@@ -191,10 +191,46 @@ Replaces Quo/OpenPhone entirely. Unblocks the live copilot.
 **Strategy**
 - `CRM Call Log` is already the stable interface — the Quo mirror writes into it and
   everything downstream reads it. Keep that boundary; swap what fills it.
-- [ ] Provider abstraction for SMS mirroring the calls one
+
+**CUTOVER: DECIDED 2026-08-14 — run parallel, port numbers in later.**
+New Telnyx numbers stand up alongside Quo; existing numbers port afterwards.
+This avoids a porting window where texts silently drop, at the cost of two live
+systems for a period.
+
+Parallel running turns three things from "nice" into **mandatory, before any
+Telnyx traffic exists**:
+
+1. **Do-not-contact must be provider-agnostic FIRST.** This is compliance, not
+   tidiness. Today opt-out detection is bound to `Quo Message` after_insert
+   (`hooks.py:187`) and the flag lives on `CRM Buyer.do_not_contact`. If someone
+   replies STOP to a Quo number and we then text them from Telnyx, we have texted
+   a person who asked us to stop. The check in `bulk_text.send_buyer_text` must
+   run for every provider, and inbound opt-out detection must fire on Telnyx
+   inbound too. **Build this before the first Telnyx send.**
+2. **Every report must union both providers or it silently under-counts.** The
+   activity report, standup, intraday pulse and `lead_owner_backfill` all share
+   the `caller` → `receiver` → `custom_quo_number` chain. During parallel, half
+   the calls are invisible to it. This is the same failure family as the
+   `reference_doctype` trap and the incoming-`userId` trap — no error, just a
+   wrong number that looks plausible.
+3. **`User.custom_quo_number` is single-valued and must become per-provider.** A
+   rep will hold a Quo line AND a Telnyx line simultaneously. Rename/replace with
+   a mapping (e.g. `CRM Telephony Agent` already exists upstream for exactly this
+   — per-user calling medium — so extend it rather than adding another field).
+
+**Free seam discovered 2026-08-14:** `CRM Call Log.telephony_medium` already
+exists and **every one of the 4,102 rows is `"Manual"`** — it carries no
+information today. Telnyx writes `"Telnyx"`, re-stamp the Quo mirror as `"Quo"`,
+and every downstream reader gets a discriminator for free, no schema change.
+SMS has no equivalent yet: `Quo Message` needs a `provider` column (cheaper than
+renaming a doctype with 4,357 rows).
+
+- [ ] Provider-agnostic do-not-contact (**blocks all Telnyx sending**)
+- [ ] `provider` column on Quo Message; re-stamp `telephony_medium` on Call Log
+- [ ] Per-provider line mapping (extend `CRM Telephony Agent`)
+- [ ] Union both providers in every report before Telnyx carries real traffic
 - [ ] `crm/integrations/telnyx/` + `TelnyxCallUI.vue` + settings doctype
-- [ ] Port number inventory + per-user line mapping
-- [ ] Cutover plan (parallel-run window? historical `Quo Message` stays read-only?)
+- [ ] Exit condition for the parallel period
 
 ### 4. Test environment — DECIDED: second Frappe site
 Prod is currently the only backend — the Vite dev server proxies to it. Fine for
@@ -230,12 +266,14 @@ test site lands, rather than silently contradicting it.
 3. **Copilot scope for v1** — now that live is possible, how much of it is live
    transcription vs. screen-driven commands?
 4. **Geo repo name/location** — `groundwork-geo`? Under `~/Projects/Groundwork/`.
-5. **Telnyx cutover shape** — do we port existing numbers (rep continuity, but a
-   porting window where texts can drop), or stand up new Telnyx numbers and run
-   both in parallel? Affects whether `Quo Message` history stays live or archives.
-6. **Does the live copilot run on the Telnyx stream, or on the CRM?** The websocket
+5. **Does the live copilot run on the Telnyx stream, or on the CRM?** The websocket
    consumer has to live somewhere reachable by Telnyx. Candidate: the geo service
    grows a sibling, or its own small service.
+6. **Thread boundary during parallel** — proposal: existing conversations stay on
+   Quo (the seller has that number saved and will reply to it), new leads start on
+   Telnyx. Clean, testable, no mid-thread number switch. Confirm before building.
+7. **When does parallel end?** Needs an explicit exit condition, or it becomes
+   permanent and we pay for both forever.
 
 ---
 
