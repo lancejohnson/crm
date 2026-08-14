@@ -370,27 +370,46 @@
         pattern as the copy/pencil affordances on the field rows above.
       -->
       <div class="relative flex items-center justify-between gap-2">
-        <div class="text-ink-gray-7 flex items-center gap-1.5">
-          <div class="flex items-center gap-1" :title="__('Calls out / in')">
+        <!--
+          Tighter gaps than the rest of the card on purpose. The three counters
+          are the widest thing on a card and the busiest ones (e.g. "79↑ 205↓")
+          ran 258px inside a 238px footer, so the column's overflow clipped the
+          trailing arrow of the email counter. Shaving the gaps recovers ~20px,
+          which is enough to fit — and unlike letting the row shrink, it hides
+          nothing.
+        -->
+        <div class="text-ink-gray-7 flex items-center gap-1">
+          <div class="flex items-center gap-0.5" :title="__('Calls out / in')">
             <PhoneIcon class="h-4 w-4" />
             <span>{{ getRow(itemName, '_call_out_count').label ?? 0 }}&#8593;</span>
             <span>{{ getRow(itemName, '_call_in_count').label ?? 0 }}&#8595;</span>
           </div>
           <span class="text-3xl leading-[0]"> &middot; </span>
-          <div class="flex items-center gap-1" :title="__('Texts out / in')">
+          <div class="flex items-center gap-0.5" :title="__('Texts out / in')">
             <CommentIcon class="h-4 w-4" />
             <span>{{ getRow(itemName, '_text_out_count').label ?? 0 }}&#8593;</span>
             <span>{{ getRow(itemName, '_text_in_count').label ?? 0 }}&#8595;</span>
           </div>
           <span class="text-3xl leading-[0]"> &middot; </span>
-          <div class="flex items-center gap-1" :title="__('Emails out / in')">
+          <div class="flex items-center gap-0.5" :title="__('Emails out / in')">
             <EmailAtIcon class="h-4 w-4" />
             <span>{{ getRow(itemName, '_email_out_count').label ?? 0 }}&#8593;</span>
             <span>{{ getRow(itemName, '_email_in_count').label ?? 0 }}&#8595;</span>
           </div>
         </div>
+        <!--
+          `has-[[data-state=open]]:flex` keeps this visible while its own menu is
+          open, and it is load-bearing, not belt-and-braces. reka-ui's dropdown is
+          modal: opening it puts `pointer-events: none` on <body>, so the card
+          instantly loses :hover, a hover-only trigger collapses to display:none,
+          and Popper then anchors the open menu to a 0x0 box at the origin — the
+          menu jumps to the top-left corner of the window. reka sets
+          `data-state="open"` on the trigger, so this pins the container open for
+          exactly as long as the menu is. KanbanCardFieldAction solves the same
+          problem with its `editorOpen` ref; this is the CSS equivalent.
+        -->
         <div
-          class="absolute -right-1 top-1/2 hidden -translate-y-1/2 items-center rounded bg-surface-white pl-1 group-hover/card:flex"
+          class="absolute -right-1 top-1/2 hidden -translate-y-1/2 items-center rounded bg-surface-white pl-1 group-hover/card:flex has-[[data-state=open]]:flex"
         >
           <HoverMount @click.stop.prevent>
             <Dropdown
