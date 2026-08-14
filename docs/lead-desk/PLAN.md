@@ -475,3 +475,35 @@ states), `valuation`, `address.{latitude,longitude}`.
       no recorded sale price is dropped; the AVM rides along as `avm` context
       only. Costs nothing measurable at take=25 — Brooklyn 25/25 kept, San
       Antonio (non-disclosure, the hard case) 16/25 kept, both >> the 6 shown.
+
+
+---
+
+## Deploy readiness (2026-08-14)
+
+**The branch now contains prod's code.** This nearly went wrong:
+
+`docker image inspect ghcr.io/frappe/crm:v1.67.0-gw333 --format '{{json .Config.Labels}}'`
+reports `org.opencontainers.image.revision = 2ae06c50` — prod was built from
+**feature/kanban-modal**, NOT groundwork. `feature/lead-desk` was based on
+groundwork and so was missing eight live commits (dispo-buyer badges, national
+buyer lookup, lead quick view, kanban hover-chip colours, the Today modal's real
+comps map). `build_image.sh` replaces rather than merges, so deploying would have
+deleted all of it — green build, passing smoke test, gw258 all over again.
+
+Fixed by merging 2ae06c50 into the branch. **Clean.** `git merge-tree` had
+flagged `CompsView.vue` as "changed in both", which means overlap rather than
+conflict — my nine added lines (the subject emit) sat away from their edits.
+Verified after: emit present, DispoBuyerBadges / LeadQuickViewModal /
+dispo_buyers.py present, `yarn build` passes, and the desk still renders 76 pills
+with BD 2 / BA 1 / SQFT 876 / YR 1908 agreeing with the Subject pill.
+
+**Two corrections to an earlier alarm in this file:** `feature/kanban-modal` was
+already on origin, and the MBP's `4f964773` was already merged into groundwork.
+Neither was ever at risk. The stale base was the real problem.
+
+**Always check the image revision before deploying.** One command, and it is the
+difference between shipping and silently deleting a fortnight of someone's work.
+
+- [ ] Deploy: `cd ../frappe-crm-deploy && git pull && ./scripts/build_image.sh FORK=~/crm-worktrees/lead-desk`
+- [ ] Then BatchData go-live (setup script + `batchdata_comps_key`)
