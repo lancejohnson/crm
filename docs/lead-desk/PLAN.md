@@ -442,5 +442,24 @@ livingAreaSquareFeet,yearBuilt}`, `deedHistory[]` with real `salePrice`/`saleDat
 (better than RealEstateAPI, which returns `lastSalePrice: 0` in non-disclosure
 states), `valuation`, `address.{latitude,longitude}`.
 
-- [ ] Build it: zero-comp -> ZIP query -> haversine trim -> map into the comp shape
-- [ ] Confirm per-request vs per-record billing before enabling for all leads
+- [x] **Built** — `crm/api/comps_batchdata.py`, wired into `get_lead_comps`.
+      `take=25` (~$0.75), hard 2-mile cap that DROPS rather than pads, ranked
+      client-side, keep 6. Fires only when `total_in_radius == 0`.
+- [x] **Billing is PER ROW, not per request** — my earlier per-request guess from
+      the rate-limit header was wrong; QUIRKS.md says so plainly. Two tokens:
+      `BATCHDATA_COMPS_API_KEY` $0.030/row vs `BATCHDATA_API_KEY` $0.640/row.
+      The module reads `batchdata_comps_key` and **will not** fall back to the
+      expensive one.
+- [x] **25 rows beats 10 — measured**, and not on cost grounds. The response is
+      not relevance-ordered, so `take` sets how much there is to choose from.
+      Brooklyn lead (3bd/1444sf/1930), best-6 after ranking:
+      take=10 -> mean score 1.91, median 0.85mi, median $788/sf
+      take=25 -> mean score 1.19, median 0.59mi, median $919/sf
+      **5 of the best 6 were invisible at take=10**, and the median $/sf moved
+      17% — a different ARV, not just tidier comps.
+- [ ] **Ops before it can fire** (it self-disables until both exist):
+      `bench set-config batchdata_comps_key <BATCHDATA_COMPS_API_KEY>` and a
+      script adding `CRM Lead.batchdata_comps` (Long Text) +
+      `batchdata_comps_at` (Datetime).
+- [ ] UI: label `status: "estimate"` comps visibly — an AVM is a model's opinion,
+      not a sale, and a rep must not price off one unknowingly.
