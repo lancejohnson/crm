@@ -354,6 +354,17 @@
             {{ getRow(itemName, fieldName).label }}
           </div>
         </div>
+        <!--
+          Who already buys here. Renders nothing at all unless one of the two
+          national buyers covers this lead's area, which is ~58% of the board,
+          so it costs no height on the rest.
+        -->
+        <div
+          v-else-if="fieldName === '_dispo_buyers'"
+          class="truncate text-base"
+        >
+          <DispoBuyerBadges :value="getRawValue(itemName, fieldName)" />
+        </div>
         <div
           v-else-if="fieldName === '_first_call'"
           class="truncate text-base"
@@ -595,6 +606,7 @@ import KanbanView from '@/components/Kanban/KanbanView.vue'
 import KanbanCardField from '@/components/Kanban/KanbanCardField.vue'
 import HoverMount from '@/components/Kanban/HoverMount.vue'
 import LeadModal from '@/components/Modals/LeadModal.vue'
+import DispoBuyerBadges from '@/components/DispoBuyerBadges.vue'
 import LeadQuickViewModal from '@/components/Modals/LeadQuickViewModal.vue'
 import LeadOpenModeModal from '@/components/Modals/LeadOpenModeModal.vue'
 import {
