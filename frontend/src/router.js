@@ -49,6 +49,16 @@ const routes = [
     props: true,
   },
   {
+    // The lead desk: the single screen a rep works a live seller call from.
+    // Same '/leads/:leadId/<verb>' shape as Comps above, and for the same
+    // reason -- a param never matches across a '/', so it cannot shadow
+    // '/leads/:leadId'. Desktop only by design; see pages/LeadDesk.vue.
+    path: '/leads/:leadId/desk',
+    name: 'LeadDesk',
+    component: () => import('@/pages/LeadDesk.vue'),
+    props: true,
+  },
+  {
     alias: '/deals',
     path: '/deals/view/:viewType?',
     name: 'Deals',
