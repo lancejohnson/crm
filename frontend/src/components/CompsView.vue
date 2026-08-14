@@ -391,7 +391,7 @@ const props = defineProps({
 // This used to be a modal driven by `defineModel()`. It is now a full page, so
 // "open" is simply always true -- which keeps every existing `show.value` guard,
 // watcher and keyboard-shortcut gate working exactly as before.
-const emit = defineEmits(['subject'])
+const emit = defineEmits(['subject', 'picked'])
 const show = ref(true)
 
 // Canvas/marker colours live in JS because Leaflet can't read Tailwind tokens.
@@ -1332,6 +1332,16 @@ function toggleRevealHidden() {
 const MAX_SHEET_COMPS = 4
 const creatingSheet = ref(false)
 const selectedNames = computed(() => comps.value.filter((c) => c.selected).map((c) => c.name))
+
+// Hand the chosen comps to whoever is hosting us, so a host rail can price off
+// exactly what the rep ticked. Selection already persists team-wide on the lead;
+// this just avoids the host re-deriving it and the two disagreeing about which
+// comps produced a number somebody said out loud on a call.
+watch(
+  () => comps.value.filter((c) => c.selected),
+  (picked) => emit('picked', picked),
+  { deep: true, immediate: true },
+)
 
 const underwritingLabel = computed(() => {
   const n = selectedNames.value.length

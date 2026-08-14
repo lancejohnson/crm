@@ -38,8 +38,20 @@
           :lead="leadId"
           :address="address"
           @subject="onSubject"
+          @picked="onPicked"
         />
       </div>
+
+      <!-- Right rail: what the comps mean in money. -->
+      <OfferRail
+        v-if="leadId"
+        :lead="leadId"
+        :picked="picked"
+        :subject="subject"
+        :motivated="lead?.first_call_motivated || ''"
+        :on-price="lead?.first_call_on_price || ''"
+        @read-saved="leadResource.reload()"
+      />
     </div>
   </div>
 </template>
@@ -73,6 +85,7 @@ import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { createResource, Badge, Button } from 'frappe-ui'
 import CompsView from '@/components/CompsView.vue'
+import OfferRail from '@/components/OfferRail.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -104,6 +117,14 @@ const lead = computed(() => leadResource.data || null)
 const subject = ref(null)
 function onSubject(s) {
   subject.value = s || null
+}
+
+// The comps the rep ticked, straight from CompsView so the rail prices off
+// exactly what is highlighted on the map — not a second derivation that could
+// disagree with it.
+const picked = ref([])
+function onPicked(list) {
+  picked.value = Array.isArray(list) ? list : []
 }
 
 /**
