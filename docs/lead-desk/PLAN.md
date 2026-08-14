@@ -1,7 +1,7 @@
 # Lead Desk — working plan
 
 **Branch:** `feature/lead-desk` · **Worktree:** `~/crm-worktrees/lead-desk`
-**Started:** 2026-08-14 · **Last updated:** 2026-08-14
+**Started:** 2026-08-14 · **Last updated:** 2026-08-14 (geo service scaffolded + sweep proven)
 
 > This file is the memory for a project that spans many days and two machines.
 > Read it first. Update it at the end of every session — decisions, measured
@@ -128,9 +128,24 @@ It owns the WAF cookie lifecycle and the rate limiter, so lux/devproppy/CRM can
 never collectively get the egress IP banned. Prefetch is triggered at lead
 purchase (open question: CRM `after_insert` vs earlier in `istl-buyer`).
 
-- [ ] Repo + skeleton + systemd
-- [ ] Tiled sweep (port `tile_bbox` from lux, fix the stale cap)
-- [ ] `/warm` + `/properties`, measure on 10 Chicago/Indy leads
+- [x] Repo created: `~/Projects/Groundwork/groundwork-geo` (own git repo)
+- [x] **Adaptive quadtree sweep** — replaces lux's fixed 8x8. Subdivides only
+      where saturation is observed, so rural costs 1 call and dense pays for
+      the depth it needs. `SATURATION=1400`, `MAX_DEPTH=5`, circle-trimmed.
+- [x] **Measured payoff (2 mi radius):** Indianapolis naive 1,832 -> **17,287**
+      (49 calls, depth 3) = **9.44x**; the naive call was missing 94% of the
+      neighbourhood. Olivia 1,007 -> 997 in **1 call, depth 0** (fewer because
+      the circle trim drops bbox corners reaching 2.83 mi — correct).
+- [x] `/health`, `/warm`, `/properties` verified: 139 GeoJSON features around
+      the demo lead, guards return 422/501 correctly.
+- [x] Coverage confirmed partial and normal: Indy 17,287 homes, only **41%
+      priced**. Pills must render without a price.
+- [x] Timing: dense 2-mi sweep ~75s / 49 calls — proves prefetch is mandatory,
+      this can never run on page load.
+- [ ] `geo/store.py` — PostGIS persistence (`/properties` currently 501s
+      without `live=true`)
+- [ ] Parcel enrichment + WAF cookie lifecycle on a headless box
+- [ ] systemd unit + deploy to `/opt/groundwork-geo`
 - [ ] Parcel enrichment + cookie lifecycle
 - [ ] CRM hook + backfill (stage it — 362 leads × ~3k parcels ≈ 1M rows)
 
@@ -287,3 +302,7 @@ test site lands, rather than silently contradicting it.
   have been $375/mo and bills per parcel record, which is unaffordable for browsing).
 - Confirmed Quo cannot do live transcription; confirmed Telnyx can.
 - Created this branch + worktree.
+- Decided: Telnyx cutover runs **parallel**, port numbers in later.
+- Approved: make do-not-contact provider-agnostic (**blocks Telnyx sending**).
+- Built `groundwork-geo` — separate repo, adaptive sweep proven at 9.44x the
+  naive call in Indianapolis. Service skeleton verified end to end.
