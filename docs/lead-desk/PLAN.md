@@ -467,5 +467,11 @@ states), `valuation`, `address.{latitude,longitude}`.
       Script deliberately NOT run yet: creating the fields and setting the key is
       the moment money starts moving, and that should be intentional rather than a
       side effect. The app self-disables until both exist.
-- [ ] UI: label `status: "estimate"` comps visibly — an AVM is a model's opinion,
-      not a sale, and a rep must not price off one unknowingly.
+- [x] **AVM comps are dropped, not labelled.** Reading `CompsView` first showed a
+      label was insufficient: `isActive()` matches `"active"` exactly, so
+      `"estimate"` fell through to `OFF_MARKET` — the colour that file defines as
+      *"an actual transaction"*. An AVM was pixel-identical to a confirmed sale.
+      Deeper problem: averaging AVMs into a $/sf ARV is circular. So a comp with
+      no recorded sale price is dropped; the AVM rides along as `avm` context
+      only. Costs nothing measurable at take=25 — Brooklyn 25/25 kept, San
+      Antonio (non-disclosure, the hard case) 16/25 kept, both >> the 6 shown.
