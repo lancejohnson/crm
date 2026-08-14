@@ -256,6 +256,12 @@ doc_events = {
 			"crm.api.sequence_drain.enqueue_for_lead",
 			# A new never-called lead may owe work immediately; add its card after commit.
 			"crm.api.today_board.enqueue_today_sync",
+			# Warm this lead's neighbourhood in groundwork-geo the moment we buy it.
+			# A 2-mile sweep is ~75s and its parcels ~45min, so the work has to start
+			# at purchase, not when a rep opens the desk. Enqueued (never inline) so a
+			# slow sweep can't hold the inbound webhook open long enough for the vendor
+			# to retry and duplicate the lead. No-op without site_config geo_service_url.
+			"crm.api.geo.on_lead_insert",
 		],
 		"on_update": [
 			"crm.api.sequence_drain.enqueue_for_lead",
