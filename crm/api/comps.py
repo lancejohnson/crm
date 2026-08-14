@@ -883,7 +883,62 @@ def get_lead_comps(lead, radius_mi=None, limit=None, filters=None, auto=0, inclu
 
 	base["total_matched"] = len(matched)
 	base["comps"] = matched[:cap]
+
+	# Nothing in the pooled index reaches this property. Sampling the 45 most recent
+	# leads, 18% land here — an empty map, which is the one outcome this feature set
+	# out to avoid. Buy a small set from BatchData rather than show nothing.
+	#
+	# Strictly a LAST resort: gated on the unfiltered radius result being empty, not
+	# on the filtered one, so a tight preset that happens to match nothing can never
+	# spend money. `total_in_radius` is the honest "do we hold anything here at all".
+	if not out and not base["comps"]:
+		base["fallback"] = _batchdata_fallback(doc, base)
+
 	return base
+
+
+def _batchdata_fallback(doc, base):
+	"""Fill an empty comps map from BatchData. Returns a small status dict.
+
+	Split out so the paid path is one obvious, greppable place rather than an inline
+	branch someone later widens by accident.
+	"""
+	from crm.api import batchdata_comps
+
+	if not batchdata_comps.available():
+		return {"source": "batchdata", "used": False, "reason": "not_configured"}
+
+	try:
+		comps = batchdata_comps.fetch_for_lead(doc)
+	except Exception:
+		# A comps map that renders without the fallback beats a 500 on lead detail.
+		frappe.log_error(frappe.get_traceback(), "BatchData comps fallback failed")
+		return {"source": "batchdata", "used": False, "reason": "error"}
+
+	if not comps:
+		return {"source": "batchdata", "used": True, "count": 0}
+
+	lat, lng = base["subject"]["lat"], base["subject"]["lng"]
+	for c in comps:
+		c["distance_mi"] = round(_haversine_mi(lat, lng, c["lat"], c["lng"]), 2)
+		c["selected"] = False
+		c["hidden"] = False
+		c["recency_days"] = _recency_days(c, frappe.utils.today())
+	comps.sort(key=lambda r: r["distance_mi"])
+
+	base["comps"] = comps
+	base["total_matched"] = len(comps)
+	base["total_in_radius"] = len(comps)
+	# The rep must be told these came from somewhere else, on a different basis:
+	# recorded sales rather than our pooled listing index, and not distance-ranked
+	# by the provider. Presenting them silently as the same thing would be a lie
+	# about where the number came from.
+	return {
+		"source": "batchdata",
+		"used": True,
+		"count": len(comps),
+		"basis": "recorded sales, last 2 years",
+	}
 
 
 # ---------------------------------------------------------------------------------
