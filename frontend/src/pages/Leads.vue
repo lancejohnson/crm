@@ -156,6 +156,7 @@
         params: { leadId: row.name },
         query: { view: route.query.view, viewType: route.params.viewType },
       }),
+      onClick: (row, e) => onCardClick(row, e),
       onNewClick: (column) => onNewClick(column),
       cardColor: (row) => cardTint(row),
     }"
@@ -556,6 +557,24 @@
     doctype="CRM Lead"
     :doc="docname"
   />
+  <!--
+    Kept mounted (v-show semantics via the modal's own `show`) rather than
+    v-if'd away, so reopening the same lead does not re-mount Activities and
+    refetch the whole timeline. The modal itself gates its heavy children on
+    `show`, so nothing renders while it is closed.
+  -->
+  <LeadQuickViewModal v-model="showQuickView" :lead-id="quickViewLead" />
+  <!--
+    v-if, so answering the prompt UNMOUNTS it rather than leaving it to play an
+    exit transition. Two reka-ui modal dialogs overlapping wedge each other: the
+    outgoing one stays on screen at data-state="closed" and the incoming one
+    sticks half-faded at opacity .5, both permanently. Measured, not guessed.
+  -->
+  <LeadOpenModeModal
+    v-if="showOpenModePrompt"
+    v-model="showOpenModePrompt"
+    @choose="onOpenModeChosen"
+  />
 </template>
 
 <script setup>
@@ -576,6 +595,15 @@ import KanbanView from '@/components/Kanban/KanbanView.vue'
 import KanbanCardField from '@/components/Kanban/KanbanCardField.vue'
 import HoverMount from '@/components/Kanban/HoverMount.vue'
 import LeadModal from '@/components/Modals/LeadModal.vue'
+import LeadQuickViewModal from '@/components/Modals/LeadQuickViewModal.vue'
+import LeadOpenModeModal from '@/components/Modals/LeadOpenModeModal.vue'
+import {
+  LEAD_OPEN_MODAL,
+  LEAD_OPEN_PAGE,
+  loadLeadOpenMode,
+  saveLeadOpenMode,
+  useLeadOpenMode,
+} from '@/composables/leadOpenMode'
 import ImportLeadsModal from '@/components/Modals/ImportLeadsModal.vue'
 import NoteModal from '@/components/Modals/NoteModal.vue'
 import TaskModal from '@/components/Modals/TaskModal.vue'
@@ -606,7 +634,7 @@ import {
 import { formatPhone, callHref } from '@/utils/phoneFormat'
 import { myQuoNumber } from '@/composables/quoSender'
 import { Avatar, Tooltip, Dropdown, call } from 'frappe-ui'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   ref,
   computed,
@@ -630,10 +658,81 @@ const myNumber = computed(() => myQuoNumber())
 const { on } = useBroadcast()
 
 const route = useRoute()
+const router = useRouter()
 
 const leadsListView = ref(null)
 const showLeadModal = ref(false)
 const showImportModal = ref(false)
+
+// Opening a lead from the Kanban without losing your place on the board.
+//
+// The card stays a real <router-link> -- it keeps a genuine href, so cmd/middle
+// click still opens the full lead in a background tab, and vue-router's own
+// guardEvent ignores modified clicks before we ever see them. We only intercept
+// the plain left click and decide what it should do.
+const leadOpenMode = useLeadOpenMode()
+const showQuickView = ref(false)
+const quickViewLead = ref('')
+const showOpenModePrompt = ref(false)
+const pendingLead = ref('')
+
+function openQuickView(name) {
+  quickViewLead.value = name
+  showQuickView.value = true
+}
+
+function goToLead(name) {
+  router.push({
+    name: 'Lead',
+    params: { leadId: name },
+    query: { view: route.query.view, viewType: route.params.viewType },
+  })
+}
+
+async function onCardClick(row, e) {
+  // Let the browser handle new-tab/new-window intents itself. vue-router would
+  // ignore these too, but bailing here means we also never preventDefault them.
+  if (e && (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button)) return
+
+  // We are taking responsibility for this click, so stop the router-link from
+  // navigating. This MUST happen synchronously, before any await -- vue-router's
+  // guardEvent checks defaultPrevented during the same event dispatch.
+  e?.preventDefault()
+
+  let mode = leadOpenMode.value
+  // null means the preference has genuinely not been fetched yet (a click landed
+  // before the board's mount request resolved). Waiting is right: guessing here
+  // would open the wrong surface on the very first click after a page load.
+  if (mode === null) mode = await loadLeadOpenMode()
+
+  if (mode === LEAD_OPEN_PAGE) return goToLead(row.name)
+  if (mode === LEAD_OPEN_MODAL) return openQuickView(row.name)
+
+  // Never asked -- ask once, then honour the answer for this very click.
+  pendingLead.value = row.name
+  showOpenModePrompt.value = true
+}
+
+async function onOpenModeChosen(mode) {
+  const name = pendingLead.value
+  pendingLead.value = ''
+  if (!name) {
+    saveLeadOpenMode(mode)
+    return
+  }
+  if (mode === LEAD_OPEN_PAGE) {
+    saveLeadOpenMode(mode)
+    return goToLead(name)
+  }
+  // Let the prompt finish unmounting before the quick view mounts, so the two
+  // dialogs are never on screen together (see the v-if note in the template).
+  // Persisting the choice is deliberately NOT awaited here: it is a preference
+  // write, and making the lead the user asked for wait on it would put a round
+  // trip in front of every first click.
+  saveLeadOpenMode(mode)
+  await nextTick()
+  openQuickView(name)
+}
 
 // The "..." menu beside Create. Bulk import lives here rather than on the main
 // row: it's an occasional vendor-batch action, not a daily one.
@@ -945,6 +1044,10 @@ async function flushCardRefresh() {
 onMounted(() => {
   $socket.on('crm_task_update', queueCardRefresh)
   $socket.on('crm_first_call', queueCardRefresh)
+  // Warm the lead-open preference so the FIRST card click already knows what to
+  // do. onCardClick can await it if this has not landed, but that would put a
+  // round trip in front of the very first open of the session.
+  loadLeadOpenMode()
   // Restore a persisted "Tasks due" filter: re-resolve the matching lead names
   // fresh (the stored scope is the source of truth; names go stale), then let
   // applyTaskDue reload the board with them. Skip while a dashboard drill is
