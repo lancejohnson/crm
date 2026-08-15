@@ -488,3 +488,84 @@ difference between shipping and silently deleting a fortnight of someone's work.
 
 - [ ] Deploy: `cd ../frappe-crm-deploy && git pull && ./scripts/build_image.sh FORK=~/crm-worktrees/lead-desk`
 - [ ] Then BatchData go-live (setup script + `batchdata_comps_key`)
+
+---
+
+# SESSION 2 END STATE (2026-08-14) — start here
+
+**Launch a new session from:** `~/crm-worktrees/lead-desk` (branch
+`feature/lead-desk`, clean, pushed). This file is the memory; read it first.
+
+Other repos this project touches:
+    ~/Projects/Groundwork/frappe-crm-deploy   ops: deploy, envs, setup scripts
+    ~/Projects/Groundwork/groundwork-geo      the geo microservice
+    ~/Projects/Groundwork/frappe-crm-app      main checkout — has Lance's
+                                              UNCOMMITTED in-flight work; leave it
+
+## Production right now
+
+    gw336 @ 098ca26c (clean)   smoke: all green   drift: PASS
+    Live: lead desk route, geo client, provider-agnostic DNC, BatchData fallback
+
+`groundwork` contains both feature branches. `feature/lead-desk` = groundwork +
+the desk page + the offer rail, and is NOT deployed.
+
+## Done this session, beyond the BatchData section above
+
+- **Lead desk slice 1+2.** `/leads/:leadId/desk` -> `pages/LeadDesk.vue`, which
+  embeds the real `CompsView` (not the mockup's map) and `OfferRail.vue`.
+  Verified live: 76 comps, header facts agreeing with the Subject pill, and ARV
+  $48,000 = $55/sf x 876sf with a correct $0 offer + warning.
+  `CompsView` gained two emits: `subject` and `picked`.
+- **Geo service deployed**: `geo-api.service`, 127.0.0.1 -> the CRM's bridge
+  gateway, `/warm` persists to PostGIS, `/properties` serves the store.
+- **Staging box**: Hetzner `crm-staging` 87.99.154.150 (cpx21, ubuntu 24.04,
+  **devproppy** project). DNS live. Nothing installed on it yet.
+- **Deploy is env-parameterised**: `envs/prod.env` / `envs/staging.env`,
+  `ENV=staging ./scripts/build_image.sh`. Default is prod, byte-identical to
+  before. Parameterising found three HARDCODED prod site names in the standby
+  health probe and cache-clear — a staging deploy would have hit prod.
+
+## Traps learned the hard way this session — do not re-earn these
+
+- **`crm-test.groundworkpro.com` shares production's APP CODE.** Frappe
+  multi-site is one bench, one codebase, many sites. It isolates DATA, not code,
+  so it CANNOT be used to test a branch. That is why the staging BOX exists.
+- **Check the image revision before every deploy.**
+  `docker image inspect <tag> --format '{{json .Config.Labels}}'` ->
+  `org.opencontainers.image.revision`. Prod was built from `feature/kanban-modal`
+  (2ae06c50), not groundwork — deploying a groundwork-based branch would have
+  deleted eight live commits. `build_image.sh` has its own clobber guard which
+  correctly refused; **`FORK=` must be an ENV VAR, not an argument**, or it
+  silently reads the main checkout.
+- **A `-dirty` revision in the build banner means somebody's uncommitted work
+  just shipped.** gw335 shipped Lance's in-flight `hooks.py` (tracked) but NOT
+  his untracked `daily_outreach.py` — `git stash create` skips untracked files —
+  leaving prod with a scheduler hook pointing at an absent module. gw336 is the
+  same commit rebuilt clean.
+- **`nc_dns.py` was dangerous and is now fixed** (`~/.claude/api-helpers/`,
+  **not in any git repo — worth versioning**). Three bugs, all in the same
+  family: Namecheap `getHosts` returns `Name`/`Type` but `setHosts` expects
+  `HostName`/`RecordType`, so every exported record had a blank name; `setHosts`
+  is a FULL REPLACE, so applying that would have erased all 34 records while the
+  diff looked clean (broken compared against broken); and addresses come back
+  XML-escaped, so a CAA value `0 issue &quot;x&quot;` was written back literally
+  and rejected. Now: correct field mapping, XML-unescape, a refuse-on-blank
+  guard, and domain-based account routing (groundworkpro.com -> Servant account,
+  egress 5.161.68.223 via groundwork-apps).
+  **If `apply` was ever run on a WBG domain, check that zone.**
+
+## Next, in order
+
+1. Bootstrap staging: docker, compose stack, bench, nginx + TLS, then a
+   SANITISED prod copy (scrub phone numbers so a test call cannot reach a seller).
+2. Desk slice 3: save the determination to the lead; activity timeline.
+3. Telnyx — its own project, bigger than the desk. See the section above.
+   Copilot stays blocked until it lands.
+
+## Open, needing a human
+
+- Deploying `feature/lead-desk` to prod: small (226 lines) but `CompsView` is
+  used by `TodayLeadModal`, `CompDetailModal` and `Comps.vue` — all live.
+- Lance's four uncommitted files in the main checkout.
+- Orphan cleanup is DONE (`batchdata_comps_key` / `batchdata_comps_at` dropped).
