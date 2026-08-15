@@ -15,6 +15,8 @@ reuses the same thread components.
 import json
 
 import frappe
+
+from crm.api import telephony
 from frappe import _
 
 ALLOWED_SMS_ROLES = ["System Manager", "Sales Manager", "Sales User"]
@@ -62,20 +64,28 @@ def validate_access(reference_doctype=None, reference_name=None, permtype="read"
 
 
 def _last10(number):
-	return "".join(ch for ch in (number or "") if ch.isdigit())[-10:]
+	return telephony.last10(number)
 
 
 def _sender_map():
-	"""Last-10-digit Quo number -> user, for attributing an outbound text to the
-	teammate whose line sent it (Quo Message stores only phone numbers)."""
-	if not frappe.db.has_column("User", "custom_quo_number"):
+	"""Last-10-digit line -> user, for attributing an outbound text to the
+	teammate whose line sent it (a stored message carries only phone numbers).
+
+	Shared with the Team Activity report and the intraday pulse, and provider-wide:
+	a rep who sends from Telnyx must still be named on their own texts, or the
+	thread shows an unattributed message and the activity report under-counts them.
+	"""
+	owners = telephony.line_owners()
+	if not owners:
 		return {}
-	users = frappe.get_all(
-		"User",
-		filters={"enabled": 1, "custom_quo_number": ("is", "set")},
-		fields=["name", "full_name", "custom_quo_number"],
-	)
-	return {digits: u for u in users if (digits := _last10(u.custom_quo_number))}
+	names = {
+		row.name: row
+		for row in frappe.get_all(
+			"User", filters={"name": ["in", list(set(owners.values()))]},
+			fields=["name", "full_name"],
+		)
+	}
+	return {digits: names[user] for digits, user in owners.items() if user in names}
 
 
 def _shape(rows):

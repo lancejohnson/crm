@@ -302,6 +302,26 @@ and every downstream reader gets a discriminator for free, no schema change.
 SMS has no equivalent yet: `Quo Message` needs a `provider` column (cheaper than
 renaming a doctype with 4,357 rows).
 
+- [x] **`provider` column on Quo Message** (live on prod, 4,403 rows backfilled
+      to "Quo"). **Calls needed NOTHING and the plan above was wrong about which
+      field**: measured before writing anything, all 4,192 CRM Call Log rows are
+      `medium = "Quo"` / `telephony_medium = "Manual"` — the ops webhook has
+      written `medium` since the mirror was built, so the discriminator already
+      exists, is 100% populated and is correct. Telnyx writes `medium = "Telnyx"`.
+      Re-stamping `telephony_medium` would have replaced a right field with a
+      duplicate one.
+- [x] **Per-provider line mapping** — `CRM Telephony Agent.custom_telnyx_number`
+      (live), read through `telephony.user_lines()` / `sending_line()`.
+      `User.custom_quo_number` stays authoritative for Quo; the agent row is
+      where the SECOND line lives, because a rep will hold both at once.
+- [x] **One attribution chain, provider-wide** — `crm/api/telephony.py` (new).
+      `activity_progress`, `today_pulse` and `sms` now share `line_owners()`
+      instead of each building their own map, and `_workspace_lines()` unions the
+      live Quo list with every configured line so a rep-to-rep call over Telnyx
+      is still "internal" rather than outreach to a stranger.
+      **Verified equivalent on prod before/after**: 3 days of the Team Activity
+      report and the SMS sender map byte-identical, the pulse identical except
+      its clock-derived line, and 0 of 2,896 calls over 30 days change hands.
 - [x] **Provider-agnostic do-not-contact** (was blocking all Telnyx sending).
       `record_inbound_opt_out()` takes plain values, not a Quo Message doc, so any
       provider's inbound handler calls the same rule; `check_inbound_opt_out` is
@@ -713,3 +733,43 @@ because `sequence_drain.drain_due` runs every minute.
 - **A 4.2GB database is mostly one table.** `tabError Log` is 3.9GB of it (148
   rows), so the clone restores it — and the other log-shaped tables — as empty
   structure and moves ~250MB instead.
+
+
+---
+
+# TELNYX PREREQUISITES — DONE (2026-08-15)
+
+All three prerequisites the plan called mandatory-before-any-Telnyx-traffic are
+built, live on prod where they need schema, and verified equivalent. What is left
+is Telnyx itself, which is blocked on two DECISIONS, not on code (open questions
+6 and 7): the thread boundary during parallel running, and the exit condition.
+
+## `crm/api/telephony.py` — the one place that knows whose line is whose
+
+There were **NINE** separate `_last10`/`_digits` helpers in this app and they did
+not agree. `activity_progress` and `today_pulse` matched a user's line by EXACT
+STRING against `custom_quo_number`, so a line stored as `+16125551234` would
+never have matched a call log carrying `6125551234`. It happens to work today
+because both sides are E.164 — measured, 0 of 2,896 calls change attribution —
+but that is luck, and Telnyx will not necessarily store numbers the way Quo does.
+
+## Corrections to this file's own plan, both found by measuring first
+
+- **`CRM Call Log.medium` is the discriminator, not `telephony_medium`.** Every
+  one of the 4,192 rows already says `Quo`. No migration, no re-stamp.
+- **Texts genuinely needed a column**, and it is backfilled — but the app treats
+  a BLANK provider as Quo (`telephony.LEGACY_PROVIDER`), so a site that never
+  runs the backfill still counts all 4,357 texts. A missing migration must not
+  make history disappear.
+
+## Trap
+
+**`bench mariadb` runs in SAFE UPDATE MODE.** An `UPDATE ... WHERE provider IS
+NULL` touches no KEY column, so it is refused with ERROR 1175 and exits 1 — and
+with stderr hidden that is indistinguishable from a successful no-op. The backfill
+reported "done" while 4,403 rows stayed NULL. Always `SET SQL_SAFE_UPDATES=0;`
+first, and always read back the row counts.
+
+## Ops
+
+`scripts/setup_provider_columns.py` (run on prod) + the backfill it prints.
