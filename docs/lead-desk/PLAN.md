@@ -690,8 +690,17 @@ undone (2 comments deleted, `comps_hidden` / `comps_selected` /
 # STAGING IS LIVE (2026-08-15)
 
     https://crm-staging.groundworkpro.com    87.99.154.150 (Hetzner cpx21, ash)
-    v1.67.0-stg1 @ c62d089d (feature/lead-desk)   876 leads, all phones scrubbed
+    v1.67.0-stg1 @ c62d089d (feature/lead-desk)
     Administrator password: crm-staging:/opt/frappe-crm/.env
+
+**It is a LEADZOLO-ONLY box (2026-08-15, Lance's call), NOT a copy of prod.** It
+was seeded from a scrubbed clone first; that was the wrong shape. His test leads
+come from LeadZolo and Quo is not going on it at all, so the site was wiped:
+**0 leads, 0 Server Scripts, and no `tabQuo Message` table at all.**
+`scripts/provision_staging_leadzolo.sh` adds back only the intake path — 20 CRM
+Lead custom fields, the Lead Webhook Log doctype, the `Leadzolo` lead source and
+the `leadzolo-leads` script. The clone script still exists for when a data-shaped
+box is wanted; it is simply not what this one is.
 
 Two scripts in the ops repo, both idempotent:
 
@@ -773,3 +782,39 @@ first, and always read back the row counts.
 ## Ops
 
 `scripts/setup_provider_columns.py` (run on prod) + the backfill it prints.
+
+
+## Staging: LeadZolo-only, and what the round trip taught (2026-08-15)
+
+**Which custom fields get installed is DERIVED FROM THE WEBHOOK**, not
+hand-listed: a field is installed only if `leadzolo_webhook.py` references it (20
+of the 43 in `site/custom_fields.json`). That is the rule that keeps the box to
+one purpose as the export grows — the file also carries `User.custom_quo_number`,
+`CRM Lead.quo_contact_id` and three CRM Call Log transcript fields, all
+telephony, plus refund-pool fields for a feature deleted in gw226. A
+hand-maintained exclude list would silently let the next one through.
+
+Three failures that a "200 OK" check would have missed, all now handled by the
+provisioning script:
+
+- **Server Scripts are OFF unless `common_site_config` says
+  `server_script_enabled`.** The script installs fine, is enabled, and simply
+  never runs; the endpoint 417s with `ServerScriptNotEnabled`.
+- **A missing master record is a HARD failure, not a blank field.** The first
+  fire died with `Could not find Source: Leadzolo` — *after* the raw payload had
+  been logged, which is exactly what the Lead Webhook Log exists for.
+- **`CRM Lead Source` autonames on `source_name`, not `lead_source`.** Posting
+  the wrong key returns "Source Name is required".
+
+`sync_server_scripts.py`, `setup_lead_webhook_log.py` take their target from the
+environment now (`CRM_SSH_HOST` / `CRM_SITE` / `CRM_BASE` /
+`CRM_ADMIN_PASSWORD`), defaulting to prod. 48 other `setup_*.py` scripts still
+hardcode prod's URL — parameterise them as they are needed, not speculatively.
+
+**Verified end to end**: a LeadZolo-shaped payload created `CRM-LEAD-2026-00001`
+with address / beds / baths / sqft / year / campaign / vendor id all in the right
+fields, and the payload logged. `lead_owner` is NULL because the round robin is
+config-gated and staging has no roster — correct for a test box.
+
+The scheduler is **paused** (`pause_scheduler: 1`); intake does not need it, and
+`sequence_drain.drain_due` runs every minute when it is on.
