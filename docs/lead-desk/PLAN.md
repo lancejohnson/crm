@@ -209,10 +209,13 @@ purchase (open question: CRM `after_insert` vs earlier in `istl-buyer`).
       **Test-lead choice matters:** the first run used a Brooklyn lead and got
       zero comps. That was not a page bug -- `CRM Comp` has **0 rows for ZIP
       11230**. Use a lead with real coverage; Chicago 00854 has 561.
-- [ ] Right rail: offer math, repair matrix, 2x2 (reuse `first_call.py`)
+- [x] Right rail: offer math, repair matrix, 2x2 (reuse `first_call.py`)
 - [ ] Left rail: copilot (blocked on the Telnyx decision)
-- [ ] Save determination (needs schema)
-- [ ] Shortcuts + palette contributions
+- [x] **Save determination** — `crm/api/price_determination.py`, the two CRM Lead
+      fields, and the activity rail. See SESSION 3 below.
+- [~] Shortcuts: `S` saves, `]` toggles the activity rail (registered as
+      `activeDetailPanel`, so `]` keeps one meaning app-wide). Palette
+      contributions still to do.
 
 ### 3. Telnyx migration — its own project, bigger than the lead desk
 Replaces Quo/OpenPhone entirely. Unblocks the live copilot.
@@ -559,7 +562,7 @@ the desk page + the offer rail, and is NOT deployed.
 
 1. Bootstrap staging: docker, compose stack, bench, nginx + TLS, then a
    SANITISED prod copy (scrub phone numbers so a test call cannot reach a seller).
-2. Desk slice 3: save the determination to the lead; activity timeline.
+2. ~~Desk slice 3~~ — done, see SESSION 3.
 3. Telnyx — its own project, bigger than the desk. See the section above.
    Copilot stays blocked until it lands.
 
@@ -569,3 +572,90 @@ the desk page + the offer rail, and is NOT deployed.
   used by `TodayLeadModal`, `CompDetailModal` and `Comps.vue` — all live.
 - Lance's four uncommitted files in the main checkout.
 - Orphan cleanup is DONE (`batchdata_comps_key` / `batchdata_comps_at` dropped).
+
+---
+
+# SESSION 3 (2026-08-15) — desk slice 3: the saved determination
+
+**Launch from** `~/crm-worktrees/lead-desk`. Prod is still **gw336 @ 098ca26c**;
+this session's work is committed but **NOT deployed**.
+
+## What shipped
+
+- **`crm/api/price_determination.py`** (new) — `save_price_determination` /
+  `get_price_determination`.
+  - **The snapshot keeps the INPUTS and the CONSTANTS**, not just the offer.
+    "We said $35,300" is unusable three weeks later without the comps, the $/sf
+    and the repair level. `margin` and `fee` ride along because constants change:
+    move the fee from $10k to $12k and a snapshot holding only inputs would
+    silently re-derive to a number nobody ever said out loud.
+  - **The server re-derives and REFUSES a mismatch** — not to impose today's
+    formula (it uses the snapshot's own constants) but to catch a client whose
+    offer does not follow from its own inputs. That failure is silent and it is
+    a number a rep read to a seller.
+  - **Comps are COPIED, not referenced.** `CRM Comp` is a projection of a feed
+    that re-syncs nightly, and a BatchData fallback comp has no CRM row at all,
+    so a determination resolving comps by name would drift or empty out.
+  - **The field is the current price; the TIMELINE is the history.** Every save
+    also posts a Comment, so re-pricing after a repair walkthrough never erases
+    what was said before. Best-effort — a timeline write never fails the click.
+  - `modified` is deliberately allowed to move (unlike the Zillow/BatchData
+    caches): this is a person pricing a deal, not the machine remembering.
+- **`OfferRail.vue`** — Save / Re-save with a drift line ("Saved 2:32 pm at
+  $58,000 — changed since."). Comparison excludes the server-stamped
+  `by`/`at`/`source`, or every save would look instantly stale.
+- **`LeadDesk.vue`** — the real `Activities.vue` as a `]`-toggled overlay,
+  mounted lazily on first open and kept mounted after; `S` saves.
+- Ops: **`scripts/setup_price_determination.py`** — RUN ON PROD ALREADY
+  (`price_determination`, `price_determination_at` on CRM Lead). Every write is
+  column-guarded, so the app was safe to deploy before it: with the fields absent
+  the save still lands on the timeline and the rail says "recorded on the
+  timeline only" rather than showing a saved state that vanishes on reload.
+
+## Traps this session paid for
+
+- **A `z-20` overlay LOSES to Leaflet.** `.leaflet-container` creates no stacking
+  context and its panes carry z-index 400–700, so the map PAINTED over the left
+  ~100px of the activity panel (the heading read "y") while the panel still
+  hit-tested underneath — clicks landing where nothing was visible. Any overlay
+  near this map needs `z-[1000]`.
+- **CompsView does not fit a fixed-height host.** It was built as a full page:
+  filter card + map + list is ~1,010px against the desk's 726px, so only 62px of
+  the 320px property list was reachable and the wheel could not get to the rest.
+  New **`fill` prop** (default off, so the three live surfaces are untouched):
+  filters fold behind a "Filters (N)" toggle, map and list share the height and
+  scroll themselves. Measured after: centre pane scrollHeight == clientHeight at
+  1280×800.
+- **PostHog's "Report a problem" tab sits ON the rail.**
+  `button.ph-survey-widget-tab`, in a shadow root, `position:fixed`, 35px, right
+  edge, vertically CENTRED — it landed on "Max offer", the one number said out
+  loud. Shadow DOM means our CSS cannot move it and disabling feedback on the
+  screen reps live in is the wrong trade, so the rail is 340px with a 40px right
+  gutter (same ~288px of content as before). Verified: rail content ends at 1240,
+  tab starts at 1245.
+- **TOASTS NEVER RENDERED UNDER `yarn dev`, app-wide, and nothing said so.**
+  frappe-ui's toast state is module-level; pre-bundling inlines it into
+  `.vite/deps/frappe-ui.js` while `FrappeUIProvider.vue` (a .vue file, always
+  served raw) imports `../Toast/index` directly — two instances, so every
+  `toast.success()` pushed to an array no mounted `<Toasts>` was rendering.
+  Production was always fine, which is the dangerous part: **all UI verification
+  happens on the dev server, and an error toast that cannot appear reads as "no
+  error"**. Fixed with `optimizeDeps.exclude: ['frappe-ui']`; verified by
+  triggering CompsView's own "Comp hidden" toast before and after.
+- **`verify_ui` can be killed mid-run** (exit 143) and then writes no report —
+  but its screenshots survive in `.pi/verification/<ts>/` and were enough to
+  finish the verdict. Check them before paying for a re-run.
+
+## Verified
+
+Backend on prod via `bench execute`, rolled back: fields present, `stored: true`,
+`get_after: true`, an inconsistent offer refused, an unknown repair level
+refused. UI at a real 1280×800: no page scroll, nothing clipped, ARV/offer
+arithmetic correct, save → toast + "Saved 2:37 pm · offer $54,400", **the line
+survives a full reload**, drift wording correct, panel overlays without the map
+reflowing (identical rect before/while/after), all three hit-tests inside the
+panel, and the determination visible in the timeline.
+
+Everything written to prod lead **CRM-LEAD-2026-00854** during verification was
+undone (2 comments deleted, `comps_hidden` / `comps_selected` /
+`price_determination*` cleared); `verify_no_drift.py` PASSes.

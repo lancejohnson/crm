@@ -1,5 +1,8 @@
 <template>
-  <div class="flex flex-col gap-3">
+  <!-- `fill` makes this size to its container instead of to its content: the map
+       and the property list share whatever height there is, each scrolling
+       internally. The comps PAGE keeps its natural, scroll-the-page layout. -->
+  <div class="flex flex-col gap-3" :class="fill ? 'h-full min-h-0' : ''">
   <!-- Address + counts -->
   <div class="flex flex-wrap items-center justify-between gap-2">
     <div class="min-w-0">
@@ -54,6 +57,22 @@
               {{ __('Details') }}
             </label>
 
+            <!-- In `fill` mode ONLY, the filter card folds away behind this.
+                 Filters are deliberately always visible on the comps page (they
+                 are the point of the tool, and a rep should not have to find a
+                 button to widen a beds range) -- but the desk gives this whole
+                 component ~726px on the laptop it is designed for, and the card
+                 is ~190px of it. Spending a quarter of the working surface on
+                 controls the preset ladder has already set is the worse trade
+                 there. The count keeps the state visible while it is folded. -->
+            <Button
+              v-if="fill"
+              :label="activeFilterCount ? __('Filters ({0})', [activeFilterCount]) : __('Filters')"
+              :variant="filtersOpen ? 'subtle' : 'ghost'"
+              iconLeft="filter"
+              @click="filtersOpen = !filtersOpen"
+            />
+
             <!-- Radius stays its own control: a rural lead needs a wider net than
                  an infill lot, and the right answer is obvious once you see the
                  map. Loosening the preset ladder never touches it. -->
@@ -77,6 +96,7 @@
              first discovering a button. Wraps to as many rows as it needs, which
              is what keeps it usable at 390px. -->
         <div
+          v-show="!fill || filtersOpen"
           class="rounded-lg border border-outline-gray-2 bg-surface-gray-1 px-3 py-2.5"
         >
           <div class="flex flex-wrap items-end gap-x-4 gap-y-2.5">
@@ -198,7 +218,13 @@
         <div
           ref="mapEl"
           class="w-full overflow-hidden rounded-lg border border-outline-gray-2 bg-surface-gray-1"
-          :class="pageMode ? 'h-[26rem] sm:h-[32rem]' : 'h-[20rem] sm:h-[24rem]'"
+          :class="
+            fill
+              ? 'min-h-[15rem] flex-1'
+              : pageMode
+                ? 'h-[26rem] sm:h-[32rem]'
+                : 'h-[20rem] sm:h-[24rem]'
+          "
         />
 
         <!-- Every comp as a row, because a map answers "where" and a list answers
@@ -207,6 +233,7 @@
 <div
   v-if="comps.length"
   class="overflow-hidden rounded-lg border border-outline-gray-2"
+  :class="fill ? 'flex min-h-[8rem] flex-1 flex-col' : ''"
 >
   <div
     class="flex items-center justify-between border-b border-outline-gray-2 bg-surface-gray-1 px-3 py-2"
@@ -218,7 +245,7 @@
       {{ __('Hover a row to find it on the map') }}
     </span>
   </div>
-  <div class="max-h-80 overflow-auto">
+  <div class="overflow-auto" :class="fill ? 'min-h-0 flex-1' : 'max-h-80'">
     <table class="w-full min-w-[560px] text-sm">
       <thead
         class="sticky top-0 z-10 bg-surface-white text-xs text-ink-gray-5 shadow-[0_1px_0_0_var(--outline-gray-2)]"
@@ -387,12 +414,20 @@ const props = defineProps({
   // Only the full page offers underwriting; it needs the room, and the action
   // belongs where the comps are actually chosen.
   pageMode: { type: Boolean, default: false },
+  // Size to the container rather than to the content (the lead desk), folding
+  // the filter card behind a toggle and letting map + list share the height.
+  fill: { type: Boolean, default: false },
 })
 // This used to be a modal driven by `defineModel()`. It is now a full page, so
 // "open" is simply always true -- which keeps every existing `show.value` guard,
 // watcher and keyboard-shortcut gate working exactly as before.
 const emit = defineEmits(['subject', 'picked'])
 const show = ref(true)
+
+// Only consulted in `fill` mode. Starts closed: the preset ladder has already
+// chosen a sensible filter set by the time anyone looks, and the desk exists to
+// remove decisions from a live call rather than present them.
+const filtersOpen = ref(false)
 
 // Canvas/marker colours live in JS because Leaflet can't read Tailwind tokens.
 // Blue/amber rather than red/green: safe for dichromats.

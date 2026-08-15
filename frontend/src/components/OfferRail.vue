@@ -1,5 +1,15 @@
 <template>
-  <div class="flex w-[300px] shrink-0 flex-col gap-3 overflow-y-auto border-l p-3"
+  <!-- 340px wide with a 40px right gutter, which leaves the same ~288px of
+       content a plain 300px rail had. The gutter is for somebody else's widget
+       and it is deliberate: PostHog injects a "Report a problem" survey tab
+       (button.ph-survey-widget-tab, in a shadow root, position:fixed, 35px wide,
+       pinned to the right edge and vertically CENTRED) on every page of this
+       app, prod included -- and it landed squarely on "Max offer", the one number
+       the rep says out loud. Shadow DOM means our CSS cannot move it, and
+       suppressing feedback on the screen reps work from all day is the wrong
+       trade. Reserving the strip is the honest fix: the tab keeps working and
+       nothing important is ever underneath it. -->
+  <div class="flex w-[340px] shrink-0 flex-col gap-3 overflow-y-auto border-l p-3 pr-10"
        style="border-color: var(--surface-gray-2)">
 
     <!-- ARV, derived from the comps the rep actually ticked -->
@@ -95,6 +105,32 @@
       :on-price="onPrice"
       @saved="$emit('read-saved')"
     />
+
+    <!-- Save. Pinned to the bottom of the rail so it is in the same place
+         whatever the lead above it looks like. -->
+    <div class="mt-auto border-t pt-2" style="border-color: var(--surface-gray-2)">
+      <div class="mb-1.5 text-[11px] leading-snug" :class="drifted ? 'text-ink-amber-3' : 'text-ink-gray-5'">
+        <template v-if="!saved">{{ __('Nothing saved for this lead yet.') }}</template>
+        <template v-else-if="drifted">
+          {{ __('Saved {0} at {1} — changed since.', [savedWhen, money(saved.offer)]) }}
+        </template>
+        <template v-else>
+          {{ __('Saved {0} · offer {1}', [savedWhen, money(saved.offer)]) }}
+        </template>
+      </div>
+      <div v-if="saved && !saved.stored" class="mb-1.5 text-[11px] text-ink-amber-3">
+        {{ __('Recorded on the timeline only — the lead has nowhere to keep the current number yet.') }}
+      </div>
+      <Button
+        class="w-full"
+        variant="solid"
+        :loading="saving"
+        :disabled="!canSave"
+        :label="drifted ? __('Re-save (S)') : __('Save (S)')"
+        @click="save"
+      />
+      <div v-if="error" class="mt-1 text-[11px] text-ink-red-4">{{ error }}</div>
+    </div>
   </div>
 </template>
 
@@ -117,7 +153,8 @@
  * loud rather than silently dropped — a $/sf built from four comps when the rep
  * ticked six is a different number than they think they are looking at.
  */
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { call, Button, toast } from 'frappe-ui'
 import FirstCallReadCard from '@/components/FirstCallReadCard.vue'
 
 const props = defineProps({
@@ -127,7 +164,7 @@ const props = defineProps({
   motivated: { type: String, default: '' },
   onPrice: { type: String, default: '' },
 })
-defineEmits(['read-saved'])
+const emit = defineEmits(['read-saved', 'saved'])
 
 const MARGIN = 90
 const FEE = 10000
@@ -191,4 +228,110 @@ function money(n) {
 function fmt(n) {
   return (Number(n) || 0).toLocaleString('en-US')
 }
+
+/**
+ * The saved determination.
+ *
+ * The snapshot carries the INPUTS and the CONSTANTS, not just the offer: "we
+ * said $35,300" is unusable three weeks later without the comps, the $/sf and
+ * the repair level that produced it, and storing `margin`/`fee` means a later
+ * change to the formula cannot silently rewrite what we told a seller.
+ *
+ * Comps are copied, not referenced. `CRM Comp` is a projection of a feed that
+ * re-syncs nightly and a BatchData fallback comp has no CRM row at all, so a
+ * determination that resolved its comps by name would drift or empty out.
+ */
+function snapshot() {
+  return {
+    arv: arv.value,
+    psf: avgPsf.value,
+    subject_sqft: subjectSqft.value,
+    level: level.value,
+    majors: [...majors.value].sort(),
+    repairs: repairs.value,
+    margin: MARGIN,
+    fee: FEE,
+    offer: offer.value,
+    comps: usable.value.map((c) => ({
+      name: c.name,
+      address: c.address,
+      price: Number(c.price) || 0,
+      square_footage: Number(c.square_footage) || 0,
+      status: c.status || '',
+      removed_date: c.removed_date || null,
+      source: c.source || '',
+    })),
+    read: { motivated: props.motivated || '', on_price: props.onPrice || '' },
+  }
+}
+
+const saved = ref(null)
+const saving = ref(false)
+const error = ref('')
+
+/** The comparison that decides Save vs Re-save. Only the fields that change the
+ *  number — `by`/`at`/`source` are stamped server-side and would make every
+ *  saved determination look immediately stale. */
+const COMPARED = [
+  'arv', 'psf', 'subject_sqft', 'level', 'majors',
+  'repairs', 'margin', 'fee', 'offer', 'comps', 'read',
+]
+function comparable(s) {
+  return JSON.stringify(COMPARED.map((k) => s?.[k] ?? null))
+}
+
+const drifted = computed(
+  () => !!saved.value && comparable(saved.value) !== comparable(snapshot()),
+)
+const canSave = computed(() => arv.value > 0 && !saving.value && (!saved.value || drifted.value))
+
+const savedWhen = computed(() => {
+  const at = saved.value?.at
+  if (!at) return ''
+  // Frappe hands back "YYYY-MM-DD HH:MM:SS" in SITE time with no zone, so it is
+  // parsed as local rather than through Date.parse, which would read it as UTC.
+  const m = String(at).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/)
+  if (!m) return String(at)
+  const d = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5])
+  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).toLowerCase()
+})
+
+async function load() {
+  saved.value = null
+  if (!props.lead) return
+  try {
+    const d = await call('crm.api.price_determination.get_price_determination', {
+      lead: props.lead,
+    })
+    if (d) saved.value = { ...d, stored: true }
+  } catch (e) {
+    // A determination that will not load must never stop the rep pricing the
+    // deal — the rail simply reads as "nothing saved yet".
+    console.error(e)
+  }
+}
+
+async function save() {
+  if (!canSave.value) return
+  saving.value = true
+  error.value = ''
+  try {
+    const res = await call('crm.api.price_determination.save_price_determination', {
+      lead: props.lead,
+      determination: snapshot(),
+    })
+    saved.value = { ...res.determination, stored: !!res.stored }
+    toast.success(__('Price determination saved'))
+    emit('saved', saved.value)
+  } catch (e) {
+    error.value = e?.messages?.[0] || e?.message || __('Could not save the determination.')
+  } finally {
+    saving.value = false
+  }
+}
+
+onMounted(load)
+watch(() => props.lead, load)
+
+defineExpose({ save, canSave })
 </script>

@@ -25,18 +25,40 @@
       </div>
 
       <div class="ml-auto flex shrink-0 items-center gap-2">
+        <!-- Activity is lead-level history, the same tier as the lead itself, so
+             it sits with the lead-level actions rather than hiding behind an
+             arrow on the window edge. -->
+        <Button
+          :label="__('Activity')"
+          :variant="showActivity ? 'subtle' : 'ghost'"
+          :title="__('Calls, texts and notes for this lead (])')"
+          @click="toggleActivity()"
+        />
         <Button :label="__('Open lead')" iconLeft="external-link" @click="openLead" />
       </div>
     </div>
 
     <!-- Body. Panes flex; the desk never scrolls as a page (see script note). -->
-    <div class="flex min-h-0 flex-1">
-      <!-- Centre: the real comps surface, not a reimplementation. -->
-      <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
+    <div class="relative flex min-h-0 flex-1">
+      <!-- Centre: the real comps surface, not a reimplementation.
+
+           `fill` is what makes it work here. CompsView was built as a full page:
+           filter card + map + property list is ~1,010px tall, against 726px of
+           body on the 1,280x800 laptop this desk is designed for, so verification
+           found only 62px of the 320px list on screen -- one row -- with no way
+           to wheel to the rest, because the page itself deliberately never
+           scrolls. In `fill` mode the filters fold behind a toggle and the map
+           and list share the height, each scrolling itself.
+
+           The pane stays `overflow-y-auto` as a floor, not a plan: at a short
+           enough window the map's 15rem minimum plus the list's 8rem eventually
+           exceed the pane, and a scrollbar then is better than clipping. -->
+      <div class="flex min-w-0 flex-1 flex-col overflow-y-auto">
         <CompsView
           v-if="leadId"
           :lead="leadId"
           :address="address"
+          fill
           @subject="onSubject"
           @picked="onPicked"
         />
@@ -45,13 +67,61 @@
       <!-- Right rail: what the comps mean in money. -->
       <OfferRail
         v-if="leadId"
+        ref="offerRail"
         :lead="leadId"
         :picked="picked"
         :subject="subject"
         :motivated="lead?.first_call_motivated || ''"
         :on-price="lead?.first_call_on_price || ''"
         @read-saved="leadResource.reload()"
+        @saved="onDeterminationSaved"
       />
+
+      <!-- Activity slides OVER the desk rather than taking a column of its own.
+           Nothing reflows, so the map keeps its size and Leaflet keeps its
+           measurement -- and the rep gets the history back out of the way with
+           the same key that opened it.
+
+           z-[1000] rather than a modest z-20, because Leaflet gives its own
+           panes z-index 400-700 and `.leaflet-container` creates no stacking
+           context of its own -- so those panes compete directly with this one.
+           At z-20 the map PAINTED over the panel's left ~100px (the heading read
+           "y" instead of "Activity") while still hit-testing as the panel
+           underneath: clicks landed where the user could not see. -->
+      <aside
+        v-show="showActivity"
+        class="absolute inset-y-0 right-0 z-[1000] flex w-[400px] flex-col border-l bg-surface-white shadow-2xl"
+        style="border-color: var(--surface-gray-2)"
+      >
+        <div
+          class="flex shrink-0 items-center gap-2 border-b px-3 py-1.5"
+          style="border-color: var(--surface-gray-2)"
+        >
+          <span class="text-xs font-semibold uppercase tracking-wide text-ink-gray-5">
+            {{ __('Activity') }}
+          </span>
+          <Button
+            class="ml-auto"
+            variant="ghost"
+            icon="x"
+            :title="__('Close (])')"
+            @click="toggleActivity(false)"
+          />
+        </div>
+        <!-- Mounted only once opened: the feed is six resources, and a rep who
+             never opens the history should not pay for it on every lead. Kept
+             mounted afterwards so reopening is instant and the scroll holds. -->
+        <div v-if="activityOpened" class="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <Activities
+            ref="activities"
+            v-model:tabIndex="activityTab"
+            doctype="CRM Lead"
+            :docname="leadId"
+            :tabs="activityTabs"
+            :scroll-on-mount="false"
+          />
+        </div>
+      </aside>
     </div>
   </div>
 </template>
@@ -81,11 +151,14 @@
  * this is a working surface on a ~1280x800 laptop, and a rep mid-call should
  * never have to scroll to find the offer.
  */
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { createResource, Badge, Button } from 'frappe-ui'
 import CompsView from '@/components/CompsView.vue'
 import OfferRail from '@/components/OfferRail.vue'
+import Activities from '@/components/Activities/Activities.vue'
+import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
+import { activeDetailPanel } from '@/composables/settings'
 
 const route = useRoute()
 const router = useRouter()
@@ -187,5 +260,57 @@ const address = computed(() => {
 
 function openLead() {
   router.push({ name: 'Lead', params: { leadId: leadId.value } })
+}
+
+/**
+ * The activity rail.
+ *
+ * This mounts the REAL `Activities.vue` -- the same timeline, quick comment box
+ * and to-do quick-add the lead page and the Today modal use. A read-only feed
+ * built for this screen would be a second answer to "what happened with this
+ * seller", and the saved price determination lands here as a comment, so the
+ * desk must show the same thing the lead page will.
+ */
+const showActivity = ref(false)
+const activityOpened = ref(false)
+const activityTab = ref(0)
+const activities = ref(null)
+// One tab, as in the Today modal. The unified Activity feed already merges
+// calls, texts, comments, tasks and agreements newest-first, so a row of tabs on
+// a 400px overlay would only add a decision to a screen that exists to remove
+// them. Everything else is one click away on the lead page.
+const activityTabs = [{ name: 'Activity', label: __('Activity') }]
+
+function toggleActivity(v) {
+  showActivity.value = typeof v === 'boolean' ? v : !showActivity.value
+  if (showActivity.value) activityOpened.value = true
+}
+
+// `]` means "the detail panel" everywhere in this app (GlobalModals owns the
+// binding; Resizer registers the lead/deal/buyer sidebars). Registering here
+// keeps that one meaning rather than teaching the desk a private key.
+const panelHandle = { toggle: () => toggleActivity() }
+onMounted(() => (activeDetailPanel.value = panelHandle))
+onBeforeUnmount(() => {
+  if (activeDetailPanel.value === panelHandle) activeDetailPanel.value = null
+})
+
+const offerRail = ref(null)
+
+// `S` saves the determination, as in v17. `skipWhenDialogOpen` is left ON here
+// (unlike CompsView, which opts out because it WAS a dialog): a comp's photo
+// gallery or the outcome modal being open means the rep is answering something
+// else, and saving a price out from under that is not what S should do.
+useKeyboardShortcuts({
+  shortcuts: [{ keys: ['s', 'S'], action: () => offerRail.value?.save?.() }],
+})
+
+/**
+ * A saved determination writes a Comment on the lead, so the feed has to be told
+ * -- it has no listener for one. Reloading only the merged activity resource is
+ * enough and avoids re-fetching the five sibling feeds.
+ */
+function onDeterminationSaved() {
+  activities.value?.all_activities?.reload?.()
 }
 </script>
