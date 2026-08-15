@@ -944,3 +944,28 @@ thousand rows a day, ~2.4GB/month at a rough 200 bytes a row, against 51GB free.
 `save_properties` upserts on `property_id`, so overlapping neighbourhoods dedupe
 rather than multiply — but this is the first thing to look at if the box gets
 tight.
+
+
+### The verification found a real one: an empty canvas that reported success
+
+The lot-line PASS run flagged the Nearby label as `Nearby (5000)` where the spec
+said `N of M`. Chasing that cosmetic deviation found the actual defect.
+
+**The frontend only understood the NEW payload shape.** `get_neighborhood` used
+to pass the geo service's raw GeoJSON straight through
+(`{geometry:{coordinates:[lng,lat]}, properties:{…}}`); the trimmed version
+returns flat rows (`{lat, lng, price, …}`). Production is still on the old one —
+so the desk fetched **1.46 MB / 5,000 features**, skipped every single point for
+having no `lat`, and drew an **EMPTY CANVAS** while the button read
+"Nearby (5000)". Measured: `paintedPixels: 0`.
+
+Both shapes exist in the wild at once, because the frontend and the backend
+deploy separately and for the length of any deploy window the browser is talking
+to the other version. `hoodPoints()` now accepts either, and the **label counts
+what was drawn**, not what arrived — the same rule as `truncated`: the number has
+to describe what is on screen. Verified against production's old endpoint:
+`paintedPixels: 0 → 5,287`, pills unchanged at 83.
+
+Worth keeping: a verifier reporting a *cosmetic* mismatch is worth chasing to the
+data, because "the label is slightly different" and "the layer draws nothing" look
+identical from the outside.

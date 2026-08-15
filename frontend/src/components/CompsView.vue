@@ -478,17 +478,49 @@ const hoodLabel = computed(() => {
   if (!hoodOn.value) return __('Nearby')
   const d = hood.value
   if (!d?.features) return __('Nearby')
-  // When the cap bites, say BOTH numbers. The first cut showed `in_view`, so a
-  // capped map read "Nearby (1806)" while drawing 1,500 -- a count that does not
-  // match what is on screen is worse than no count.
-  return d.truncated
-    ? __('Nearby ({0} of {1})', [d.features.length, d.in_view])
-    : __('Nearby ({0})', [d.features.length])
+  // Counted from the points we can actually DRAW, not from the payload length.
+  // Same rule as `truncated` below: the label describes what is on screen, and a
+  // number that survives a shape change the renderer cannot handle is how an
+  // empty map ends up claiming 5,000 homes.
+  const drawn = hoodPoints(d).length
+  return d.truncated && d.in_view
+    ? __('Nearby ({0} of {1})', [drawn, d.in_view])
+    : __('Nearby ({0})', [drawn])
 })
 
 function hoodMoney(n) {
   const v = Number(n) || 0
   return v ? `$${Math.round(v).toLocaleString('en-US')}` : ''
+}
+
+/**
+ * Normalise a neighbourhood payload into points, WHICHEVER SHAPE IT ARRIVES IN.
+ *
+ * `get_neighborhood` used to pass the geo service's raw GeoJSON straight through
+ * (`{geometry:{coordinates:[lng,lat]}, properties:{...}}`) and now returns flat
+ * trimmed rows (`{lat, lng, price, ...}`). Both exist in the wild at once: the
+ * frontend and the backend deploy separately, so for the length of any deploy
+ * window the browser is talking to the OTHER version.
+ *
+ * That is not hypothetical. Verified against production mid-work: 5,000 GeoJSON
+ * features arrived, every one was skipped for having no `lat`, and the layer
+ * drew an EMPTY CANVAS while the button cheerfully read "Nearby (5000)" -- the
+ * worst kind of failure, one that reports success.
+ */
+function hoodPoints(payload) {
+  const out = []
+  for (const f of payload?.features || []) {
+    if (f == null) continue
+    if (f.lat != null && f.lng != null) {
+      out.push(f)
+      continue
+    }
+    const coords = f.geometry?.coordinates
+    if (Array.isArray(coords) && coords.length >= 2) {
+      out.push({ ...(f.properties || {}), lng: coords[0], lat: coords[1] })
+    }
+  }
+  return out
 }
 
 /**
@@ -540,7 +572,7 @@ function paintHood() {
     parcelMoveHandler = null
   }
   clearParcels()
-  if (!hoodOn.value || !hood.value?.features?.length) return
+  if (!hoodOn.value || !hoodPoints(hood.value).length) return
 
   // ORDER MATTERS. The renderer joins the map FIRST and the group is on the map
   // BEFORE any circle goes into it: a circleMarker added to a detached group
@@ -550,7 +582,7 @@ function paintHood() {
   // obviously broken.
   const renderer = L.canvas({ padding: 0.3 }).addTo(map)
   const layer = L.layerGroup().addTo(map)
-  for (const p of hood.value.features) {
+  for (const p of hoodPoints(hood.value)) {
     if (p.lat == null || p.lng == null) continue
     const priced = !!Number(p.price)
     L.circleMarker([p.lat, p.lng], {
@@ -706,7 +738,7 @@ async function loadHood() {
 function toggleHood(force) {
   hoodOn.value = typeof force === 'boolean' ? force : !hoodOn.value
   if (!hoodOn.value) return paintHood()
-  if (hood.value?.features?.length) return paintHood()
+  if (hoodPoints(hood.value).length) return paintHood()
   loadHood()
 }
 
