@@ -458,6 +458,22 @@ let hoodLayer = null
 let hoodRenderer = null
 let hoodZoomHandler = null
 
+// --- lot lines ------------------------------------------------------------
+// Parcels ride WITH the neighbourhood layer rather than getting a toggle of
+// their own: they answer the same question ("what is around this house") one
+// zoom level further in, and a second switch to find would be a decision the
+// desk exists to remove.
+//
+// PARCEL_ZOOM is where a city lot stops being a smudge. At z15 a 12m frontage
+// is ~5px; at 16 it is ~10px and the shape starts to mean something. Below it
+// nothing is fetched at all -- a request whose result cannot be read is just
+// latency and load on a service that is scraping for it.
+const PARCEL_ZOOM = 16
+let parcelLayer = null
+let parcelMoveHandler = null
+let parcelTimer = null
+let parcelKey = ''
+
 const hoodLabel = computed(() => {
   if (!hoodOn.value) return __('Nearby')
   const d = hood.value
@@ -519,6 +535,11 @@ function paintHood() {
     map.off('zoomend', hoodZoomHandler)
     hoodZoomHandler = null
   }
+  if (parcelMoveHandler) {
+    map.off('moveend zoomend', parcelMoveHandler)
+    parcelMoveHandler = null
+  }
+  clearParcels()
   if (!hoodOn.value || !hood.value?.features?.length) return
 
   // ORDER MATTERS. The renderer joins the map FIRST and the group is on the map
@@ -564,6 +585,92 @@ function paintHood() {
   const onZoom = () => layer.eachLayer((l) => l.setRadius?.(hoodRadius()))
   map.on('zoomend', onZoom)
   hoodZoomHandler = onZoom
+
+  // Lot lines follow the viewport once the rep is zoomed in far enough.
+  const onMove = () => scheduleParcels()
+  map.on('moveend zoomend', onMove)
+  parcelMoveHandler = onMove
+  scheduleParcels()
+}
+
+function clearParcels() {
+  if (parcelTimer) {
+    clearTimeout(parcelTimer)
+    parcelTimer = null
+  }
+  if (parcelLayer && map) map.removeLayer(parcelLayer)
+  parcelLayer = null
+  parcelKey = ''
+}
+
+/**
+ * Fetch lot lines for what is on screen, once the rep is zoomed in enough.
+ *
+ * Debounced, because `moveend` fires on every pan and each call reaches a
+ * PostGIS query behind an HTTP hop. Keyed on the rounded viewport so panning a
+ * few pixels and coming back does not re-fetch what is already drawn -- the
+ * cheapest request is the one not made.
+ */
+function scheduleParcels() {
+  if (!map || !hoodOn.value) return clearParcels()
+  if (map.getZoom() < PARCEL_ZOOM) {
+    // Deliberately silent: at this zoom a lot line is a smudge, and drawing one
+    // would suggest a precision the rep cannot see.
+    if (parcelLayer) {
+      map.removeLayer(parcelLayer)
+      parcelLayer = null
+      parcelKey = ''
+    }
+    return
+  }
+  if (parcelTimer) clearTimeout(parcelTimer)
+  parcelTimer = setTimeout(loadParcels, 400)
+}
+
+async function loadParcels() {
+  if (!map || !hoodOn.value || map.getZoom() < PARCEL_ZOOM) return
+  const b = map.getBounds()
+  const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]
+    .map((v) => v.toFixed(4))
+    .join(',')
+  if (bbox === parcelKey) return
+  parcelKey = bbox
+  try {
+    const res = await call('crm.api.geo.get_parcels', { lead: props.lead, bbox })
+    if (!res?.ok || !res.features?.length) {
+      // An empty answer means "not enriched here yet", not an error -- the
+      // service says so explicitly and the map simply shows no lot lines.
+      if (parcelLayer) map.removeLayer(parcelLayer)
+      parcelLayer = null
+      return
+    }
+    if (parcelLayer) map.removeLayer(parcelLayer)
+    parcelLayer = L.geoJSON(
+      { type: 'FeatureCollection', features: res.features },
+      {
+        // Thin, unfilled, and grey: a lot line is a boundary, not an object.
+        // Filling it would compete with the comp pills for the eye on the one
+        // screen where the pills are the answer.
+        style: { color: '#475569', weight: 1, opacity: 0.55, fill: false },
+        onEachFeature: (f, layer) => {
+          const p = f.properties || {}
+          layer.bindPopup(
+            `<div style="font-size:12px">` +
+              `<div style="font-weight:600">${escapeHtml(p.address || __('Parcel'))}</div>` +
+              (p.apn ? `<div style="color:#64748b">APN ${escapeHtml(p.apn)}</div>` : '') +
+              `<div style="color:#94a3b8;margin-top:2px">${__('Lot line · context, not a comp')}</div>` +
+              `</div>`,
+            { maxWidth: 220 },
+          )
+        },
+      },
+    ).addTo(map)
+    parcelLayer.bringToBack()
+  } catch (e) {
+    // Never toast: lot lines are the least important thing on this screen and a
+    // rep mid-call does not need to be told a background layer is unavailable.
+    console.error(e)
+  }
 }
 
 async function loadHood() {

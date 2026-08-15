@@ -173,14 +173,17 @@ purchase (open question: CRM `after_insert` vs earlier in `istl-buyer`).
       Verified live from inside the container: Brooklyn lead -> 824 features.
       **Backfill excludes parked imports** — dry run said 876 (= 362 live + 514
       parked); now 362. NULL-safe `isnull() | != 1`.
+- [x] **`geo_service_url` IS SET ON PROD (2026-08-15)** — the geo client is live,
+      so every new lead warms its neighbourhood and enriches its block. The desk
+      UI for it ships with the next deploy of this branch.
 - [ ] Deploy (app code is committed, NOT yet built into an image)
 - [x] **Frontend: neighbourhood on the desk map** — a "Nearby" toggle drawing
       every home around the subject as canvas dots, filled when we have a price
       and hollow when we do not (47% priced on the Chicago lead; that hollow
       majority IS the off-market universe, not missing data). Verified PASS.
-- [ ] Frontend: parcels — **BLOCKED, the service does not implement `/parcels`**
-      (404 measured). `crm/api/geo.get_parcels` already calls it and `store.py`
-      has `parcels_in_bbox` written; the API route was never added.
+- [x] **Frontend: parcels** — lot lines ride with the Nearby layer above zoom 16
+      and follow the viewport. The service gained `/parcels` and `/enrich`, and a
+      sweep now enriches its own inner 600m. See below.
 - [ ] **verify_ui the desk page** (required before calling any of this done)
 - [ ] Seed `crm-test` — it has **0 leads**, so UI work still uses the
       prod-backed dev server (`CRM_DEV_TARGET=... yarn dev`). crm-test is for
@@ -878,3 +881,66 @@ both "test" copies left production missing a module its lead-insert hook imports
 `verify_no_drift.py` caught it in the same minute — check whether a file belongs
 to the deployed revision BEFORE deleting it from the container, and re-run the
 drift check after any cleanup, not just after a deploy.
+
+
+## Lot lines, and geo turned on (2026-08-15)
+
+### The service grew the half it was missing
+
+`/parcels` returned **404** — `crm/api/geo.get_parcels` had been calling it since
+the client was written, and `store.parcels_in_bbox` had been ready the whole
+time; only the route was missing. It takes a **bbox, not a radius**, because lot
+lines are only legible zoomed in and what a caller wants is exactly the rectangle
+on screen. 422 on a malformed, inverted or continent-sized box.
+
+`/enrich` is separate from `/warm` **on purpose**: a sweep is ~75s, enriching
+everything it finds is ~45 MINUTES at 6.6 parcels/sec. But nothing else called
+it, so a warmed lead had dots and no boundaries — invisible until a rep zoomed in
+mid-call to a bare map. **A sweep now enriches its own inner 600m
+(`ENRICH_AFTER_SWEEP_M`)**: the block the house is ON is what gets looked at, and
+the far edge of a two-mile radius is scraping nobody opens.
+
+Measured: parcels **61 → 318 → 818 → 1,010**; `/parcels` 404 → 200 with 255
+features carrying APN + FIPS; a fresh `/warm` produced its own enrich batch with
+no second call.
+
+### On the desk
+
+Lot lines ride WITH the Nearby layer rather than getting their own toggle — same
+question, one zoom level in — and only above **zoom 16**, where a 12m frontage is
+~10px instead of ~5. Below it nothing is fetched: a request whose result cannot
+be read is latency and scraping load for nothing. Debounced 400ms and keyed on
+the rounded viewport, so panning back and forth does not re-fetch.
+
+Thin, unfilled, slate: a lot line is a boundary, not an object, and filling it
+would compete with the comp pills on the one screen where the pills are the
+answer. Popup says **"Lot line · context, not a comp"**, same rule as the dots.
+
+Verified live at zoom 16: **149 parcel paths** at exactly the intended style
+(`#475569`, w1, o0.55) plus the 3 distance rings; zoom out to 15 → **0**; back to
+16 → **149**; popup read `120 W 108th Pl · APN 25164090280000 · Lot line ·
+context, not a comp`.
+
+**GOTCHA — rapid zoom clicks are swallowed.** Five `.leaflet-control-zoom-in`
+clicks in one tick advanced the map ONE level, which made the threshold look
+broken while it was working. Leaflet's zoom animation eats clicks fired inside
+it; pause ~700ms between them when driving the map from a script.
+
+**GOTCHA — `performance.getEntriesByType('resource')` reported 0 calls to an
+endpoint that had demonstrably run.** Its buffer caps at 250 entries and silently
+drops the oldest — the same trap the kanban work hit. Count with a `fetch` wrapper
+or trust the DOM.
+
+### geo is ON in prod
+
+`geo_service_url = http://172.20.0.1:8110` is now in prod's site_config, so
+`on_lead_insert` warms every new lead and its block gets lot lines. Verified
+through the DEPLOYED client: `warm_lead` on a real lead returned `queued: true`
+and the sweep landed.
+
+**Measured, and worth watching**: that one 2-mile warm returned **29,706 homes in
+69 calls** (properties 2,213 → 30,113). At ~13 leads/day that is a few hundred
+thousand rows a day, ~2.4GB/month at a rough 200 bytes a row, against 51GB free.
+`save_properties` upserts on `property_id`, so overlapping neighbourhoods dedupe
+rather than multiply — but this is the first thing to look at if the box gets
+tight.
