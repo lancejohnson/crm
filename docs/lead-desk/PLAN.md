@@ -174,7 +174,13 @@ purchase (open question: CRM `after_insert` vs earlier in `istl-buyer`).
       **Backfill excludes parked imports** — dry run said 876 (= 362 live + 514
       parked); now 362. NULL-safe `isnull() | != 1`.
 - [ ] Deploy (app code is committed, NOT yet built into an image)
-- [ ] Frontend: draw neighbourhood + parcels on the desk map
+- [x] **Frontend: neighbourhood on the desk map** — a "Nearby" toggle drawing
+      every home around the subject as canvas dots, filled when we have a price
+      and hollow when we do not (47% priced on the Chicago lead; that hollow
+      majority IS the off-market universe, not missing data). Verified PASS.
+- [ ] Frontend: parcels — **BLOCKED, the service does not implement `/parcels`**
+      (404 measured). `crm/api/geo.get_parcels` already calls it and `store.py`
+      has `parcels_in_bbox` written; the API route was never added.
 - [ ] **verify_ui the desk page** (required before calling any of this done)
 - [ ] Seed `crm-test` — it has **0 leads**, so UI work still uses the
       prod-backed dev server (`CRM_DEV_TARGET=... yarn dev`). crm-test is for
@@ -818,3 +824,57 @@ config-gated and staging has no roster — correct for a test box.
 
 The scheduler is **paused** (`pause_scheduler: 1`); intake does not need it, and
 `sequence_drain.drain_due` runs every minute when it is on.
+
+
+## Neighbourhood layer on the desk (2026-08-15)
+
+`crm.api.geo.get_neighborhood` now TRIMS and CAPS: 12 fields per home instead of
+Redfin's whole record, `bbox` for what the rep is actually looking at, and
+`MAX_FEATURES = 1500`. Measured on the Chicago lead: the full 2-mile radius is
+1,806 homes / **384KB**, the same call with a ~450m bbox is 125 homes / **32KB**.
+The response says `truncated` out loud, and the button reads
+`Nearby (1500 of 1806)` when the cap bites — a count that does not match what is
+on screen is worse than no count.
+
+**Dots, not pills, and never comps.** Pill grammar means "comp" everywhere else
+on this map, so the layer is grey canvas circles and every popup ends with
+"Context, not a comp". Priced = filled, unpriced = hollow ring.
+
+**Canvas, not markers** (`L.canvas`), because a warmed radius is ~1,800 points
+here and 17,287 in Indianapolis — one DOM node each is the kanban's per-field
+mistake, on a map somebody is dragging mid-call. Comp pills are markers
+(pane z-600) and this is an overlay (z-400), so the answer stays above the
+context with no per-layer reordering.
+
+**Dot size follows zoom, and that is not cosmetic.** The desk opens at whatever
+zoom fits the COMPS — zoom 12 on the test lead — where 28m/px turns 1.3km of
+neighbourhood into a 50x50px smudge. First cut looked broken and was not: all
+1,500 markers were drawing, correctly, into a blob. Radius now steps 1.5 → 3 → 5
+→ 7 with zoom, re-applied on `zoomend`. Verified: 1 merged blob at default zoom
+→ 33 resolvable dots at ~16px after three zoom clicks.
+
+**Verified PASS** (desktop-chrome, 1280x800): default off, toggle on/off, pill
+count unchanged at 83 throughout, comp popups still open, dot popups show
+"no price on record" where there is none, zoom scales the dots, no console errors
+from the layer.
+
+### Still open
+
+- **`geo_service_url` is NOT set on prod** — it was enabled only for this
+  verification and turned off again. Setting it is the go-live act, and it does
+  two things at once: it lets the desk read the neighbourhood, AND it arms
+  `on_lead_insert` to warm every new lead (~75s of background sweep, real Redfin
+  traffic). That is the intended design; it is a decision, not a deploy step.
+- **`/parcels` returns 404** — never implemented in the service. Lot lines are
+  the remaining half of workstream 1.
+- The warmed radius on the test lead is only ~1.5km because the sweep was run
+  at radius=800m during service bring-up, not the 2 miles the client asks for.
+
+### Trap
+
+**Cleaning up a docker-cp'd module deleted a file prod actually ships.**
+`geo.py` is part of revision 098ca26c; `price_determination.py` is not. Removing
+both "test" copies left production missing a module its lead-insert hook imports.
+`verify_no_drift.py` caught it in the same minute — check whether a file belongs
+to the deployed revision BEFORE deleting it from the container, and re-run the
+drift check after any cleanup, not just after a deploy.

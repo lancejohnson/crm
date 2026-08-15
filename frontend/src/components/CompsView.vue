@@ -73,6 +73,20 @@
               @click="filtersOpen = !filtersOpen"
             />
 
+            <!-- The neighbourhood: every home around the subject, most of which
+                 we know nothing about. OFF by default and loaded only on the
+                 first click -- it is context, the comps are the answer, and a
+                 dense area is ~1,800 records nobody should pay for on open. -->
+            <Button
+              v-if="neighborhood"
+              :label="hoodLabel"
+              :variant="hoodOn ? 'subtle' : 'ghost'"
+              :loading="hoodLoading"
+              iconLeft="map-pin"
+              :title="__('Every home around this one, priced or not (N)')"
+              @click="toggleHood()"
+            />
+
             <!-- Radius stays its own control: a rural lead needs a wider net than
                  an infill lot, and the right answer is obvious once you see the
                  map. Loosening the preset ladder never touches it. -->
@@ -417,6 +431,9 @@ const props = defineProps({
   // Size to the container rather than to the content (the lead desk), folding
   // the filter card behind a toggle and letting map + list share the height.
   fill: { type: Boolean, default: false },
+  // Offer the neighbourhood layer (groundwork-geo). Opt-in for the same reason
+  // `fill` is: the comps page is a comps page.
+  neighborhood: { type: Boolean, default: false },
 })
 // This used to be a modal driven by `defineModel()`. It is now a full page, so
 // "open" is simply always true -- which keeps every existing `show.value` guard,
@@ -428,6 +445,163 @@ const show = ref(true)
 // chosen a sensible filter set by the time anyone looks, and the desk exists to
 // remove decisions from a live call rather than present them.
 const filtersOpen = ref(false)
+
+// --- neighbourhood layer -------------------------------------------------
+// Drawn on a CANVAS renderer, not as markers. A warmed two-mile radius is
+// ~1,800 points here and 17,287 in Indianapolis; one DOM node each is the same
+// mistake the kanban made with per-field components, and it would land on the
+// map a rep is dragging mid-call.
+const hoodOn = ref(false)
+const hoodLoading = ref(false)
+const hood = ref(null)
+let hoodLayer = null
+let hoodRenderer = null
+let hoodZoomHandler = null
+
+const hoodLabel = computed(() => {
+  if (!hoodOn.value) return __('Nearby')
+  const d = hood.value
+  if (!d?.features) return __('Nearby')
+  // When the cap bites, say BOTH numbers. The first cut showed `in_view`, so a
+  // capped map read "Nearby (1806)" while drawing 1,500 -- a count that does not
+  // match what is on screen is worse than no count.
+  return d.truncated
+    ? __('Nearby ({0} of {1})', [d.features.length, d.in_view])
+    : __('Nearby ({0})', [d.features.length])
+})
+
+function hoodMoney(n) {
+  const v = Number(n) || 0
+  return v ? `$${Math.round(v).toLocaleString('en-US')}` : ''
+}
+
+/**
+ * Draw (or redraw) the neighbourhood.
+ *
+ * Two states, and the difference is the whole point: a home we have a price for
+ * is filled, one we do not is a hollow ring. Most of a neighbourhood is the
+ * second kind -- 41% priced in the Indianapolis measurement -- and that IS the
+ * off-market universe, so it must not be drawn as if it were missing data.
+ *
+ * These are deliberately NOT pills. Pill grammar means "comp" everywhere else on
+ * this map, and a rep glancing down must never price off a dot that is only
+ * context.
+ */
+/**
+ * Dot size follows the zoom, and that is not cosmetic.
+ *
+ * The desk opens at whatever zoom fits the COMPS -- zoom 12 on the Chicago test
+ * lead -- and at 28m/px the warmed neighbourhood (1.3km x 1.6km) lands in a
+ * 50x50px area. Verified: all 1,500 markers were drawn correctly and the result
+ * was an indistinct smudge. Fixed dots answer "is there anything here"; dots
+ * that grow as you zoom answer "what is on this street", which is the question
+ * a rep on a call actually has.
+ */
+function hoodRadius() {
+  const z = map?.getZoom() ?? 14
+  if (z <= 12) return 1.5
+  if (z <= 14) return 3
+  if (z <= 16) return 5
+  return 7
+}
+
+function paintHood() {
+  if (!map) return
+  if (hoodLayer) {
+    map.removeLayer(hoodLayer)
+    hoodLayer = null
+  }
+  if (hoodRenderer) {
+    map.removeLayer(hoodRenderer)
+    hoodRenderer = null
+  }
+  if (hoodZoomHandler) {
+    map.off('zoomend', hoodZoomHandler)
+    hoodZoomHandler = null
+  }
+  if (!hoodOn.value || !hood.value?.features?.length) return
+
+  // ORDER MATTERS. The renderer joins the map FIRST and the group is on the map
+  // BEFORE any circle goes into it: a circleMarker added to a detached group
+  // never gets a live renderer, so it is only drawn if something later happens
+  // to redraw it. Measured with the group added last: 2,416 painted pixels --
+  // about 85 of 1,500 dots -- on a map that looked plausibly empty rather than
+  // obviously broken.
+  const renderer = L.canvas({ padding: 0.3 }).addTo(map)
+  const layer = L.layerGroup().addTo(map)
+  for (const p of hood.value.features) {
+    if (p.lat == null || p.lng == null) continue
+    const priced = !!Number(p.price)
+    L.circleMarker([p.lat, p.lng], {
+      renderer,
+      radius: hoodRadius(),
+      weight: 1,
+      color: '#64748b',
+      opacity: priced ? 0.85 : 0.55,
+      fillColor: '#94a3b8',
+      fillOpacity: priced ? 0.85 : 0,
+    })
+      .bindPopup(
+        `<div style="font-size:12px">` +
+          `<div style="font-weight:600">${escapeHtml(p.address || __('Nearby home'))}</div>` +
+          (priced ? `<div>${hoodMoney(p.price)}</div>` : `<div style="color:#64748b">${__('no price on record')}</div>`) +
+          `<div style="color:#64748b">${[p.beds && `${p.beds} bd`, p.baths && `${p.baths} ba`, p.sqft && `${Number(p.sqft).toLocaleString('en-US')} sf`, p.year_built]
+            .filter(Boolean)
+            .join(' · ')}</div>` +
+          `<div style="color:#94a3b8;margin-top:2px">${__('Context, not a comp')}</div>` +
+          `</div>`,
+        { maxWidth: 220 },
+      )
+      .addTo(layer)
+  }
+  // The comp pills are markers (pane z-600) and this is an overlay (z-400), so
+  // the answer already sits above the context without any per-layer reordering.
+  hoodLayer = layer
+  hoodRenderer = renderer
+
+  // Resize the dots as the rep zooms. Registered once per painted layer and
+  // removed with it, so toggling the layer off leaves no handler behind.
+  const onZoom = () => layer.eachLayer((l) => l.setRadius?.(hoodRadius()))
+  map.on('zoomend', onZoom)
+  hoodZoomHandler = onZoom
+}
+
+async function loadHood() {
+  if (!props.lead) return
+  hoodLoading.value = true
+  try {
+    const bounds = map?.getBounds()
+    const res = await call('crm.api.geo.get_neighborhood', {
+      lead: props.lead,
+      ...(bounds && {
+        bbox: [
+          bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth(),
+        ].join(','),
+      }),
+    })
+    hood.value = res || null
+    if (res && !res.ok) {
+      // Say why rather than showing an empty map: "not configured" and "this
+      // lead has no coordinates" are different problems with different fixes.
+      toast.error(res.reason || __('Nearby homes are unavailable'))
+      hoodOn.value = false
+    }
+    paintHood()
+  } catch (e) {
+    console.error(e)
+    toast.error(__('Nearby homes are unavailable'))
+    hoodOn.value = false
+  } finally {
+    hoodLoading.value = false
+  }
+}
+
+function toggleHood(force) {
+  hoodOn.value = typeof force === 'boolean' ? force : !hoodOn.value
+  if (!hoodOn.value) return paintHood()
+  if (hood.value?.features?.length) return paintHood()
+  loadHood()
+}
 
 // Canvas/marker colours live in JS because Leaflet can't read Tailwind tokens.
 // Blue/amber rather than red/green: safe for dichromats.
@@ -1191,6 +1365,10 @@ function render() {
     }).addTo(map)
   }
 
+  // Repaint the neighbourhood whenever the map is rebuilt (a reload, a radius
+  // change), or the layer would silently vanish while its button still reads on.
+  if (hoodOn.value) nextTick(paintHood)
+
   for (const c of comps.value) {
     if (c.lat == null || c.lng == null) continue
     // Fresher pills stack above faded ones where markers overlap, so the comp
@@ -1509,6 +1687,8 @@ useKeyboardShortcuts({
   skipWhenDialogOpen: false,
   shortcuts: [
     { keys: ['d', 'D'], action: () => (showDetail.value = !showDetail.value) },
+    // Only where the layer is offered, so `n` stays free on the comps page.
+    { keys: ['n', 'N'], action: () => props.neighborhood && toggleHood() },
     {
       keys: ['h', 'H'],
       action: () => focusedComp.value && setCompState(focusedComp.value, 'hidden'),

@@ -59,6 +59,7 @@
           :lead="leadId"
           :address="address"
           fill
+          neighborhood
           @subject="onSubject"
           @picked="onPicked"
         />
