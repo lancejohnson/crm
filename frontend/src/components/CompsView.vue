@@ -552,6 +552,27 @@ const notice = computed(() => {
   const d = data.value
   if (!d || loading.value || !d.available || !d.subject) return null
 
+  // We hold nothing at all here, so these were bought from BatchData. Said first
+  // and unconditionally, because it changes what the numbers MEAN: recorded sale
+  // prices rather than our pooled listing index, and ranked by the provider's own
+  // similarity rather than by distance. Letting them render as ordinary pins would
+  // quietly present two different kinds of evidence as one.
+  if (d.fallback?.used && (d.fallback.count ?? 0) > 0) {
+    return {
+      tone: 'info',
+      text: __(
+        'We hold no comps here — showing {0} recorded sales from BatchData ({1}).',
+        [d.fallback.count, d.fallback.basis || __('last 2 years')],
+      ),
+    }
+  }
+  if (d.fallback?.used && (d.fallback.count ?? 0) === 0) {
+    return {
+      tone: 'warning',
+      text: __('No comps here, and no recorded sales nearby either.'),
+    }
+  }
+
   if ((d.total_matched ?? 0) === 0 && (d.total_in_radius ?? 0) > 0) {
     return {
       tone: 'warning',

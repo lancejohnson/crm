@@ -884,35 +884,85 @@ def get_lead_comps(lead, radius_mi=None, limit=None, filters=None, auto=0, inclu
 	base["total_matched"] = len(matched)
 	base["comps"] = matched[:cap]
 
-	# Nothing of our own anywhere in radius -> buy a small set from BatchData.
+	# Nothing in the pooled index reaches this property. Sampling the 45 most recent
+	# leads, 18% land here — an empty map, which is the one outcome this feature set
+	# out to avoid. Buy a small set from BatchData rather than show nothing.
 	#
-	# Gated on `total_in_radius`, not on `matched`: matching zero after filtering is
-	# the tier ladder doing its job on inventory we HAVE, and paying to widen a
-	# deliberate filter would be the same broken behaviour the ladder avoids. This
-	# fires only where `CRM Comp` genuinely has nothing -- a ZIP outside the
-	# iSpeedToLead feed, e.g. Brooklyn 11230, which holds 0 rows.
-	#
-	# Costs ~$0.30 (10 rows x $0.030) and is cached 30 days on the lead, including
-	# a negative result, so a rep refreshing the desk does not re-buy it.
-	if not base["total_in_radius"] and subject:
-		try:
-			from crm.api import comps_batchdata
-
-			fallback = comps_batchdata.fetch(doc, lat, lng, subject_facts=subject)
-			if fallback:
-				base["comps"] = fallback
-				base["total_matched"] = len(fallback)
-				base["total_in_radius"] = len(fallback)
-				# Say so out loud. These are bought comps with different provenance
-				# and no listing history, and a rep pricing a deal off them should
-				# know that rather than assume they are our usual inventory.
-				base["comp_source"] = "batchdata"
-				base["fell_through"] = False
-		except Exception:
-			# A paid fallback failing must never take the map down with it.
-			frappe.log_error(frappe.get_traceback(), "comps: BatchData fallback failed")
+	# Strictly a LAST resort: gated on the unfiltered radius result being empty, not
+	# on the filtered one, so a tight preset that happens to match nothing can never
+	# spend money. `total_in_radius` is the honest "do we hold anything here at all".
+	if not out and not base["comps"]:
+		base["fallback"] = _batchdata_fallback(doc, base)
 
 	return base
+
+
+def _batchdata_fallback(doc, base):
+	"""Fill an empty comps map from BatchData. Returns a small status dict.
+
+	Split out so the paid path is one obvious, greppable place rather than an inline
+	branch someone later widens by accident.
+	"""
+	from crm.api import batchdata_comps
+
+	if not batchdata_comps.available():
+		return {"source": "batchdata", "used": False, "reason": "not_configured"}
+
+	try:
+		comps = batchdata_comps.fetch_for_lead(doc)
+	except Exception:
+		# A comps map that renders without the fallback beats a 500 on lead detail.
+		frappe.log_error(frappe.get_traceback(), "BatchData comps fallback failed")
+		return {"source": "batchdata", "used": False, "reason": "error"}
+
+	if not comps:
+		return {"source": "batchdata", "used": True, "count": 0}
+
+	lat, lng = base["subject"]["lat"], base["subject"]["lng"]
+	for c in comps:
+		c["distance_mi"] = round(_haversine_mi(lat, lng, c["lat"], c["lng"]), 2)
+		c["selected"] = False
+		c["hidden"] = False
+		c["recency_days"] = _recency_days(c, frappe.utils.today())
+
+	# BatchData applies no radius and returns no similarity score, so both are ours
+	# to impose. Drop first: a comp 2.8mi away is not a comp here, and padding the
+	# list with one is worse than showing five.
+	comps = [c for c in comps if c["distance_mi"] <= batchdata_comps.MAX_MILES]
+
+	# Then rank on shape, not just proximity. Distance still dominates because it is
+	# the one fact always present; sqft and beds are frequently missing, and a
+	# missing fact must not score as a bad match or every sparse row sinks.
+	subj = base.get("subject") or {}
+	s_sqft, s_beds, s_year = subj.get("sqft"), subj.get("beds"), subj.get("year_built")
+
+	def _fit(c):
+		score = c["distance_mi"] * 2.0
+		if s_sqft and c.get("square_footage"):
+			score += abs(c["square_footage"] - s_sqft) / max(s_sqft, 1) * 1.5
+		if s_beds and c.get("bedrooms"):
+			score += abs(c["bedrooms"] - s_beds) * 0.3
+		if s_year and c.get("year_built"):
+			score += min(abs(c["year_built"] - s_year) / 50.0, 1.0) * 0.3
+		return score
+
+	comps.sort(key=_fit)
+	comps = comps[: batchdata_comps.KEEP]
+	comps.sort(key=lambda r: r["distance_mi"])
+
+	base["comps"] = comps
+	base["total_matched"] = len(comps)
+	base["total_in_radius"] = len(comps)
+	# The rep must be told these came from somewhere else, on a different basis:
+	# recorded sales rather than our pooled listing index, and not distance-ranked
+	# by the provider. Presenting them silently as the same thing would be a lie
+	# about where the number came from.
+	return {
+		"source": "batchdata",
+		"used": True,
+		"count": len(comps),
+		"basis": batchdata_comps.WINDOW_LABEL,
+	}
 
 
 # ---------------------------------------------------------------------------------

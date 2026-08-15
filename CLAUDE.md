@@ -193,6 +193,53 @@ duplicating. Work substantial features in a worktree of your own.
     before the data. Ops: `scripts/setup_comps.py` (CRM Comp doctype, autoname
     `format:{address_key}` so re-import updates in place; + the lead lat/lng
     cache fields).
+
+### BatchData fallback for leads with ZERO comps (`crm/api/batchdata_comps.py`)
+
+  - **The gap it fills, measured:** sampling the 45 most recent leads,
+    **8 (18%) returned zero comps** — Albany/Brooklyn/Rochester NY, High Point
+    and Glade Valley NC, Avondale AZ, Newnan GA, Warsaw MO. Those reps open the
+    map and get nothing, the one outcome the ladder in `_preset_tiers` exists to
+    avoid. When the pooled index holds *nothing at all*, no amount of loosening
+    helps.
+  - **NOT gated on non-disclosure states, and that was checked.** The original
+    theory was "Texas comps lack sale prices". False: all **67,679** CRM Comp
+    rows carry a price, **TX included at 100%**, and TX has our *best* coverage
+    (~168 comps/lead vs ~26 for MN). Four TX leads returned 200 / 107 / 13 / 158
+    comps, all priced. None of the eight empty leads are in a non-disclosure
+    state. The real trigger is **zero coverage**, which is geography-agnostic.
+  - **Trigger is deliberately `not out`** — the *unfiltered* radius result — not
+    the filtered one. A tight preset matching nothing must never spend money;
+    that is the ladder's job, not the wallet's.
+  - **Cost: $0.03/row, `take=10` → $0.30 per empty lead**, verified by
+    wallet-balance deltas, not by reading a price list. Uses the dedicated
+    `batchdata_comps_api_key` (Basic Property Data + Comparable Properties only).
+    **Do NOT point it at the general BatchData key** — that carries all 13
+    datasets and bills **$0.64/row**, 21x more, for fields this never reads.
+  - **A no-match is free.** Avondale AZ returned an empty pool and cost **$0.00**
+    — you are billed per row returned, so a miss costs nothing but the round trip.
+  - **Sale window is applied SERVER-SIDE** (`sale.lastSaleDate.minDate/maxDate`,
+    2 years) so we only pay for rows already inside it — 24% cheaper than pulling
+    25 and discarding stale ones. `minDate`/`maxDate` is the ONLY accepted shape:
+    `min/max`, `start/end`, `from/to`, `gte/lte` and ISO datetimes all return
+    `"Invalid Date"`, and **an unrecognised key is silently ignored**, which would
+    mean paying for stale rows and never being told.
+  - **Negative results are cached** (14d, vs 90d for a hit) — same lesson as the
+    Zillow cache: an address the provider cannot match is otherwise re-billed on
+    every modal open. Written with `update_modified=False`, so a cached lookup
+    never looks like a human edit.
+  - **Rows are shaped to the existing comp contract** (same keys, `status`
+    `"Inactive"`, `removed_date` = sale date) so the map, table and pill grammar
+    work untouched. They carry `source: "batchdata"`, and the response carries a
+    `fallback` block — these are *recorded sales*, not our pooled listing index,
+    and the rep has to be told that rather than left to assume.
+  - **Verified live against the real empty leads** (4 of 5 filled, 10 usable comps
+    each, $1.20 total): Albany pool=38, Brooklyn 234, High Point 45, Newnan 64,
+    Avondale 0. Harness: `tmp/verify-fallback.py`.
+  - **Ops before this does anything:** set `batchdata_comps_api_key` in site
+    config, and add `batchdata_comps` (Long Text) + `batchdata_comps_fetched_at`
+    (Datetime) to CRM Lead. Absent either, it degrades quietly — no key means the
+    fallback reports `not_configured`; no fields means it works but re-bills.
   - **GOTCHA — Frappe declares Int/Float/Currency columns NOT NULL.** Plenty of
     comps have no year built or square footage, so the importer coerces missing
     numerics to 0 and text to "" (dates stay nullable — a live listing genuinely
