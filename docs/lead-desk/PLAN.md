@@ -560,11 +560,15 @@ the desk page + the offer rail, and is NOT deployed.
 
 ## Next, in order
 
-1. Bootstrap staging: docker, compose stack, bench, nginx + TLS, then a
-   SANITISED prod copy (scrub phone numbers so a test call cannot reach a seller).
+1. ~~Bootstrap staging~~ — done, see SESSION 3. **crm-staging.groundworkpro.com
+   is live**, TLS, running `feature/lead-desk` against a scrubbed copy of prod.
 2. ~~Desk slice 3~~ — done, see SESSION 3.
 3. Telnyx — its own project, bigger than the desk. See the section above.
-   Copilot stays blocked until it lands.
+   Copilot stays blocked until it lands. The three prerequisites that must exist
+   BEFORE any Telnyx traffic are still open: the `provider` column on Quo Message
+   + re-stamping `telephony_medium`, per-provider line mapping, and unioning both
+   providers in every report. Two decisions are still unanswered (open questions
+   6 and 7): the thread boundary during parallel running, and its exit condition.
 
 ## Open, needing a human
 
@@ -659,3 +663,53 @@ panel, and the determination visible in the timeline.
 Everything written to prod lead **CRM-LEAD-2026-00854** during verification was
 undone (2 comments deleted, `comps_hidden` / `comps_selected` /
 `price_determination*` cleared); `verify_no_drift.py` PASSes.
+
+
+---
+
+# STAGING IS LIVE (2026-08-15)
+
+    https://crm-staging.groundworkpro.com    87.99.154.150 (Hetzner cpx21, ash)
+    v1.67.0-stg1 @ c62d089d (feature/lead-desk)   876 leads, all phones scrubbed
+    Administrator password: crm-staging:/opt/frappe-crm/.env
+
+Two scripts in the ops repo, both idempotent:
+
+    ./scripts/bootstrap_staging.sh          bare Ubuntu -> TLS-served CRM
+    ./scripts/clone_prod_to_staging.sh      prod's data, sanitised on arrival
+    ENV=staging FORK=<worktree> ./scripts/build_image.sh     deploy a branch
+
+**The scrub is a mechanism, not a habit.** It runs inside the clone pipeline
+before anything starts against the new data, and there is no mode that restores
+prod unscrubbed. Phones become unroutable `+1555…` derived from the row's own
+name (so records that shared a number still share one), contact emails become
+`@example.invalid`, per-user sending lines are cleared, and the email queue is
+emptied. Verified after the first clone: 876 leads, 593 buyers, 4,192 call logs,
+4,403 texts, **0 real numbers**.
+
+**Staging carries NO integration keys** and that is the whole safety story: every
+integration is gated on a per-site `site_config` key, and a site created fresh
+has none. The scheduler is disabled by default — enabling it is a deliberate act,
+because `sequence_drain.drain_due` runs every minute.
+
+## Traps the bootstrap paid for (they are all in the scripts now)
+
+- **`docker compose run/exec -T` inside a heredoc-fed ssh script eats the REST OF
+  THE SCRIPT**, because stdin *is* the script. It silently swallowed
+  `mute_emails`, the seqdrain config and `up -d` on the first run, leaving a box
+  with only db and redis up — and no error anywhere. Redirect `</dev/null`.
+- **The `seqdrain` queue must be declared in `common_site_config`** or
+  drain-worker crash-loops on "Queue should be one of short, default, long".
+  `bench set-config -g workers.seqdrain.background_workers 1` does **not** create
+  the nested dict: it writes nothing and reports nothing. Write the JSON.
+- **nginx inside the frontend container caches `backend:8000`'s IP at startup**,
+  so a backend started after it answers 504 until reloaded — exactly what a fresh
+  bootstrap looks like.
+- **`build_image.sh` had the prod tag pattern hardcoded** even after the env
+  parameterisation, so `ENV=staging` would have read an empty CURRENT, computed
+  `v1.67.0-gw1` and sed'd nothing: a no-op deploy reporting success. It also
+  rewrote this repo's compose pin regardless of target, which would have shipped
+  a staging tag back to prod.
+- **A 4.2GB database is mostly one table.** `tabError Log` is 3.9GB of it (148
+  rows), so the clone restores it — and the other log-shaped tables — as empty
+  structure and moves ~250MB instead.
