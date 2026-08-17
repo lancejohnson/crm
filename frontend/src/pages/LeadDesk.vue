@@ -1,40 +1,39 @@
 <template>
-  <div class="flex h-screen flex-col overflow-hidden bg-surface-white">
-    <!-- Header row: identity + the facts a rep says out loud, then actions. -->
-    <div
-      class="flex shrink-0 items-center gap-3 border-b px-3 py-2"
-      style="border-color: var(--surface-gray-2)"
-    >
+  <div class="desk">
+    <!-- Header: identity, the facts a rep says out loud, then actions. Dense on
+         purpose (7px/12px, 9px gaps) -- this is a working surface, and every row
+         of chrome here is a row of map the rep does not get. -->
+    <div class="hd">
       <div class="flex min-w-0 items-baseline gap-2">
-        <h1 class="truncate text-base font-semibold text-ink-gray-9">
-          {{ lead?.lead_name || leadId }}
-        </h1>
-        <span class="truncate text-sm text-ink-gray-6">
-          {{ address }}
+        <h1 class="hd-name">{{ lead?.lead_name || leadId }}</h1>
+        <span class="hd-ad">{{ address }}</span>
+      </div>
+
+      <!-- Facts as chips, keyed like the mockup: a 9.5px uppercase key and the
+           value beside it, so four facts cost one line rather than four badges. -->
+      <div class="dets">
+        <span v-for="f in facts" :key="f.key" class="det" :title="f.title">
+          <span class="dk">{{ f.key }}</span>{{ f.value }}
         </span>
       </div>
 
-      <div class="flex shrink-0 items-center gap-1.5">
-        <Badge
-          v-for="f in facts"
-          :key="f.key"
-          variant="subtle"
-          :label="`${f.key} ${f.value}`"
-          :title="f.title"
-        />
-      </div>
-
       <div class="ml-auto flex shrink-0 items-center gap-2">
+        <!-- The whole point of the desk: dial the person whose house is on the
+             screen, from the screen. The softphone lives HERE rather than in the
+             app shell -- a phone widget on the Settings page is a phone widget in
+             the way, and this is the one surface where a call is the job. -->
+        <button
+          v-if="lead?.mobile_no || lead?.phone"
+          class="hb call"
+          @click="callLead"
+        >
+          <span class="ic" />Call
+        </button>
         <!-- Activity is lead-level history, the same tier as the lead itself, so
              it sits with the lead-level actions rather than hiding behind an
              arrow on the window edge. -->
-        <Button
-          :label="__('Activity')"
-          :variant="showActivity ? 'subtle' : 'ghost'"
-          :title="__('Calls, texts and notes for this lead (])')"
-          @click="toggleActivity()"
-        />
-        <Button :label="__('Open lead')" iconLeft="external-link" @click="openLead" />
+        <button class="hb" :class="{ on: showActivity }" @click="toggleActivity()">Activity</button>
+        <button class="hb" @click="openLead">Open lead ↗</button>
       </div>
     </div>
 
@@ -77,6 +76,10 @@
         @read-saved="leadResource.reload()"
         @saved="onDeterminationSaved"
       />
+
+      <!-- The softphone renders nothing until there is a call, so it costs the
+           layout nothing to have it mounted here. -->
+      <TelnyxCallUI ref="phone" />
 
       <!-- Activity slides OVER the desk rather than taking a column of its own.
            Nothing reflows, so the map keeps its size and Leaflet keeps its
@@ -154,10 +157,11 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { createResource, Badge, Button } from 'frappe-ui'
+import { createResource } from 'frappe-ui'
 import CompsView from '@/components/CompsView.vue'
 import OfferRail from '@/components/OfferRail.vue'
 import Activities from '@/components/Activities/Activities.vue'
+import TelnyxCallUI from '@/components/Telephony/TelnyxCallUI.vue'
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
 import { activeDetailPanel } from '@/composables/settings'
 
@@ -263,6 +267,21 @@ function openLead() {
   router.push({ name: 'Lead', params: { leadId: leadId.value } })
 }
 
+const phone = ref(null)
+
+/**
+ * Dial this lead from the browser.
+ *
+ * The number comes from the lead record rather than being typed, which is the
+ * difference between a call that is linked to the deal and one that is a row in
+ * a phone bill.
+ */
+function callLead() {
+  const number = lead.value?.mobile_no || lead.value?.phone
+  if (!number) return
+  phone.value?.dial(number, { name: lead.value?.lead_name || '' })
+}
+
 /**
  * The activity rail.
  *
@@ -315,3 +334,53 @@ function onDeterminationSaved() {
   activities.value?.all_activities?.reload?.()
 }
 </script>
+
+<style scoped>
+/* Tokens from `~/crm-mockups/today-leadzolo/v17.html`, verbatim. The desk is the
+   one screen with a settled visual design, and approximating it with the nearest
+   Tailwind utility in twenty places is what made it look like something else. */
+.desk {
+  --t1: #18181a; --t2: #62636a; --t3: #9a9ba3;
+  --bg: #fff; --bg1: #fbfbfc; --bg2: #f4f4f6;
+  --br: #e8e8ec; --br2: #dcdce2;
+  --green: #15683c;
+  --rs: 5px;
+
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+  font: 13px/1.5 Inter, -apple-system, 'Segoe UI', system-ui, sans-serif;
+  color: var(--t1);
+}
+
+.hd {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 12px; border-bottom: 1px solid var(--br); flex: none;
+}
+.hd-name { margin: 0; font-size: 14.5px; font-weight: 600; letter-spacing: -0.01em; }
+.hd-ad {
+  font-size: 12px; color: var(--t2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.dets { display: flex; align-items: center; gap: 4px; flex: none; }
+.det {
+  display: inline-flex; align-items: baseline; gap: 3px;
+  padding: 2px 6px; border: 1px solid var(--br); border-radius: 4px;
+  background: var(--bg1); font-size: 12px; font-weight: 500;
+}
+.det .dk { font-size: 9.5px; font-weight: 500; text-transform: uppercase; color: var(--t3); }
+
+.hb {
+  height: 26px; padding: 0 9px; border: 1px solid var(--br2); border-radius: var(--rs);
+  background: var(--bg); color: var(--t1); font-size: 12px; font-weight: 500;
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer; white-space: nowrap;
+}
+.hb:hover { background: var(--bg2); }
+.hb.on { background: var(--bg2); border-color: var(--t3); }
+.hb.call { background: var(--green); border-color: var(--green); color: #fff; }
+.hb.call:hover { filter: brightness(1.08); }
+.hb .ic { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+</style>

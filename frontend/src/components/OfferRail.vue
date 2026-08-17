@@ -1,160 +1,127 @@
 <template>
-  <!-- 340px wide with a 40px right gutter, which leaves the same ~288px of
-       content a plain 300px rail had. The gutter is for somebody else's widget
-       and it is deliberate: PostHog injects a "Report a problem" survey tab
-       (button.ph-survey-widget-tab, in a shadow root, position:fixed, 35px wide,
-       pinned to the right edge and vertically CENTRED) on every page of this
-       app, prod included -- and it landed squarely on "Max offer", the one number
-       the rep says out loud. Shadow DOM means our CSS cannot move it, and
-       suppressing feedback on the screen reps work from all day is the wrong
-       trade. Reserving the strip is the honest fix: the tab keeps working and
-       nothing important is ever underneath it. -->
-  <div class="flex w-[340px] shrink-0 flex-col gap-3 overflow-y-auto border-l p-3 pr-10"
-       style="border-color: var(--surface-gray-2)">
-
-    <!-- ARV, derived from the comps the rep actually ticked -->
-    <div>
-      <div class="mb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-gray-5">ARV</div>
-      <div v-if="!picked.length" class="rounded border border-dashed p-2 text-xs text-ink-gray-5"
-           style="border-color: var(--surface-gray-3)">
-        Tick comps on the map to price this.
-      </div>
-      <template v-else>
-        <div class="flex items-baseline justify-between">
-          <span class="text-lg font-semibold text-ink-gray-9">{{ money(arv) }}</span>
-          <span class="text-xs text-ink-gray-5">{{ money(avgPsf) }}/sf × {{ fmt(subjectSqft) }}sf</span>
-        </div>
-        <div class="mt-0.5 text-[11px] text-ink-gray-5">
-          {{ usable.length }} of {{ picked.length }} comp{{ picked.length === 1 ? '' : 's' }}
-          <span v-if="usable.length < picked.length" :title="'Comps without both a price and a size cannot produce a $/sf'">
-            · {{ picked.length - usable.length }} unusable
-          </span>
-        </div>
-      </template>
+  <!-- 306px, the mockup's width. The rail is a column of key/value ROWS, not a
+       stack of cards: cards put their own padding between every figure and the
+       one above it, which is what made this read as a pile of widgets rather
+       than one calculation you can follow down the page. -->
+  <div class="desk-rail">
+    <!-- ARV -->
+    <div class="lb">ARV</div>
+    <div v-if="!picked.length" class="empty">
+      Tick comps on the map to price this.
     </div>
+    <template v-else>
+      <div class="arvline">
+        <span class="av">{{ money(arv) }}</span>
+        <span class="ak">{{ money(avgPsf) }}/sf × {{ fmt(subjectSqft) }}sf</span>
+      </div>
+      <div class="sub">
+        {{ usable.length }} of {{ picked.length }} comp{{ picked.length === 1 ? '' : 's' }}
+        <span
+          v-if="usable.length < picked.length"
+          :title="'Comps without both a price and a size cannot produce a $/sf'"
+        >· {{ picked.length - usable.length }} unusable</span>
+      </div>
+    </template>
 
     <!-- Repairs -->
-    <div>
-      <div class="mb-1 flex items-baseline justify-between">
-        <span class="text-[10px] font-semibold uppercase tracking-wide text-ink-gray-5">Repairs</span>
-        <span class="text-[10px] text-ink-gray-5">{{ bandLabel }}</span>
-      </div>
-      <div class="flex gap-1">
-        <button
-          v-for="l in LEVELS"
-          :key="l.id"
-          class="flex-1 rounded border px-1 py-1 text-[11px] leading-tight"
-          :class="l.id === level
-            ? 'border-outline-gray-4 bg-surface-gray-2 font-medium text-ink-gray-9'
-            : 'border-transparent text-ink-gray-6 hover:bg-surface-gray-1'"
-          @click="level = l.id"
-        >
-          <div>{{ l.short }}</div>
-          <div class="text-ink-gray-5">{{ money(l.cost[band]) }}</div>
-        </button>
-      </div>
-
-      <div class="mt-1.5 space-y-0.5">
-        <label
-          v-for="m in MAJORS"
-          :key="m"
-          class="flex cursor-pointer items-center gap-1.5 text-xs text-ink-gray-7"
-        >
-          <input type="checkbox" class="size-3 rounded" :value="m" v-model="majors" />
-          <span class="flex-1">{{ m }}</span>
-          <span class="text-ink-gray-5">+{{ money(MAJOR_COST) }}</span>
-        </label>
-      </div>
-
-      <div class="mt-1.5 flex items-baseline justify-between border-t pt-1.5"
-           style="border-color: var(--surface-gray-2)">
-        <span class="text-xs text-ink-gray-6">Estimate</span>
-        <span class="text-sm font-medium text-ink-gray-9">{{ money(repairs) }}</span>
-      </div>
+    <div class="sublb2">
+      Repairs<span class="band">{{ bandLabel }}</span>
+    </div>
+    <div class="seg">
+      <button
+        v-for="l in LEVELS"
+        :key="l.id"
+        class="sgb"
+        :class="{ on: l.id === level }"
+        @click="level = l.id"
+      >
+        {{ l.short }}<span class="sgv">{{ money(l.cost[band]) }}</span>
+      </button>
     </div>
 
-    <!-- The offer, shown as the steps a rep says out loud -->
-    <div>
-      <div class="mb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-gray-5">Offer</div>
-      <div class="space-y-0.5 text-xs">
-        <div class="flex justify-between"><span class="text-ink-gray-6">ARV</span><span>{{ money(arv) }}</span></div>
-        <div class="flex justify-between"><span class="text-ink-gray-6">× Margin</span><span>{{ MARGIN }}%</span></div>
-        <div class="flex justify-between"><span class="text-ink-gray-6">= Gross</span><span>{{ money(gross) }}</span></div>
-        <div class="flex justify-between">
-          <span class="text-ink-gray-6" :title="DOUBLE_WHY">− Repairs × 2</span>
-          <span>{{ money(repairs * 2) }}</span>
-        </div>
-        <div class="flex justify-between"><span class="text-ink-gray-6">− Fee</span><span>{{ money(FEE) }}</span></div>
-      </div>
-      <div class="mt-1.5 flex items-baseline justify-between border-t pt-1.5"
-           style="border-color: var(--surface-gray-2)">
-        <span class="text-[17px] font-semibold text-ink-gray-9">Max offer</span>
-        <span class="text-[17px] font-semibold"
-              :class="offer > 0 ? 'text-ink-gray-9' : 'text-ink-red-4'">{{ money(offer) }}</span>
-      </div>
-      <div v-if="arv && offer <= 0" class="mt-1 text-[11px] text-ink-red-4">
-        Repairs and fee exceed {{ MARGIN }}% of ARV — there is no offer here at this repair level.
-      </div>
+    <div
+      v-for="m in MAJORS"
+      :key="m"
+      class="row pick"
+      :class="{ on: majors.includes(m) }"
+      @click="toggleMajor(m)"
+    >
+      <span class="chk">✓</span>
+      <span class="k">{{ m }}</span>
+      <span class="v mut">+{{ money(MAJOR_COST) }}</span>
     </div>
 
-    <!-- The 2x2. Reuses the existing card rather than a second way to record it. -->
-    <FirstCallReadCard
-      v-if="lead"
-      :lead="lead"
-      :motivated="motivated"
-      :on-price="onPrice"
-      @saved="$emit('read-saved')"
-    />
+    <div class="row tot">
+      <span class="k">Estimate</span>
+      <span class="v">{{ money(repairs) }}</span>
+    </div>
 
-    <!-- Save. Pinned to the bottom of the rail so it is in the same place
-         whatever the lead above it looks like. -->
-    <div class="mt-auto border-t pt-2" style="border-color: var(--surface-gray-2)">
-      <div class="mb-1.5 text-[11px] leading-snug" :class="drifted ? 'text-ink-amber-3' : 'text-ink-gray-5'">
-        <template v-if="!saved">{{ __('Nothing saved for this lead yet.') }}</template>
-        <template v-else-if="drifted">
-          {{ __('Saved {0} at {1} — changed since.', [savedWhen, money(saved.offer)]) }}
-        </template>
-        <template v-else>
-          {{ __('Saved {0} · offer {1}', [savedWhen, money(saved.offer)]) }}
-        </template>
-      </div>
-      <div v-if="saved && !saved.stored" class="mb-1.5 text-[11px] text-ink-amber-3">
-        {{ __('Recorded on the timeline only — the lead has nowhere to keep the current number yet.') }}
-      </div>
-      <Button
-        class="w-full"
-        variant="solid"
-        :loading="saving"
-        :disabled="!canSave"
-        :label="drifted ? __('Re-save (S)') : __('Save (S)')"
-        @click="save"
+    <!-- Offer -->
+    <div class="sublb2">Offer</div>
+    <div class="row"><span class="k">ARV</span><span class="v mut">{{ money(arv) }}</span></div>
+    <div class="row"><span class="k">× Margin</span><span class="v mut">{{ MARGIN }}%</span></div>
+    <div class="row"><span class="k">= Gross</span><span class="v mut">{{ money(gross) }}</span></div>
+    <div class="row">
+      <span class="k" :title="DOUBLE_WHY">− Repairs × 2</span>
+      <span class="v mut">{{ money(repairs * 2) }}</span>
+    </div>
+    <div class="row"><span class="k">− Fee</span><span class="v mut">{{ money(FEE) }}</span></div>
+
+    <div class="row big">
+      <span class="k">Max offer</span>
+      <span class="v" :class="{ bad: offer <= 0 }">{{ money(offer) }}</span>
+    </div>
+    <div v-if="arv && offer <= 0" class="warn">
+      Repairs and fee exceed {{ MARGIN }}% of ARV — there is no offer here at this repair level.
+    </div>
+
+    <!-- The 2x2, unchanged in behaviour: it writes the lead's real First-Call Read. -->
+    <div class="readcard">
+      <FirstCallReadCard
+        v-if="lead"
+        :lead="lead"
+        :motivated="motivated"
+        :on-price="onPrice"
+        @saved="$emit('read-saved')"
       />
-      <div v-if="error" class="mt-1 text-[11px] text-ink-red-4">{{ error }}</div>
+    </div>
+
+    <!-- Save, in the mockup's foot band: full-bleed, its own surface, pinned. -->
+    <div class="rfoot">
+      <div class="savedline">
+        <template v-if="!saved">Nothing saved for this lead yet.</template>
+        <template v-else-if="drifted">
+          Saved <b>{{ savedWhen }}</b> at <b>{{ money(saved.offer) }}</b> — changed since.
+        </template>
+        <template v-else>Saved <b>{{ savedWhen }}</b> · offer <b>{{ money(saved.offer) }}</b></template>
+      </div>
+      <div v-if="saved && !saved.stored" class="savedline amber">
+        Recorded on the timeline only — the lead has nowhere to keep the current number yet.
+      </div>
+      <button class="go" :disabled="!canSave" @click="save">
+        {{ saving ? 'Saving…' : drifted ? 'Re-save (S)' : 'Save (S)' }}
+      </button>
+      <div v-if="error" class="warn">{{ error }}</div>
     </div>
   </div>
 </template>
 
 <script setup>
 /**
- * The offer rail: ARV from the comps the rep ticked, repairs from Lance's Fix &
- * Flip matrix, and the offer those two produce.
+ * The offer rail, styled to `~/crm-mockups/today-leadzolo/v17.html`.
  *
- * WHY REPAIRS ARE DOUBLED. The formula is 90% ARV − 2×Repairs − Fee, and the
- * doubling is deliberate rather than a fudge: the matrix is a cheat-sheet read
- * mid-call, and a buffer that overruns is recoverable where an offer that was
- * too high is not. It is shown as its own line so nobody mistakes it for the
- * repair estimate itself.
+ * WHY SCOPED CSS RATHER THAN TAILWIND UTILITIES. The mockup is a specification
+ * with real numbers in it -- 13px/1.5 base, 10px uppercase labels at #9a9ba3,
+ * 17px for the figure that gets said out loud, 6px radii, #e8e8ec hairlines --
+ * and Tailwind's scale has no 11.5px, no 9.5px and a different grey ramp. The
+ * first cut approximated all of it with the nearest utility class, and
+ * "approximately the mockup" in twenty places is what made it look nothing like
+ * the mockup.
  *
- * ARV IS ROUNDED TO $1,000 because a rep says it out loud. "$117,000" is a
- * number you can defend; "$116,847" claims a precision that six comps and a
- * band-derived square footage do not have.
- *
- * Comps missing a price or a size are EXCLUDED from the average and counted out
- * loud rather than silently dropped — a $/sf built from four comps when the rep
- * ticked six is a different number than they think they are looking at.
+ * The arithmetic below is unchanged; this is a skin.
  */
 import { computed, onMounted, ref, watch } from 'vue'
-import { call, Button, toast } from 'frappe-ui'
+import { call, toast } from 'frappe-ui'
 import FirstCallReadCard from '@/components/FirstCallReadCard.vue'
 
 const props = defineProps({
@@ -174,8 +141,6 @@ const DOUBLE_WHY =
   'Doubled on purpose: the matrix is a mid-call cheat sheet, and a buffer that ' +
   'overruns is recoverable where an offer that was too high is not.'
 
-// Lance's Fix & Flip matrix. Columns are square-footage bands, and the bands are
-// the sheet's own — not interpolated, because the sheet is what the team quotes.
 const BANDS = ['<1,500', '1,500–2,000', '2,000–2,500', '2,500+']
 const LEVELS = [
   { id: 'smooth', short: 'Smooth', cost: [20000, 30000, 40000, 50000] },
@@ -185,6 +150,11 @@ const LEVELS = [
 
 const level = ref('smooth')
 const majors = ref([])
+function toggleMajor(m) {
+  majors.value = majors.value.includes(m)
+    ? majors.value.filter((x) => x !== m)
+    : [...majors.value, m]
+}
 
 const subjectSqft = computed(() => Number(props.subject?.sqft) || 0)
 
@@ -197,7 +167,6 @@ const band = computed(() => {
 })
 const bandLabel = computed(() => `${BANDS[band.value]} sqft`)
 
-/** Only comps that can actually produce a $/sf. */
 const usable = computed(() =>
   props.picked.filter((c) => Number(c.price) > 0 && Number(c.square_footage) > 0),
 )
@@ -229,18 +198,6 @@ function fmt(n) {
   return (Number(n) || 0).toLocaleString('en-US')
 }
 
-/**
- * The saved determination.
- *
- * The snapshot carries the INPUTS and the CONSTANTS, not just the offer: "we
- * said $35,300" is unusable three weeks later without the comps, the $/sf and
- * the repair level that produced it, and storing `margin`/`fee` means a later
- * change to the formula cannot silently rewrite what we told a seller.
- *
- * Comps are copied, not referenced. `CRM Comp` is a projection of a feed that
- * re-syncs nightly and a BatchData fallback comp has no CRM row at all, so a
- * determination that resolved its comps by name would drift or empty out.
- */
 function snapshot() {
   return {
     arv: arv.value,
@@ -269,9 +226,6 @@ const saved = ref(null)
 const saving = ref(false)
 const error = ref('')
 
-/** The comparison that decides Save vs Re-save. Only the fields that change the
- *  number — `by`/`at`/`source` are stamped server-side and would make every
- *  saved determination look immediately stale. */
 const COMPARED = [
   'arv', 'psf', 'subject_sqft', 'level', 'majors',
   'repairs', 'margin', 'fee', 'offer', 'comps', 'read',
@@ -288,8 +242,6 @@ const canSave = computed(() => arv.value > 0 && !saving.value && (!saved.value |
 const savedWhen = computed(() => {
   const at = saved.value?.at
   if (!at) return ''
-  // Frappe hands back "YYYY-MM-DD HH:MM:SS" in SITE time with no zone, so it is
-  // parsed as local rather than through Date.parse, which would read it as UTC.
   const m = String(at).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/)
   if (!m) return String(at)
   const d = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5])
@@ -305,8 +257,6 @@ async function load() {
     })
     if (d) saved.value = { ...d, stored: true }
   } catch (e) {
-    // A determination that will not load must never stop the rep pricing the
-    // deal — the rail simply reads as "nothing saved yet".
     console.error(e)
   }
 }
@@ -335,3 +285,100 @@ watch(() => props.lead, load)
 
 defineExpose({ save, canSave })
 </script>
+
+<style scoped>
+/* Tokens lifted verbatim from the mockup so there is one source of truth for
+   what this screen looks like. */
+.desk-rail {
+  --t1: #18181a; --t2: #62636a; --t3: #9a9ba3;
+  --bg: #fff; --bg1: #fbfbfc; --bg2: #f4f4f6;
+  --br: #e8e8ec; --br2: #dcdce2;
+  --green: #15683c; --amber: #9a5308; --red: #b3261e;
+  --rs: 5px;
+
+  width: 306px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 12px 14px 0;
+  border-left: 1px solid var(--br2);
+  background: var(--bg);
+  font: 13px/1.5 Inter, -apple-system, 'Segoe UI', system-ui, sans-serif;
+  color: var(--t1);
+}
+
+.lb {
+  font-size: 10px; font-weight: 500; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--t3);
+}
+.empty {
+  margin-top: 6px; padding: 9px 10px; font-size: 11.5px; color: var(--t3);
+  border: 1px dashed var(--br2); border-radius: var(--rs);
+}
+.arvline { display: flex; align-items: baseline; gap: 8px; margin-top: 3px; }
+.arvline .av { font-size: 18px; font-weight: 600; letter-spacing: -0.015em; }
+.arvline .ak { font-size: 11.5px; color: var(--t2); margin-left: auto; }
+.sub { font-size: 11px; color: var(--t3); margin-top: 2px; }
+
+.sublb2 {
+  font-size: 10px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--t3); margin: 18px 0 7px; padding-top: 14px; border-top: 1px solid var(--br);
+  display: flex; align-items: baseline;
+}
+.sublb2 .band { margin-left: auto; letter-spacing: 0; text-transform: none; }
+
+.seg { display: flex; gap: 2px; background: var(--bg2); padding: 2px; border-radius: var(--rs); }
+.sgb {
+  flex: 1; padding: 4px 8px; border: 0; border-radius: 4px; background: none;
+  font-size: 11.5px; font-weight: 500; color: var(--t2); text-align: center;
+  line-height: 1.25; cursor: pointer;
+}
+.sgb.on { background: var(--bg); color: var(--t1); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); }
+.sgv { display: block; font-size: 10px; font-weight: 500; color: var(--t3); margin-top: 1px; }
+.sgb.on .sgv { color: var(--t2); }
+
+.row {
+  display: flex; align-items: center; gap: 7px; height: 24px; font-size: 12px;
+}
+.row .k { color: var(--t2); }
+.row .v { margin-left: auto; font-weight: 500; text-align: right; }
+.row .v.mut { color: var(--t3); font-weight: 400; }
+.row.tot { border-top: 1px solid var(--br); margin-top: 9px; padding-top: 11px; height: auto; }
+.row.tot .k { color: var(--t1); font-weight: 500; }
+.row.big {
+  border-top: 1px solid var(--br2); margin-top: 14px; padding-top: 14px;
+  height: auto; align-items: baseline;
+}
+/* Label and figure share a size: a 13px word beside a 24px number reads as two
+   unrelated things rather than one row. */
+.row.big .k { color: var(--t1); font-weight: 600; font-size: 17px; }
+.row.big .v { font-size: 17px; font-weight: 600; letter-spacing: -0.015em; line-height: 1.2; }
+.row.big .v.bad { color: var(--red); }
+
+.chk {
+  width: 13px; height: 13px; border: 1px solid var(--br2); border-radius: 3px; flex: none;
+  display: grid; place-items: center; font-size: 8.5px; color: transparent;
+}
+.row.pick { cursor: pointer; border-radius: 4px; margin: 0 -5px; padding: 0 5px; }
+.row.pick:hover { background: var(--bg2); }
+.row.pick.on .chk { background: var(--t1); border-color: var(--t1); color: #fff; }
+
+.warn { font-size: 11px; color: var(--red); margin-top: 6px; line-height: 1.4; }
+
+.readcard { margin: 16px -14px 0; }
+
+.rfoot {
+  margin: auto -14px 0; padding: 10px 14px; flex: none;
+  border-top: 1px solid var(--br2); background: var(--bg1);
+  position: sticky; bottom: 0;
+}
+.savedline { font-size: 11px; color: var(--t3); margin-bottom: 7px; line-height: 1.4; min-height: 15px; }
+.savedline b { color: var(--t2); font-weight: 500; }
+.savedline.amber { color: var(--amber); }
+.go {
+  width: 100%; height: 31px; border-radius: var(--rs); background: var(--t1); color: #fff;
+  font-size: 12px; font-weight: 500; border: 0; cursor: pointer;
+}
+.go:disabled { opacity: 0.45; cursor: default; }
+</style>
