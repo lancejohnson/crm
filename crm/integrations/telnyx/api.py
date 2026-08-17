@@ -134,6 +134,18 @@ def dial(to: str, lead: str = None):
 	if not frm:
 		frappe.throw(_("No Telnyx number is set for you or for this site."))
 
+	# VOICEMAIL IS REQUIRED BEFORE YOU CAN DIAL, and the gate is here rather than
+	# in the UI because it is a promise to the person on the other end: we ring
+	# sellers who then ring back, and a number that rings out with no greeting --
+	# or worse, a stranger's default -- costs the lead we just paid for. Setting it
+	# takes one sentence, so this is a small tax on the rep and a real protection
+	# for the deal.
+	if not voicemail_greeting(frappe.session.user):
+		frappe.throw(
+			_("Set your voicemail greeting before making calls — sellers call this number back."),
+			title=_("Voicemail not set up"),
+		)
+
 	data = _post(
 		"/calls",
 		{
@@ -153,6 +165,75 @@ def dial(to: str, lead: str = None):
 		},
 	)
 	return {"ok": True, "call_control_id": data.get("call_control_id"), "to": to, "from": frm}
+
+
+def command(call_control_id: str, action: str, payload: dict = None):
+	"""One Call Control command. Errors are logged, never raised: a command that
+	fails mid-call must not take down the webhook that is handling the call."""
+	try:
+		return _post(f"/calls/{call_control_id}/actions/{action}", payload or {})
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), f"Telnyx command {action} failed")
+		return {}
+
+
+def start_recording(call_control_id: str):
+	"""Record the call, DUAL CHANNEL, with transcription.
+
+	`channels: "dual"` is the whole reason this is worth doing on Telnyx: the rep
+	and the other party land on separate channels, so who said what is a fact of
+	the file rather than a guess. Quo gives one mixed channel, which is why
+	`call_transcript.py` has to infer speakers from `userId` and a last-10 digit
+	match -- and why an inbound call it cannot attribute reads as the wrong person.
+
+	`transcription: true` here rather than a separate `transcription_start`: that
+	one is the REAL-TIME stream (webhook `call.transcription`), which the copilot
+	will need and which bills per minute. Paying for both to get one post-call
+	transcript would be paying twice for the same words.
+	"""
+	return command(
+		call_control_id,
+		"record_start",
+		{
+			"format": "mp3",
+			"channels": "dual",
+			"play_beep": False,
+			"transcription": True,
+			"transcription_engine": "B",
+			"transcription_language": "en",
+		},
+	)
+
+
+def voicemail_greeting(user: str) -> str:
+	"""This user's greeting, or "" if they have never set one."""
+	if not frappe.db.has_column("User", "custom_voicemail_greeting"):
+		return ""
+	return (frappe.db.get_value("User", user, "custom_voicemail_greeting") or "").strip()
+
+
+@frappe.whitelist()
+def set_voicemail_greeting(greeting: str):
+	"""Record the session user's own greeting. Text, spoken by Telnyx TTS.
+
+	Text rather than an audio upload on purpose: a rep can fix a typo in ten
+	seconds from a phone, and nobody has to find a quiet room to re-record.
+	"""
+	greeting = (greeting or "").strip()
+	if len(greeting) < 10:
+		frappe.throw(_("A voicemail greeting needs to be a sentence, not a word."))
+	if not frappe.db.has_column("User", "custom_voicemail_greeting"):
+		frappe.throw(_("Voicemail is not set up on this site yet."))
+	frappe.db.set_value("User", frappe.session.user, "custom_voicemail_greeting", greeting)
+	return {"ok": True, "greeting": greeting}
+
+
+@frappe.whitelist()
+def voicemail_status(user: str = None):
+	"""Whether this user is ready to take calls. The UI gates on this."""
+	user = user or frappe.session.user
+	greeting = voicemail_greeting(user)
+	return {"configured": bool(greeting), "greeting": greeting}
 
 
 def _store_message(
