@@ -46,29 +46,41 @@
       :class="{ on: majors.includes(m) }"
       @click="toggleMajor(m)"
     >
-      <span class="chk">✓</span>
-      <span class="k">{{ m }}</span>
-      <span class="v mut">+{{ money(MAJOR_COST) }}</span>
+      <span class="k"><span class="op">+</span><span class="chk">✓</span><span>{{ m }}</span></span>
+      <span class="v mut">{{ money(MAJOR_COST) }}</span>
     </div>
 
     <div class="row tot">
-      <span class="k">Estimate</span>
+      <span class="k"><span class="op">=</span><span>Repair estimate</span></span>
       <span class="v">{{ money(repairs) }}</span>
     </div>
 
-    <!-- Offer -->
+    <!-- Offer. Every sign lives in the operator column so the labels form one
+         left edge and each value can be a single plain format. -->
     <div class="sublb2">Offer</div>
-    <div class="row"><span class="k">ARV</span><span class="v mut">{{ money(arv) }}</span></div>
-    <div class="row"><span class="k">× Margin</span><span class="v mut">{{ MARGIN }}%</span></div>
-    <div class="row"><span class="k">= Gross</span><span class="v mut">{{ money(gross) }}</span></div>
     <div class="row">
-      <span class="k" :title="DOUBLE_WHY">− Repairs × 2</span>
-      <span class="v mut">{{ money(repairs * 2) }}</span>
+      <span class="k"><span class="op" /><span>ARV</span></span>
+      <span class="v">{{ money(arv) }}</span>
     </div>
-    <div class="row"><span class="k">− Fee</span><span class="v mut">{{ money(FEE) }}</span></div>
+    <div class="row">
+      <span class="k"><span class="op">×</span><span>Margin</span></span>
+      <span class="v">{{ MARGIN }}%</span>
+    </div>
+    <div class="row">
+      <span class="k"><span class="op">=</span><span>Gross</span></span>
+      <span class="v mut">{{ money(gross) }}</span>
+    </div>
+    <div class="row">
+      <span class="k" :title="DOUBLE_WHY"><span class="op">−</span><span>Repairs × 2</span></span>
+      <span class="v">{{ money(repairs * 2) }}</span>
+    </div>
+    <div class="row">
+      <span class="k"><span class="op">−</span><span>Fee</span></span>
+      <span class="v">{{ money(FEE) }}</span>
+    </div>
 
     <div class="row big">
-      <span class="k">Max offer</span>
+      <span class="k"><span class="op">=</span><span>Max offer</span></span>
       <span class="v" :class="{ bad: offer <= 0 }">{{ money(offer) }}</span>
     </div>
     <div v-if="arv && offer <= 0" class="warn">
@@ -86,6 +98,27 @@
       />
     </div>
 
+    <!-- What the seller wants, and the gap. The band is full-bleed and tinted
+         because it is the other side of the negotiation, not another one of our
+         own figures -- and the distance between the two numbers is the whole
+         conversation. -->
+    <div class="wantrow">
+      <div class="row">
+        <span class="k"><span class="op" /><span>They want</span></span>
+        <input
+          v-model="ask"
+          class="v inp"
+          inputmode="numeric"
+          placeholder="—"
+          @focus="$event.target.select()"
+        />
+      </div>
+      <div class="row">
+        <span class="k"><span class="op" /><span>Apart</span></span>
+        <span class="v">{{ askNumber ? money(Math.max(0, askNumber - offer)) : '—' }}</span>
+      </div>
+    </div>
+
     <!-- Save, in the mockup's foot band: full-bleed, its own surface, pinned. -->
     <div class="rfoot">
       <div class="savedline">
@@ -98,9 +131,14 @@
       <div v-if="saved && !saved.stored" class="savedline amber">
         Recorded on the timeline only — the lead has nowhere to keep the current number yet.
       </div>
-      <button class="go" :disabled="!canSave" @click="save">
-        {{ saving ? 'Saving…' : drifted ? 'Re-save (S)' : 'Save (S)' }}
-      </button>
+      <div class="foot-actions">
+        <button class="go alt" :disabled="!canSave" @click="save">
+          {{ saving ? 'Saving…' : drifted ? 'Re-save' : 'Save' }}
+        </button>
+        <button class="go send" :disabled="offer <= 0" @click="$emit('send-agreement', offer)">
+          Send agreement
+        </button>
+      </div>
       <div v-if="error" class="warn">{{ error }}</div>
     </div>
   </div>
@@ -131,7 +169,12 @@ const props = defineProps({
   motivated: { type: String, default: '' },
   onPrice: { type: String, default: '' },
 })
-const emit = defineEmits(['read-saved', 'saved'])
+const emit = defineEmits(['read-saved', 'saved', 'send-agreement'])
+
+// What the seller says they want. Typed, not derived -- and kept as a string
+// so a half-typed "12" does not momentarily read as a $12 ask.
+const ask = ref('')
+const askNumber = computed(() => Number(String(ask.value).replace(/[^0-9.]/g, '')) || 0)
 
 const MARGIN = 90
 const FEE = 10000
@@ -218,6 +261,7 @@ function snapshot() {
       removed_date: c.removed_date || null,
       source: c.source || '',
     })),
+    ask: askNumber.value,
     read: { motivated: props.motivated || '', on_price: props.onPrice || '' },
   }
 }
@@ -228,7 +272,7 @@ const error = ref('')
 
 const COMPARED = [
   'arv', 'psf', 'subject_sqft', 'level', 'majors',
-  'repairs', 'margin', 'fee', 'offer', 'comps', 'read',
+  'repairs', 'margin', 'fee', 'offer', 'comps', 'read', 'ask',
 ]
 function comparable(s) {
   return JSON.stringify(COMPARED.map((k) => s?.[k] ?? null))
@@ -302,7 +346,7 @@ defineExpose({ save, canSave })
   flex-direction: column;
   overflow-y: auto;
   padding: 12px 14px 0;
-  border-left: 1px solid var(--br2);
+  border-left: 1px solid var(--br);
   background: var(--bg);
   font: 13px/1.5 InterVar, Inter, -apple-system, 'Segoe UI', system-ui, sans-serif;
   font-optical-sizing: auto;
@@ -340,12 +384,27 @@ defineExpose({ save, canSave })
 .sgb.on .sgv { color: var(--t2); }
 
 .row {
-  display: flex; align-items: center; gap: 7px; height: 24px; font-size: 12px;
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 8px; height: 27px; font-size: 12px;
 }
-.row .k { color: var(--t2); }
-.row .v { margin-left: auto; font-weight: 500; text-align: right; }
+.row .k { color: var(--t2); display: flex; align-items: center; gap: 6px; min-width: 0; }
+.row .k > span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The operator column carries every sign, so each value is one plain format and
+   the labels form a single left edge instead of stepping in and out. */
+.row .op { width: 9px; flex: none; color: var(--t3); text-align: center; font-size: 11px; }
+/* Every value gets the SAME box whether it is typed or computed -- without it,
+   editable values sit 6px left of computed ones and the column reads ragged. */
+.row .v {
+  font-weight: 500; color: var(--t1); flex: none; font-size: 12px;
+  padding: 1px 5px; border: 1px solid transparent; border-radius: 4px;
+  box-sizing: border-box; text-align: right;
+}
 .row .v.mut { color: var(--t3); font-weight: 400; }
-.row.tot { border-top: 1px solid var(--br); margin-top: 9px; padding-top: 11px; height: auto; }
+.row input.v { width: 96px; background: transparent; color: var(--t1); }
+.row input.v:hover { background: var(--bg2); }
+.row input.v:focus { outline: 0; background: var(--bg); border-color: #2563c9; }
+.row.tot { border-top: 1px solid var(--br); margin-top: 9px; padding-top: 11px;
+  height: auto; padding-bottom: 2px; }
 .row.tot .k { color: var(--t1); font-weight: 500; }
 .row.big {
   border-top: 1px solid var(--br2); margin-top: 14px; padding-top: 14px;
@@ -369,6 +428,15 @@ defineExpose({ save, canSave })
 
 .readcard { margin: 16px -14px 0; }
 
+.wantrow {
+  background: #fdf8ee; border-top: 1px solid #f2e4c9; border-bottom: 1px solid #f2e4c9;
+  margin: 16px -14px 0; padding: 9px 14px;
+}
+.wantrow .row .k { color: var(--amber); }
+.wantrow input.v { background: var(--bg); border-color: var(--br2); }
+
+.foot-actions { display: flex; gap: 7px; }
+
 .rfoot {
   margin: auto -14px 0; padding: 10px 14px; flex: none;
   border-top: 1px solid var(--br2); background: var(--bg1);
@@ -378,8 +446,13 @@ defineExpose({ save, canSave })
 .savedline b { color: var(--t2); font-weight: 500; }
 .savedline.amber { color: var(--amber); }
 .go {
-  width: 100%; height: 31px; border-radius: var(--rs); background: var(--t1); color: #fff;
+  flex: 1; height: 31px; border-radius: var(--rs); background: var(--t1); color: #fff;
   font-size: 12px; font-weight: 500; border: 0; cursor: pointer;
 }
+/* Save is the quiet one and the agreement is the commitment, so the dark button
+   is the one that sends a contract -- not the one that saves a note to a lead. */
+.go.alt { background: var(--bg); border: 1px solid var(--br2); color: var(--t1); flex: none; width: 95px; }
+.go.alt:hover:not(:disabled) { background: var(--bg2); }
+.go.send { background: var(--t1); color: #fff; }
 .go:disabled { opacity: 0.45; cursor: default; }
 </style>

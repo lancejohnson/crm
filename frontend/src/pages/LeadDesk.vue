@@ -12,8 +12,14 @@
       <!-- Facts as chips, keyed like the mockup: a 9.5px uppercase key and the
            value beside it, so four facts cost one line rather than four badges. -->
       <div class="dets">
-        <span v-for="f in facts" :key="f.key" class="det" :title="f.title">
-          <span class="dk">{{ f.key }}</span>{{ f.value }}
+        <span
+          v-for="f in facts"
+          :key="f.key"
+          class="det"
+          :class="{ wide: f.key === 'SQFT' }"
+          :title="f.title"
+        >
+          <span class="dk">{{ f.key }}</span><span class="dv">{{ f.value }}</span>
         </span>
       </div>
 
@@ -368,10 +374,14 @@ function onDeterminationSaved() {
 
 .dets { display: flex; align-items: center; gap: 4px; flex: none; }
 .det {
-  display: inline-flex; align-items: baseline; gap: 3px;
-  padding: 2px 6px; border: 1px solid var(--br); border-radius: 4px;
+  display: inline-flex; align-items: baseline; gap: 4px;
+  padding: 2px 6px; border: 1px solid var(--br); border-radius: 5px;
   background: var(--bg1); font-size: 12px; font-weight: 500;
 }
+/* Fixed value field: hugging the content gave four chips four widths and the row
+   read ragged. The mockup's are an even column. */
+.det .dv { min-width: 30px; text-align: right; }
+.det.wide .dv { min-width: 46px; }
 .det .dk { font-size: 9.5px; font-weight: 500; text-transform: uppercase; color: var(--t3); }
 
 .hb {
