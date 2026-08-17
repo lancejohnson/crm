@@ -211,14 +211,58 @@ def voice():
 		updates = {"status": "Completed" if event == "call.hangup" else "In Progress"}
 		if event == "call.hangup":
 			updates["end_time"] = frappe.utils.now()
-			seconds = payload.get("call_duration_secs") or payload.get("duration_secs")
-			if seconds is not None:
-				updates["duration"] = int(seconds)
+			updates["duration"] = _duration(payload, existing)
 			if payload.get("hangup_cause") in ("call_rejected", "busy", "no_answer", "timeout"):
 				updates["status"] = "No Answer"
 		frappe.db.set_value("CRM Call Log", existing, updates)
 
 	return {"ok": True}
+
+
+def _duration(payload, call_log_name):
+	"""Seconds of call, from the best source available.
+
+	Three sources, best first, because the obvious one is not always there: the
+	first cut read `call_duration_secs` alone and a real answered call landed with
+	**duration NULL** -- a call log that says nothing about talk time is useless to
+	the activity report, the pulse and the desk, all of which sum exactly this
+	column.
+
+	1. whatever Telnyx states outright;
+	2. its own start/end stamps, which describe the media rather than our webhooks;
+	3. our row's start_time to now -- last resort, and it measures webhook arrival,
+	   so it can only ever be slightly long.
+	"""
+	for key in ("call_duration_secs", "duration_secs", "call_duration"):
+		value = payload.get(key)
+		if value not in (None, ""):
+			try:
+				return int(float(value))
+			except (TypeError, ValueError):
+				pass
+
+	start, end = payload.get("start_time"), payload.get("end_time")
+	if start and end:
+		try:
+			from datetime import datetime
+
+			parse = lambda s: datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+			return max(0, int((parse(end) - parse(start)).total_seconds()))
+		except Exception:
+			pass
+
+	row_start = frappe.db.get_value("CRM Call Log", call_log_name, "start_time")
+	if row_start:
+		try:
+			return max(
+				0,
+				int(
+					(frappe.utils.now_datetime() - frappe.utils.get_datetime(row_start)).total_seconds()
+				),
+			)
+		except Exception:
+			pass
+	return 0
 
 
 def _client_state_user(payload):
