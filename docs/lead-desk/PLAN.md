@@ -536,8 +536,10 @@ Other repos this project touches:
 
 ## Production right now
 
-    gw336 @ 098ca26c (clean)   smoke: all green   drift: PASS
-    Live: lead desk route, geo client, provider-agnostic DNC, BatchData fallback
+    gw337 @ 88f4b10b (clean)   smoke: all green   drift: PASS
+    Live: lead desk route + offer rail + saved determination + activity rail,
+    Nearby neighbourhood layer + lot lines, geo client (geo_service_url SET),
+    crm/api/telephony.py, provider-agnostic DNC, BatchData fallback
 
 `groundwork` contains both feature branches. `feature/lead-desk` = groundwork +
 the desk page + the offer rail, and is NOT deployed.
@@ -969,3 +971,30 @@ to describe what is on screen. Verified against production's old endpoint:
 Worth keeping: a verifier reporting a *cosmetic* mismatch is worth chasing to the
 data, because "the label is slightly different" and "the layer draws nothing" look
 identical from the outside.
+
+
+## Deployed gw337 (2026-08-17)
+
+`feature/lead-desk` @ 88f4b10b is on production. Verified live on
+crm.groundworkpro.com, not just locally: Nearby reads **"Nearby (1500 of 5000)"**
+with 1,725 painted pixels, 83 comp pills, and `get_neighborhood` returning
+trimmed flat rows (13 keys) with `truncated`/`in_view`/`priced`. Smoke all green,
+drift PASS, image revision 88f4b10b. No `sync_jobs` needed — no hooks.py change.
+
+### What is still missing before a REP can work a call from it
+
+1. **Nothing links to it.** No button on the Lead page, none on a Today card. The
+   route exists and is reachable only by typing the URL. This is the single
+   biggest gap and the cheapest to close.
+2. **No call controls on the desk** — v17 has "Start call". Working a live call
+   from a screen with no dialer means switching apps mid-sentence.
+3. **"They want" (the seller's ask) and the gap it implies** — in v17, and
+   already in the saved snapshot's schema (`ask`); not built.
+4. **Copilot** — blocked on Telnyx, as it has been.
+5. **Shortcuts are undiscoverable.** `S` / `]` / `N` / `D` / `H` / `U` all work;
+   nothing on screen says so, and the command palette has no desk entries.
+6. **Street View** — the Maps Embed key exists (`~/.config/groundwork/maps_embed_key`)
+   but has never been moved into site_config as `maps_embed_key`.
+7. **Geo coverage is thin.** Only leads warmed since geo went on have a
+   neighbourhood; everything older shows an empty Nearby. `warm_backfill` exists
+   (362 live leads) but is hours of background sweeping — stage it.
