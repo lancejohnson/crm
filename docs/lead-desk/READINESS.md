@@ -52,9 +52,27 @@ leads, real comps and real geocoding to mean anything.
 
 ## 1. Nobody can reach it
 
-- [ ] **Entry point on the Lead page** (`Lead.vue` header row or More ▾).
-- [ ] **Entry point from the Today board** — the card, and/or "Open desk" in
-      `TodayLeadModal`, which is where a rep actually starts a call.
+**Corrected 2026-08-17 — the desk IS the Today card's screen.** Lance: "this is a
+new screen for the cards for the Today modal", and the mockup said so all along
+(v17 is a `<div class="modal">`; the folder is `today-leadzolo`). Building it as
+a standalone page was the mistake; a rep works a QUEUE of cards, and a different
+URL per card loses the queue.
+
+- [x] **Desk pane in `TodayLeadModal`** — same `CompsView` (fill + neighbourhood)
+      beside the same `OfferRail`, so page and modal share one implementation.
+      Left rail hides on that pane, dialog widens to 7xl, card context (status,
+      "Call N of M", why today) stays in the header. **Verified on crm-test**
+      against a LeadMarket-pushed lead: card -> modal -> Desk, 8 comps + Subject
+      pill, ladder notice, offer rail, and pane switching that keeps the map
+      mounted (868x240 before and after a round trip through Activity).
+- [ ] **The map is short in the modal** — 240px, its `fill`-mode minimum, because
+      the modal body is 704px against the page's 800. Usable, but the list could
+      give the map back some height here.
+- [ ] **Entry point on the Lead page** (`Lead.vue` header row or More ▾) — still
+      worth having for a lead not on today's board.
+- [ ] **Resolve from the desk**: Done / Skip / outcome still live on the card
+      behind the modal, so a rep who prices in the desk must close it to
+      disposition.
 - [ ] **Mobile decision.** `MobileLead.vue` is a separate page and has no path to
       the desk. The desk is desktop-only by design (h-screen, ~1280x800); say so
       explicitly rather than leaving a dead end on a phone.
