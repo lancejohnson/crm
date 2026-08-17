@@ -10,7 +10,30 @@ live seller call, not by effort.
 
 ---
 
-## 0. Where it gets tested — decide this first
+## 0. What crm-test IS — corrected 2026-08-17
+
+**crm-test is production's build and schema with LeadZolo data only.** It is not
+a reduced product. I had built it the other way — 20 custom fields and one server
+script — which proves nothing about the site reps use, because a desk tested
+against a site missing the comp inventory and half the doctypes is not the desk.
+
+Fixed the same day:
+
+- `provision_staging_full.sh` runs **every** `setup_*.py` against crm-test
+  (41 of 44 applied; `setup_quo_webhooks` deliberately skipped — it would point
+  production's telephony at the test box). 35 scripts had prod's URL hardcoded and
+  now read `CRM_BASE` / `CRM_ADMIN_PASSWORD`, defaulting to prod.
+- **69,440 `CRM Comp` rows copied** from prod. They are a projection of the
+  iSpeedToLead feed with no seller PII, and without them the desk has nothing to
+  price from.
+- Same build deployed: **stg2 @ 36e2e1e0** against prod's gw337 @ 88f4b10b.
+- LeadZolo leads already flow there (`crm_push` with `CRM_HTTP_BASE` set).
+
+Still missing for true parity: `rapidapi_zillow_key`, `batchdata_comps_api_key`
+(spends money — decide the ceiling), a geo service reachable from that box, and
+the `CRM Sequence*` doctypes (2 setup scripts still fail on them).
+
+## 0b. Where it gets tested — decide this first
 
 The desk has only ever been exercised through the **prod-backed dev server**
 (`CRM_DEV_TARGET=https://crm.groundworkpro.com yarn dev`), because it needs real
@@ -116,3 +139,95 @@ $1,000**. Every item below is a real defect in that, not a refinement.
 - [ ] **A lead with NO comps and NO geo**, to see the degraded desk end to end.
 - [ ] **A rep walkthrough** — German or Exe on a live call, watching where they
       stall. Everything above is my model of the work, not theirs.
+
+
+---
+
+# What else is needed — beyond the list of 2026-08-17
+
+Lance's list: comping method/tool (+ comp condition evaluation, + a short
+explanation of the reasoning), Telnyx calling and texting, a parcel-line toggle
+on the comp map, and a live-streaming chatbot with quick buttons and typed input.
+Everything below is ADDITIONAL, and ordered by how badly it breaks the method if
+it is missing.
+
+## The sharpest gap: we do not hold SOLD data
+
+The method described is "what sold recently and nearby, worked back into what
+this would sell for fixed up". **Our pooled `CRM Comp` inventory is the last ASK,
+not a sale** — an off-market row means "it left the market", not "it closed at
+this price". The BatchData fallback IS recorded sales, but it only fires for
+leads with zero pooled comps.
+
+So the primary source does not contain what the method needs. Decide one:
+
+- [ ] buy sold data for every lead (BatchData comparables at ~$0.30-0.75/lead,
+      not just the empty ones);
+- [ ] pull sold events per property from Zillow `priceHistory` (1 billed call per
+      property, already proven for the subject);
+- [ ] keep the ask-based index and apply an explicit, stated haircut.
+
+Whichever, the ARV must **say which basis it used**. Same number, different
+meaning, is the failure mode to design out.
+
+## The offer is only half ARV
+
+- [ ] **Repairs are a 3-button matrix** (Smooth / Shiver / Abandon + majors). For
+      fix-and-flip that is the weakest input in the formula, and it is doubled.
+      The condition tool wanted for COMPS is needed for the SUBJECT too.
+- [ ] **Seller photos already land in Drive** (Photos card) — that is the obvious
+      feed for a subject-condition read.
+- [ ] **Subject facts are often wrong and the ARV inherits it silently.**
+      Measured: seller said "1000-2000 sqft, 1970-1980"; Zillow says 924 sqft,
+      built 1993, Manufactured. A confirm-the-facts step belongs in the call.
+
+## Comp condition evaluation has a cost model
+
+- [ ] Photos are ~1 billed Zillow call per comp plus a vision pass per comp.
+      Twenty comps per lead is not free. Pre-compute for the shortlist only, cache
+      like the Zillow facts (30 days), and decide the per-lead ceiling.
+
+## The call does not end at the number
+
+- [ ] **Disposition from the desk** — it cannot mark a Today card Done/Skipped,
+      so a rep working here leaves the board stale.
+- [ ] **Offer into a contract**: the DocuSeal purchase-agreement flow exists;
+      the desk should hand it the price it just computed.
+- [ ] **Task / follow-up** from the desk, or the cadence silently degrades.
+
+## Copilot: the parts that are not the model
+
+- [ ] **Grounding and refusal.** "Do not give wrong information" needs a
+      mechanism: answer only from the desk's own data (comps, subject facts,
+      transcript) and say so when it cannot.
+- [ ] **Latency budget.** An answer 4s late in a live call is worse than none.
+- [ ] **Where the media-stream consumer runs** — Telnyx needs a reachable
+      websocket; that is a new always-on service (open question 5 in PLAN.md).
+- [ ] **RECORDING CONSENT.** Live transcription in two-party-consent states is a
+      legal question, not a technical one, and it applies the moment the stream
+      is opened.
+- [ ] **Cost per call**: Telnyx minutes + streaming STT + LLM tokens. Should be a
+      known number before it runs on every call.
+- [ ] **Kill switch** — per-user and global, without a deploy.
+
+## Telnyx, beyond "calling and texting"
+
+- [ ] The provider code itself (`crm/integrations/telnyx/`, `TelnyxCallUI.vue`,
+      settings doctype). The three prerequisites are done: provider-agnostic DNC,
+      the `provider`/`medium` discriminators, and the shared attribution chain.
+- [ ] **Number porting plan** — sellers have our current numbers saved.
+- [ ] **Parallel-running exit condition** (open question 7).
+- [ ] Rebuild on Telnyx what Quo gives us today: recordings, transcripts,
+      chapters, the AI call review, call classification.
+
+## Everything must degrade without blocking a live call
+
+- [ ] Zillow, BatchData, geo and Telnyx all sit in the desk's path. Each needs a
+      timeout and a stated fallback, because the failure lands mid-sentence.
+
+## How we will know it worked
+
+- [ ] Offers made per call, time-to-offer, contract rate. Without them this is a
+      screen we like rather than a screen that works.
+- [ ] A rep walkthrough (German or Exe) on a live call before it is linked
+      anywhere.
