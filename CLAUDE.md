@@ -1,5 +1,9 @@
 # Frappe CRM fork — Groundwork
 
+**Keep end-of-turn summaries SHORT** (Lance, 2026-08-17: "reduce by 80%"). Lead
+with the result, name only what he has to decide or act on, and stop. The work is
+in the commits and the docs — the reply is not where it gets re-explained.
+
 Fork of frappe/crm (github.com/lancejohnson/crm). Working branch: **groundwork**,
 based on upstream tag **v1.67.0** — the last upstream release whose published
 image actually contains the crm app (their image CI is broken after it).
