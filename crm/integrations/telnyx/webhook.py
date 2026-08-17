@@ -184,8 +184,15 @@ def voice():
 			"to": to,
 			"type": "Incoming" if inbound else "Outgoing",
 			"status": "Ringing",
+			# `medium` is the discriminator -- free-text, and the Quo mirror has
+			# always written it, which is why all 4,192 prod rows carry "Quo".
+			#
+			# `telephony_medium` is a SELECT limited to ""/Manual/Twilio/Exotel, so
+			# writing "Telnyx" there fails validation -- the webhook 500s, Telnyx
+			# retries, and no call is ever logged. Mirror what the Quo integration
+			# does and leave it "Manual".
 			"medium": "Telnyx",
-			"telephony_medium": "Telnyx",
+			"telephony_medium": "Manual",
 			"start_time": frappe.utils.now(),
 		}
 		if doctype:
