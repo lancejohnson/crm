@@ -23,6 +23,9 @@ Config (site_config, all absent by default so this is inert until switched on):
     telnyx_default_number         E.164 line to send from when a user has none
 """
 
+import base64
+import json
+
 import frappe
 import requests
 from frappe import _
@@ -140,11 +143,13 @@ def dial(to: str, lead: str = None):
 			# Carried back on every webhook for this call, so the handler can
 			# attribute it to the person who dialled without guessing from the
 			# line -- the exact trap that put 47 inbound calls on one rep.
-			"client_state": frappe.safe_encode(
-				frappe.as_json({"user": frappe.session.user, "lead": lead})
-			).decode()
-			if hasattr(frappe, "safe_encode")
-			else None,
+			#
+			# Telnyx requires this BASE64-ENCODED and hands it back verbatim; the
+			# first cut sent plain UTF-8 (frappe.safe_encode) while the webhook
+			# b64-decoded it, so every dial would have come back unattributed.
+			"client_state": base64.b64encode(
+				json.dumps({"user": frappe.session.user, "lead": lead}).encode()
+			).decode(),
 		},
 	)
 	return {"ok": True, "call_control_id": data.get("call_control_id"), "to": to, "from": frm}
