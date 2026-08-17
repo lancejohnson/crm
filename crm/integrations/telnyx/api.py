@@ -167,6 +167,72 @@ def dial(to: str, lead: str = None):
 	return {"ok": True, "call_control_id": data.get("call_control_id"), "to": to, "from": frm}
 
 
+@frappe.whitelist()
+def webrtc_token():
+	"""A short-lived JWT for the browser softphone (`@telnyx/webrtc`).
+
+	The API key NEVER reaches the browser. Each rep gets their own telephony
+	credential under one credential connection, so a token can be revoked for one
+	person without cutting the team off, and so Telnyx's own logs name who was on
+	the call rather than "the CRM".
+
+	The credential is created on first use and cached on the User: making it every
+	time would litter the account with one credential per page load.
+
+	GOTCHA: `POST /telephony_credentials/{id}/token` returns the JWT as PLAIN TEXT
+	with no content-type -- parsing it as JSON throws "Expecting value: line 1".
+	"""
+	if not enabled():
+		frappe.throw(_("Telnyx is not configured on this site."))
+
+	# Same gate as dialling: a softphone that can call but has no voicemail is the
+	# same broken promise to the seller who rings back.
+	if not voicemail_greeting(frappe.session.user):
+		frappe.throw(
+			_("Set your voicemail greeting before making calls — sellers call this number back."),
+			title=_("Voicemail not set up"),
+		)
+
+	credential_id = _user_credential(frappe.session.user)
+	r = requests.post(
+		f"{API}/telephony_credentials/{credential_id}/token",
+		headers={"Authorization": f"Bearer {_key()}"},
+		timeout=TIMEOUT,
+	)
+	if r.status_code >= 400:
+		frappe.log_error(title="Telnyx token failed", message=r.text[:1000])
+		frappe.throw(_("Could not start the phone ({0}).").format(r.status_code))
+	return {
+		"token": r.text.strip(),
+		"caller_number": sending_number(),
+		"caller_name": frappe.db.get_value("User", frappe.session.user, "full_name"),
+	}
+
+
+def _user_credential(user: str) -> str:
+	"""This user's telephony credential id, created once and remembered."""
+	field = "custom_telnyx_credential_id"
+	if frappe.db.has_column("User", field):
+		existing = (frappe.db.get_value("User", user, field) or "").strip()
+		if existing:
+			return existing
+
+	connection = (frappe.conf.get("telnyx_credential_connection_id") or "").strip()
+	if not connection:
+		frappe.throw(_("No Telnyx credential connection is configured."))
+
+	data = _post(
+		"/telephony_credentials",
+		{"name": f"crm-{user.split('@')[0]}"[:40], "connection_id": connection},
+	)
+	credential_id = data.get("id")
+	if frappe.db.has_column("User", field):
+		# update_modified=False: caching a credential is the machine remembering
+		# something, not the user editing their profile.
+		frappe.db.set_value("User", user, field, credential_id, update_modified=False)
+	return credential_id
+
+
 def command(call_control_id: str, action: str, payload: dict = None):
 	"""One Call Control command. Errors are logged, never raised: a command that
 	fails mid-call must not take down the webhook that is handling the call."""
