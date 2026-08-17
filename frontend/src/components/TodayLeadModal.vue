@@ -1,7 +1,7 @@
 <template>
   <Dialog
     v-model="show"
-    :options="{ size: '5xl', title: item?.lead_name || __('Lead details') }"
+    :options="{ size: pane === 'desk' ? '7xl' : '5xl', title: item?.lead_name || __('Lead details') }"
   >
     <template #body>
       <div class="flex h-[88vh] max-h-[88vh] flex-col overflow-hidden bg-surface-modal">
@@ -29,7 +29,15 @@
         </div>
 
         <div class="flex min-h-0 flex-1 flex-col md:flex-row">
-          <aside class="max-h-[42vh] shrink-0 overflow-y-auto border-b p-4 md:max-h-none md:w-72 md:border-b-0 md:border-r sm:p-5">
+          <!-- Hidden on the desk, and that is the point of the desk: its own rail
+               already carries the 2x2, and the map needs every pixel this aside
+               would take. The card context that matters mid-call (status, call N
+               of M, why today) is in the header above, where it stays visible on
+               every pane. -->
+          <aside
+            v-show="pane !== 'desk'"
+            class="max-h-[42vh] shrink-0 overflow-y-auto border-b p-4 md:max-h-none md:w-72 md:border-b-0 md:border-r sm:p-5"
+          >
             <div class="flex flex-col gap-2 text-sm text-ink-gray-6">
               <a
                 v-if="item?.mobile_no"
@@ -148,6 +156,40 @@
             >
               <CompsView :key="item.lead" :lead="item.lead" :address="item.address" />
             </div>
+
+            <!-- THE DESK. This is the screen a Today card opens: the same comps
+                 map, and beside it what the comps MEAN in money -- ARV from the
+                 ticked comps, repairs, the offer, and a saved determination.
+                 v17 was always a modal over the board (the mockup folder is
+                 "today-leadzolo"), not a page somewhere else: a rep works a queue
+                 of cards, and sending them to a different URL per card loses the
+                 queue. Same components as /leads/<id>/desk, so there is one
+                 implementation and not two that drift. -->
+            <div
+              v-if="deskOpened && show && item?.lead"
+              v-show="pane === 'desk'"
+              class="flex min-h-0 flex-1"
+            >
+              <div class="flex min-w-0 flex-1 flex-col overflow-y-auto p-4 sm:p-5">
+                <CompsView
+                  :key="`desk-${item.lead}`"
+                  :lead="item.lead"
+                  :address="item.address"
+                  fill
+                  neighborhood
+                  @subject="onSubject"
+                  @picked="onPicked"
+                />
+              </div>
+              <OfferRail
+                :lead="item.lead"
+                :picked="picked"
+                :subject="subject"
+                :motivated="leadDoc?.first_call_motivated || ''"
+                :on-price="leadDoc?.first_call_on_price || ''"
+                @read-saved="loadLead(true)"
+              />
+            </div>
           </div>
         </div>
 
@@ -166,6 +208,7 @@
 import Activities from '@/components/Activities/Activities.vue'
 import CompsView from '@/components/CompsView.vue'
 import FirstCallReadCard from '@/components/FirstCallReadCard.vue'
+import OfferRail from '@/components/OfferRail.vue'
 import { callHref, formatPhone } from '@/utils/phoneFormat'
 import { Badge, Button, Dialog, FeatherIcon, call } from 'frappe-ui'
 import { computed, ref, watch } from 'vue'
@@ -187,12 +230,36 @@ const tabs = [{ name: 'Activity', label: __('Activity') }]
 const pane = ref('activity')
 const panes = computed(() => [
   { value: 'activity', label: __('Activity') },
+  { value: 'desk', label: __('Desk') },
   { value: 'comps', label: __('Comps') },
 ])
 const compsOpened = ref(false)
+const deskOpened = ref(false)
 watch(pane, (v) => {
   if (v === 'comps') compsOpened.value = true
+  if (v === 'desk') deskOpened.value = true
 })
+
+// The desk prices off exactly what the rep ticked on ITS map -- taken from the
+// component's own emits rather than re-derived, so the rail and the map can
+// never disagree about which comps produced the number.
+const picked = ref([])
+const subject = ref(null)
+function onPicked(list) {
+  picked.value = Array.isArray(list) ? list : []
+}
+function onSubject(s) {
+  subject.value = s || null
+}
+// A different lead is a different price. Clearing on switch stops the rail
+// showing the previous card's ARV for the moment before the new map loads.
+watch(
+  () => props.item?.lead,
+  () => {
+    picked.value = []
+    subject.value = null
+  },
+)
 const leadDoc = ref(null)
 const leadLoading = ref(false)
 const leadCache = new Map()
