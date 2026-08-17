@@ -52,7 +52,8 @@
 
     <div class="row tot">
       <span class="k"><span class="op">=</span><span>Repair estimate</span></span>
-      <span class="v">{{ money(repairs) }}</span>
+      <input class="v inp" inputmode="numeric" :value="money(repairs)"
+             @focus="$event.target.select()" @change="setOverride('repairs', $event)" />
     </div>
 
     <!-- Offer. Every sign lives in the operator column so the labels form one
@@ -60,11 +61,13 @@
     <div class="sublb2">Offer</div>
     <div class="row">
       <span class="k"><span class="op" /><span>ARV</span></span>
-      <span class="v">{{ money(arv) }}</span>
+      <input class="v inp" inputmode="numeric" :value="money(arv)"
+             @focus="$event.target.select()" @change="setOverride('arv', $event)" />
     </div>
     <div class="row">
       <span class="k"><span class="op">×</span><span>Margin</span></span>
-      <span class="v">{{ MARGIN }}%</span>
+      <input class="v inp" inputmode="numeric" :value="`${margin}%`"
+             @focus="$event.target.select()" @change="setOverride('margin', $event)" />
     </div>
     <div class="row">
       <span class="k"><span class="op">=</span><span>Gross</span></span>
@@ -76,7 +79,8 @@
     </div>
     <div class="row">
       <span class="k"><span class="op">−</span><span>Fee</span></span>
-      <span class="v">{{ money(FEE) }}</span>
+      <input class="v inp" inputmode="numeric" :value="money(fee)"
+             @focus="$event.target.select()" @change="setOverride('fee', $event)" />
     </div>
 
     <div class="row big">
@@ -84,7 +88,7 @@
       <span class="v" :class="{ bad: offer <= 0 }">{{ money(offer) }}</span>
     </div>
     <div v-if="arv && offer <= 0" class="warn">
-      Repairs and fee exceed {{ MARGIN }}% of ARV — there is no offer here at this repair level.
+      Repairs and fee exceed {{ margin }}% of ARV — there is no offer here at this repair level.
     </div>
 
     <!-- The 2x2, unchanged in behaviour: it writes the lead's real First-Call Read. -->
@@ -111,6 +115,7 @@
           inputmode="numeric"
           placeholder="—"
           @focus="$event.target.select()"
+          @change="ask = askNumber ? money(askNumber) : ''"
         />
       </div>
       <div class="row">
@@ -191,6 +196,21 @@ const LEVELS = [
   { id: 'abandon', short: 'Abandon', cost: [50000, 70000, 85000, 110000] },
 ]
 
+// Overrides. Null means "follow the comps"; a number means the rep decided.
+// The mockup makes these editable because the comps are an input to a judgement,
+// not the judgement -- a rep who knows the roof is new should not have to fight
+// the arithmetic.
+const arvOverride = ref(null)
+const repairsOverride = ref(null)
+const marginOverride = ref(null)
+const feeOverride = ref(null)
+
+function setOverride(which, event) {
+  const n = Number(String(event.target.value).replace(/[^0-9.]/g, ''))
+  const ref_ = { arv: arvOverride, repairs: repairsOverride, margin: marginOverride, fee: feeOverride }[which]
+  ref_.value = Number.isFinite(n) && n > 0 ? n : null
+}
+
 const level = ref('smooth')
 const majors = ref([])
 function toggleMajor(m) {
@@ -221,17 +241,21 @@ const avgPsf = computed(() => {
 })
 
 const arv = computed(() => {
+  if (arvOverride.value != null) return arvOverride.value
   const v = avgPsf.value * subjectSqft.value
   return v ? Math.round(v / 1000) * 1000 : 0
 })
 
 const repairs = computed(() => {
+  if (repairsOverride.value != null) return repairsOverride.value
   const base = LEVELS.find((l) => l.id === level.value).cost[band.value]
   return base + majors.value.length * MAJOR_COST
 })
 
-const gross = computed(() => Math.round((arv.value * MARGIN) / 100))
-const offer = computed(() => Math.max(0, gross.value - repairs.value * 2 - FEE))
+const margin = computed(() => marginOverride.value ?? MARGIN)
+const fee = computed(() => feeOverride.value ?? FEE)
+const gross = computed(() => Math.round((arv.value * margin.value) / 100))
+const offer = computed(() => Math.max(0, gross.value - repairs.value * 2 - fee.value))
 
 function money(n) {
   const v = Number(n) || 0
@@ -249,8 +273,8 @@ function snapshot() {
     level: level.value,
     majors: [...majors.value].sort(),
     repairs: repairs.value,
-    margin: MARGIN,
-    fee: FEE,
+    margin: margin.value,
+    fee: fee.value,
     offer: offer.value,
     comps: usable.value.map((c) => ({
       name: c.name,
@@ -386,6 +410,11 @@ defineExpose({ save, canSave })
 .row {
   display: flex; justify-content: space-between; align-items: center;
   gap: 8px; height: 27px; font-size: 12px;
+  /* flex:none or the row is a SHRINKABLE flex item: the rail is a scrolling
+     column, and with more content than height every row quietly compressed to
+     22px while the stylesheet still said 27. A height in a flex column is a
+     suggestion unless you say otherwise. */
+  flex: none;
 }
 .row .k { color: var(--t2); display: flex; align-items: center; gap: 6px; min-width: 0; }
 .row .k > span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -400,7 +429,10 @@ defineExpose({ save, canSave })
   box-sizing: border-box; text-align: right;
 }
 .row .v.mut { color: var(--t3); font-weight: 400; }
-.row input.v { width: 96px; background: transparent; color: var(--t1); }
+.row input.v {
+  width: 96px; background: transparent; color: var(--t1);
+  height: 22px; line-height: 18px; font-family: inherit;
+}
 .row input.v:hover { background: var(--bg2); }
 .row input.v:focus { outline: 0; background: var(--bg); border-color: #2563c9; }
 .row.tot { border-top: 1px solid var(--br); margin-top: 9px; padding-top: 11px;
