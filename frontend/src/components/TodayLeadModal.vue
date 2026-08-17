@@ -227,14 +227,19 @@ const tabs = [{ name: 'Activity', label: __('Activity') }]
 // Which pane is open. Deliberately NOT reset per lead, unlike the Activity tab
 // below: a rep comping a run of leads is in comping mode, and dropping them back
 // on the timeline at every card would make them re-click it every time.
-const pane = ref('activity')
+// The desk is what a card opens ON. Activity is one click away for the
+// "what happened last time" question, but the reason the card was clicked is to
+// work the lead, and that is the desk.
+const pane = ref('desk')
 const panes = computed(() => [
   { value: 'activity', label: __('Activity') },
   { value: 'desk', label: __('Desk') },
   { value: 'comps', label: __('Comps') },
 ])
 const compsOpened = ref(false)
-const deskOpened = ref(false)
+// Mounted immediately, unlike comps: the desk IS the landing pane, so deferring
+// it would just mean every card opens on a blank panel for a frame.
+const deskOpened = ref(true)
 watch(pane, (v) => {
   if (v === 'comps') compsOpened.value = true
   if (v === 'desk') deskOpened.value = true

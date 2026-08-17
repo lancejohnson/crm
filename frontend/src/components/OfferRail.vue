@@ -304,7 +304,8 @@ defineExpose({ save, canSave })
   padding: 12px 14px 0;
   border-left: 1px solid var(--br2);
   background: var(--bg);
-  font: 13px/1.5 Inter, -apple-system, 'Segoe UI', system-ui, sans-serif;
+  font: 13px/1.5 InterVar, Inter, -apple-system, 'Segoe UI', system-ui, sans-serif;
+  font-optical-sizing: auto;
   color: var(--t1);
 }
 
