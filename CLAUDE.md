@@ -2458,12 +2458,26 @@ duplicating. Work substantial features in a worktree of your own.
     $/to/Address labels (row 1 is the normal case).
     `crm/api/agreement.py` (`want_cancellation` + resolver branch) +
     `CreateAgreementModal.vue` (fourth type option).
+  - **Unilateral termination / no EMD (2026-08-18)** — the fifth agreement type
+    creates a buyer-only notice from DocuSeal template
+    `Unilateral Termination - No EMD` (id 5473548, canonical in Purchase
+    Agreements). It uses the approved one-page Times New Roman 12pt PDF and has
+    ONE `Buyer` submitter — the logged-in company representative — with no seller
+    signer or seller link. Notice date, property owner (one field with areas on
+    both the top line and salutation), phone, property address, and representative
+    name are prefilled; contract date and representative title stay editable;
+    signature is required. The API-built source was cloned before use and a
+    values-prefill submission was verified, then archived. The modal hides all
+    seller email/count controls for this type, and tracking surfaces label the
+    internal URL as the company-representative link rather than a buyer link.
+    `crm/api/agreement.py` (`want_termination` + buyer-only submitters) +
+    `CreateAgreementModal.vue` + `AgreementsCard.vue` + `Activities.vue`.
   - `components/Modals/CreateAgreementModal.vue` (chooser + success view: buyer
     link with copy/open + seller links), mounted in `Activities/AllModals.vue`
     (`createAgreement()` + expose), forwarded by `Activities/Activities.vue`.
   - `pages/Lead.vue` — **button row decluttered** into Call · Text · **More ▾**
     (Dropdown via a `moreActions` computed: Make-a-Call / Email / Website /
-    Attach / Fetch Tax Info / Create Purchase Agreement) · Delete. (Email +
+    Attach / Fetch Tax Info / Create Agreement) · Delete. (Email +
     Website moved off the row into the menu per Lance — "that area is getting
     unruly".) `MoneyIcon`/`Email2Icon`/`LinkIcon`/`AttachmentIcon` imports now
     unused but harmless.

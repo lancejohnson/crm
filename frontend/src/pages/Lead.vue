@@ -580,7 +580,7 @@ const moreActions = computed(() => {
         : toast.error(__('Set a property address to fetch tax info')),
   })
   items.push({
-    label: __('Create Purchase Agreement'),
+    label: __('Create Agreement'),
     icon: 'file-text',
     onClick: () =>
       d.property_address

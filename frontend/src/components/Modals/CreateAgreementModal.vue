@@ -1,5 +1,5 @@
 <template>
-  <Dialog v-model="show" :options="{ title: __('Create Purchase Agreement') }">
+  <Dialog v-model="show" :options="{ title: __('Create Agreement') }">
     <template #body-content>
       <!-- Form -->
       <div v-if="!result" class="flex flex-col gap-4 text-base">
@@ -17,13 +17,14 @@
             { label: __('Novation (+ Attorney-in-Fact page)'), value: 'novation' },
             { label: __('Amendment (price / closing date)'), value: 'amendment' },
             { label: __('Cancellation / release of earnest money'), value: 'cancellation' },
+            { label: __('Unilateral termination (no earnest money)'), value: 'termination' },
           ]"
         />
 
         <!-- Seller 1 is the lead; if the lead has no email on file, ask for one
              (optional — Documenso doesn't require it). -->
         <FormControl
-          v-if="!leadHasEmail"
+          v-if="!isTermination && !leadHasEmail"
           type="email"
           :label="__('Seller 1 email (optional)')"
           v-model="seller1Email"
@@ -31,6 +32,7 @@
         />
 
         <FormControl
+          v-if="!isTermination"
           type="select"
           :label="__('How many sellers?')"
           v-model="sellerCount"
@@ -42,7 +44,7 @@
 
         <!-- Seller 1 comes from the lead; only Seller 2 needs collecting. -->
         <div
-          v-if="sellerCount === '2'"
+          v-if="!isTermination && sellerCount === '2'"
           class="flex flex-col gap-3 rounded-md bg-surface-gray-2 px-3 py-3"
         >
           <div class="text-xs text-ink-gray-5">
@@ -64,9 +66,13 @@
 
         <div class="text-sm text-ink-gray-5">
           {{
-            __(
-              'Buyer fields are pre-filled from this lead and stay editable. No email is sent — you get a link to review, complete and sign.',
-            )
+            isTermination
+              ? __(
+                  'Owner and property details are pre-filled from this lead and stay editable. Only the company representative signs. No email is sent.',
+                )
+              : __(
+                  'Buyer fields are pre-filled from this lead and stay editable. No email is sent — you get a link to review, complete and sign.',
+                )
           }}
         </div>
 
@@ -86,7 +92,11 @@
 
         <div class="flex flex-col gap-1.5">
           <div class="text-xs text-ink-gray-5">
-            {{ __('Buyer link (review, edit & sign)') }}
+            {{
+              isTermination
+                ? __('Company representative link (review & sign)')
+                : __('Buyer link (review, edit & sign)')
+            }}
           </div>
           <div class="flex items-center gap-2">
             <div
@@ -183,6 +193,7 @@ const allCopied = ref(false)
 
 const propertyAddress = computed(() => props.referenceDoc?.property_address || '')
 const leadHasEmail = computed(() => !!props.referenceDoc?.email)
+const isTermination = computed(() => template.value === 'termination')
 
 // Reset to a clean form each time the modal opens.
 watch(show, (open) => {
@@ -212,7 +223,8 @@ function openLink(url) {
 function copyAll() {
   const r = result.value
   if (!r) return
-  const lines = [`Buyer (review & sign): ${r.buyer_link}`]
+  const primaryRole = isTermination.value ? 'Company representative' : 'Buyer'
+  const lines = [`${primaryRole} (review & sign): ${r.buyer_link}`]
   for (const sl of r.seller_links || []) {
     lines.push(`${sl.name} (sign): ${sl.link}`)
   }
@@ -224,7 +236,7 @@ function copyAll() {
 async function createDraft() {
   const lead = props.referenceDoc?.name
   if (!lead || loading.value) return
-  if (sellerCount.value === '2' && !seller2Name.value) {
+  if (!isTermination.value && sellerCount.value === '2' && !seller2Name.value) {
     error.value = __('Enter the second seller’s name.')
     return
   }

@@ -400,7 +400,9 @@
                 activity.agreement.created_by_name || activity.agreement.owner
               }}</span>
               <span class="text-ink-gray-5">{{
-                __('created a purchase agreement')
+                isTerminationAgreement(activity.agreement)
+                  ? __('created a unilateral termination notice')
+                  : __('created a purchase agreement')
               }}</span>
               <Tooltip :text="formatDate(activity.creation)" class="ml-auto">
                 <div class="whitespace-nowrap text-xs text-ink-gray-5">
@@ -427,7 +429,11 @@
                   class="self-start text-xs text-ink-gray-6 underline hover:text-ink-gray-9"
                   @click="openAgreementLink(activity.agreement.buyer_link)"
                 >
-                  {{ __('Open buyer link') }}
+                  {{
+                    isTerminationAgreement(activity.agreement)
+                      ? __('Open company representative link')
+                      : __('Open buyer link')
+                  }}
                 </button>
                 <a
                   v-if="activity.agreement.is_signed"
@@ -1091,6 +1097,10 @@ function get_agreement_activities() {
 
 function openAgreementLink(url) {
   if (url) window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+function isTerminationAgreement(a) {
+  return String(a?.template_title || '').startsWith('Unilateral Termination - No EMD')
 }
 
 // Proxy endpoint that streams the fully-signed PDF (the backend holds the

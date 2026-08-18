@@ -1,8 +1,9 @@
 """E-sign agreements tracked per lead.
 
-**DocuSeal** (current) — a user clicks **Create Purchase Agreement** on a lead →
+**DocuSeal** (current) — a user clicks **Create Agreement** on a lead →
 `create_docuseal_agreement()` resolves the right DocuSeal template (Standard vs
-Novation/+AIF vs Amendment vs Cancellation × one/two sellers), prefills the buyer/seller fields, creates a
+Novation/+AIF vs Amendment vs Cancellation × one/two sellers, or a buyer-only
+Unilateral Termination), prefills the applicable fields, creates a
 submission with `send_email:false`, stores a **CRM Esign Agreement** row
 (`provider="docuseal"`) and hands back self-serve signing links. A DocuSeal
 webhook (`docuseal_webhook`) keeps the row's status current as recipients
@@ -143,7 +144,11 @@ def _docuseal_token() -> str:
 
 
 def _resolve_template_ids(
-	want_aif: bool, want_two: bool, want_amendment: bool = False, want_cancellation: bool = False
+	want_aif: bool,
+	want_two: bool,
+	want_amendment: bool = False,
+	want_cancellation: bool = False,
+	want_termination: bool = False,
 ):
 	"""Resolve the template id(s) for this deal; newest id wins per match.
 
@@ -152,13 +157,15 @@ def _resolve_template_ids(
 	  AIF - One Seller / - Two Sellers                  (Seller(s) only)
 	  Amendment - One Seller / - Two Sellers            (Buyer + Seller(s))
 	  Cancellation - One Seller / - Two Sellers         (Buyer + Seller(s))
+	  Unilateral Termination - No EMD                    (Buyer only)
 
 	A Standard deal is the Purchase Agreement template alone; a Novation deal
 	adds the matching AIF document into the SAME envelope at create time (via
 	`POST /submissions/pdf` `template_ids`) — no pre-merged templates to maintain.
 	An Amendment (price / closing-date change to an executed agreement) and a
 	Cancellation (cancel the contract + release the earnest money) are each their
-	own single-document envelope.
+	own single-document envelope. A Unilateral Termination is a buyer-only notice:
+	no seller signature or seller signing link is created.
 
 	ONLY the "Purchase Agreements" folder is considered — the team makes one-off
 	templates in the DocuSeal UI for specific deals (e.g. "Amendment 17199
@@ -187,6 +194,12 @@ def _resolve_template_ids(
 				if chosen is None or (t.get("id") or 0) > (chosen.get("id") or 0):
 					chosen = t
 		return chosen
+
+	if want_termination:
+		termination = _best(lambda n: n.startswith("Unilateral Termination - No EMD"))
+		if not termination:
+			frappe.throw(_("No matching DocuSeal Unilateral Termination template was found."))
+		return [termination["id"]], termination["name"]
 
 	if want_amendment:
 		amd = _best(lambda n: n.startswith("Amendment") and (("Two" in n) == want_two))
@@ -234,8 +247,9 @@ def create_docuseal_agreement(
 ):
 	"""Create a DocuSeal submission for a lead; return self-serve signing links.
 
-	The logged-in sales user is the Buyer (signs first, fields stay editable);
-	Seller 1 is the lead, Seller 2 is collected for two-seller deals.
+	The logged-in sales user is the Buyer/company representative (signs first,
+	fields stay editable). Seller 1 is the lead and Seller 2 is collected for
+	two-seller deals; unilateral termination notices have no seller signer.
 	`buyer` (optional) links the agreement to a CRM Buyer — set when the draft
 	is created from a buyer page, so it shows on that buyer's Agreements card.
 	"""
@@ -247,13 +261,17 @@ def create_docuseal_agreement(
 		frappe.throw(_("Buyer not found"), frappe.DoesNotExistError)
 
 	leaddoc = frappe.get_doc("CRM Lead", lead)
-	want_amendment = str(template).strip().lower() == "amendment"
-	want_cancellation = str(template).strip().lower() in ("cancellation", "cancel")
-	want_aif = str(template).strip().lower() in ("novation", "aif")
+	template_key = str(template).strip().lower()
+	want_amendment = template_key == "amendment"
+	want_cancellation = template_key in ("cancellation", "cancel")
+	want_termination = template_key in ("termination", "unilateral_termination", "termination_no_emd")
+	want_aif = template_key in ("novation", "aif")
 	# `two_sellers` arrives as a seller *count* ("1" / "2") from the modal, so
 	# "1" must mean one seller — don't run it through the generic `_truthy`
 	# (which treats "1" as true and wrongly demands a second seller).
-	want_two = str(two_sellers).strip().lower() in ("2", "two", "true", "yes", "on")
+	want_two = (not want_termination) and str(two_sellers).strip().lower() in (
+		"2", "two", "true", "yes", "on"
+	)
 
 	# Buyer = the session user (its own no-login link comes back regardless).
 	user = frappe.get_doc("User", frappe.session.user)
@@ -272,7 +290,9 @@ def create_docuseal_agreement(
 	if want_two and not seller2_name:
 		frappe.throw(_("Enter the second seller's name."))
 
-	template_ids, template_title = _resolve_template_ids(want_aif, want_two, want_amendment, want_cancellation)
+	template_ids, template_title = _resolve_template_ids(
+		want_aif, want_two, want_amendment, want_cancellation, want_termination
+	)
 
 	addr = _full_property_address(leaddoc)
 	sellers_joined = seller1_name + ((" and " + seller2_name) if (want_two and seller2_name) else "")
@@ -282,11 +302,21 @@ def create_docuseal_agreement(
 
 	# Buyer-role prefill: identity pulled off the lead + standard defaults for the
 	# boilerplate terms (all still editable by the buyer on the signing page).
+	# A termination notice pre-fills today's notice date, owner, phone, property,
+	# and current user's name; contract date and title remain buyer-entered.
 	# The Amendment only carries name/address; the amended price, closing date and
 	# Binding Agreement Date are the whole point of the document — buyer fills them.
 	# Same for the Cancellation: the contract date, escrow agent and earnest-money
 	# disbursement are per-deal facts the buyer fills on the signing page.
-	if want_amendment or want_cancellation:
+	if want_termination:
+		buyer_values = _clean({
+			"Notice Date": frappe.utils.nowdate(),
+			"Property Owner": seller1_name,
+			"Phone": (leaddoc.get("mobile_no") or leaddoc.get("phone") or "").strip(),
+			"Property Address": addr,
+			"Signer Name": buyer_name,
+		})
+	elif want_amendment or want_cancellation:
 		buyer_values = _clean({
 			"Seller Name(s)": sellers_joined,
 			"Property Address": addr,
@@ -328,23 +358,24 @@ def create_docuseal_agreement(
 		"send_email": False,
 		"values": buyer_values,
 	}]
-	if want_two:
-		submitters.append({
-			"role": "Seller 1", "name": seller1_name,
-			"email": _placeholder_email(seller1_email, lead, 1),
-			"send_email": False, "values": _seller_values(seller1_name, 1),
-		})
-		submitters.append({
-			"role": "Seller 2", "name": seller2_name,
-			"email": _placeholder_email(seller2_email, lead, 2),
-			"send_email": False, "values": _seller_values(seller2_name, 2),
-		})
-	else:
-		submitters.append({
-			"role": "Seller", "name": seller1_name,
-			"email": _placeholder_email(seller1_email, lead, 1),
-			"send_email": False, "values": _seller_values(seller1_name),
-		})
+	if not want_termination:
+		if want_two:
+			submitters.append({
+				"role": "Seller 1", "name": seller1_name,
+				"email": _placeholder_email(seller1_email, lead, 1),
+				"send_email": False, "values": _seller_values(seller1_name, 1),
+			})
+			submitters.append({
+				"role": "Seller 2", "name": seller2_name,
+				"email": _placeholder_email(seller2_email, lead, 2),
+				"send_email": False, "values": _seller_values(seller2_name, 2),
+			})
+		else:
+			submitters.append({
+				"role": "Seller", "name": seller1_name,
+				"email": _placeholder_email(seller1_email, lead, 1),
+				"send_email": False, "values": _seller_values(seller1_name),
+			})
 
 	# One template (Standard) → POST /submissions. Two+ (Novation = Purchase
 	# Agreement + AIF) → POST /submissions/pdf with `template_ids`, which assembles

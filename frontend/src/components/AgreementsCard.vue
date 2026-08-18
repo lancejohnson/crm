@@ -6,7 +6,7 @@
         {{ __('Agreements') }}
       </div>
       <Button
-        :tooltip="__('Create purchase agreement')"
+        :tooltip="__('Create agreement')"
         icon="plus"
         variant="ghost"
         @click="emit('create')"
@@ -69,7 +69,11 @@
           <Button
             class="flex-1"
             size="sm"
-            :label="__('Open buyer link')"
+            :label="
+              isTerminationAgreement(a)
+                ? __('Open company representative link')
+                : __('Open buyer link')
+            "
             @click="openLink(a.buyer_link)"
           />
           <Button size="sm" icon="copy" @click="copy(a.buyer_link)" />
@@ -206,8 +210,13 @@ function signedUrl(a) {
 }
 
 // A labeled, paste-ready block of every link for an email/text.
+function isTerminationAgreement(a) {
+  return String(a?.template_title || '').startsWith('Unilateral Termination - No EMD')
+}
+
 function copyAll(a) {
-  const lines = [`Buyer (review & sign): ${a.buyer_link}`]
+  const primaryRole = isTerminationAgreement(a) ? 'Company representative' : 'Buyer'
+  const lines = [`${primaryRole} (review & sign): ${a.buyer_link}`]
   for (const sl of a.seller_links || []) {
     lines.push(`${sl.name} (sign): ${sl.link}`)
   }
