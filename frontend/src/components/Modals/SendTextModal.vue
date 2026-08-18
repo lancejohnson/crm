@@ -8,6 +8,22 @@
           :label="__('To')"
           :placeholder="__('+1XXXXXXXXXX')"
         />
+        <div v-if="toChoices.length > 1" class="flex flex-wrap gap-1.5">
+          <button
+            v-for="p in toChoices"
+            :key="p.last10"
+            type="button"
+            class="rounded-full border px-2 py-0.5 text-xs"
+            :class="
+              toLast10 === p.last10
+                ? 'border-outline-gray-4 bg-surface-gray-2 text-ink-gray-8'
+                : 'border-outline-gray-2 text-ink-gray-6 hover:border-outline-gray-3'
+            "
+            @click="to = p.number"
+          >
+            {{ formatPhone(p.number) }}
+          </button>
+        </div>
         <div v-if="linkedNumber" class="text-xs text-ink-gray-5">
           {{ __('Sending from') }}
           <span class="font-medium text-ink-gray-7">
@@ -78,6 +94,7 @@
 <script setup>
 import SelectQuoNumberModal from '@/components/Modals/SelectQuoNumberModal.vue'
 import { myQuoNumber, formatPhone } from '@/composables/quoSender'
+import { listLeadPhones, primaryLeadPhone } from '@/utils/leadPhones'
 import {
   call,
   Dialog,
@@ -115,7 +132,7 @@ watch(
   show,
   (open) => {
     if (open) {
-      to.value = props.referenceDoc?.mobile_no || props.referenceDoc?.phone || ''
+      to.value = primaryLeadPhone(props.referenceDoc)
       content.value = ''
       error.value = null
       linkedNumber.value = myQuoNumber()
@@ -128,6 +145,11 @@ watch(
     }
   },
   { immediate: true },
+)
+
+const toChoices = computed(() => listLeadPhones(props.referenceDoc))
+const toLast10 = computed(() =>
+  String(to.value || '').replace(/\D/g, '').slice(-10),
 )
 
 const canSend = computed(

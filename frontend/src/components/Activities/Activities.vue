@@ -912,6 +912,7 @@ onBeforeUnmount(() => {
   $socket.off('crm_tax_pull')
   $socket.off('crm_esign')
   $socket.off('crm_underwriting')
+  $socket.off('crm_call_log')
 })
 
 onMounted(() => {
@@ -970,6 +971,17 @@ onMounted(() => {
       data.reference_docname === props.docname
     ) {
       underwritingWorkbooks.reload()
+    }
+  })
+
+  // A newly-added lead phone finished its Quo backfill — the Calls / Activity
+  // timeline should show the pulled logs without a reload.
+  $socket.on('crm_call_log', (data) => {
+    if (
+      data.reference_doctype === props.doctype &&
+      data.reference_docname === props.docname
+    ) {
+      all_activities.reload()
     }
   })
 

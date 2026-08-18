@@ -28,6 +28,24 @@ duplicating. Work substantial features in a worktree of your own.
 
 ## Our changes vs upstream (keep this list current)
 
+- **Multiple phones per lead + Quo call backfill** — a lead can hold as many
+  numbers as the rep types in. `mobile_no` stays the primary (Call / Text /
+  Today / kanban); extras live in `CRM Lead.extra_phones` (JSON list of
+  strings; ops `setup_lead_phones.py`). A **Phones** sidebar card (Lead.vue
+  **and** MobileLead.vue) lists every number with set-primary / dial / remove
+  / add; the header Call button becomes a picker when there's more than one,
+  and Send Text offers the same list as To chips. Adding a number (or a new
+  inbound lead arriving with one) **relinks any already-mirrored CRM Call Log**
+  whose from/to matches and is unlinked, then enqueues a Quo `/v1/calls` sweep
+  per workspace line and inserts missing logs **oldest-first**. Dedupes on the
+  Quo call id. Attribution matches the webhook (outgoing `userId` = dialer;
+  incoming `answeredBy` = answerer; unanswered inbound leaves receiver blank).
+  The sequence-events webhook matches calls, texts, the ring silencer and
+  sequence auto-stop against the full list, has_column-guarded. App:
+  `crm/api/lead_phones.py` + `LeadPhonesCard.vue` + `utils/leadPhones.js`.
+  `db.set_value` on the add/remove API so it does not fire lead save hooks;
+  `after_insert`/`on_update` cover side-panel / import / webhook writes.
+
 - **Open Research tabs (Lead header)** — a one-click button on the Lead page
   header row (Call · Text · **Research** · ⋯ · Delete) that opens **two Zillow
   tabs + one Google Maps tab** for the lead's `property_address`. Reuses the

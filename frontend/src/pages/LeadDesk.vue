@@ -29,7 +29,7 @@
              app shell -- a phone widget on the Settings page is a phone widget in
              the way, and this is the one surface where a call is the job. -->
         <button
-          v-if="lead?.mobile_no || lead?.phone"
+          v-if="primaryPhone"
           class="hb call"
           @click="callLead"
         >
@@ -170,6 +170,7 @@ import Activities from '@/components/Activities/Activities.vue'
 import TelnyxCallUI from '@/components/Telephony/TelnyxCallUI.vue'
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
 import { activeDetailPanel } from '@/composables/settings'
+import { primaryLeadPhone } from '@/utils/leadPhones'
 
 const route = useRoute()
 const router = useRouter()
@@ -282,8 +283,10 @@ const phone = ref(null)
  * difference between a call that is linked to the deal and one that is a row in
  * a phone bill.
  */
+const primaryPhone = computed(() => primaryLeadPhone(lead.value))
+
 function callLead() {
-  const number = lead.value?.mobile_no || lead.value?.phone
+  const number = primaryPhone.value
   if (!number) return
   phone.value?.dial(number, { name: lead.value?.lead_name || '' })
 }

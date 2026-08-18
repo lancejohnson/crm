@@ -245,13 +245,21 @@
                 />
               </div>
               <div class="flex gap-1.5">
+                <Dropdown
+                  v-if="leadPhones.length > 1"
+                  :options="callPhoneOptions"
+                  placement="bottom-start"
+                >
+                  <Button :tooltip="__('Call')" :icon="PhoneIcon" />
+                </Dropdown>
                 <Button
+                  v-else
                   :tooltip="__('Call')"
                   :icon="PhoneIcon"
                   @click="
                     () =>
-                      doc.mobile_no || doc.phone
-                        ? dialNumber(doc.mobile_no || doc.phone)
+                      primaryPhone
+                        ? dialNumber(primaryPhone)
                         : toast.error(__('Please set a mobile number to call'))
                   "
                 />
@@ -311,6 +319,12 @@
         v-model="doc"
         @updateField="updateField"
       />
+      <LeadPhonesCard
+        :lead="leadId"
+        :doc="doc"
+        @saved="onPhonesSaved"
+        @dial="dialNumber"
+      />
       <FirstCallReadCard
         :lead="leadId"
         :motivated="doc.first_call_motivated"
@@ -329,7 +343,7 @@
       <InvestorLiftCard :lead="leadId" :address="doc.property_address" />
       <div v-if="sections.data" class="flex flex-col">
         <SidePanelLayout
-          :sections="sections.data"
+          :sections="sidePanelWithoutPhones"
           doctype="CRM Lead"
           :docname="leadId"
           @reload="sections.reload"
@@ -412,6 +426,7 @@ import SidePanelLayout from '@/components/SidePanelLayout.vue'
 import SLASection from '@/components/SLASection.vue'
 import CustomActions from '@/components/CustomActions.vue'
 import FirstCallReadCard from '@/components/FirstCallReadCard.vue'
+import LeadPhonesCard from '@/components/LeadPhonesCard.vue'
 import PhotosCard from '@/components/PhotosCard.vue'
 import PhotoGalleryModal from '@/components/Modals/PhotoGalleryModal.vue'
 import TaxInfoCard from '@/components/TaxInfoCard.vue'
@@ -430,7 +445,8 @@ import {
   parseColor,
 } from '@/utils'
 import { getView } from '@/utils/view'
-import { callHref } from '@/utils/phoneFormat'
+import { callHref, formatPhone } from '@/utils/phoneFormat'
+import { listLeadPhones, primaryLeadPhone } from '@/utils/leadPhones'
 import { mapsUrl, zillowUrl } from '@/utils/propertyLinks'
 import { myQuoNumber } from '@/composables/quoSender'
 import { getSettings } from '@/stores/settings'
@@ -535,8 +551,8 @@ const moreActions = computed(() => {
       label: __('Make a Call'),
       icon: 'phone',
       onClick: () =>
-        d.mobile_no
-          ? makeCall(d.mobile_no)
+        primaryLeadPhone(d)
+          ? makeCall(primaryLeadPhone(d))
           : toast.error(__('Please set a mobile number to make calls')),
     })
   }
@@ -977,6 +993,32 @@ function updateField(name, value) {
 
 function deleteLead() {
   showDeleteLinkedDocModal.value = true
+}
+
+const leadPhones = computed(() => listLeadPhones(doc.value))
+const primaryPhone = computed(() => primaryLeadPhone(doc.value))
+const callPhoneOptions = computed(() =>
+  leadPhones.value.map((p) => ({
+    label: formatPhone(p.number) + (p.primary ? ` (${__('primary')})` : ''),
+    icon: 'phone',
+    onClick: () => dialNumber(p.number),
+  })),
+)
+const sidePanelWithoutPhones = computed(() =>
+  (sections.data || []).map((section) => ({
+    ...section,
+    columns: (section.columns || []).map((col) => ({
+      ...col,
+      fields: (col.fields || []).filter(
+        (f) => !['mobile_no', 'phone'].includes(f.fieldname),
+      ),
+    })),
+  })),
+)
+
+function onPhonesSaved() {
+  document.reload()
+  reload.value = true
 }
 
 function dialNumber(number) {

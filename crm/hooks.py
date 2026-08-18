@@ -262,6 +262,9 @@ doc_events = {
 			# slow sweep can't hold the inbound webhook open long enough for the vendor
 			# to retry and duplicate the lead. No-op without site_config geo_service_url.
 			"crm.api.geo.on_lead_insert",
+			# A phone that arrived with the lead (inbound webhook / manual create)
+			# should pull its Quo history the same way typing one in later does.
+			"crm.api.lead_phones.on_lead_phones_changed",
 		],
 		"on_update": [
 			"crm.api.sequence_drain.enqueue_for_lead",
@@ -274,6 +277,9 @@ doc_events = {
 			"crm.api.task_hygiene.on_lead_update",
 			# Status moves during standup can make a lead newly eligible today.
 			"crm.api.today_board.enqueue_today_sync",
+			# Side-panel / import edits of mobile_no/phone/extra_phones — the
+			# dedicated add-phone API uses set_value (no hook) and backfills itself.
+			"crm.api.lead_phones.on_lead_phones_changed",
 		],
 	},
 }
