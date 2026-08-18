@@ -15,6 +15,18 @@ export function formatPhone(value) {
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`
 }
 
+// As-you-type US mask: (###) ###-####. Strips a leading 1, caps at 10 digits.
+// Partial values stay well-formed so "6513" becomes "(651) 3".
+export function formatPhoneTyping(value) {
+  let digits = String(value || '').replace(/\D/g, '')
+  if (digits.length === 11 && digits[0] === '1') digits = digits.slice(1)
+  digits = digits.slice(0, 10)
+  if (!digits) return ''
+  if (digits.length <= 3) return `(${digits}`
+  if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`
+}
+
 // True on iOS/Android handsets & tablets — where the Quo (OpenPhone) app's deep
 // link auto-dials. Desktop uses a plain tel: link instead: there the deep link
 // only opens the app without placing the call, whereas tel:+1… actually dials

@@ -64,13 +64,14 @@
 
     <form class="mt-3 flex items-center gap-1.5" @submit.prevent="add">
       <input
-        v-model="draft"
+        :value="draft"
         type="tel"
         inputmode="tel"
         autocomplete="tel"
-        :placeholder="__('Add a number')"
+        :placeholder="__('(###) ###-####')"
         :disabled="busy"
         class="min-w-0 flex-1 border-none bg-transparent p-0 text-sm text-ink-gray-8 placeholder:text-ink-gray-4 focus:outline-none focus:ring-0"
+        @input="draft = formatPhoneTyping($event.target.value)"
       />
       <Button
         type="submit"
@@ -85,7 +86,7 @@
 <script setup>
 import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
 import { listLeadPhones } from '@/utils/leadPhones'
-import { callHref, formatPhone } from '@/utils/phoneFormat'
+import { callHref, formatPhone, formatPhoneTyping } from '@/utils/phoneFormat'
 import { myQuoNumber } from '@/composables/quoSender'
 import { globalStore } from '@/stores/global'
 import { Button, FeatherIcon, call, toast } from 'frappe-ui'
