@@ -102,9 +102,49 @@ def on_lead_insert(doc, method=None):
 		frappe.log_error(frappe.get_traceback(), "geo: enqueue warm failed")
 
 
+#: What the map actually draws. The service returns the full Redfin record; a
+#: dense neighbourhood is ~1,800 of them and none of the rest is rendered.
+MAP_FIELDS = (
+	"property_id", "address", "city", "state", "zipcode", "price",
+	"beds", "baths", "sqft", "year_built", "property_type", "mls_status",
+)
+
+#: Ceiling on one response. Measured: a 2-mile Indianapolis sweep holds 17,287
+#: homes, and nobody can read 17,000 dots -- past a point this is a heat map
+#: pretending to be data. The client asks for the viewport it is showing.
+MAX_FEATURES = 1500
+
+
+def _trim(feature):
+	"""One feature, reduced to what the map draws."""
+	props = feature.get("properties") or {}
+	coords = (feature.get("geometry") or {}).get("coordinates") or [None, None]
+	out = {k: props.get(k) for k in MAP_FIELDS if props.get(k) not in (None, "")}
+	out["lng"], out["lat"] = coords[0], coords[1]
+	return out
+
+
+def _in_bbox(feature, bbox):
+	lng, lat = feature.get("lng"), feature.get("lat")
+	if lng is None or lat is None:
+		return False
+	west, south, east, north = bbox
+	return west <= lng <= east and south <= lat <= north
+
+
 @frappe.whitelist()
-def get_neighborhood(lead, radius_m=None, live=0):
-	"""Properties around a lead, as GeoJSON, for the desk map."""
+def get_neighborhood(lead, radius_m=None, live=0, bbox=None, limit=None):
+	"""Properties around a lead, trimmed for the desk map.
+
+	This is CONTEXT, not comps: the off-market universe around the subject, most
+	of which has no price (measured: 41% priced in Indianapolis). It is returned
+	flat rather than as GeoJSON because the client draws circles, and shipping
+	Redfin's whole record for 1,800 homes to render a dot is most of the payload
+	for none of the information.
+
+	`bbox` ('west,south,east,north') is what a zoomed-in rep is actually looking
+	at; without it the whole warmed radius comes back, capped at MAX_FEATURES.
+	"""
 	if not _enabled():
 		return {"ok": False, "reason": "geo service not configured", "features": []}
 
@@ -124,10 +164,37 @@ def get_neighborhood(lead, radius_m=None, live=0):
 			timeout=TIMEOUT if not live else 120,
 		)
 		r.raise_for_status()
-		return {"ok": True, "lat": lat, "lng": lng, **(r.json() or {})}
+		payload = r.json() or {}
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "geo: get_neighborhood failed")
 		return {"ok": False, "reason": str(e)[:200], "features": []}
+
+	features = [_trim(f) for f in (payload.get("features") or [])]
+	total = len(features)
+
+	if bbox:
+		try:
+			box = [float(v) for v in str(bbox).split(",")]
+			if len(box) == 4:
+				features = [f for f in features if _in_bbox(f, box)]
+		except ValueError:
+			pass  # a malformed bbox shows the whole radius rather than nothing
+
+	cap = min(int(limit or MAX_FEATURES), MAX_FEATURES)
+	shown = features[:cap]
+	return {
+		"ok": True,
+		"lat": lat,
+		"lng": lng,
+		"features": shown,
+		"total": total,
+		"in_view": len(features),
+		# Said out loud rather than left for the eye to notice: a capped map is a
+		# map that is not showing you everything, and it looks identical to one
+		# that is.
+		"truncated": len(shown) < len(features),
+		"priced": sum(1 for f in shown if f.get("price")),
+	}
 
 
 @frappe.whitelist()

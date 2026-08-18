@@ -173,8 +173,17 @@ purchase (open question: CRM `after_insert` vs earlier in `istl-buyer`).
       Verified live from inside the container: Brooklyn lead -> 824 features.
       **Backfill excludes parked imports** — dry run said 876 (= 362 live + 514
       parked); now 362. NULL-safe `isnull() | != 1`.
+- [x] **`geo_service_url` IS SET ON PROD (2026-08-15)** — the geo client is live,
+      so every new lead warms its neighbourhood and enriches its block. The desk
+      UI for it ships with the next deploy of this branch.
 - [ ] Deploy (app code is committed, NOT yet built into an image)
-- [ ] Frontend: draw neighbourhood + parcels on the desk map
+- [x] **Frontend: neighbourhood on the desk map** — a "Nearby" toggle drawing
+      every home around the subject as canvas dots, filled when we have a price
+      and hollow when we do not (47% priced on the Chicago lead; that hollow
+      majority IS the off-market universe, not missing data). Verified PASS.
+- [x] **Frontend: parcels** — lot lines ride with the Nearby layer above zoom 16
+      and follow the viewport. The service gained `/parcels` and `/enrich`, and a
+      sweep now enriches its own inner 600m. See below.
 - [ ] **verify_ui the desk page** (required before calling any of this done)
 - [ ] Seed `crm-test` — it has **0 leads**, so UI work still uses the
       prod-backed dev server (`CRM_DEV_TARGET=... yarn dev`). crm-test is for
@@ -209,10 +218,13 @@ purchase (open question: CRM `after_insert` vs earlier in `istl-buyer`).
       **Test-lead choice matters:** the first run used a Brooklyn lead and got
       zero comps. That was not a page bug -- `CRM Comp` has **0 rows for ZIP
       11230**. Use a lead with real coverage; Chicago 00854 has 561.
-- [ ] Right rail: offer math, repair matrix, 2x2 (reuse `first_call.py`)
+- [x] Right rail: offer math, repair matrix, 2x2 (reuse `first_call.py`)
 - [ ] Left rail: copilot (blocked on the Telnyx decision)
-- [ ] Save determination (needs schema)
-- [ ] Shortcuts + palette contributions
+- [x] **Save determination** — `crm/api/price_determination.py`, the two CRM Lead
+      fields, and the activity rail. See SESSION 3 below.
+- [~] Shortcuts: `S` saves, `]` toggles the activity rail (registered as
+      `activeDetailPanel`, so `]` keeps one meaning app-wide). Palette
+      contributions still to do.
 
 ### 3. Telnyx migration — its own project, bigger than the lead desk
 Replaces Quo/OpenPhone entirely. Unblocks the live copilot.
@@ -299,6 +311,26 @@ and every downstream reader gets a discriminator for free, no schema change.
 SMS has no equivalent yet: `Quo Message` needs a `provider` column (cheaper than
 renaming a doctype with 4,357 rows).
 
+- [x] **`provider` column on Quo Message** (live on prod, 4,403 rows backfilled
+      to "Quo"). **Calls needed NOTHING and the plan above was wrong about which
+      field**: measured before writing anything, all 4,192 CRM Call Log rows are
+      `medium = "Quo"` / `telephony_medium = "Manual"` — the ops webhook has
+      written `medium` since the mirror was built, so the discriminator already
+      exists, is 100% populated and is correct. Telnyx writes `medium = "Telnyx"`.
+      Re-stamping `telephony_medium` would have replaced a right field with a
+      duplicate one.
+- [x] **Per-provider line mapping** — `CRM Telephony Agent.custom_telnyx_number`
+      (live), read through `telephony.user_lines()` / `sending_line()`.
+      `User.custom_quo_number` stays authoritative for Quo; the agent row is
+      where the SECOND line lives, because a rep will hold both at once.
+- [x] **One attribution chain, provider-wide** — `crm/api/telephony.py` (new).
+      `activity_progress`, `today_pulse` and `sms` now share `line_owners()`
+      instead of each building their own map, and `_workspace_lines()` unions the
+      live Quo list with every configured line so a rep-to-rep call over Telnyx
+      is still "internal" rather than outreach to a stranger.
+      **Verified equivalent on prod before/after**: 3 days of the Team Activity
+      report and the SMS sender map byte-identical, the pulse identical except
+      its clock-derived line, and 0 of 2,896 calls over 30 days change hands.
 - [x] **Provider-agnostic do-not-contact** (was blocking all Telnyx sending).
       `record_inbound_opt_out()` takes plain values, not a Quo Message doc, so any
       provider's inbound handler calls the same rule; `check_inbound_opt_out` is
@@ -400,84 +432,65 @@ test site lands, rather than silently contradicting it.
 
 ---
 
-## BatchData comps fallback (decided 2026-08-14: AUTOMATIC when comps = 0)
+## BatchData comps fallback — SHIPPED (gw336), one module
 
-`CRM Comp` covers only iSpeedToLead ZIPs — **0 rows for Brooklyn 11230**, which is
-why the first desk verification showed an empty map. When `get_lead_comps` returns
-zero, fall back to BatchData automatically (Lance's call — not a button).
+`CRM Comp` only covers iSpeedToLead ZIPs. Sampling the 45 most recent leads,
+**18% land on an empty map** — Brooklyn 11230 holds 0 rows. When nothing of ours
+is in radius we buy a small set from BatchData. Automatic (Lance's call).
 
-Key: `BATCHDATA_API_KEY` (Infisical). Endpoint
-`POST https://api.batchdata.com/api/v1/property/search`, same one `pull_tax_info`
-already uses. Rate limit header `x-ratelimit-limit: 3000`; a `take:5` call
-decremented remaining by **1**, so billing looks per-REQUEST not per-record —
-unlike Regrid. Confirm before turning it loose.
+### TWO AGENTS BUILT THIS INDEPENDENTLY — read this before touching it
 
-### GOTCHA — `geoLocation` / `radiusMiles` is SILENTLY IGNORED
+`batchdata_comps.py` (kept) and `comps_batchdata.py` (deleted) existed at once,
+near-identical names, incompatible config keys and cache fields. The in-flight
+check exists to prevent exactly this and did not, because the other agent's work
+was on an unpushed branch on the MBP.
 
-```json
-{"searchCriteria":{"geoLocation":{"latitude":40.6195,"longitude":-73.9623,
-                                  "radiusMiles":0.5},
-                   "quickLists":["recently-sold"]},"options":{"take":5}}
-```
-returns **HTTP 200 with 5 properties** — in Austin, Miami and elsewhere. It matched
-only `quickLists` and ignored the geography entirely. No error, no warning. Built
-on this, a Brooklyn lead would have shown Miami comps on the map and poisoned the
-ARV. Same failure family as Redfin's silent cap: a plausible answer to a question
-that was never asked.
+**`batchdata_comps.py` won**, and the deciding reason was not style: it sets
+`selected` / `hidden` / `recency_days` on every comp, so the map's hide-use
+buttons and recency fade keep working. The deleted one did not — its comps would
+have rendered as un-hideable pills that never faded.
 
-### The shape that actually works: bare ZIP in `query`
+Ported in from the deleted one:
+- **`DEFAULT_TAKE = 25`.** Not affordability. The response is NOT
+  relevance-ordered, so `take` decides how much there is to CHOOSE from.
+  Measured, Brooklyn lead (3bd/1444sf/1930), best-6 after ranking:
+  take=10 -> mean score 1.91, median 0.85mi, median $788/sf;
+  take=25 -> mean score 1.19, median 0.59mi, median $919/sf.
+  **Five of the best six were invisible at take=10** and the median $/sf moved
+  **17%** — a different ARV, not tidier comps.
+- **`MAX_MILES = 2.0`, dropping not padding.** `compAddress` has no radius
+  control and has been seen matching to ~3mi.
+- **Shape ranking** (distance dominant, sqft/beds/year adjust). The provider
+  returns no similarity score. A missing fact is never scored as a bad match, or
+  every sparse row sinks.
 
-| criteria | result |
-|---|---|
-| `{"query":"11230"}` | **5/5 in ZIP 11230, Brooklyn** ✅ |
-| `{"address":{"zip":"11230"}}` | HTTP **400** |
-| `{"query":"Brooklyn, NY 11230"}` | Brooklyn, but ZIPs 11215/11231/11235/11201 — city matched, ZIP did not constrain |
+### Names — one of each, the orphans are gone
+    config     batchdata_comps_api_key        (site_config)
+    cache      CRM Lead.batchdata_comps       {"t": ..., "comps": [...]}
+    stamp      CRM Lead.batchdata_comps_fetched_at
+    TTL        90d hit / 14d miss
+`batchdata_comps_key` and `batchdata_comps_at` were mine and have been dropped
+from prod. **The two modules stored different JSON shapes in the same field** —
+a bare list vs `{"t","comps"}` — so a payload written by the deleted module is
+unreadable by the survivor. Verified 0 remain.
 
-So scope by **bare ZIP string**, then trim by true distance using each result's
-`address.latitude/longitude`. ZIP-level is the right grain anyway: `CRM Comp`
-is already organised by ZIP.
+### Traps, all paid for
+- **`geoLocation`/`radiusMiles` is SILENTLY IGNORED.** HTTP 200, properties from
+  other states. Only `compAddress` constrains geography.
+- **`sale.lastSaleDate` accepts `minDate`/`maxDate` ONLY.** min/max, start/end,
+  from/to, gte/lte and ISO datetimes all fail "Invalid Date", and an
+  unrecognised key is silently ignored — paying for stale rows, never told.
+- **Prices are `sale.lastSale.price`, NOT `deedHistory`** (this token returns no
+  deedHistory at all). Reading deedHistory makes every comp look $0.
+- **Two tokens, 21x apart**: `BATCHDATA_COMPS_API_KEY` $0.030/row vs
+  `BATCHDATA_API_KEY` $0.640/row. Billing is **per row returned**, verified by
+  wallet-balance deltas — not per request, which a rate-limit header wrongly
+  suggested.
 
-Useful fields per property: `building.{bedroomCount,bathroomCount,
-livingAreaSquareFeet,yearBuilt}`, `deedHistory[]` with real `salePrice`/`saleDate`
-(better than RealEstateAPI, which returns `lastSalePrice: 0` in non-disclosure
-states), `valuation`, `address.{latitude,longitude}`.
-
-- [x] **Built** — `crm/api/comps_batchdata.py`, wired into `get_lead_comps`.
-      `take=25` (~$0.75), hard 2-mile cap that DROPS rather than pads, ranked
-      client-side, keep 6. Fires only when `total_in_radius == 0`.
-- [x] **Billing is PER ROW, not per request** — my earlier per-request guess from
-      the rate-limit header was wrong; QUIRKS.md says so plainly. Two tokens:
-      `BATCHDATA_COMPS_API_KEY` $0.030/row vs `BATCHDATA_API_KEY` $0.640/row.
-      The module reads `batchdata_comps_key` and **will not** fall back to the
-      expensive one.
-- [x] **25 rows beats 10 — measured**, and not on cost grounds. The response is
-      not relevance-ordered, so `take` sets how much there is to choose from.
-      Brooklyn lead (3bd/1444sf/1930), best-6 after ranking:
-      take=10 -> mean score 1.91, median 0.85mi, median $788/sf
-      take=25 -> mean score 1.19, median 0.59mi, median $919/sf
-      **5 of the best 6 were invisible at take=10**, and the median $/sf moved
-      17% — a different ARV, not just tidier comps.
-- [x] **Ops script written**: `../frappe-crm-deploy/scripts/setup_batchdata_comps.py`
-      (committed + pushed). Dry-run verified against prod — both fields absent,
-      both would be added.
-- [ ] **GO LIVE — one deliberate act, because it starts spending:**
-      1. `python3 scripts/setup_batchdata_comps.py`
-      2. `bench --site crm.groundworkpro.com set-config batchdata_comps_key <BATCHDATA_COMPS_API_KEY>`
-      3. deploy the app code (`crm/api/comps_batchdata.py` + the `comps.py` hook)
-      Script deliberately NOT run yet: creating the fields and setting the key is
-      the moment money starts moving, and that should be intentional rather than a
-      side effect. The app self-disables until both exist.
-- [x] **AVM comps are dropped, not labelled.** Reading `CompsView` first showed a
-      label was insufficient: `isActive()` matches `"active"` exactly, so
-      `"estimate"` fell through to `OFF_MARKET` — the colour that file defines as
-      *"an actual transaction"*. An AVM was pixel-identical to a confirmed sale.
-      Deeper problem: averaging AVMs into a $/sf ARV is circular. So a comp with
-      no recorded sale price is dropped; the AVM rides along as `avm` context
-      only. Costs nothing measurable at take=25 — Brooklyn 25/25 kept, San
-      Antonio (non-disclosure, the hard case) 16/25 kept, both >> the 6 shown.
-
-
----
+### Live, verified on prod
+`{'source':'batchdata','used':True,'count':6,'basis':'last 2 years'}` — six
+Brooklyn comps 0.21-0.75mi, all 3bd against a 3bd subject, 1248-1727sf against
+1444, none over the cap, hide/select/recency populated. ~$0.75/lead, cached.
 
 ## Deploy readiness (2026-08-14)
 
@@ -507,3 +520,481 @@ difference between shipping and silently deleting a fortnight of someone's work.
 
 - [ ] Deploy: `cd ../frappe-crm-deploy && git pull && ./scripts/build_image.sh FORK=~/crm-worktrees/lead-desk`
 - [ ] Then BatchData go-live (setup script + `batchdata_comps_key`)
+
+---
+
+# SESSION 2 END STATE (2026-08-14) — start here
+
+**Launch a new session from:** `~/crm-worktrees/lead-desk` (branch
+`feature/lead-desk`, clean, pushed). This file is the memory; read it first.
+
+Other repos this project touches:
+    ~/Projects/Groundwork/frappe-crm-deploy   ops: deploy, envs, setup scripts
+    ~/Projects/Groundwork/groundwork-geo      the geo microservice
+    ~/Projects/Groundwork/frappe-crm-app      main checkout — has Lance's
+                                              UNCOMMITTED in-flight work; leave it
+
+## Production right now
+
+    gw337 @ 88f4b10b (clean)   smoke: all green   drift: PASS
+    Live: lead desk route + offer rail + saved determination + activity rail,
+    Nearby neighbourhood layer + lot lines, geo client (geo_service_url SET),
+    crm/api/telephony.py, provider-agnostic DNC, BatchData fallback
+
+`groundwork` contains both feature branches. `feature/lead-desk` = groundwork +
+the desk page + the offer rail, and is NOT deployed.
+
+## Done this session, beyond the BatchData section above
+
+- **Lead desk slice 1+2.** `/leads/:leadId/desk` -> `pages/LeadDesk.vue`, which
+  embeds the real `CompsView` (not the mockup's map) and `OfferRail.vue`.
+  Verified live: 76 comps, header facts agreeing with the Subject pill, and ARV
+  $48,000 = $55/sf x 876sf with a correct $0 offer + warning.
+  `CompsView` gained two emits: `subject` and `picked`.
+- **Geo service deployed**: `geo-api.service`, 127.0.0.1 -> the CRM's bridge
+  gateway, `/warm` persists to PostGIS, `/properties` serves the store.
+- **Staging box**: Hetzner `crm-staging` 87.99.154.150 (cpx21, ubuntu 24.04,
+  **devproppy** project). DNS live. Nothing installed on it yet.
+- **Deploy is env-parameterised**: `envs/prod.env` / `envs/staging.env`,
+  `ENV=staging ./scripts/build_image.sh`. Default is prod, byte-identical to
+  before. Parameterising found three HARDCODED prod site names in the standby
+  health probe and cache-clear — a staging deploy would have hit prod.
+
+## Traps learned the hard way this session — do not re-earn these
+
+- **`crm-test.groundworkpro.com` shares production's APP CODE.** Frappe
+  multi-site is one bench, one codebase, many sites. It isolates DATA, not code,
+  so it CANNOT be used to test a branch. That is why the staging BOX exists.
+- **Check the image revision before every deploy.**
+  `docker image inspect <tag> --format '{{json .Config.Labels}}'` ->
+  `org.opencontainers.image.revision`. Prod was built from `feature/kanban-modal`
+  (2ae06c50), not groundwork — deploying a groundwork-based branch would have
+  deleted eight live commits. `build_image.sh` has its own clobber guard which
+  correctly refused; **`FORK=` must be an ENV VAR, not an argument**, or it
+  silently reads the main checkout.
+- **A `-dirty` revision in the build banner means somebody's uncommitted work
+  just shipped.** gw335 shipped Lance's in-flight `hooks.py` (tracked) but NOT
+  his untracked `daily_outreach.py` — `git stash create` skips untracked files —
+  leaving prod with a scheduler hook pointing at an absent module. gw336 is the
+  same commit rebuilt clean.
+- **`nc_dns.py` was dangerous and is now fixed** (`~/.claude/api-helpers/`,
+  **not in any git repo — worth versioning**). Three bugs, all in the same
+  family: Namecheap `getHosts` returns `Name`/`Type` but `setHosts` expects
+  `HostName`/`RecordType`, so every exported record had a blank name; `setHosts`
+  is a FULL REPLACE, so applying that would have erased all 34 records while the
+  diff looked clean (broken compared against broken); and addresses come back
+  XML-escaped, so a CAA value `0 issue &quot;x&quot;` was written back literally
+  and rejected. Now: correct field mapping, XML-unescape, a refuse-on-blank
+  guard, and domain-based account routing (groundworkpro.com -> Servant account,
+  egress 5.161.68.223 via groundwork-apps).
+  **If `apply` was ever run on a WBG domain, check that zone.**
+
+## Next, in order
+
+1. ~~Bootstrap staging~~ — done, see SESSION 3. **crm-staging.groundworkpro.com
+   is live**, TLS, running `feature/lead-desk` against a scrubbed copy of prod.
+2. ~~Desk slice 3~~ — done, see SESSION 3.
+3. Telnyx — its own project, bigger than the desk. See the section above.
+   Copilot stays blocked until it lands. The three prerequisites that must exist
+   BEFORE any Telnyx traffic are still open: the `provider` column on Quo Message
+   + re-stamping `telephony_medium`, per-provider line mapping, and unioning both
+   providers in every report. Two decisions are still unanswered (open questions
+   6 and 7): the thread boundary during parallel running, and its exit condition.
+
+## Open, needing a human
+
+- Deploying `feature/lead-desk` to prod: small (226 lines) but `CompsView` is
+  used by `TodayLeadModal`, `CompDetailModal` and `Comps.vue` — all live.
+- Lance's four uncommitted files in the main checkout.
+- Orphan cleanup is DONE (`batchdata_comps_key` / `batchdata_comps_at` dropped).
+
+---
+
+# SESSION 3 (2026-08-15) — desk slice 3: the saved determination
+
+**Launch from** `~/crm-worktrees/lead-desk`. Prod is still **gw336 @ 098ca26c**;
+this session's work is committed but **NOT deployed**.
+
+## What shipped
+
+- **`crm/api/price_determination.py`** (new) — `save_price_determination` /
+  `get_price_determination`.
+  - **The snapshot keeps the INPUTS and the CONSTANTS**, not just the offer.
+    "We said $35,300" is unusable three weeks later without the comps, the $/sf
+    and the repair level. `margin` and `fee` ride along because constants change:
+    move the fee from $10k to $12k and a snapshot holding only inputs would
+    silently re-derive to a number nobody ever said out loud.
+  - **The server re-derives and REFUSES a mismatch** — not to impose today's
+    formula (it uses the snapshot's own constants) but to catch a client whose
+    offer does not follow from its own inputs. That failure is silent and it is
+    a number a rep read to a seller.
+  - **Comps are COPIED, not referenced.** `CRM Comp` is a projection of a feed
+    that re-syncs nightly, and a BatchData fallback comp has no CRM row at all,
+    so a determination resolving comps by name would drift or empty out.
+  - **The field is the current price; the TIMELINE is the history.** Every save
+    also posts a Comment, so re-pricing after a repair walkthrough never erases
+    what was said before. Best-effort — a timeline write never fails the click.
+  - `modified` is deliberately allowed to move (unlike the Zillow/BatchData
+    caches): this is a person pricing a deal, not the machine remembering.
+- **`OfferRail.vue`** — Save / Re-save with a drift line ("Saved 2:32 pm at
+  $58,000 — changed since."). Comparison excludes the server-stamped
+  `by`/`at`/`source`, or every save would look instantly stale.
+- **`LeadDesk.vue`** — the real `Activities.vue` as a `]`-toggled overlay,
+  mounted lazily on first open and kept mounted after; `S` saves.
+- Ops: **`scripts/setup_price_determination.py`** — RUN ON PROD ALREADY
+  (`price_determination`, `price_determination_at` on CRM Lead). Every write is
+  column-guarded, so the app was safe to deploy before it: with the fields absent
+  the save still lands on the timeline and the rail says "recorded on the
+  timeline only" rather than showing a saved state that vanishes on reload.
+
+## Traps this session paid for
+
+- **A `z-20` overlay LOSES to Leaflet.** `.leaflet-container` creates no stacking
+  context and its panes carry z-index 400–700, so the map PAINTED over the left
+  ~100px of the activity panel (the heading read "y") while the panel still
+  hit-tested underneath — clicks landing where nothing was visible. Any overlay
+  near this map needs `z-[1000]`.
+- **CompsView does not fit a fixed-height host.** It was built as a full page:
+  filter card + map + list is ~1,010px against the desk's 726px, so only 62px of
+  the 320px property list was reachable and the wheel could not get to the rest.
+  New **`fill` prop** (default off, so the three live surfaces are untouched):
+  filters fold behind a "Filters (N)" toggle, map and list share the height and
+  scroll themselves. Measured after: centre pane scrollHeight == clientHeight at
+  1280×800.
+- **PostHog's "Report a problem" tab sits ON the rail.**
+  `button.ph-survey-widget-tab`, in a shadow root, `position:fixed`, 35px, right
+  edge, vertically CENTRED — it landed on "Max offer", the one number said out
+  loud. Shadow DOM means our CSS cannot move it and disabling feedback on the
+  screen reps live in is the wrong trade, so the rail is 340px with a 40px right
+  gutter (same ~288px of content as before). Verified: rail content ends at 1240,
+  tab starts at 1245.
+- **TOASTS NEVER RENDERED UNDER `yarn dev`, app-wide, and nothing said so.**
+  frappe-ui's toast state is module-level; pre-bundling inlines it into
+  `.vite/deps/frappe-ui.js` while `FrappeUIProvider.vue` (a .vue file, always
+  served raw) imports `../Toast/index` directly — two instances, so every
+  `toast.success()` pushed to an array no mounted `<Toasts>` was rendering.
+  Production was always fine, which is the dangerous part: **all UI verification
+  happens on the dev server, and an error toast that cannot appear reads as "no
+  error"**. Fixed with `optimizeDeps.exclude: ['frappe-ui']`; verified by
+  triggering CompsView's own "Comp hidden" toast before and after.
+- **`verify_ui` can be killed mid-run** (exit 143) and then writes no report —
+  but its screenshots survive in `.pi/verification/<ts>/` and were enough to
+  finish the verdict. Check them before paying for a re-run.
+
+## Verified
+
+Backend on prod via `bench execute`, rolled back: fields present, `stored: true`,
+`get_after: true`, an inconsistent offer refused, an unknown repair level
+refused. UI at a real 1280×800: no page scroll, nothing clipped, ARV/offer
+arithmetic correct, save → toast + "Saved 2:37 pm · offer $54,400", **the line
+survives a full reload**, drift wording correct, panel overlays without the map
+reflowing (identical rect before/while/after), all three hit-tests inside the
+panel, and the determination visible in the timeline.
+
+Everything written to prod lead **CRM-LEAD-2026-00854** during verification was
+undone (2 comments deleted, `comps_hidden` / `comps_selected` /
+`price_determination*` cleared); `verify_no_drift.py` PASSes.
+
+
+---
+
+# STAGING IS LIVE (2026-08-15)
+
+    https://crm-staging.groundworkpro.com    87.99.154.150 (Hetzner cpx21, ash)
+    v1.67.0-stg1 @ c62d089d (feature/lead-desk)
+    Administrator password: crm-staging:/opt/frappe-crm/.env
+
+**It is a LEADZOLO-ONLY box (2026-08-15, Lance's call), NOT a copy of prod.** It
+was seeded from a scrubbed clone first; that was the wrong shape. His test leads
+come from LeadZolo and Quo is not going on it at all, so the site was wiped:
+**0 leads, 0 Server Scripts, and no `tabQuo Message` table at all.**
+`scripts/provision_staging_leadzolo.sh` adds back only the intake path — 20 CRM
+Lead custom fields, the Lead Webhook Log doctype, the `Leadzolo` lead source and
+the `leadzolo-leads` script. The clone script still exists for when a data-shaped
+box is wanted; it is simply not what this one is.
+
+Two scripts in the ops repo, both idempotent:
+
+    ./scripts/bootstrap_staging.sh          bare Ubuntu -> TLS-served CRM
+    ./scripts/clone_prod_to_staging.sh      prod's data, sanitised on arrival
+    ENV=staging FORK=<worktree> ./scripts/build_image.sh     deploy a branch
+
+**The scrub is a mechanism, not a habit.** It runs inside the clone pipeline
+before anything starts against the new data, and there is no mode that restores
+prod unscrubbed. Phones become unroutable `+1555…` derived from the row's own
+name (so records that shared a number still share one), contact emails become
+`@example.invalid`, per-user sending lines are cleared, and the email queue is
+emptied. Verified after the first clone: 876 leads, 593 buyers, 4,192 call logs,
+4,403 texts, **0 real numbers**.
+
+**Staging carries NO integration keys** and that is the whole safety story: every
+integration is gated on a per-site `site_config` key, and a site created fresh
+has none. The scheduler is disabled by default — enabling it is a deliberate act,
+because `sequence_drain.drain_due` runs every minute.
+
+## Traps the bootstrap paid for (they are all in the scripts now)
+
+- **`docker compose run/exec -T` inside a heredoc-fed ssh script eats the REST OF
+  THE SCRIPT**, because stdin *is* the script. It silently swallowed
+  `mute_emails`, the seqdrain config and `up -d` on the first run, leaving a box
+  with only db and redis up — and no error anywhere. Redirect `</dev/null`.
+- **The `seqdrain` queue must be declared in `common_site_config`** or
+  drain-worker crash-loops on "Queue should be one of short, default, long".
+  `bench set-config -g workers.seqdrain.background_workers 1` does **not** create
+  the nested dict: it writes nothing and reports nothing. Write the JSON.
+- **nginx inside the frontend container caches `backend:8000`'s IP at startup**,
+  so a backend started after it answers 504 until reloaded — exactly what a fresh
+  bootstrap looks like.
+- **`build_image.sh` had the prod tag pattern hardcoded** even after the env
+  parameterisation, so `ENV=staging` would have read an empty CURRENT, computed
+  `v1.67.0-gw1` and sed'd nothing: a no-op deploy reporting success. It also
+  rewrote this repo's compose pin regardless of target, which would have shipped
+  a staging tag back to prod.
+- **A 4.2GB database is mostly one table.** `tabError Log` is 3.9GB of it (148
+  rows), so the clone restores it — and the other log-shaped tables — as empty
+  structure and moves ~250MB instead.
+
+
+---
+
+# TELNYX PREREQUISITES — DONE (2026-08-15)
+
+All three prerequisites the plan called mandatory-before-any-Telnyx-traffic are
+built, live on prod where they need schema, and verified equivalent. What is left
+is Telnyx itself, which is blocked on two DECISIONS, not on code (open questions
+6 and 7): the thread boundary during parallel running, and the exit condition.
+
+## `crm/api/telephony.py` — the one place that knows whose line is whose
+
+There were **NINE** separate `_last10`/`_digits` helpers in this app and they did
+not agree. `activity_progress` and `today_pulse` matched a user's line by EXACT
+STRING against `custom_quo_number`, so a line stored as `+16125551234` would
+never have matched a call log carrying `6125551234`. It happens to work today
+because both sides are E.164 — measured, 0 of 2,896 calls change attribution —
+but that is luck, and Telnyx will not necessarily store numbers the way Quo does.
+
+## Corrections to this file's own plan, both found by measuring first
+
+- **`CRM Call Log.medium` is the discriminator, not `telephony_medium`.** Every
+  one of the 4,192 rows already says `Quo`. No migration, no re-stamp.
+- **Texts genuinely needed a column**, and it is backfilled — but the app treats
+  a BLANK provider as Quo (`telephony.LEGACY_PROVIDER`), so a site that never
+  runs the backfill still counts all 4,357 texts. A missing migration must not
+  make history disappear.
+
+## Trap
+
+**`bench mariadb` runs in SAFE UPDATE MODE.** An `UPDATE ... WHERE provider IS
+NULL` touches no KEY column, so it is refused with ERROR 1175 and exits 1 — and
+with stderr hidden that is indistinguishable from a successful no-op. The backfill
+reported "done" while 4,403 rows stayed NULL. Always `SET SQL_SAFE_UPDATES=0;`
+first, and always read back the row counts.
+
+## Ops
+
+`scripts/setup_provider_columns.py` (run on prod) + the backfill it prints.
+
+
+## Staging: LeadZolo-only, and what the round trip taught (2026-08-15)
+
+**Which custom fields get installed is DERIVED FROM THE WEBHOOK**, not
+hand-listed: a field is installed only if `leadzolo_webhook.py` references it (20
+of the 43 in `site/custom_fields.json`). That is the rule that keeps the box to
+one purpose as the export grows — the file also carries `User.custom_quo_number`,
+`CRM Lead.quo_contact_id` and three CRM Call Log transcript fields, all
+telephony, plus refund-pool fields for a feature deleted in gw226. A
+hand-maintained exclude list would silently let the next one through.
+
+Three failures that a "200 OK" check would have missed, all now handled by the
+provisioning script:
+
+- **Server Scripts are OFF unless `common_site_config` says
+  `server_script_enabled`.** The script installs fine, is enabled, and simply
+  never runs; the endpoint 417s with `ServerScriptNotEnabled`.
+- **A missing master record is a HARD failure, not a blank field.** The first
+  fire died with `Could not find Source: Leadzolo` — *after* the raw payload had
+  been logged, which is exactly what the Lead Webhook Log exists for.
+- **`CRM Lead Source` autonames on `source_name`, not `lead_source`.** Posting
+  the wrong key returns "Source Name is required".
+
+`sync_server_scripts.py`, `setup_lead_webhook_log.py` take their target from the
+environment now (`CRM_SSH_HOST` / `CRM_SITE` / `CRM_BASE` /
+`CRM_ADMIN_PASSWORD`), defaulting to prod. 48 other `setup_*.py` scripts still
+hardcode prod's URL — parameterise them as they are needed, not speculatively.
+
+**Verified end to end**: a LeadZolo-shaped payload created `CRM-LEAD-2026-00001`
+with address / beds / baths / sqft / year / campaign / vendor id all in the right
+fields, and the payload logged. `lead_owner` is NULL because the round robin is
+config-gated and staging has no roster — correct for a test box.
+
+The scheduler is **paused** (`pause_scheduler: 1`); intake does not need it, and
+`sequence_drain.drain_due` runs every minute when it is on.
+
+
+## Neighbourhood layer on the desk (2026-08-15)
+
+`crm.api.geo.get_neighborhood` now TRIMS and CAPS: 12 fields per home instead of
+Redfin's whole record, `bbox` for what the rep is actually looking at, and
+`MAX_FEATURES = 1500`. Measured on the Chicago lead: the full 2-mile radius is
+1,806 homes / **384KB**, the same call with a ~450m bbox is 125 homes / **32KB**.
+The response says `truncated` out loud, and the button reads
+`Nearby (1500 of 1806)` when the cap bites — a count that does not match what is
+on screen is worse than no count.
+
+**Dots, not pills, and never comps.** Pill grammar means "comp" everywhere else
+on this map, so the layer is grey canvas circles and every popup ends with
+"Context, not a comp". Priced = filled, unpriced = hollow ring.
+
+**Canvas, not markers** (`L.canvas`), because a warmed radius is ~1,800 points
+here and 17,287 in Indianapolis — one DOM node each is the kanban's per-field
+mistake, on a map somebody is dragging mid-call. Comp pills are markers
+(pane z-600) and this is an overlay (z-400), so the answer stays above the
+context with no per-layer reordering.
+
+**Dot size follows zoom, and that is not cosmetic.** The desk opens at whatever
+zoom fits the COMPS — zoom 12 on the test lead — where 28m/px turns 1.3km of
+neighbourhood into a 50x50px smudge. First cut looked broken and was not: all
+1,500 markers were drawing, correctly, into a blob. Radius now steps 1.5 → 3 → 5
+→ 7 with zoom, re-applied on `zoomend`. Verified: 1 merged blob at default zoom
+→ 33 resolvable dots at ~16px after three zoom clicks.
+
+**Verified PASS** (desktop-chrome, 1280x800): default off, toggle on/off, pill
+count unchanged at 83 throughout, comp popups still open, dot popups show
+"no price on record" where there is none, zoom scales the dots, no console errors
+from the layer.
+
+### Still open
+
+- **`geo_service_url` is NOT set on prod** — it was enabled only for this
+  verification and turned off again. Setting it is the go-live act, and it does
+  two things at once: it lets the desk read the neighbourhood, AND it arms
+  `on_lead_insert` to warm every new lead (~75s of background sweep, real Redfin
+  traffic). That is the intended design; it is a decision, not a deploy step.
+- **`/parcels` returns 404** — never implemented in the service. Lot lines are
+  the remaining half of workstream 1.
+- The warmed radius on the test lead is only ~1.5km because the sweep was run
+  at radius=800m during service bring-up, not the 2 miles the client asks for.
+
+### Trap
+
+**Cleaning up a docker-cp'd module deleted a file prod actually ships.**
+`geo.py` is part of revision 098ca26c; `price_determination.py` is not. Removing
+both "test" copies left production missing a module its lead-insert hook imports.
+`verify_no_drift.py` caught it in the same minute — check whether a file belongs
+to the deployed revision BEFORE deleting it from the container, and re-run the
+drift check after any cleanup, not just after a deploy.
+
+
+## Lot lines, and geo turned on (2026-08-15)
+
+### The service grew the half it was missing
+
+`/parcels` returned **404** — `crm/api/geo.get_parcels` had been calling it since
+the client was written, and `store.parcels_in_bbox` had been ready the whole
+time; only the route was missing. It takes a **bbox, not a radius**, because lot
+lines are only legible zoomed in and what a caller wants is exactly the rectangle
+on screen. 422 on a malformed, inverted or continent-sized box.
+
+`/enrich` is separate from `/warm` **on purpose**: a sweep is ~75s, enriching
+everything it finds is ~45 MINUTES at 6.6 parcels/sec. But nothing else called
+it, so a warmed lead had dots and no boundaries — invisible until a rep zoomed in
+mid-call to a bare map. **A sweep now enriches its own inner 600m
+(`ENRICH_AFTER_SWEEP_M`)**: the block the house is ON is what gets looked at, and
+the far edge of a two-mile radius is scraping nobody opens.
+
+Measured: parcels **61 → 318 → 818 → 1,010**; `/parcels` 404 → 200 with 255
+features carrying APN + FIPS; a fresh `/warm` produced its own enrich batch with
+no second call.
+
+### On the desk
+
+Lot lines ride WITH the Nearby layer rather than getting their own toggle — same
+question, one zoom level in — and only above **zoom 16**, where a 12m frontage is
+~10px instead of ~5. Below it nothing is fetched: a request whose result cannot
+be read is latency and scraping load for nothing. Debounced 400ms and keyed on
+the rounded viewport, so panning back and forth does not re-fetch.
+
+Thin, unfilled, slate: a lot line is a boundary, not an object, and filling it
+would compete with the comp pills on the one screen where the pills are the
+answer. Popup says **"Lot line · context, not a comp"**, same rule as the dots.
+
+Verified live at zoom 16: **149 parcel paths** at exactly the intended style
+(`#475569`, w1, o0.55) plus the 3 distance rings; zoom out to 15 → **0**; back to
+16 → **149**; popup read `120 W 108th Pl · APN 25164090280000 · Lot line ·
+context, not a comp`.
+
+**GOTCHA — rapid zoom clicks are swallowed.** Five `.leaflet-control-zoom-in`
+clicks in one tick advanced the map ONE level, which made the threshold look
+broken while it was working. Leaflet's zoom animation eats clicks fired inside
+it; pause ~700ms between them when driving the map from a script.
+
+**GOTCHA — `performance.getEntriesByType('resource')` reported 0 calls to an
+endpoint that had demonstrably run.** Its buffer caps at 250 entries and silently
+drops the oldest — the same trap the kanban work hit. Count with a `fetch` wrapper
+or trust the DOM.
+
+### geo is ON in prod
+
+`geo_service_url = http://172.20.0.1:8110` is now in prod's site_config, so
+`on_lead_insert` warms every new lead and its block gets lot lines. Verified
+through the DEPLOYED client: `warm_lead` on a real lead returned `queued: true`
+and the sweep landed.
+
+**Measured, and worth watching**: that one 2-mile warm returned **29,706 homes in
+69 calls** (properties 2,213 → 30,113). At ~13 leads/day that is a few hundred
+thousand rows a day, ~2.4GB/month at a rough 200 bytes a row, against 51GB free.
+`save_properties` upserts on `property_id`, so overlapping neighbourhoods dedupe
+rather than multiply — but this is the first thing to look at if the box gets
+tight.
+
+
+### The verification found a real one: an empty canvas that reported success
+
+The lot-line PASS run flagged the Nearby label as `Nearby (5000)` where the spec
+said `N of M`. Chasing that cosmetic deviation found the actual defect.
+
+**The frontend only understood the NEW payload shape.** `get_neighborhood` used
+to pass the geo service's raw GeoJSON straight through
+(`{geometry:{coordinates:[lng,lat]}, properties:{…}}`); the trimmed version
+returns flat rows (`{lat, lng, price, …}`). Production is still on the old one —
+so the desk fetched **1.46 MB / 5,000 features**, skipped every single point for
+having no `lat`, and drew an **EMPTY CANVAS** while the button read
+"Nearby (5000)". Measured: `paintedPixels: 0`.
+
+Both shapes exist in the wild at once, because the frontend and the backend
+deploy separately and for the length of any deploy window the browser is talking
+to the other version. `hoodPoints()` now accepts either, and the **label counts
+what was drawn**, not what arrived — the same rule as `truncated`: the number has
+to describe what is on screen. Verified against production's old endpoint:
+`paintedPixels: 0 → 5,287`, pills unchanged at 83.
+
+Worth keeping: a verifier reporting a *cosmetic* mismatch is worth chasing to the
+data, because "the label is slightly different" and "the layer draws nothing" look
+identical from the outside.
+
+
+## Deployed gw337 (2026-08-17)
+
+`feature/lead-desk` @ 88f4b10b is on production. Verified live on
+crm.groundworkpro.com, not just locally: Nearby reads **"Nearby (1500 of 5000)"**
+with 1,725 painted pixels, 83 comp pills, and `get_neighborhood` returning
+trimmed flat rows (13 keys) with `truncated`/`in_view`/`priced`. Smoke all green,
+drift PASS, image revision 88f4b10b. No `sync_jobs` needed — no hooks.py change.
+
+### What is still missing before a REP can work a call from it
+
+1. **Nothing links to it.** No button on the Lead page, none on a Today card. The
+   route exists and is reachable only by typing the URL. This is the single
+   biggest gap and the cheapest to close.
+2. **No call controls on the desk** — v17 has "Start call". Working a live call
+   from a screen with no dialer means switching apps mid-sentence.
+3. **"They want" (the seller's ask) and the gap it implies** — in v17, and
+   already in the saved snapshot's schema (`ask`); not built.
+4. **Copilot** — blocked on Telnyx, as it has been.
+5. **Shortcuts are undiscoverable.** `S` / `]` / `N` / `D` / `H` / `U` all work;
+   nothing on screen says so, and the command palette has no desk entries.
+6. **Street View** — the Maps Embed key exists (`~/.config/groundwork/maps_embed_key`)
+   but has never been moved into site_config as `maps_embed_key`.
+7. **Geo coverage is thin.** Only leads warmed since geo went on have a
+   neighbourhood; everything older shows an empty Nearby. `warm_backfill` exists
+   (362 live leads) but is hours of background sweeping — stage it.

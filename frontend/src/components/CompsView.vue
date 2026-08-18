@@ -1,5 +1,8 @@
 <template>
-  <div class="flex flex-col gap-3">
+  <!-- `fill` makes this size to its container instead of to its content: the map
+       and the property list share whatever height there is, each scrolling
+       internally. The comps PAGE keeps its natural, scroll-the-page layout. -->
+  <div class="flex flex-col gap-3" :class="fill ? 'h-full min-h-0' : ''">
   <!-- Address + counts -->
   <div class="flex flex-wrap items-center justify-between gap-2">
     <div class="min-w-0">
@@ -54,6 +57,36 @@
               {{ __('Details') }}
             </label>
 
+            <!-- In `fill` mode ONLY, the filter card folds away behind this.
+                 Filters are deliberately always visible on the comps page (they
+                 are the point of the tool, and a rep should not have to find a
+                 button to widen a beds range) -- but the desk gives this whole
+                 component ~726px on the laptop it is designed for, and the card
+                 is ~190px of it. Spending a quarter of the working surface on
+                 controls the preset ladder has already set is the worse trade
+                 there. The count keeps the state visible while it is folded. -->
+            <Button
+              v-if="fill"
+              :label="activeFilterCount ? __('Filters ({0})', [activeFilterCount]) : __('Filters')"
+              :variant="filtersOpen ? 'subtle' : 'ghost'"
+              iconLeft="filter"
+              @click="filtersOpen = !filtersOpen"
+            />
+
+            <!-- The neighbourhood: every home around the subject, most of which
+                 we know nothing about. OFF by default and loaded only on the
+                 first click -- it is context, the comps are the answer, and a
+                 dense area is ~1,800 records nobody should pay for on open. -->
+            <Button
+              v-if="neighborhood"
+              :label="hoodLabel"
+              :variant="hoodOn ? 'subtle' : 'ghost'"
+              :loading="hoodLoading"
+              iconLeft="map-pin"
+              :title="__('Every home around this one, priced or not (N)')"
+              @click="toggleHood()"
+            />
+
             <!-- Radius stays its own control: a rural lead needs a wider net than
                  an infill lot, and the right answer is obvious once you see the
                  map. Loosening the preset ladder never touches it. -->
@@ -77,6 +110,7 @@
              first discovering a button. Wraps to as many rows as it needs, which
              is what keeps it usable at 390px. -->
         <div
+          v-show="!fill || filtersOpen"
           class="rounded-lg border border-outline-gray-2 bg-surface-gray-1 px-3 py-2.5"
         >
           <div class="flex flex-wrap items-end gap-x-4 gap-y-2.5">
@@ -198,7 +232,13 @@
         <div
           ref="mapEl"
           class="w-full overflow-hidden rounded-lg border border-outline-gray-2 bg-surface-gray-1"
-          :class="pageMode ? 'h-[26rem] sm:h-[32rem]' : 'h-[20rem] sm:h-[24rem]'"
+          :class="
+            fill
+              ? 'min-h-[15rem] flex-1'
+              : pageMode
+                ? 'h-[26rem] sm:h-[32rem]'
+                : 'h-[20rem] sm:h-[24rem]'
+          "
         />
 
         <!-- Every comp as a row, because a map answers "where" and a list answers
@@ -207,6 +247,7 @@
 <div
   v-if="comps.length"
   class="overflow-hidden rounded-lg border border-outline-gray-2"
+  :class="fill ? 'flex min-h-[8rem] flex-1 flex-col' : ''"
 >
   <div
     class="flex items-center justify-between border-b border-outline-gray-2 bg-surface-gray-1 px-3 py-2"
@@ -218,7 +259,7 @@
       {{ __('Hover a row to find it on the map') }}
     </span>
   </div>
-  <div class="max-h-80 overflow-auto">
+  <div class="overflow-auto" :class="fill ? 'min-h-0 flex-1' : 'max-h-80'">
     <table class="w-full min-w-[560px] text-sm">
       <thead
         class="sticky top-0 z-10 bg-surface-white text-xs text-ink-gray-5 shadow-[0_1px_0_0_var(--outline-gray-2)]"
@@ -387,12 +428,319 @@ const props = defineProps({
   // Only the full page offers underwriting; it needs the room, and the action
   // belongs where the comps are actually chosen.
   pageMode: { type: Boolean, default: false },
+  // Size to the container rather than to the content (the lead desk), folding
+  // the filter card behind a toggle and letting map + list share the height.
+  fill: { type: Boolean, default: false },
+  // Offer the neighbourhood layer (groundwork-geo). Opt-in for the same reason
+  // `fill` is: the comps page is a comps page.
+  neighborhood: { type: Boolean, default: false },
 })
 // This used to be a modal driven by `defineModel()`. It is now a full page, so
 // "open" is simply always true -- which keeps every existing `show.value` guard,
 // watcher and keyboard-shortcut gate working exactly as before.
-const emit = defineEmits(['subject'])
+const emit = defineEmits(['subject', 'picked'])
 const show = ref(true)
+
+// Only consulted in `fill` mode. Starts closed: the preset ladder has already
+// chosen a sensible filter set by the time anyone looks, and the desk exists to
+// remove decisions from a live call rather than present them.
+const filtersOpen = ref(false)
+
+// --- neighbourhood layer -------------------------------------------------
+// Drawn on a CANVAS renderer, not as markers. A warmed two-mile radius is
+// ~1,800 points here and 17,287 in Indianapolis; one DOM node each is the same
+// mistake the kanban made with per-field components, and it would land on the
+// map a rep is dragging mid-call.
+const hoodOn = ref(false)
+const hoodLoading = ref(false)
+const hood = ref(null)
+let hoodLayer = null
+let hoodRenderer = null
+let hoodZoomHandler = null
+
+// --- lot lines ------------------------------------------------------------
+// Parcels ride WITH the neighbourhood layer rather than getting a toggle of
+// their own: they answer the same question ("what is around this house") one
+// zoom level further in, and a second switch to find would be a decision the
+// desk exists to remove.
+//
+// PARCEL_ZOOM is where a city lot stops being a smudge. At z15 a 12m frontage
+// is ~5px; at 16 it is ~10px and the shape starts to mean something. Below it
+// nothing is fetched at all -- a request whose result cannot be read is just
+// latency and load on a service that is scraping for it.
+const PARCEL_ZOOM = 16
+let parcelLayer = null
+let parcelMoveHandler = null
+let parcelTimer = null
+let parcelKey = ''
+
+const hoodLabel = computed(() => {
+  if (!hoodOn.value) return __('Nearby')
+  const d = hood.value
+  if (!d?.features) return __('Nearby')
+  // Counted from the points we can actually DRAW, not from the payload length.
+  // Same rule as `truncated` below: the label describes what is on screen, and a
+  // number that survives a shape change the renderer cannot handle is how an
+  // empty map ends up claiming 5,000 homes.
+  const drawn = hoodPoints(d).length
+  return d.truncated && d.in_view
+    ? __('Nearby ({0} of {1})', [drawn, d.in_view])
+    : __('Nearby ({0})', [drawn])
+})
+
+function hoodMoney(n) {
+  const v = Number(n) || 0
+  return v ? `$${Math.round(v).toLocaleString('en-US')}` : ''
+}
+
+/**
+ * Normalise a neighbourhood payload into points, WHICHEVER SHAPE IT ARRIVES IN.
+ *
+ * `get_neighborhood` used to pass the geo service's raw GeoJSON straight through
+ * (`{geometry:{coordinates:[lng,lat]}, properties:{...}}`) and now returns flat
+ * trimmed rows (`{lat, lng, price, ...}`). Both exist in the wild at once: the
+ * frontend and the backend deploy separately, so for the length of any deploy
+ * window the browser is talking to the OTHER version.
+ *
+ * That is not hypothetical. Verified against production mid-work: 5,000 GeoJSON
+ * features arrived, every one was skipped for having no `lat`, and the layer
+ * drew an EMPTY CANVAS while the button cheerfully read "Nearby (5000)" -- the
+ * worst kind of failure, one that reports success.
+ */
+function hoodPoints(payload) {
+  const out = []
+  for (const f of payload?.features || []) {
+    if (f == null) continue
+    if (f.lat != null && f.lng != null) {
+      out.push(f)
+      continue
+    }
+    const coords = f.geometry?.coordinates
+    if (Array.isArray(coords) && coords.length >= 2) {
+      out.push({ ...(f.properties || {}), lng: coords[0], lat: coords[1] })
+    }
+  }
+  return out
+}
+
+/**
+ * Draw (or redraw) the neighbourhood.
+ *
+ * Two states, and the difference is the whole point: a home we have a price for
+ * is filled, one we do not is a hollow ring. Most of a neighbourhood is the
+ * second kind -- 41% priced in the Indianapolis measurement -- and that IS the
+ * off-market universe, so it must not be drawn as if it were missing data.
+ *
+ * These are deliberately NOT pills. Pill grammar means "comp" everywhere else on
+ * this map, and a rep glancing down must never price off a dot that is only
+ * context.
+ */
+/**
+ * Dot size follows the zoom, and that is not cosmetic.
+ *
+ * The desk opens at whatever zoom fits the COMPS -- zoom 12 on the Chicago test
+ * lead -- and at 28m/px the warmed neighbourhood (1.3km x 1.6km) lands in a
+ * 50x50px area. Verified: all 1,500 markers were drawn correctly and the result
+ * was an indistinct smudge. Fixed dots answer "is there anything here"; dots
+ * that grow as you zoom answer "what is on this street", which is the question
+ * a rep on a call actually has.
+ */
+function hoodRadius() {
+  const z = map?.getZoom() ?? 14
+  if (z <= 12) return 1.5
+  if (z <= 14) return 3
+  if (z <= 16) return 5
+  return 7
+}
+
+function paintHood() {
+  if (!map) return
+  if (hoodLayer) {
+    map.removeLayer(hoodLayer)
+    hoodLayer = null
+  }
+  if (hoodRenderer) {
+    map.removeLayer(hoodRenderer)
+    hoodRenderer = null
+  }
+  if (hoodZoomHandler) {
+    map.off('zoomend', hoodZoomHandler)
+    hoodZoomHandler = null
+  }
+  if (parcelMoveHandler) {
+    map.off('moveend zoomend', parcelMoveHandler)
+    parcelMoveHandler = null
+  }
+  clearParcels()
+  if (!hoodOn.value || !hoodPoints(hood.value).length) return
+
+  // ORDER MATTERS. The renderer joins the map FIRST and the group is on the map
+  // BEFORE any circle goes into it: a circleMarker added to a detached group
+  // never gets a live renderer, so it is only drawn if something later happens
+  // to redraw it. Measured with the group added last: 2,416 painted pixels --
+  // about 85 of 1,500 dots -- on a map that looked plausibly empty rather than
+  // obviously broken.
+  const renderer = L.canvas({ padding: 0.3 }).addTo(map)
+  const layer = L.layerGroup().addTo(map)
+  for (const p of hoodPoints(hood.value)) {
+    if (p.lat == null || p.lng == null) continue
+    const priced = !!Number(p.price)
+    L.circleMarker([p.lat, p.lng], {
+      renderer,
+      radius: hoodRadius(),
+      weight: 1,
+      color: '#64748b',
+      opacity: priced ? 0.85 : 0.55,
+      fillColor: '#94a3b8',
+      fillOpacity: priced ? 0.85 : 0,
+    })
+      .bindPopup(
+        `<div style="font-size:12px">` +
+          `<div style="font-weight:600">${escapeHtml(p.address || __('Nearby home'))}</div>` +
+          (priced ? `<div>${hoodMoney(p.price)}</div>` : `<div style="color:#64748b">${__('no price on record')}</div>`) +
+          `<div style="color:#64748b">${[p.beds && `${p.beds} bd`, p.baths && `${p.baths} ba`, p.sqft && `${Number(p.sqft).toLocaleString('en-US')} sf`, p.year_built]
+            .filter(Boolean)
+            .join(' · ')}</div>` +
+          `<div style="color:#94a3b8;margin-top:2px">${__('Context, not a comp')}</div>` +
+          `</div>`,
+        { maxWidth: 220 },
+      )
+      .addTo(layer)
+  }
+  // The comp pills are markers (pane z-600) and this is an overlay (z-400), so
+  // the answer already sits above the context without any per-layer reordering.
+  hoodLayer = layer
+  hoodRenderer = renderer
+
+  // Resize the dots as the rep zooms. Registered once per painted layer and
+  // removed with it, so toggling the layer off leaves no handler behind.
+  const onZoom = () => layer.eachLayer((l) => l.setRadius?.(hoodRadius()))
+  map.on('zoomend', onZoom)
+  hoodZoomHandler = onZoom
+
+  // Lot lines follow the viewport once the rep is zoomed in far enough.
+  const onMove = () => scheduleParcels()
+  map.on('moveend zoomend', onMove)
+  parcelMoveHandler = onMove
+  scheduleParcels()
+}
+
+function clearParcels() {
+  if (parcelTimer) {
+    clearTimeout(parcelTimer)
+    parcelTimer = null
+  }
+  if (parcelLayer && map) map.removeLayer(parcelLayer)
+  parcelLayer = null
+  parcelKey = ''
+}
+
+/**
+ * Fetch lot lines for what is on screen, once the rep is zoomed in enough.
+ *
+ * Debounced, because `moveend` fires on every pan and each call reaches a
+ * PostGIS query behind an HTTP hop. Keyed on the rounded viewport so panning a
+ * few pixels and coming back does not re-fetch what is already drawn -- the
+ * cheapest request is the one not made.
+ */
+function scheduleParcels() {
+  if (!map || !hoodOn.value) return clearParcels()
+  if (map.getZoom() < PARCEL_ZOOM) {
+    // Deliberately silent: at this zoom a lot line is a smudge, and drawing one
+    // would suggest a precision the rep cannot see.
+    if (parcelLayer) {
+      map.removeLayer(parcelLayer)
+      parcelLayer = null
+      parcelKey = ''
+    }
+    return
+  }
+  if (parcelTimer) clearTimeout(parcelTimer)
+  parcelTimer = setTimeout(loadParcels, 400)
+}
+
+async function loadParcels() {
+  if (!map || !hoodOn.value || map.getZoom() < PARCEL_ZOOM) return
+  const b = map.getBounds()
+  const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]
+    .map((v) => v.toFixed(4))
+    .join(',')
+  if (bbox === parcelKey) return
+  parcelKey = bbox
+  try {
+    const res = await call('crm.api.geo.get_parcels', { lead: props.lead, bbox })
+    if (!res?.ok || !res.features?.length) {
+      // An empty answer means "not enriched here yet", not an error -- the
+      // service says so explicitly and the map simply shows no lot lines.
+      if (parcelLayer) map.removeLayer(parcelLayer)
+      parcelLayer = null
+      return
+    }
+    if (parcelLayer) map.removeLayer(parcelLayer)
+    parcelLayer = L.geoJSON(
+      { type: 'FeatureCollection', features: res.features },
+      {
+        // Thin, unfilled, and grey: a lot line is a boundary, not an object.
+        // Filling it would compete with the comp pills for the eye on the one
+        // screen where the pills are the answer.
+        style: { color: '#475569', weight: 1, opacity: 0.55, fill: false },
+        onEachFeature: (f, layer) => {
+          const p = f.properties || {}
+          layer.bindPopup(
+            `<div style="font-size:12px">` +
+              `<div style="font-weight:600">${escapeHtml(p.address || __('Parcel'))}</div>` +
+              (p.apn ? `<div style="color:#64748b">APN ${escapeHtml(p.apn)}</div>` : '') +
+              `<div style="color:#94a3b8;margin-top:2px">${__('Lot line · context, not a comp')}</div>` +
+              `</div>`,
+            { maxWidth: 220 },
+          )
+        },
+      },
+    ).addTo(map)
+    parcelLayer.bringToBack()
+  } catch (e) {
+    // Never toast: lot lines are the least important thing on this screen and a
+    // rep mid-call does not need to be told a background layer is unavailable.
+    console.error(e)
+  }
+}
+
+async function loadHood() {
+  if (!props.lead) return
+  hoodLoading.value = true
+  try {
+    const bounds = map?.getBounds()
+    const res = await call('crm.api.geo.get_neighborhood', {
+      lead: props.lead,
+      ...(bounds && {
+        bbox: [
+          bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth(),
+        ].join(','),
+      }),
+    })
+    hood.value = res || null
+    if (res && !res.ok) {
+      // Say why rather than showing an empty map: "not configured" and "this
+      // lead has no coordinates" are different problems with different fixes.
+      toast.error(res.reason || __('Nearby homes are unavailable'))
+      hoodOn.value = false
+    }
+    paintHood()
+  } catch (e) {
+    console.error(e)
+    toast.error(__('Nearby homes are unavailable'))
+    hoodOn.value = false
+  } finally {
+    hoodLoading.value = false
+  }
+}
+
+function toggleHood(force) {
+  hoodOn.value = typeof force === 'boolean' ? force : !hoodOn.value
+  if (!hoodOn.value) return paintHood()
+  if (hoodPoints(hood.value).length) return paintHood()
+  loadHood()
+}
 
 // Canvas/marker colours live in JS because Leaflet can't read Tailwind tokens.
 // Blue/amber rather than red/green: safe for dichromats.
@@ -1156,6 +1504,10 @@ function render() {
     }).addTo(map)
   }
 
+  // Repaint the neighbourhood whenever the map is rebuilt (a reload, a radius
+  // change), or the layer would silently vanish while its button still reads on.
+  if (hoodOn.value) nextTick(paintHood)
+
   for (const c of comps.value) {
     if (c.lat == null || c.lng == null) continue
     // Fresher pills stack above faded ones where markers overlap, so the comp
@@ -1354,6 +1706,16 @@ const MAX_SHEET_COMPS = 4
 const creatingSheet = ref(false)
 const selectedNames = computed(() => comps.value.filter((c) => c.selected).map((c) => c.name))
 
+// Hand the chosen comps to whoever is hosting us, so a host rail can price off
+// exactly what the rep ticked. Selection already persists team-wide on the lead;
+// this just avoids the host re-deriving it and the two disagreeing about which
+// comps produced a number somebody said out loud on a call.
+watch(
+  () => comps.value.filter((c) => c.selected),
+  (picked) => emit('picked', picked),
+  { deep: true, immediate: true },
+)
+
 const underwritingLabel = computed(() => {
   const n = selectedNames.value.length
   if (!n) return __('Select comps to underwrite')
@@ -1464,6 +1826,8 @@ useKeyboardShortcuts({
   skipWhenDialogOpen: false,
   shortcuts: [
     { keys: ['d', 'D'], action: () => (showDetail.value = !showDetail.value) },
+    // Only where the layer is offered, so `n` stays free on the comps page.
+    { keys: ['n', 'N'], action: () => props.neighborhood && toggleHood() },
     {
       keys: ['h', 'H'],
       action: () => focusedComp.value && setCompState(focusedComp.value, 'hidden'),

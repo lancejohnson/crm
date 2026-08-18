@@ -1283,6 +1283,14 @@
   resolved "https://registry.yarnpkg.com/@oxc-project/types/-/types-0.139.0.tgz#38d76b9dbf934c2a02be174fb32ceebf182fe742"
   integrity sha512-r9gHphtCs+1M7J0pw6Sn/hh/Wpa/iQrOOkrNAlVLF/gHq+/CJmHIWKKUUhdWjcD6CIa8idarspCsASiXCXvFUw==
 
+"@peermetrics/webrtc-stats@^5.7.1":
+  version "5.9.0"
+  resolved "https://registry.yarnpkg.com/@peermetrics/webrtc-stats/-/webrtc-stats-5.9.0.tgz#cb6a2f32e2bc4d5abe0977f3635ecd83ed09e7ad"
+  integrity sha512-eQYGGdj+H4MUEuwbccy9bxRV3uAqPM5+Say9PSx/alrtv5ccmKCqGfLbqXrRJ/qThZvjZNBna5K/YnCWoaTQBw==
+  dependencies:
+    events "^3.3.0"
+    uuid "^8.3.2"
+
 "@popperjs/core@^2.11.2", "@popperjs/core@^2.9.0":
   version "2.11.8"
   resolved "https://registry.yarnpkg.com/@popperjs/core/-/core-2.11.8.tgz#6b79032e760a0899cd4204710beede972a3a185f"
@@ -1609,6 +1617,15 @@
   integrity sha512-b5jPluAR6U3eOq6GWAYSpj3ugnAIZgGR0e6aGAgyRse0Yu6MVQQ0ZWm9SArSXWtageogn6bkVD8D//c4IjW3xQ==
   dependencies:
     "@tanstack/virtual-core" "3.13.23"
+
+"@telnyx/webrtc@^2.27.9":
+  version "2.27.9"
+  resolved "https://registry.yarnpkg.com/@telnyx/webrtc/-/webrtc-2.27.9.tgz#3a06e06d4f154b527279f0ff9e3b739456800db8"
+  integrity sha512-4ZUY6K7tWdKewrUTFiajFQicmPIriSq2tkHmL0xHFhzRAKAD/sHD8hizHbOmGKFUQYLHXItzSmxVF844undgWQ==
+  dependencies:
+    "@peermetrics/webrtc-stats" "^5.7.1"
+    loglevel "^1.6.8"
+    uuid "^7.0.3"
 
 "@tiptap/core@^2.26.1", "@tiptap/core@^2.27.2":
   version "2.27.2"
@@ -3102,7 +3119,7 @@ eta@^4.5.1:
   resolved "https://registry.yarnpkg.com/eta/-/eta-4.6.0.tgz#9bf9adb6d5833f3359c7ead1d57109e6064b9430"
   integrity sha512-lW6is4T1NFOYnmqGZIfvixqj7A7sSvScF+DN8EK6K58xI5MZ5UvYe0GjopxOXQtZvUn4eDdVuZ8XSoYWTMEKwA==
 
-events@3.3.0:
+events@3.3.0, events@^3.3.0:
   version "3.3.0"
   resolved "https://registry.yarnpkg.com/events/-/events-3.3.0.tgz#31a95ad0a924e2d2c419a813aeb2c4e878ea7400"
   integrity sha512-mQw+2fkQbALzQ7V0MY0IqdnXNOeTtP4r0lN9z7AAawCXgqea7bDii20AYrIBrFd/Hx0M2Ocz6S111CaFkUcb0Q==
@@ -4009,7 +4026,7 @@ log-symbols@^4.1.0:
     chalk "^4.1.0"
     is-unicode-supported "^0.1.0"
 
-loglevel@1.9.2:
+loglevel@1.9.2, loglevel@^1.6.8:
   version "1.9.2"
   resolved "https://registry.yarnpkg.com/loglevel/-/loglevel-1.9.2.tgz#c2e028d6c757720107df4e64508530db6621ba08"
   integrity sha512-HgMmCqIJSAKqo68l0rS2AanEWfkxaZ5wNiEFb5ggm08lDs9Xl2KxBlX3PTcaD2chBM1gXAYf491/M2Rv8Jwayg==
@@ -5560,6 +5577,16 @@ util-deprecate@^1.0.1, util-deprecate@^1.0.2:
   version "1.0.2"
   resolved "https://registry.yarnpkg.com/util-deprecate/-/util-deprecate-1.0.2.tgz#450d4dc9fa70de732762fbd2d4a28981419a0ccf"
   integrity sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw==
+
+uuid@^7.0.3:
+  version "7.0.3"
+  resolved "https://registry.yarnpkg.com/uuid/-/uuid-7.0.3.tgz#c5c9f2c8cf25dc0a372c4df1441c41f5bd0c680b"
+  integrity sha512-DPSke0pXhTZgoF/d+WSt2QaKMCFSfx7QegxEWT+JOuHF5aWrKEn0G+ztjuJg/gG8/ItK+rbPCD/yNv8yyih6Cg==
+
+uuid@^8.3.2:
+  version "8.3.2"
+  resolved "https://registry.yarnpkg.com/uuid/-/uuid-8.3.2.tgz#80d5b5ced271bb9af6c445f21a1a04c606cefbe2"
+  integrity sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==
 
 vite-plugin-pwa@^1.3.0:
   version "1.3.0"

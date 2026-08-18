@@ -319,6 +319,17 @@ export default defineConfig(async ({ mode }) => {
       },
     },
     optimizeDeps: {
+      // TOASTS DO NOT RENDER IN DEV WITHOUT THIS, and nothing says so.
+      // `frappe-ui`'s toast state is module-level in Toast/index.ts. Pre-bundled,
+      // esbuild inlines that module into .vite/deps/frappe-ui.js, while
+      // FrappeUIProvider.vue -- a .vue file, so always served RAW -- imports
+      // ../Toast/index directly. Two module instances, two separate arrays: our
+      // `toast.success()` pushes to one and the mounted <Toasts> renders the
+      // other, so every toast in the app silently goes nowhere under `yarn dev`.
+      // The Rollup build resolves a single copy, so production was always fine
+      // -- which is the dangerous part: UI verification happens on THIS server,
+      // and an error toast that cannot appear reads as "no error".
+      exclude: ['frappe-ui'],
       include: [
         'feather-icons',
         'tailwind.config.js',

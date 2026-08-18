@@ -43,6 +43,7 @@ import requests
 from frappe import _
 from frappe.utils import get_datetime, getdate, now_datetime
 
+from crm.api import telephony
 from crm.api.daily_standup import DEFAULT_MM_BASE, is_business_day
 
 DOCTYPE = "CRM Today Item"
@@ -250,17 +251,10 @@ def _delta_cards(day, since, until, stamp_field, users):
 
 def _number_users(users):
 	"""Quo number -> user, the same map `activity_progress` builds."""
-	rows = frappe.get_all(
-		"User",
-		filters={"enabled": 1},
-		fields=["name", "custom_quo_number"],
-		limit_page_length=500,
-	)
-	return {
-		row.custom_quo_number.strip(): row.name
-		for row in rows
-		if row.custom_quo_number and (not users or row.name in users)
-	}
+	# One mapping for every provider, shared with the Team Activity report and the
+	# SMS sender attribution -- so the pulse cannot disagree with the report about
+	# whose call it was, and neither goes blind when a rep's line is on Telnyx.
+	return telephony.line_owners(users=users)
 
 
 def _calls(day, since, until, users):
@@ -285,7 +279,11 @@ def _calls(day, since, until, users):
 	connected = 0
 	for row in rows:
 		workspace_number = row.get("from") if row.type == "Outgoing" else row.get("to")
-		user = row.get("caller") or row.get("receiver") or number_users.get(workspace_number)
+		user = (
+			row.get("caller")
+			or row.get("receiver")
+			or number_users.get(telephony.last10(workspace_number))
+		)
 		if users and user not in users:
 			continue
 		duration = int(row.duration or 0)

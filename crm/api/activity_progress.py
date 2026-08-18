@@ -25,6 +25,8 @@ import requests
 from frappe import _
 from frappe.utils import convert_utc_to_system_timezone, getdate, now_datetime
 
+from crm.api import telephony
+
 ACTIVITY_PROGRESS_USER = "lance.johnson@groundworkpro.com"
 GOALS_DEFAULT_KEY = "crm_activity_progress_goals"
 GOAL_KEYS = ("calls", "texts", "tasks", "cards")
@@ -82,9 +84,13 @@ def _toggl_user_ids():
 
 
 def _digits(value):
-	"""Last 10 digits — the house phone-matching rule."""
-	raw = "".join(ch for ch in str(value or "") if ch.isdigit())
-	return raw[-10:] if len(raw) >= 10 else ""
+	"""Last 10 digits — the house phone-matching rule.
+
+	Kept as a name local to this module, but the rule now lives in one place
+	(`telephony.last10`) because there were NINE copies of it in this app and they
+	did not agree.
+	"""
+	return telephony.last10(value)
 
 
 def _workspace_lines():
@@ -116,13 +122,14 @@ def _workspace_lines():
 		except Exception:
 			frappe.log_error(title="Quo line list failed", message=frappe.get_traceback())
 
+	# Union with every line we have CONFIGURED, across providers. The live call
+	# above asks Quo, and Quo does not know about a Telnyx line -- so during
+	# parallel running a rep-to-rep call over Telnyx would be counted as outreach
+	# to a stranger. Configured lines are also the whole answer when Quo is
+	# unreachable, which is what this used to fall back to on its own.
+	lines |= telephony.our_numbers()
+
 	if not lines:
-		for number in frappe.get_all(
-			"User", filters={"custom_quo_number": ["is", "set"]}, pluck="custom_quo_number"
-		):
-			number = _digits(number)
-			if number:
-				lines.add(number)
 		return lines
 
 	frappe.cache().set_value("crm_quo_lines", json.dumps(sorted(lines)), expires_in_sec=QUO_LINES_TTL)
@@ -288,7 +295,7 @@ def _call_events(people, number_users, start, end):
 	for row in rows:
 		incoming = row.type == "Incoming"
 		workspace_number = row.get("to") if incoming else row.get("from")
-		user = row.get("caller") or row.get("receiver") or number_users.get(workspace_number)
+		user = row.get("caller") or row.get("receiver") or number_users.get(_digits(workspace_number))
 		external = _digits(row.get("from") if incoming else row.get("to"))
 
 		if external and external in lines:
@@ -424,7 +431,7 @@ def get_activity_progress(for_date=None):
 	users = _crm_users()
 	goals = _load_goals({u.name for u in users})
 
-	people, number_users = {}, {}
+	people = {}
 	for user in users:
 		people[user.name] = {
 			"user": user.name,
@@ -441,8 +448,13 @@ def get_activity_progress(for_date=None):
 			"events": [],
 			"toggl": {"seconds": 0, "bands": [], "running": False},
 		}
-		if user.custom_quo_number:
-			number_users[user.custom_quo_number.strip()] = user.name
+	# Line -> user for every provider, keyed on last-10. This USED to be an exact
+	# string match against `custom_quo_number`, which meant a line stored as
+	# "+16125551234" silently failed to match a call log carrying "6125551234".
+	# It happens to agree today (verified on prod: 0 of 2,896 calls over 30 days
+	# change attribution) because both sides are E.164 — but that was luck, not
+	# design, and Telnyx will not necessarily store numbers the same way Quo does.
+	number_users = telephony.line_owners()
 
 	unattributed = defaultdict(int)
 	unattributed["calls"] = _call_events(people, number_users, start, end)
