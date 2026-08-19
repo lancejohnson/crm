@@ -398,6 +398,14 @@ duplicating. Work substantial features in a worktree of your own.
     measured **186px** wide vs **113px** two-line, the difference between readable
     and a wall of overlap. **`D` toggles the facts off** (54px price-only pill),
     persisted per user in `localStorage['compsPillDetail']`.
+  - **Parcels are their own toggle** (`P` / a checkbox next to Details), not a
+    side-effect of Nearby. Nearby is every home around the subject; lot lines are
+    where each lot ends — a rep zoomed in to judge a comp should not also have to
+    turn on 1,800 context dots. Off by default, fetched only when flipped on,
+    and only above zoom 16 (below that a city lot is a smudge). Persisted in
+    `localStorage['compsShowParcels']`. Uses `crm.api.geo.get_parcels` (bbox, the
+    same endpoint the desk already had). A fetch that loses a race with toggle-off
+    or a map rebuild does not redraw.
     - **Year rides on the TOP line beside the price** — a width decision, not a
       cosmetic one. A pill is as wide as its widest line and the facts line was
       it; moving the four year digits up beside the short price shortens the line

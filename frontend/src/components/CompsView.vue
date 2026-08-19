@@ -58,6 +58,18 @@
               {{ __('Details') }}
             </label>
 
+            <!-- Lot lines are their own layer, not a side-effect of Nearby.
+                 Nearby is every home around this one; parcels are where each
+                 lot ends. A rep zoomed in to judge a comp should not also have
+                 to turn on 1,800 context dots. Same checkbox idiom as Details. -->
+            <label
+              class="flex cursor-pointer select-none items-center gap-1.5 whitespace-nowrap text-sm text-ink-gray-7"
+              :title="__('Show lot lines when zoomed in') + ' (P)'"
+            >
+              <FormControl type="checkbox" size="sm" v-model="showParcels" />
+              {{ __('Parcels') }}
+            </label>
+
             <!-- In `fill` mode ONLY, the filter card folds away behind this.
                  Filters are deliberately always visible on the comps page (they
                  are the point of the tool, and a rep should not have to find a
@@ -376,8 +388,8 @@
           </span>
           <span class="text-ink-gray-4">
             {{ __('Click a pin to use or hide it') }} ·
-            <b>D</b> {{ __('details') }} · <b>U</b> {{ __('use') }} ·
-            <b>H</b> {{ __('hide') }}
+            <b>D</b> {{ __('details') }} · <b>P</b> {{ __('parcels') }} ·
+            <b>U</b> {{ __('use') }} · <b>H</b> {{ __('hide') }}
           </span>
         </div>
   </div>
@@ -460,16 +472,25 @@ let hoodRenderer = null
 let hoodZoomHandler = null
 
 // --- lot lines ------------------------------------------------------------
-// Parcels ride WITH the neighbourhood layer rather than getting a toggle of
-// their own: they answer the same question ("what is around this house") one
-// zoom level further in, and a second switch to find would be a decision the
-// desk exists to remove.
+// Own toggle, not tied to Nearby. Nearby is "every home around this one";
+// lot lines are "where does this lot end". They answer different questions,
+// and a second switch is the point — Lance asked for one.
 //
 // PARCEL_ZOOM is where a city lot stops being a smudge. At z15 a 12m frontage
 // is ~5px; at 16 it is ~10px and the shape starts to mean something. Below it
 // nothing is fetched at all -- a request whose result cannot be read is just
 // latency and load on a service that is scraping for it.
+//
+// OFF by default and loaded only when flipped on -- same rule as Nearby. A
+// dense viewport is hundreds of polygons nobody should pay for on open.
+// Persisted so turning it on once is enough for the next lead.
 const PARCEL_ZOOM = 16
+const showParcels = ref(localStorage.getItem('compsShowParcels') === '1')
+watch(showParcels, (v) => {
+  localStorage.setItem('compsShowParcels', v ? '1' : '0')
+  if (v) bindParcels()
+  else unbindParcels()
+})
 let parcelLayer = null
 let parcelMoveHandler = null
 let parcelTimer = null
@@ -568,11 +589,6 @@ function paintHood() {
     map.off('zoomend', hoodZoomHandler)
     hoodZoomHandler = null
   }
-  if (parcelMoveHandler) {
-    map.off('moveend zoomend', parcelMoveHandler)
-    parcelMoveHandler = null
-  }
-  clearParcels()
   if (!hoodOn.value || !hoodPoints(hood.value).length) return
 
   // ORDER MATTERS. The renderer joins the map FIRST and the group is on the map
@@ -618,22 +634,29 @@ function paintHood() {
   const onZoom = () => layer.eachLayer((l) => l.setRadius?.(hoodRadius()))
   map.on('zoomend', onZoom)
   hoodZoomHandler = onZoom
-
-  // Lot lines follow the viewport once the rep is zoomed in far enough.
-  const onMove = () => scheduleParcels()
-  map.on('moveend zoomend', onMove)
-  parcelMoveHandler = onMove
-  scheduleParcels()
 }
 
-function clearParcels() {
+function unbindParcels() {
   if (parcelTimer) {
     clearTimeout(parcelTimer)
     parcelTimer = null
   }
+  if (parcelMoveHandler && map) {
+    map.off('moveend zoomend', parcelMoveHandler)
+  }
+  parcelMoveHandler = null
   if (parcelLayer && map) map.removeLayer(parcelLayer)
   parcelLayer = null
   parcelKey = ''
+}
+
+function bindParcels() {
+  if (!map || !showParcels.value) return unbindParcels()
+  if (!parcelMoveHandler) {
+    parcelMoveHandler = () => scheduleParcels()
+    map.on('moveend zoomend', parcelMoveHandler)
+  }
+  scheduleParcels()
 }
 
 /**
@@ -645,7 +668,7 @@ function clearParcels() {
  * cheapest request is the one not made.
  */
 function scheduleParcels() {
-  if (!map || !hoodOn.value) return clearParcels()
+  if (!map || !showParcels.value) return unbindParcels()
   if (map.getZoom() < PARCEL_ZOOM) {
     // Deliberately silent: at this zoom a lot line is a smudge, and drawing one
     // would suggest a precision the rep cannot see.
@@ -661,7 +684,7 @@ function scheduleParcels() {
 }
 
 async function loadParcels() {
-  if (!map || !hoodOn.value || map.getZoom() < PARCEL_ZOOM) return
+  if (!map || !showParcels.value || map.getZoom() < PARCEL_ZOOM) return
   const b = map.getBounds()
   const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]
     .map((v) => v.toFixed(4))
@@ -670,6 +693,8 @@ async function loadParcels() {
   parcelKey = bbox
   try {
     const res = await call('crm.api.geo.get_parcels', { lead: props.lead, bbox })
+    // The toggle or a map rebuild can land while this is in flight.
+    if (!map || !showParcels.value) return
     if (!res?.ok || !res.features?.length) {
       // An empty answer means "not enriched here yet", not an error -- the
       // service says so explicitly and the map simply shows no lot lines.
@@ -1458,6 +1483,7 @@ function popupHtml(c) {
 function render() {
   if (!mapEl.value) return
   if (map) {
+    unbindParcels()
     map.remove()
     map = null
   }
@@ -1516,6 +1542,7 @@ function render() {
   // Repaint the neighbourhood whenever the map is rebuilt (a reload, a radius
   // change), or the layer would silently vanish while its button still reads on.
   if (hoodOn.value) nextTick(paintHood)
+  if (showParcels.value) nextTick(bindParcels)
 
   for (const c of comps.value) {
     if (c.lat == null || c.lng == null) continue
@@ -1826,6 +1853,7 @@ watch(show, (v) => {
     userTouched.value = false
     nextTick(() => load({ explicit: false }))
   } else if (map) {
+    unbindParcels()
     map.remove()
     map = null
   }
@@ -1844,6 +1872,7 @@ useKeyboardShortcuts({
   skipWhenDialogOpen: false,
   shortcuts: [
     { keys: ['d', 'D'], action: () => (showDetail.value = !showDetail.value) },
+    { keys: ['p', 'P'], action: () => (showParcels.value = !showParcels.value) },
     // Only where the layer is offered, so `n` stays free on the comps page.
     { keys: ['n', 'N'], action: () => props.neighborhood && toggleHood() },
     {
@@ -1865,6 +1894,7 @@ onBeforeUnmount(() => {
   sizeObserver?.disconnect()
   sizeObserver = null
   if (map) {
+    unbindParcels()
     map.remove()
     map = null
   }
