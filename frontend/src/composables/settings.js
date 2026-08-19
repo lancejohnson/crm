@@ -53,6 +53,28 @@ export const mobileSidebarOpened = ref(false)
 // AppSidebar and a toggle in the AppHeader drive the same persisted value.
 export const isSidebarCollapsed = useStorage('isSidebarCollapsed', false)
 
+// A page can ask for the nav to be out of the way without rewriting the user's
+// own preference. Deliberately NOT persisted: the comps map opens in its own
+// tab, and closing that tab must not leave every other CRM tab collapsed --
+// which is exactly what writing `isSidebarCollapsed` on mount would do.
+// `null` means "no opinion", so the stored preference decides.
+export const sidebarCollapsedOverride = ref(null)
+
+/**
+ * What the sidebar should actually do right now.
+ *
+ * Reading prefers a page's override; WRITING is always a deliberate human act,
+ * so it drops the override and updates the real preference -- otherwise hitting
+ * Expand on a page that asked for collapsed would appear to do nothing.
+ */
+export const sidebarCollapsed = computed({
+  get: () => sidebarCollapsedOverride.value ?? isSidebarCollapsed.value,
+  set: (v) => {
+    sidebarCollapsedOverride.value = null
+    isSidebarCollapsed.value = v
+  },
+})
+
 // The detail-panel Resizer mounted on the current record page registers a
 // { toggle } here so a global shortcut (]) can collapse/expand whichever panel
 // is on screen, regardless of which side it's on. Null on pages without one.

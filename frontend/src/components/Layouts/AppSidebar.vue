@@ -1,10 +1,10 @@
 <template>
   <div
     class="relative flex h-full flex-col justify-between transition-all duration-300 ease-in-out"
-    :class="isSidebarCollapsed ? 'w-12' : 'w-[220px]'"
+    :class="sidebarCollapsed ? 'w-12' : 'w-[220px]'"
   >
     <div class="p-2">
-      <UserDropdown :isCollapsed="isSidebarCollapsed" />
+      <UserDropdown :isCollapsed="sidebarCollapsed" />
     </div>
     <div class="flex-1 overflow-y-auto">
       <div class="flex flex-col">
@@ -12,13 +12,13 @@
           id="notifications-btn"
           :label="__('Notifications')"
           :icon="NotificationsIcon"
-          :isCollapsed="isSidebarCollapsed"
+          :isCollapsed="sidebarCollapsed"
           class="relative mx-2 my-[1.5px]"
           @click="() => toggleNotificationPanel()"
         >
           <template #right>
             <Badge
-              v-if="!isSidebarCollapsed && unreadNotificationsCount"
+              v-if="!sidebarCollapsed && unreadNotificationsCount"
               :label="unreadNotificationsCount"
               variant="subtle"
             />
@@ -41,7 +41,7 @@
               v-if="!hide"
               class="flex items-center cursor-pointer gap-1.5 text-base text-ink-gray-5 transition-all duration-300 ease-in-out"
               :class="
-                isSidebarCollapsed
+                sidebarCollapsed
                   ? 'h-0 overflow-hidden opacity-0'
                   : 'px-4 pt-[11px] pb-2.5 w-auto opacity-100'
               "
@@ -62,7 +62,7 @@
               :icon="link.icon"
               :label="__(link.label)"
               :to="link.to"
-              :isCollapsed="isSidebarCollapsed"
+              :isCollapsed="sidebarCollapsed"
               class="mx-2 my-[1.5px]"
             />
           </nav>
@@ -73,24 +73,24 @@
       <div class="flex flex-col gap-2 mb-1">
         <SignupBanner
           v-if="isDemoSite"
-          :isSidebarCollapsed="isSidebarCollapsed"
+          :isSidebarCollapsed="sidebarCollapsed"
           :afterSignup="() => capture('signup_from_demo_site')"
         />
         <TrialBanner
           v-if="isFCSite"
-          :isSidebarCollapsed="isSidebarCollapsed"
+          :isSidebarCollapsed="sidebarCollapsed"
           :afterUpgrade="() => capture('upgrade_plan_from_trial_banner')"
         />
         <GettingStartedBanner
           v-if="!isOnboardingStepsCompleted"
-          :isSidebarCollapsed="isSidebarCollapsed"
+          :isSidebarCollapsed="sidebarCollapsed"
         />
       </div>
       <SidebarLink
         v-if="isManager() && isDemoDataCreated"
         class="text-ink-red-3 hover:bg-surface-red-2 focus:bg-surface-red-2"
         :label="__('Clear Demo Data')"
-        :isCollapsed="isSidebarCollapsed"
+        :isCollapsed="sidebarCollapsed"
         @click="() => clearDemoData()"
       >
         <template #icon>
@@ -100,7 +100,7 @@
       <SidebarLink
         v-if="user === ACTIVITY_PROGRESS_USER"
         :label="__('Team activity')"
-        :isCollapsed="isSidebarCollapsed"
+        :isCollapsed="sidebarCollapsed"
         @click="showActivityProgress = true"
       >
         <template #icon>
@@ -110,7 +110,7 @@
       <SidebarLink
         v-if="isOnboardingStepsCompleted"
         :label="__('Help')"
-        :isCollapsed="isSidebarCollapsed"
+        :isCollapsed="sidebarCollapsed"
         @click="
           () => {
             showHelpModal = minimize ? true : !showHelpModal
@@ -123,16 +123,16 @@
         </template>
       </SidebarLink>
       <SidebarLink
-        :label="isSidebarCollapsed ? __('Expand') : __('Collapse')"
-        :isCollapsed="isSidebarCollapsed"
+        :label="sidebarCollapsed ? __('Expand') : __('Collapse')"
+        :isCollapsed="sidebarCollapsed"
         class=""
-        @click="isSidebarCollapsed = !isSidebarCollapsed"
+        @click="sidebarCollapsed = !sidebarCollapsed"
       >
         <template #icon>
           <span class="grid h-4 w-4 flex-shrink-0 place-items-center">
             <CollapseSidebar
               class="h-4 w-4 text-ink-gray-7 duration-300 ease-in-out"
-              :class="{ '[transform:rotateY(180deg)]': isSidebarCollapsed }"
+              :class="{ '[transform:rotateY(180deg)]': sidebarCollapsed }"
             />
           </span>
         </template>
@@ -198,7 +198,7 @@ import { sessionStore } from '@/stores/session'
 import {
   showSettings,
   activeSettingsPage,
-  isSidebarCollapsed,
+  sidebarCollapsed,
 } from '@/composables/settings'
 import { showChangePasswordModal } from '@/composables/modals'
 import { useBroadcast } from '@/composables/useBroadcast.js'

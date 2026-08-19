@@ -6,14 +6,16 @@
        is a fragment and Vue does NOT inherit a `class` from its host. The height
        has to be decided here, from the props, or the map/tray split has no bound
        to scroll inside and grows to ~8,000px. -->
-  <div ref="rootEl" class="flex flex-col gap-3" :class="fillHeight && wide ? 'min-h-0 flex-1' : ''">
-  <!-- Address + counts -->
-  <div class="flex flex-wrap items-center justify-between gap-2">
-    <div class="min-w-0">
-      <div class="truncate text-sm font-medium text-ink-gray-8">
+  <div ref="rootEl" class="flex flex-col gap-2" :class="fillHeight && wide ? 'min-h-0 flex-1' : ''">
+  <!-- Address and counts share ONE line with the controls. They used to be
+       stacked, which cost a whole row of height at the top of a page whose
+       entire job is to show a map. -->
+  <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+    <div class="flex min-w-0 flex-1 items-baseline gap-2">
+      <span class="shrink-0 truncate text-sm font-medium text-ink-gray-8">
         {{ data?.address || address || __('This property') }}
-      </div>
-      <div class="mt-0.5 text-xs text-ink-gray-5">
+      </span>
+      <span class="truncate text-xs text-ink-gray-5">
         <template v-if="loading">{{ __('Finding comps…') }}</template>
         <template v-else-if="comps.length">
           {{ __('{0} comps', [data?.total_matched ?? comps.length]) }}
@@ -33,13 +35,13 @@
           <template v-if="zillowLine"> · {{ zillowLine }}</template>
               </template>
               <template v-else>{{ emptyMessage }}</template>
-            </div>
+            </span>
           </div>
           <!-- Wraps: at 390px this row holds the underwrite button, two
                checkboxes, Filters, radius and refresh, and without wrapping the
                Filters toggle simply sat off the right edge of the screen -- on
                the one width where it is the only way to reach the filters. -->
-          <div class="flex flex-wrap items-center gap-2">
+          <div class="flex flex-wrap items-center gap-1.5">
             <!-- Underwriting from the comps you picked. Enabled only once something is
      selected, and the label carries the count so "up to 4" is visible
      before the click rather than as an error after it. -->
@@ -49,6 +51,7 @@
   :variant="selectedNames.length ? 'solid' : 'subtle'"
   :disabled="!selectedNames.length || creatingSheet"
   :loading="creatingSheet"
+  :title="underwritingTitle"
   iconLeft="grid"
   @click="createUnderwriting"
 />
@@ -137,9 +140,9 @@
              the map gets the height back. -->
         <div
           v-show="!filtersCollapsible || filtersOpen"
-          class="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-outline-gray-2 bg-surface-gray-1 px-2.5 py-1.5"
+          class="flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg border border-outline-gray-2 bg-surface-gray-1 px-2 py-1"
         >
-          <div class="flex min-w-0 items-center gap-1.5">
+          <div class="flex min-w-0 items-center gap-1">
             <span class="shrink-0 text-2xs font-medium text-ink-gray-5">{{ __('Status') }}</span>
             <FormControl
               type="select"
@@ -149,14 +152,14 @@
             />
           </div>
           <div
-            class="flex min-w-0 items-center gap-1.5"
+            class="flex min-w-0 items-center gap-1"
             :title="
               __(
                 '“Sold within” applies to off-market comps only — an active listing stays on the map however long it has been listed.',
               )
             "
           >
-            <span class="shrink-0 text-2xs font-medium text-ink-gray-5">{{ __('Sold within') }}</span>
+            <span class="shrink-0 text-2xs font-medium text-ink-gray-5">{{ __('Sold') }}</span>
             <FormControl
               type="select"
               size="sm"
@@ -165,10 +168,10 @@
             />
           </div>
 
-          <div v-for="r in rangeRows" :key="r.key" class="flex min-w-0 items-center gap-1.5">
+          <div v-for="r in rangeRows" :key="r.key" class="flex min-w-0 items-center gap-1">
             <span class="shrink-0 text-2xs font-medium text-ink-gray-5">{{ r.label }}</span>
             <FormControl
-              class="w-14"
+              class="w-12"
               type="number"
               size="sm"
               :step="r.step"
@@ -177,7 +180,7 @@
             />
             <span class="text-ink-gray-4">–</span>
             <FormControl
-              class="w-14"
+              class="w-12"
               type="number"
               size="sm"
               :step="r.step"
@@ -186,7 +189,7 @@
             />
           </div>
 
-          <div class="flex min-w-0 items-center gap-1.5">
+          <div class="flex min-w-0 items-center gap-1">
             <span class="shrink-0 text-2xs font-medium text-ink-gray-5">{{ __('Type') }}</span>
             <FormControl
               type="select"
@@ -196,7 +199,7 @@
             />
           </div>
 
-          <div class="ml-auto flex items-center gap-1">
+          <div class="flex items-center gap-1">
             <Button
               v-if="activeFilterCount"
               :label="__('Reset to suggested')"
@@ -302,6 +305,7 @@
                 v-for="c in comps"
                 :key="c.name"
                 :comp="c"
+                :subject="data?.subject || null"
                 :active="hoveredComp === c.name"
                 :ref="(el) => setCardRef(c.name, el)"
                 @hover="hoverFromCard"
@@ -802,7 +806,7 @@ const rangeRows = [
   { key: 'beds', label: __('Beds'), step: 1 },
   { key: 'baths', label: __('Baths'), step: 0.5 },
   { key: 'sqft', label: __('Sq ft'), step: 50 },
-  { key: 'year', label: __('Year built'), step: 1 },
+  { key: 'year', label: __('Year'), step: 1 },
   { key: 'price', label: __('Price'), step: 1000 },
 ]
 
@@ -1804,11 +1808,19 @@ watch(
   { deep: true, immediate: true },
 )
 
+// Short, because it shares one line with the address and the count summary and
+// used to take ~430px of it to say nothing. The disabled state plus the tooltip
+// already carry "you have to pick some first"; the count carries the rest.
 const underwritingLabel = computed(() => {
   const n = selectedNames.value.length
-  if (!n) return __('Select comps to underwrite')
-  return __('Underwrite with {0} of {1} comps', [Math.min(n, MAX_SHEET_COMPS), MAX_SHEET_COMPS])
+  if (!n) return __('Underwrite')
+  return __('Underwrite {0}/{1}', [Math.min(n, MAX_SHEET_COMPS), MAX_SHEET_COMPS])
 })
+const underwritingTitle = computed(() =>
+  selectedNames.value.length
+    ? __('Build an underwriting sheet from the comps you picked (up to {0})', [MAX_SHEET_COMPS])
+    : __('Pick up to {0} comps with + first, then build an underwriting sheet', [MAX_SHEET_COMPS]),
+)
 
 /**
  * Send the chosen comps to a NEW underwriting sheet.

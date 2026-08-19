@@ -474,6 +474,35 @@ duplicating. Work substantial features in a worktree of your own.
     from its host. `pages/Comps.vue` passing `class="min-h-0 flex-1"` was silently
     dropped and the split grew to ~8,000px tall. Height has to be decided inside
     the component, from its own props.
+  - **Each comp card carries +/- deltas against the subject** (`+1 bd`, `−309
+    sqft`, `−7 yr`) — the actual question being asked of a comp. Without them the
+    rep reads "1,744 sqft", has to remember the subject was 1,749, and subtract,
+    for every card. Only NON-ZERO differences render: a comp that matches on beds
+    says nothing by saying "+0 bd". Computed from the subject's **exact** numbers
+    only (`beds_exact` etc.) — the lead's pick-list bands would turn a midpoint of
+    "1000 - 2000" into a hard "+244 sqft", inventing precision the source never
+    had, so a band simply yields no chip.
+  - **The nav sidebar collapses itself on this page** (`sidebarCollapsedOverride`
+    in `composables/settings.js`; `AppSidebar`/`CommandPalette`/`GlobalModals` now
+    read the `sidebarCollapsed` computed). It is an **override, not a write to the
+    stored preference** — comps opens in its OWN TAB, so writing
+    `isSidebarCollapsed` on mount would leave every other CRM tab collapsed after
+    this one is closed. Writing the computed (any deliberate human toggle) drops
+    the override and updates the real preference, so Expand still works here and
+    wins from then on. Verified: pref `false` → comps 60px, `/leads` 220px, pref
+    untouched; Expand on comps → 220px and stays.
+    - **GOTCHA — `:isSidebarCollapsed` is a frappe-ui PROP name**, on
+      `SignupBanner` / `TrialBanner` / `GettingStartedBanner`. A blind rename of
+      the identifier in `AppSidebar.vue` renames the prop too and silently breaks
+      those three banners.
+  - **The top is deliberately dense**, because every pixel it holds is a pixel the
+    map does not get: address and counts share ONE line with the controls (they
+    were stacked), the filter strip uses inline labels and tighter gaps, and
+    Reset/Clear lost the `ml-auto` that was forcing them onto a third row alone.
+    The underwrite button says **"Underwrite"**, not "Select comps to underwrite"
+    — 430px of a shared line to say what the disabled state and tooltip already
+    say. Measured on the comps page: header block **243px → 142px**, filter strip
+    3 rows → 2, map **514px → 621px**.
   - **GOTCHA — `1rem` is 20px in this app**, not 16px, so a `w-[21rem]` rail
     renders at **420px** and out-sizes the map it is meant to accompany. The tray
     is sized in px deliberately.

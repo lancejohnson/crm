@@ -65,6 +65,21 @@
           </span>
         </div>
         <div class="mt-0.5 text-xs text-ink-gray-7">{{ facts }}</div>
+
+        <!-- How this comp differs from the subject, which is the actual question
+             being asked of it. Without this the rep reads "1,744 sqft", then has
+             to remember the subject was 1,749 and do the subtraction — for every
+             card. Only non-zero differences are shown: a comp that matches on
+             beds says nothing by saying "+0 bd". -->
+        <div v-if="deltas.length" class="mt-1 flex flex-wrap gap-x-1.5 gap-y-0.5">
+          <span
+            v-for="d in deltas"
+            :key="d.key"
+            class="rounded bg-surface-gray-2 px-1 text-2xs font-medium tabular-nums text-ink-gray-6"
+            :title="d.title"
+          >{{ d.text }}</span>
+        </div>
+
         <div class="mt-0.5 truncate text-xs text-ink-gray-6" :title="comp.address">
           {{ comp.address }}
         </div>
@@ -129,6 +144,8 @@ const props = defineProps({
   comp: { type: Object, required: true },
   active: { type: Boolean, default: false },
   discarded: { type: Boolean, default: false },
+  // The resolved subject facts from `get_lead_comps`, for the +/- comparison.
+  subject: { type: Object, default: null },
 })
 defineEmits(['hover', 'open', 'use', 'discard', 'undiscard'])
 
@@ -158,6 +175,45 @@ const facts = computed(() => {
   if (c.square_footage) bits.push(Number(c.square_footage).toLocaleString() + ' ' + __('sqft'))
   if (c.year_built) bits.push(__('built {0}', [c.year_built]))
   return bits.join(' · ') || __('No details')
+})
+
+/**
+ * The comp minus the subject, per fact.
+ *
+ * Uses the subject's EXACT numbers only (`beds_exact` etc.). The lead's own
+ * pick-list fields are bands -- "1000 - 2000" sqft, "3 Bedroom" -- and
+ * subtracting a band midpoint would invent precision the source never had, then
+ * print it as a hard "+244 sqft". When Zillow gave us a real number the delta is
+ * real; otherwise there is simply no chip, which is honest.
+ */
+const DELTA_FIELDS = [
+  { key: 'bedrooms', subj: 'beds', unit: 'bd', dp: 0 },
+  { key: 'bathrooms', subj: 'baths', unit: 'ba', dp: 1 },
+  { key: 'square_footage', subj: 'sqft', unit: 'sqft', dp: 0 },
+  { key: 'year_built', subj: 'year_built', unit: 'yr', dp: 0 },
+]
+
+const deltas = computed(() => {
+  const s = props.subject
+  if (!s) return []
+  const out = []
+  for (const f of DELTA_FIELDS) {
+    // `*_exact` marks a number that came from a real source rather than a band.
+    if (f.subj !== 'year_built' && s[`${f.subj}_exact`] === false) continue
+    const a = Number(props.comp[f.key])
+    const b = Number(s[f.subj])
+    if (!Number.isFinite(a) || !Number.isFinite(b) || !a || !b) continue
+    const diff = a - b
+    const r = f.dp ? Math.round(diff * 10) / 10 : Math.round(diff)
+    if (!r) continue
+    const n = f.unit === 'sqft' ? Math.abs(r).toLocaleString() : Math.abs(r)
+    out.push({
+      key: f.key,
+      text: `${r > 0 ? '+' : '−'}${n} ${f.unit}`,
+      title: __('{0} vs this property', [`${r > 0 ? '+' : '−'}${n} ${f.unit}`]),
+    })
+  }
+  return out
 })
 
 /**

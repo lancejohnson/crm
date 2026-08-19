@@ -46,7 +46,7 @@ import {
   showCommandPalette,
 } from '@/composables/modals'
 import {
-  isSidebarCollapsed,
+  sidebarCollapsed,
   activeDetailPanel,
 } from '@/composables/settings'
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
@@ -70,7 +70,7 @@ useKeyboardShortcuts({
   shortcuts: [
     {
       keys: '[',
-      action: () => (isSidebarCollapsed.value = !isSidebarCollapsed.value),
+      action: () => (sidebarCollapsed.value = !sidebarCollapsed.value),
     },
     {
       keys: ']',

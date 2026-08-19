@@ -90,7 +90,7 @@
 import { fuzzyScore } from '@/utils/fuzzy'
 import { sidebarLinks, applySidebarConfig } from '@/utils/sidebarLinks'
 import {
-  isSidebarCollapsed,
+  sidebarCollapsed,
   activeDetailPanel,
   showSettings,
 } from '@/composables/settings'
@@ -143,7 +143,7 @@ const actionCommands = computed(() => [
     meta: '[',
     group: __('Actions'),
     keywords: 'collapse expand navigation menu',
-    run: () => (isSidebarCollapsed.value = !isSidebarCollapsed.value),
+    run: () => (sidebarCollapsed.value = !sidebarCollapsed.value),
   },
   {
     type: 'command',
