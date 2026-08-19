@@ -6,9 +6,11 @@
 The pooled `CRM Comp` index is ISTL's RentCast-derived last *asks*, frozen when
 the marketplace lead was scraped. It ages. This module is the freshness layer:
 
-  A. One circle search for RecentlySold and one for ForSale
-     (`coordinates=lon lat,diameter`, diameter = 2× radius miles). Cached 7 days
-     per rounded center so two leads on the same block share the spend.
+  A. Circle search for every RecentlySold in the last 2 years AND every
+     ForSale (`coordinates=lon lat,diameter`, diameter = 2× radius miles).
+     Pages through `totalPages`; a window over RapidAPI's 800-result ceiling
+     binary-splits on price (devproppy `fetch_all_zillow_properties`). Cached 7 days per rounded
+     center so two leads on the same block share the spend.
   B. `/property` on the nearest stale ISTL pins (capped) so a house ISTL still
      has as an 8-month-old ask can pick up the sale Zillow recorded last week.
 
@@ -37,8 +39,16 @@ PIN_CACHE_DAYS = 30
 PIN_REFRESH_CAP = 5
 #: Don't spend a /property call on an ISTL pin that already looks current.
 PIN_STALE_DAYS = 90
-SOLD_IN_LAST = "12m"
-AREA_CACHE_VERSION = 3  # v1 ZIP, v2 polygon box, v3 coordinates circle
+SOLD_IN_LAST = "24m"
+#: RapidAPI's own ceiling per query — same number devproppy stops at. Past this
+#: the API silently repeats page 1, so we binary-split the price range instead
+#: (devproppy `fetch_all_zillow_properties`). Each half recurses if still >800.
+MAX_SEARCH_RESULTS = 800
+MAX_SPLIT_DEPTH = 6
+#: Hard stop on RapidAPI calls for one circle+status so a dense metro cannot
+#: spend the shared quota on a single comps open. 40 pages ≈ 1,600 rows.
+MAX_SEARCH_CALLS = 40
+AREA_CACHE_VERSION = 5  # v4 paged to 800; v5 price-splits past 800
 PIN_CACHE_VERSION = 1
 
 _SUFFIXES = {
@@ -199,29 +209,142 @@ def _shape_search(prop, kind):
 	}
 
 
-def _search(coordinates, status_type, sold_in_last=None):
+def _search_params(coordinates, status_type, sold_in_last=None, min_price=None, max_price=None, sort="Newest", page=1):
 	params = {
 		"coordinates": coordinates,
 		"status_type": status_type,
-		"sort": "Newest",
-		"page": 0,
+		"sort": sort,
+		"page": page,
 	}
 	if sold_in_last:
 		params["soldInLast"] = sold_in_last
-	body = zillow_api._request("/search", params, f"Zillow: {status_type} search failed")
-	if not isinstance(body, dict):
+	if min_price is not None:
+		params["minPrice"] = int(min_price)
+	if max_price is not None:
+		params["maxPrice"] = int(max_price)
+	return params
+
+
+def _get(coordinates, status_type, sold_in_last=None, min_price=None, max_price=None, sort="Newest", page=1):
+	"""One RapidAPI /search. None on quota-reserve or a bad body."""
+	left = zillow_api.quota_remaining()
+	if left is not None and left <= zillow_api.QUOTA_RESERVE:
 		return None
-	# A bad coordinates string comes back as `{errors: ["wrong format"]}`. A
-	# street-address `location` comes back as `{zpid}`. Neither is an area result.
-	if "props" not in body:
-		return []
+	params = _search_params(
+		coordinates, status_type, sold_in_last, min_price, max_price, sort, page
+	)
+	body = zillow_api._request(
+		"/search", params, f"Zillow: {status_type} {sort} p{page} failed"
+	)
+	if not isinstance(body, dict) or "props" not in body:
+		return None
+	return body
+
+
+def _price_edge(coordinates, status_type, sold_in_last, min_price, max_price, high):
+	"""Cheapest or dearest price in this window. One extra call, like devproppy."""
+	sort = "Price_High_Low" if high else "Price_Low_High"
+	body = _get(
+		coordinates, status_type, sold_in_last, min_price, max_price, sort=sort, page=1
+	)
+	if not body:
+		return None
+	for prop in body.get("props") or []:
+		n = zillow_api._num(prop.get("price"))
+		if n:
+			return int(n)
+	return None
+
+
+def _collect_pages(coordinates, status_type, sold_in_last, min_price, max_price, first_body, budget):
+	"""Page through one price window that is already known to be ≤800."""
 	kind = "sale" if status_type == "ForSale" else "sold"
 	rows = []
-	for prop in body.get("props") or []:
-		shaped = _shape_search(prop, kind)
-		if shaped:
+	seen = set()
+	try:
+		total_pages = max(1, int(first_body.get("totalPages") or 1))
+	except (TypeError, ValueError):
+		total_pages = 1
+	bodies = [first_body]
+	page = 2
+	while page <= total_pages and budget["n"] < MAX_SEARCH_CALLS:
+		body = _get(
+			coordinates, status_type, sold_in_last, min_price, max_price, page=page
+		)
+		budget["n"] += 1
+		if body is None:
+			break
+		bodies.append(body)
+		page += 1
+	for body in bodies:
+		for prop in body.get("props") or []:
+			shaped = _shape_search(prop, kind)
+			if not shaped or shaped.get("zpid") in seen:
+				continue
+			seen.add(shaped["zpid"])
 			rows.append(shaped)
-	return rows
+	complete = page > total_pages
+	return rows, complete
+
+
+def _search_window(coordinates, status_type, sold_in_last=None, min_price=None, max_price=None, depth=0, budget=None):
+	"""One circle (optionally price-sliced). Splits when totalResultCount > 800."""
+	if budget is None:
+		budget = {"n": 0}
+	if budget["n"] >= MAX_SEARCH_CALLS or depth > MAX_SPLIT_DEPTH:
+		return [], False
+
+	body = _get(coordinates, status_type, sold_in_last, min_price, max_price, page=1)
+	budget["n"] += 1
+	if body is None:
+		return None, False
+
+	try:
+		count = int(body.get("totalResultCount") or 0)
+	except (TypeError, ValueError):
+		count = 0
+
+	if count > MAX_SEARCH_RESULTS and depth < MAX_SPLIT_DEPTH:
+		lo = min_price if min_price is not None else _price_edge(
+			coordinates, status_type, sold_in_last, min_price, max_price, high=False
+		)
+		hi = max_price if max_price is not None else _price_edge(
+			coordinates, status_type, sold_in_last, min_price, max_price, high=True
+		)
+		budget["n"] += int(min_price is None) + int(max_price is None)
+		# No prices → cannot split (non-disclosure solds). Page this window's 800.
+		if lo and hi and int(lo) < int(hi):
+			mid = (int(lo) + int(hi)) // 2
+			low_rows, low_ok = _search_window(
+				coordinates, status_type, sold_in_last, int(lo), mid, depth + 1, budget
+			)
+			high_rows, high_ok = _search_window(
+				coordinates, status_type, sold_in_last, mid, int(hi), depth + 1, budget
+			)
+			seen, out = set(), []
+			for row in (low_rows or []) + (high_rows or []):
+				zpid = row.get("zpid")
+				if not zpid or zpid in seen:
+					continue
+				seen.add(zpid)
+				out.append(row)
+			return out, bool(low_ok and high_ok)
+
+	return _collect_pages(
+		coordinates, status_type, sold_in_last, min_price, max_price, body, budget
+	)
+
+
+def _search(coordinates, status_type, sold_in_last=None):
+	"""All solds/listings in the circle. Price-splits when a window exceeds 800.
+
+	`complete` is False when we stopped early (quota, call budget, a mid-run
+	error). Those must not be cached for a week or we hide the rest of the circle.
+	"""
+	rows, complete = _search_window(coordinates, status_type, sold_in_last)
+	if rows is None:
+		return None, False
+	return rows, complete
 
 
 def _area_cached(coordinates, status_type, sold_in_last=None):
@@ -238,11 +361,12 @@ def _area_cached(coordinates, status_type, sold_in_last=None):
 	if miss is not None:
 		return miss, True
 
-	rows = _search(coordinates, status_type, sold_in_last)
+	rows, complete = _search(coordinates, status_type, sold_in_last)
 	if rows is None:
 		return [], False
-	_cache_set(key, rows)
-	return rows, False
+	if complete:
+		_cache_set(key, rows)
+	return rows, complete
 
 
 def area_comps(lat, lng, radius_mi):

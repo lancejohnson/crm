@@ -164,7 +164,8 @@ duplicating. Work substantial features in a worktree of your own.
     comps are last *asks* and go stale. After the pool loads we (A) search the
     subject's circle (`/search?coordinates=lon lat,diameter`, diameter = 2×
     radius so 2 mi → `d=4`; street `location=` returns `{zpid}` only) for
-    RecentlySold + ForSale (`sort=Newest`, 12-month sold window, 7-day cache)
+    RecentlySold (last 2 years, paged) + every ForSale (`sort=Newest`,
+    price-splits past RapidAPI's 800-per-query ceiling, 7-day cache)
     and (B) `/property` the nearest 5 stale ISTL pins (30-day address cache) to pick
     up a sale Zillow recorded after ISTL last saw the house. Street-address
     `/search` returns `{zpid}` only. `dateSold` is
