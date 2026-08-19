@@ -417,6 +417,71 @@ duplicating. Work substantial features in a worktree of your own.
     the whole thing; `pages/Comps.vue` is a thin wrapper. When it stopped being a
     modal, `show` became a plain always-true ref so every existing guard, watcher
     and shortcut gate kept working untouched.
+  - **Zillow layout: filters on top, map LEFT, photo tray RIGHT** (gw345, Lance's
+    ask). The property table is GONE — a table row cannot carry a photo, and a
+    photo is the fastest way to know a comp is not comparable, since square
+    footage says nothing about a gutted shell beside a renovated flip.
+    `CompTrayCard.vue` + `CompSubjectCard.vue` (**new**) are the tray; the subject
+    rides at the top of it in the same card grammar as the comps, so "bigger or
+    smaller than mine" is a glance rather than a memory test.
+    - **Photos cost NOTHING, and that is the whole reason this works.** Zillow's
+      `/search` — already being called by the area refresh — returns `imgSrc` on
+      every row (measured: 41 of 41 on a St Paul page); `_shape_search` was simply
+      throwing it away. Wiring it through gives **62% / 46% / 96% / 100%** photo
+      coverage on four real prod leads, for **zero** extra API calls. The
+      alternative, `/property?address=` per comp, is one BILLED call each — 200
+      comps would be 200 calls per open, on a key the ISTL ZIP job already leans on.
+    - `_merge_one` also stamps the photo/zpid onto a matched ISTL pin, because a
+      photo is not "newer" data — it is data the pooled index never had — so it
+      rides along on ANY match instead of waiting for a price to change. Comps with
+      no Zillow match render a labelled placeholder rather than a broken frame.
+    - **The SUBJECT's photo is free twice over**: `_normalize` now keeps
+      `cover_photo`, and failing that `apply()` grabs the thumbnail off the
+      subject's own row in the area search before discarding it (a house is not a
+      comp for itself, but its picture is still ours). `REQUIRED_FACT_KEYS` in
+      `zillow.py` treats a cached fact blob missing a listed key as stale, which
+      spends ONE lookup per lead and then rides the normal 30-day cache — a
+      remembered negative (`{}`) is deliberately exempt, or every unresolvable
+      address would be re-billed on every open.
+  - **"Discard" grays a comp out in place and offers Undo**, replacing a hide that
+    made the card vanish behind an `N hidden` button. Same backend
+    (`set_comp_state` / `comps_hidden`), same team-wide semantics, and discards
+    still leave the pool entirely — but **`include_hidden` no longer merges them
+    back in before the tier ladder**, which is what let discarded junk keep a tier
+    "usable" and suppress the widening the rep needed. They now travel in their own
+    `discarded` list, capped and distance-sorted, so the tray can show them without
+    touching the ladder, the counts, or what gets underwritten. The drawer opens
+    itself on the first discard — otherwise the card just disappears, which is the
+    behaviour this replaced.
+  - **The split is measured on the COMPONENT's width, not the viewport's**
+    (`SPLIT_MIN_WIDTH`, ResizeObserver on the root). The three hosts get wildly
+    different widths at the same viewport — comps page ~800px, the Today modal's
+    right pane ~620px, a phone ~260px — so a `lg:` breakpoint put a 330px rail
+    beside a **266px** map inside the Today modal and called it a split. Under the
+    threshold the two stack, the map spans full width, and the filter bar collapses
+    behind the existing Filters toggle (stacked, it was eight rows of controls
+    standing between the rep and the map on a 390px phone).
+  - **GOTCHA — Vue's class patching DESTROYS a Leaflet map.** Vue writes the whole
+    `class` attribute from its static + bound parts, silently discarding the
+    classes Leaflet adds imperatively (`leaflet-container`, `leaflet-touch`, …).
+    This was harmless while the map div's `:class` only keyed off a prop that never
+    moved at runtime; the moment it keyed off a resize-driven ref, crossing the
+    breakpoint wiped the map. Sizing classes now live on a WRAPPER and `mapEl`
+    keeps a static `size-full`. Any runtime-varying `:class` on a
+    third-party-decorated element is the same bug.
+  - **GOTCHA — CompsView has TWO root nodes** (the layout div and
+    `CompDetailModal`), so it is a fragment and Vue does **not** inherit a `class`
+    from its host. `pages/Comps.vue` passing `class="min-h-0 flex-1"` was silently
+    dropped and the split grew to ~8,000px tall. Height has to be decided inside
+    the component, from its own props.
+  - **GOTCHA — `1rem` is 20px in this app**, not 16px, so a `w-[21rem]` rail
+    renders at **420px** and out-sizes the map it is meant to accompany. The tray
+    is sized in px deliberately.
+  - **GOTCHA — ResizeObserver and rAF do not fire in a BACKGROUND tab.** A
+    hand-attached probe RO recorded zero callbacks, including the initial one, and
+    a container-width layout therefore looked completely broken while being
+    correct. Activate the tab before concluding anything about resize behaviour —
+    the same trap the kanban notes for paint timing.
   - **The subject is a PILL too**, in the same two-line grammar as the comps
     (`Subject 1910` / `2/1 · 1118sf`), blue with a heavier white ring so it never
     reads as one of them. It was an 18px dot, which marked the spot but said

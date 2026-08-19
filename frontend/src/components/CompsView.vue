@@ -2,7 +2,11 @@
   <!-- `fill` makes this size to its container instead of to its content: the map
        and the property list share whatever height there is, each scrolling
        internally. The comps PAGE keeps its natural, scroll-the-page layout. -->
-  <div class="flex flex-col gap-3" :class="fill ? 'h-full min-h-0' : ''">
+  <!-- NOTE this component has TWO root nodes (this and the detail modal), so it
+       is a fragment and Vue does NOT inherit a `class` from its host. The height
+       has to be decided here, from the props, or the map/tray split has no bound
+       to scroll inside and grows to ~8,000px. -->
+  <div ref="rootEl" class="flex flex-col gap-3" :class="fillHeight && wide ? 'min-h-0 flex-1' : ''">
   <!-- Address + counts -->
   <div class="flex flex-wrap items-center justify-between gap-2">
     <div class="min-w-0">
@@ -31,7 +35,11 @@
               <template v-else>{{ emptyMessage }}</template>
             </div>
           </div>
-          <div class="flex items-center gap-2">
+          <!-- Wraps: at 390px this row holds the underwrite button, two
+               checkboxes, Filters, radius and refresh, and without wrapping the
+               Filters toggle simply sat off the right edge of the screen -- on
+               the one width where it is the only way to reach the filters. -->
+          <div class="flex flex-wrap items-center gap-2">
             <!-- Underwriting from the comps you picked. Enabled only once something is
      selected, and the label carries the count so "up to 4" is visible
      before the click rather than as an error after it. -->
@@ -79,7 +87,7 @@
                  controls the preset ladder has already set is the worse trade
                  there. The count keeps the state visible while it is folded. -->
             <Button
-              v-if="fill"
+              v-if="filtersCollapsible"
               :label="activeFilterCount ? __('Filters ({0})', [activeFilterCount]) : __('Filters')"
               :variant="filtersOpen ? 'subtle' : 'ghost'"
               iconLeft="filter"
@@ -122,101 +130,80 @@
              of the tool, and a rep should be able to widen a beds range without
              first discovering a button. Wraps to as many rows as it needs, which
              is what keeps it usable at 390px. -->
+        <!-- Labels sit INLINE, not stacked above each control. Stacked labels
+             plus a caveat sentence made this card ~300px tall, which on a laptop
+             left the map 439px — the filters were bigger than the thing they
+             filter. Inline, the same eight controls wrap into ~2 short rows and
+             the map gets the height back. -->
         <div
-          v-show="!fill || filtersOpen"
-          class="rounded-lg border border-outline-gray-2 bg-surface-gray-1 px-3 py-2.5"
+          v-show="!filtersCollapsible || filtersOpen"
+          class="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-outline-gray-2 bg-surface-gray-1 px-2.5 py-1.5"
         >
-          <div class="flex flex-wrap items-end gap-x-4 gap-y-2.5">
-            <div class="flex min-w-0 flex-col gap-1">
-              <span class="text-2xs font-semibold uppercase tracking-wide text-ink-gray-5">
-                {{ __('Status') }}
-              </span>
-              <FormControl
-                type="select"
-                size="sm"
-                :options="statusOptions"
-                v-model="draft.status"
-              />
-            </div>
-            <div class="flex min-w-0 flex-col gap-1">
-              <span class="text-2xs font-semibold uppercase tracking-wide text-ink-gray-5">
-                {{ __('Sold within') }}
-              </span>
-              <FormControl
-                type="select"
-                size="sm"
-                :options="withinOptions"
-                v-model="draft.within_days"
-              />
-            </div>
-
-            <div
-              v-for="r in rangeRows"
-              :key="r.key"
-              class="flex min-w-0 flex-col gap-1"
-            >
-              <span class="text-2xs font-semibold uppercase tracking-wide text-ink-gray-5">
-                {{ r.label }}
-              </span>
-              <div class="flex items-center gap-1">
-                <FormControl
-                  class="w-16"
-                  type="number"
-                  size="sm"
-                  :step="r.step"
-                  :placeholder="__('min')"
-                  v-model="draft[r.key + '_min']"
-                />
-                <span class="text-ink-gray-4">–</span>
-                <FormControl
-                  class="w-16"
-                  type="number"
-                  size="sm"
-                  :step="r.step"
-                  :placeholder="__('max')"
-                  v-model="draft[r.key + '_max']"
-                />
-              </div>
-            </div>
-
-            <div class="flex min-w-0 flex-col gap-1">
-              <span class="text-2xs font-semibold uppercase tracking-wide text-ink-gray-5">
-                {{ __('Type') }}
-              </span>
-              <FormControl
-                type="select"
-                size="sm"
-                :options="typeOptions"
-                v-model="draft.property_types"
-              />
-            </div>
-
-            <div class="ml-auto flex items-center gap-1.5">
-              <Button
-                v-if="data?.hidden_count"
-                :label="
-                  revealHidden
-                    ? __('Hide {0} hidden', [data.hidden_count])
-                    : __('{0} hidden', [data.hidden_count])
-                "
-                variant="ghost"
-                @click="toggleRevealHidden"
-              />
-              <Button
-                v-if="activeFilterCount"
-                :label="__('Reset to suggested')"
-                variant="ghost"
-                @click="resetToSuggested"
-              />
-              <Button :label="__('Clear all')" variant="ghost" @click="clearAll" />
-            </div>
+          <div class="flex min-w-0 items-center gap-1.5">
+            <span class="shrink-0 text-2xs font-medium text-ink-gray-5">{{ __('Status') }}</span>
+            <FormControl
+              type="select"
+              size="sm"
+              :options="statusOptions"
+              v-model="draft.status"
+            />
           </div>
-          <div class="mt-2 text-2xs text-ink-gray-5">
-            {{
+          <div
+            class="flex min-w-0 items-center gap-1.5"
+            :title="
               __(
                 '“Sold within” applies to off-market comps only — an active listing stays on the map however long it has been listed.',
               )
-            }}
+            "
+          >
+            <span class="shrink-0 text-2xs font-medium text-ink-gray-5">{{ __('Sold within') }}</span>
+            <FormControl
+              type="select"
+              size="sm"
+              :options="withinOptions"
+              v-model="draft.within_days"
+            />
+          </div>
+
+          <div v-for="r in rangeRows" :key="r.key" class="flex min-w-0 items-center gap-1.5">
+            <span class="shrink-0 text-2xs font-medium text-ink-gray-5">{{ r.label }}</span>
+            <FormControl
+              class="w-14"
+              type="number"
+              size="sm"
+              :step="r.step"
+              :placeholder="__('min')"
+              v-model="draft[r.key + '_min']"
+            />
+            <span class="text-ink-gray-4">–</span>
+            <FormControl
+              class="w-14"
+              type="number"
+              size="sm"
+              :step="r.step"
+              :placeholder="__('max')"
+              v-model="draft[r.key + '_max']"
+            />
+          </div>
+
+          <div class="flex min-w-0 items-center gap-1.5">
+            <span class="shrink-0 text-2xs font-medium text-ink-gray-5">{{ __('Type') }}</span>
+            <FormControl
+              type="select"
+              size="sm"
+              :options="typeOptions"
+              v-model="draft.property_types"
+            />
+          </div>
+
+          <div class="ml-auto flex items-center gap-1">
+            <Button
+              v-if="activeFilterCount"
+              :label="__('Reset to suggested')"
+              variant="ghost"
+              @click="resetToSuggested"
+            />
+            <Button :label="__('Clear all')" variant="ghost" @click="clearAll" />
           </div>
         </div>
 
@@ -242,127 +229,113 @@
           </button>
         </div>
 
-        <div
-          ref="mapEl"
-          class="w-full overflow-hidden rounded-lg border border-outline-gray-2 bg-surface-gray-1"
-          :class="
-            fill
-              ? 'min-h-[15rem] flex-1'
-              : pageMode
-                ? 'h-[26rem] sm:h-[32rem]'
-                : 'h-[20rem] sm:h-[24rem]'
-          "
-        />
+        <!-- Map left, property tray right: the Zillow arrangement, and it is the
+             right one here for the same reason it is there. A map answers
+             "where" and a list answers "which", and the two questions are asked
+             in the same breath — stacking them meant scrolling away from the map
+             to read the list of what is on it. Below `lg` it stacks, because a
+             390px phone has no second column to give.
 
-        <!-- Every comp as a row, because a map answers "where" and a list answers
-     "which". Hovering either one lights up the other, so a row in the table and
-     a pin on the map are obviously the same property. -->
-<div
-  v-if="comps.length"
-  class="overflow-hidden rounded-lg border border-outline-gray-2"
-  :class="fill ? 'flex min-h-[8rem] flex-1 flex-col' : ''"
->
-  <div
-    class="flex items-center justify-between border-b border-outline-gray-2 bg-surface-gray-1 px-3 py-2"
-  >
-    <span class="text-sm font-medium text-ink-gray-8">
-      {{ __('{0} properties', [comps.length]) }}
-    </span>
-    <span class="text-xs text-ink-gray-5">
-      {{ __('Hover a row to find it on the map') }}
-    </span>
-  </div>
-  <div class="overflow-auto" :class="fill ? 'min-h-0 flex-1' : 'max-h-80'">
-    <table class="w-full min-w-[560px] text-sm">
-      <thead
-        class="sticky top-0 z-10 bg-surface-white text-xs text-ink-gray-5 shadow-[0_1px_0_0_var(--outline-gray-2)]"
-      >
-        <tr>
-          <th class="px-3 py-1.5 text-left font-medium">{{ __('Price') }}</th>
-          <th class="px-2 py-1.5 text-left font-medium">{{ __('Bd/Ba') }}</th>
-          <th class="px-2 py-1.5 text-right font-medium">{{ __('Sq ft') }}</th>
-          <th class="px-2 py-1.5 text-right font-medium">{{ __('Built') }}</th>
-          <th class="px-2 py-1.5 text-left font-medium">{{ __('Status') }}</th>
-          <th class="px-2 py-1.5 text-right font-medium">{{ __('Dist') }}</th>
-          <th class="w-20 px-2 py-1.5"></th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr
-          v-for="c in comps"
-          :key="c.name"
-          class="cursor-default border-t border-outline-gray-1"
-          :class="
-            hoveredComp === c.name
-              ? 'bg-surface-gray-2'
-              : c.selected
-                ? 'bg-surface-blue-1'
-                : ''
-          "
-          @mouseenter="hoveredComp = c.name"
-          @mouseleave="hoveredComp = null"
+             The tray is the list now; the old table is gone. A table row cannot
+             carry a photo, and a photo is the fastest way to know a comp is not
+             comparable — square footage says nothing about a gutted shell beside
+             a renovated flip. -->
+        <div
+          class="flex min-h-0 gap-3"
+          :class="[
+            wide ? 'flex-row' : 'flex-col',
+            wide ? (fillHeight ? 'min-h-0 flex-1' : 'h-[24rem]') : '',
+          ]"
         >
-          <td class="whitespace-nowrap px-3 py-1.5 font-medium text-ink-gray-8">
-            {{ priceShort(c.price) }}
-          </td>
-          <td class="whitespace-nowrap px-2 py-1.5 text-ink-gray-7">
-            {{ c.bedrooms || '?' }}/{{ c.bathrooms || '?' }}
-          </td>
-          <td class="whitespace-nowrap px-2 py-1.5 text-right tabular-nums text-ink-gray-7">
-            {{ c.square_footage ? Number(c.square_footage).toLocaleString() : '—' }}
-          </td>
-          <td class="whitespace-nowrap px-2 py-1.5 text-right tabular-nums text-ink-gray-7">
-            {{ c.year_built || '—' }}
-          </td>
-          <!-- The metric that matters for THIS status, same rule as the popup. -->
-          <td class="whitespace-nowrap px-2 py-1.5 text-xs">
-            <span :class="isActive(c.status) ? 'text-ink-amber-3' : 'text-ink-gray-6'">
-              {{
-                isActive(c.status)
-                  ? __('For sale · {0}', [agoLabel(c.recency_days) || '—'])
-                  : __('Off-market {0}', [fmtDate(c.removed_date)])
-              }}
-            </span>
-          </td>
-          <td class="whitespace-nowrap px-2 py-1.5 text-right tabular-nums text-ink-gray-6">
-            {{ c.distance_mi }} mi
-          </td>
-          <td class="whitespace-nowrap px-2 py-1.5 text-right">
-            <!-- Photos live one click from the row as well as from the pin: the
-                 list is how you work through comps in order, and having to find
-                 each one's pin again to look at it is the long way round. -->
-            <button
-              class="rounded px-1.5 py-0.5 text-ink-gray-4 hover:text-ink-gray-7"
-              :title="__('Photos & details')"
-              @click="openCompDetail(c.name)"
+          <!-- GOTCHA — the sizing classes live on this WRAPPER, never on the
+               element Leaflet initialises. Vue patches `class` by writing the
+               whole attribute from its static + bound parts, which silently
+               discards the classes Leaflet adds imperatively
+               (`leaflet-container`, `leaflet-touch`, ...). While these classes
+               only changed with a prop that never moved at runtime that was
+               harmless; now that `wide` flips on resize, re-patching the map
+               element destroys the map. -->
+          <div
+            class="overflow-hidden rounded-lg border border-outline-gray-2 bg-surface-gray-1"
+            :class="
+              wide
+                ? 'h-full min-h-0 flex-1'
+                : pageMode
+                  ? 'h-[26rem] sm:h-[32rem]'
+                  : 'h-[20rem] sm:h-[24rem]'
+            "
+          >
+            <div ref="mapEl" class="size-full" />
+          </div>
+
+          <!-- Sized in px, not rem: this app's root font-size is 20px, so a
+               `21rem` rail reads as 420px and takes more of the split than the
+               map it is meant to accompany.
+
+               Its HEIGHT mirrors the map's exactly. In a flex-row both panes
+               stretch to the taller one, so an `h-auto` tray beside a fixed-height
+               map would grow the row to the full comp list -- which is what the
+               Today modal (which passes neither `fill` nor `page-mode`) would
+               otherwise do. -->
+          <aside
+            v-if="comps.length || discarded.length"
+            class="flex shrink-0 flex-col overflow-hidden rounded-lg border border-outline-gray-2"
+            :class="wide ? 'h-full min-h-0 w-[330px]' : 'h-[24rem] w-full'"
+          >
+            <div
+              class="flex shrink-0 items-center justify-between gap-2 border-b border-outline-gray-2 bg-surface-gray-1 px-3 py-2"
             >
-              <FeatherIcon name="image" class="size-3.5" />
-            </button>
-            <button
-              class="ml-1 rounded px-1.5 py-0.5 text-xs font-medium"
-              :class="
-                c.selected
-                  ? 'bg-surface-blue-2 text-ink-blue-2'
-                  : 'text-ink-gray-5 hover:text-ink-gray-8'
-              "
-              :title="__('Use as comp')"
-              @click="toggleUse(c.name)"
-            >
-              {{ c.selected ? '✓' : '+' }}
-            </button>
-            <button
-              class="ml-1 rounded px-1.5 py-0.5 text-xs text-ink-gray-4 hover:text-ink-gray-7"
-              :title="__('Remove from map')"
-              @click="setCompState(c.name, 'hidden')"
-            >
-              ✕
-            </button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-</div>
+              <span class="text-sm font-medium text-ink-gray-8">
+                {{ __('{0} properties', [comps.length]) }}
+              </span>
+              <span class="text-xs text-ink-gray-5">{{ __('Nearest first') }}</span>
+            </div>
+
+            <div class="min-h-0 flex-1 overflow-auto">
+              <CompSubjectCard
+                v-if="data?.subject"
+                :subject="data.subject"
+                :address="data?.address || address"
+              />
+
+              <CompTrayCard
+                v-for="c in comps"
+                :key="c.name"
+                :comp="c"
+                :active="hoveredComp === c.name"
+                :ref="(el) => setCardRef(c.name, el)"
+                @hover="hoverFromCard"
+                @open="openCompDetail"
+                @use="toggleUse"
+                @discard="setCompState($event, 'hidden')"
+              />
+
+              <!-- Discards live at the BOTTOM of the same tray, not behind a
+                   toggle elsewhere: they are still part of what you looked at,
+                   and the undo has to be where the eye already is. -->
+              <template v-if="discarded.length">
+                <button
+                  class="sticky bottom-0 flex w-full items-center justify-between border-y border-outline-gray-2 bg-surface-gray-2 px-3 py-1.5 text-xs font-medium text-ink-gray-7"
+                  @click="showDiscarded = !showDiscarded"
+                >
+                  <span>{{ __('{0} discarded', [discarded.length]) }}</span>
+                  <FeatherIcon
+                    :name="showDiscarded ? 'chevron-down' : 'chevron-up'"
+                    class="size-4"
+                  />
+                </button>
+                <CompTrayCard
+                  v-for="c in showDiscarded ? discarded : []"
+                  :key="'d-' + c.name"
+                  :comp="c"
+                  discarded
+                  @undiscard="setCompState($event, 'none')"
+                />
+              </template>
+            </div>
+          </aside>
+        </div>
+
 
 <!-- Legend: the map is unreadable without saying what the fade means. -->
         <div class="flex flex-wrap items-center gap-3 text-xs text-ink-gray-6">
@@ -432,6 +405,8 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { zillowUrl } from '@/utils/propertyLinks'
 import CompDetailModal from '@/components/CompDetailModal.vue'
+import CompTrayCard from '@/components/CompTrayCard.vue'
+import CompSubjectCard from '@/components/CompSubjectCard.vue'
 import FilterIcon from '@/components/Icons/FilterIcon.vue'
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
 
@@ -861,7 +836,6 @@ watch(showDetail, (v) => {
 
 // Which comp's popup is open — the target for the h / u shortcuts.
 const focusedComp = ref(null)
-const revealHidden = ref(false)
 
 // The comp whose photos/facts are open, if any.
 const detailComp = ref(null)
@@ -893,9 +867,75 @@ watch(hoveredComp, (name, prev) => {
     const prevEl = off.getElement()
     if (prevEl) prevEl.style.zIndex = ''
   }
+  // Bring the matching card into the tray's viewport. Only when the map is what
+  // moved -- scrolling the list under the pointer while someone is reading it
+  // would fight the user for control of their own scroll position.
+  if (name && hoverSource === 'map') scrollCardIntoView(name)
 })
 
+// Which surface the current hover came from. The pin and the card both write
+// `hoveredComp`, and only one of the two directions should scroll.
+let hoverSource = 'card'
+function hoverFromMap(name) {
+  hoverSource = 'map'
+  hoveredComp.value = name
+}
+function hoverFromCard(name) {
+  hoverSource = 'card'
+  hoveredComp.value = name
+}
+
+function scrollCardIntoView(name) {
+  const comp = cardRefs.get(name)
+  const el = comp?.$el
+  if (el?.scrollIntoView) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+}
+
 const comps = computed(() => data.value?.comps || [])
+
+// Comps a person threw out. They arrive in their own list precisely so they can
+// be shown without ever re-entering the pool: a discarded comp must not keep a
+// preset tier "usable" and suppress the widening the rep actually needs.
+const discarded = computed(() => data.value?.discarded || [])
+const showDiscarded = ref(false)
+
+// The comps page and the desk both want map+tray to fill the height they are
+// given. `fill` additionally folds the filter card away; the two used to be the
+// same flag, which is why the page could not have a full-height tray.
+const fillHeight = computed(() => props.fill || props.pageMode)
+
+/**
+ * Is there room beside the map for the tray?
+ *
+ * Measured on OUR OWN width, not the viewport's. The three hosts get wildly
+ * different widths at the same viewport -- the comps page ~800px, the Today
+ * modal's right pane ~620px, a phone ~260px -- so a `lg:` viewport breakpoint
+ * put a 330px rail next to a 266px map inside the modal and called it a split.
+ * A ResizeObserver on the root is the only thing that knows what this instance
+ * actually got.
+ *
+ * SPLIT_MIN_WIDTH is the point below which the tray would take more from the map
+ * than it gives back; under it the two stack and the map spans the full width.
+ */
+const SPLIT_MIN_WIDTH = 700
+const rootEl = ref(null)
+const wide = ref(true)
+let rootObserver = null
+
+// Narrow means stacked, and a stacked filter card is a full screen of controls
+// standing between the rep and the map -- eight rows before the first pin on a
+// phone. Collapsed there behind the same toggle the desk uses; still always-open
+// when wide, where the filters ARE the tool and hiding them behind a button is
+// exactly what this layout refuses to do.
+const filtersCollapsible = computed(() => props.fill || !wide.value)
+
+// Hovering a pin should bring its card into view, not just tint a row that may
+// be 200 cards down a scroller.
+const cardRefs = new Map()
+function setCardRef(name, el) {
+  if (el) cardRefs.set(name, el)
+  else cardRefs.delete(name)
+}
 const emptyMessage = computed(
   () => data.value?.message || __('No comps found nearby.'),
 )
@@ -1563,7 +1603,7 @@ function render() {
       if (focusedComp.value === c.name) focusedComp.value = null
     })
     // Hover the pin -> highlight its row, and vice versa via `hoveredComp`.
-    marker.on('mouseover', () => (hoveredComp.value = c.name))
+    marker.on('mouseover', () => hoverFromMap(c.name))
     marker.on('mouseout', () => {
       if (hoveredComp.value === c.name) hoveredComp.value = null
     })
@@ -1685,7 +1725,13 @@ async function setCompState(comp, state) {
       toast.error(__('Comp selection is not set up on this site yet.'))
       return
     }
-    if (state === 'hidden') toast.success(__('Comp hidden'))
+    if (state === 'hidden') {
+      toast.success(__('Comp discarded'))
+      // Opening the drawer on the first discard is what makes the undo
+      // discoverable; without it the card simply vanishes, which is the
+      // behaviour this replaced.
+      showDiscarded.value = true
+    }
     await load()
   } catch (e) {
     toast.error(e.messages?.[0] || __('Could not update that comp.'))
@@ -1701,8 +1747,10 @@ async function load({ explicit = userTouched.value } = {}) {
   if (!props.lead) return
   loading.value = true
   try {
-    const payload = { lead: props.lead, radius_mi: radius.value }
-    if (revealHidden.value) payload.include_hidden = 1
+    // Always ask for the discards: they render as their own dimmed section in the
+    // tray rather than behind a reveal toggle, and the server keeps them out of
+    // the pool regardless of this flag.
+    const payload = { lead: props.lead, radius_mi: radius.value, include_hidden: 1 }
     if (explicit) {
       payload.filters = JSON.stringify(currentFilters())
       payload.auto = 0
@@ -1731,11 +1779,6 @@ async function load({ explicit = userTouched.value } = {}) {
 function resetToSuggested() {
   userTouched.value = false
   load({ explicit: false })
-}
-
-function toggleRevealHidden() {
-  revealHidden.value = !revealHidden.value
-  load()
 }
 
 const MAX_SHEET_COMPS = 4
@@ -1886,11 +1929,23 @@ useKeyboardShortcuts({
 // If this ever mounts with `show` already true (a v-if host, or a hot reload),
 // the watcher above never fires and the map would sit empty claiming "no comps".
 onMounted(() => {
+  if (rootEl.value) {
+    rootObserver = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect?.width || 0
+      // Defer a frame, or this trips "ResizeObserver loop completed with
+      // undelivered notifications" -- changing the layout resizes the root.
+      requestAnimationFrame(() => {
+        if (w) wide.value = w >= SPLIT_MIN_WIDTH
+      })
+    })
+    rootObserver.observe(rootEl.value)
+  }
   if (show.value) nextTick(() => load({ explicit: false }))
   observeMapSize()
 })
 
 onBeforeUnmount(() => {
+  rootObserver?.disconnect()
   sizeObserver?.disconnect()
   sizeObserver = null
   if (map) {

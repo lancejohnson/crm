@@ -13,13 +13,13 @@
     </template>
   </LayoutHeader>
 
-  <div class="flex flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-5">
-    <CompsView
-      v-if="leadId"
-      :lead="leadId"
-      :address="address"
-      page-mode
-    />
+  <!-- On a desktop the page must NOT scroll: the map and the tray each scroll
+       internally, and a scrolling page would leave the tray with no bounded
+       height to scroll inside. Below `lg` the split stacks and the page goes
+       back to scrolling normally, because two internally-scrolling panes
+       stacked on a phone is a worse thing than a long page. -->
+  <div class="flex flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-5 lg:overflow-hidden">
+    <CompsView v-if="leadId" :lead="leadId" :address="address" page-mode />
   </div>
 </template>
 

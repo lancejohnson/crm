@@ -371,6 +371,10 @@ def _subject_facts(doc):
 	facts["lot_size"] = (zillow or {}).get("lot_size") or None
 	facts["zpid"] = (zillow or {}).get("zpid") or None
 	facts["has_zillow"] = bool(zillow)
+	# May be "" here: leads cached before `cover_photo` was carried have no key.
+	# `get_lead_comps` fills the gap from the area search's self-match afterwards,
+	# so neither path spends a request on a picture.
+	facts["cover_photo"] = (zillow or {}).get("cover_photo") or ""
 
 	# What it last asked, and when it left the market. Deliberately NOT called a
 	# sale price: this inventory carries the last LIST price, and going off-market
@@ -775,6 +779,9 @@ def get_lead_comps(lead, radius_mi=None, limit=None, filters=None, auto=0, inclu
 		"radius_mi": radius,
 		"cached_point": cached,
 		"comps": [],
+		# Comps a human discarded. Never merged into `comps` — see the pool filter
+		# below. Present as [] so the client can render it without a guard.
+		"discarded": [],
 		"available": _available(),
 	}
 	if not base["available"]:
@@ -828,6 +835,10 @@ def get_lead_comps(lead, radius_mi=None, limit=None, filters=None, auto=0, inclu
 		row = dict(row)
 		row["distance_mi"] = round(dist, 2)
 		row["source"] = row.get("source") or "istl"
+		# The pooled index holds no imagery. The key exists from the start so the
+		# client never has to special-case its absence; the Zillow merge fills it in
+		# for any pin it can match, and the rest render a placeholder.
+		row.setdefault("photo", "")
 		row["selected"] = row["name"] in selected
 		row["hidden"] = row["name"] in hidden
 		# Computed while the dates are still dates, and returned so the client can
@@ -850,6 +861,12 @@ def get_lead_comps(lead, radius_mi=None, limit=None, filters=None, auto=0, inclu
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Comps: Zillow refresh failed")
 		base["zillow"] = {"used": False, "reason": "error"}
+
+	# Subject photo, cheapest source first: the facts we already cached, else the
+	# self-match the area search threw away. Both are free; neither is worth a
+	# billed lookup, so an unmatched subject simply shows no photo.
+	if base.get("subject") is not None and not base["subject"].get("cover_photo"):
+		base["subject"]["cover_photo"] = (base.get("zillow") or {}).get("subject_photo") or ""
 
 	for row in out:
 		row["selected"] = row["name"] in selected
@@ -883,8 +900,14 @@ def get_lead_comps(lead, radius_mi=None, limit=None, filters=None, auto=0, inclu
 	# that the rep actually needs.
 	hidden_here = [r for r in out if r["hidden"]]
 	base["hidden_count"] = len(hidden_here)
-	if not int(include_hidden or 0):
-		out = [r for r in out if not r["hidden"]]
+	# ALWAYS removed from the pool, whatever the caller asked for. `include_hidden`
+	# used to merge them back in here, which quietly let discarded junk keep a tier
+	# "usable" and suppress the widening the rep needed. Discards now travel in
+	# their own list so the tray can gray them out and offer an undo without ever
+	# touching the ladder, the counts, or what gets underwritten.
+	out = [r for r in out if not r["hidden"]]
+	if int(include_hidden or 0):
+		base["discarded"] = sorted(hidden_here, key=lambda r: r["distance_mi"])[:cap]
 
 	explicit = _coerce_filters(filters)
 	if explicit is not None:
@@ -962,6 +985,8 @@ def _batchdata_fallback(doc, base, merge_into=None):
 		c["distance_mi"] = round(_haversine_mi(lat, lng, c["lat"], c["lng"]), 2)
 		c["selected"] = False
 		c["hidden"] = False
+		# BatchData sells records, not imagery.
+		c.setdefault("photo", "")
 		c["recency_days"] = _recency_days(c, frappe.utils.today())
 
 	# BatchData applies no radius and returns no similarity score, so both are ours

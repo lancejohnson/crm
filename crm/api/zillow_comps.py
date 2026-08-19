@@ -48,7 +48,7 @@ MAX_SPLIT_DEPTH = 6
 #: Hard stop on RapidAPI calls for one circle+status so a dense metro cannot
 #: spend the shared quota on a single comps open. 40 pages ≈ 1,600 rows.
 MAX_SEARCH_CALLS = 40
-AREA_CACHE_VERSION = 5  # v4 paged to 800; v5 price-splits past 800
+AREA_CACHE_VERSION = 6  # v4 paged to 800; v5 price-splits past 800; v6 keeps imgSrc
 PIN_CACHE_VERSION = 1
 
 _SUFFIXES = {
@@ -206,6 +206,11 @@ def _shape_search(prop, kind):
 		"property_type": zillow_api.HOME_TYPES.get(home) or (home.title().replace("_", " ") or None),
 		"source": "zillow",
 		"zpid": str(zpid),
+		# The search response already carries a listing thumbnail. Keeping it is the
+		# whole reason the tray can show a photo per comp for NOTHING: the alternative
+		# is `/property?address=` per house, which is one billed call each. Measured
+		# on a St Paul 2-mile RecentlySold page: imgSrc present on 41 of 41 rows.
+		"photo": (prop.get("imgSrc") or "").strip(),
 	}
 
 
@@ -437,6 +442,13 @@ def _find(row, by_key, by_ll):
 
 def _merge_one(existing, incoming, today):
 	"""Update `existing` from a Zillow row when Zillow is actually newer."""
+	# A photo is not "newer" data, it is data the pooled index simply never had, so
+	# it rides along on ANY match rather than waiting for a price/date to change.
+	# This is what gives ISTL-origin pins a thumbnail without a per-address call.
+	if incoming.get("photo") and not existing.get("photo"):
+		existing["photo"] = incoming["photo"]
+	if incoming.get("zpid") and not existing.get("zpid"):
+		existing["zpid"] = incoming["zpid"]
 	if incoming.get("status") == "Active":
 		# A live Zillow listing is more current than an ISTL ask, even if ISTL
 		# also thought it was active — the ask may have moved.
@@ -512,6 +524,11 @@ def apply(doc, out, lat, lng, radius):
 		"location": "",
 		"cached": True,
 		"reason": None,
+		# The subject's OWN listing is usually inside its own search radius. We throw
+		# the row away (a house is not a comp for itself) but its thumbnail is the
+		# subject photo, free — the alternative is a billed `/property` lookup for a
+		# picture we were already handed.
+		"subject_photo": "",
 	}
 	if lat is None or lng is None:
 		info["reason"] = "no_subject"
@@ -532,6 +549,8 @@ def apply(doc, out, lat, lng, radius):
 		if dist > radius:
 			continue
 		if merge_key(row.get("address") or "") in self_keys:
+			if row.get("photo") and not info["subject_photo"]:
+				info["subject_photo"] = row["photo"]
 			continue
 		row = dict(row)
 		row["distance_mi"] = round(dist, 2)

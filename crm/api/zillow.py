@@ -272,6 +272,10 @@ def _normalize(raw):
 		"last_listing": listing,
 		"home_status": raw.get("homeStatus"),
 		"address": raw.get("streetAddress"),
+		# Carried so a lead whose facts we already paid for can show its own photo
+		# without a second call. Leads cached before this shipped simply have no key
+		# and fall back to the area search's self-match, which is also free.
+		"cover_photo": raw.get("imgSrc") or "",
 	}
 
 
@@ -347,6 +351,14 @@ def photo_urls(raw, limit=60):
 	return out
 
 
+# Bumped when `_normalize` starts carrying a field worth re-fetching a lead for.
+# A cached blob without every key here is treated as stale, which spends ONE
+# lookup per lead and then rides the normal 30-day cache. Cheaper than the
+# alternative it replaces (a per-comp `/property` call just to get a picture),
+# and self-limiting because the refetch rewrites the cache with the key present.
+REQUIRED_FACT_KEYS = ("cover_photo",)
+
+
 def _cached(doc):
 	if not _has_cache() or not doc.get("zillow_facts"):
 		return None
@@ -358,9 +370,14 @@ def _cached(doc):
 		except Exception:
 			pass
 	try:
-		return json.loads(doc.get("zillow_facts"))
+		hit = json.loads(doc.get("zillow_facts"))
 	except Exception:
 		return None
+	# A remembered negative is `{}` and must stay a cheap negative — re-fetching it
+	# for a missing key would re-bill every unresolvable address on every open.
+	if hit and any(k not in hit for k in REQUIRED_FACT_KEYS):
+		return None
+	return hit
 
 
 def _store(doc, facts):
