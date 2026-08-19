@@ -11,9 +11,15 @@ subject's real geocoded address and the comps arrange themselves around it.
 
 Where the data comes from
 -------------------------
-The comps themselves are iSpeedToLead's (RentCast-derived) comparables, imported
-from the marketplace inventory by `import_comps_file`. They carry a full street
-address but no coordinates, so the importer ships them pre-geocoded.
+The comps themselves are iSpeedToLead's (RentCast-derived) last *asks*, imported
+from the LeadMarket inventory by `import_comps_file`. ISTL uses RentCast internally;
+we never call the RentCast API. They carry a full street address but no
+coordinates, so the importer ships them pre-geocoded.
+
+On every map open we then ask Zillow whether anything is more recent: a ZIP-level
+RecentlySold + ForSale search (A), and `/property` on the nearest ISTL pins (B).
+See `crm.api.zillow_comps`. BatchData remains the last resort when the pooled
+index is empty even after that.
 
 Two layers, because exact-per-lead coverage is thin:
   * a lead we BOUGHT and whose marketplace record we still hold has its own comps
@@ -651,7 +657,11 @@ def _shape_detail(row):
 	"""Fetch and normalize one comp only after a person explicitly opens it."""
 	from crm.api import zillow as zillow_api
 
-	raw = zillow_api.property_details(row.address)
+	if str(row.get("name") or "").startswith("zillow::"):
+		zpid = str(row.name).split("::", 1)[1]
+		raw = zillow_api._request("/property", {"zpid": zpid}, "Zillow: zpid lookup failed")
+	else:
+		raw = zillow_api.property_details(row.address)
 	details = zillow_api.normalize_detail(raw) if raw else None
 	photo_raw = zillow_api.property_photos(details.get("zpid")) if details else None
 	photos = zillow_api.photo_urls(photo_raw)
@@ -687,16 +697,20 @@ def get_comp_details(lead, comp):
 	if not _available():
 		return {"available": False, "comp": None, "details": None, "photos": []}
 
-	row = frappe.db.get_value(
-		DOCTYPE,
-		comp,
-		[
-			"name", "address", "city", "state", "zip", "price", "status",
-			"listed_date", "removed_date", "days_on_market", "days_old",
-			"bedrooms", "bathrooms", "square_footage", "year_built", "property_type",
-		],
-		as_dict=True,
-	)
+	if str(comp).startswith("zillow::"):
+		# Area-search pins are not CRM Comp rows. _shape_detail looks them up by zpid.
+		row = frappe._dict({"name": comp, "address": ""})
+	else:
+		row = frappe.db.get_value(
+			DOCTYPE,
+			comp,
+			[
+				"name", "address", "city", "state", "zip", "price", "status",
+				"listed_date", "removed_date", "days_on_market", "days_old",
+				"bedrooms", "bathrooms", "square_footage", "year_built", "property_type",
+			],
+			as_dict=True,
+		)
 	if not row:
 		frappe.throw(_("Comparable property {0} does not exist.").format(comp), frappe.DoesNotExistError)
 
@@ -813,6 +827,7 @@ def get_lead_comps(lead, radius_mi=None, limit=None, filters=None, auto=0, inclu
 			continue
 		row = dict(row)
 		row["distance_mi"] = round(dist, 2)
+		row["source"] = row.get("source") or "istl"
 		row["selected"] = row["name"] in selected
 		row["hidden"] = row["name"] in hidden
 		# Computed while the dates are still dates, and returned so the client can
@@ -824,6 +839,21 @@ def get_lead_comps(lead, radius_mi=None, limit=None, filters=None, auto=0, inclu
 			if row.get(key):
 				row[key] = str(row[key])
 		out.append(row)
+
+	# ISTL asks go stale. Check Zillow for newer sales/listings around the
+	# subject, and refresh the nearest ISTL pins' sale dates, before we count
+	# or filter. Soft: an outage leaves `out` as the pooled index.
+	try:
+		from crm.api import zillow_comps
+
+		base["zillow"] = zillow_comps.apply(doc, out, lat, lng, radius)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Comps: Zillow refresh failed")
+		base["zillow"] = {"used": False, "reason": "error"}
+
+	for row in out:
+		row["selected"] = row["name"] in selected
+		row["hidden"] = row["name"] in hidden
 
 	out.sort(key=lambda r: r["distance_mi"])
 	base["total_in_radius"] = len(out)

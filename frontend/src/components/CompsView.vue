@@ -25,7 +25,8 @@
           </span>
           <template v-if="(data?.total_matched ?? 0) > comps.length">
             · {{ __('showing the {0} nearest', [comps.length]) }}
-                </template>
+          </template>
+          <template v-if="zillowLine"> · {{ zillowLine }}</template>
               </template>
               <template v-else>{{ emptyMessage }}</template>
             </div>
@@ -1390,9 +1391,14 @@ function popupHtml(c) {
   //
   // Deliberately "off-market", never "sold": this inventory carries the last ASK
   // and leaving the market is not a confirmed close.
+  // ISTL pins are last asks, so off-market ≠ sold. A Zillow RecentlySold pin
+  // (or an ISTL pin we refreshed off a Zillow sale) IS a recorded sale.
+  const zillowSale = !active && (c.source === 'zillow' || c.zillow_refreshed)
   const headline = active
     ? `${__('For sale')}${dom ? ` · ${dom}` : ''}`
-    : `${__('Off-market {0}', [fmtDate(c.removed_date)])}${ago ? ` · ${ago}` : ''}`
+    : zillowSale
+      ? `${__('Sold {0}', [fmtDate(c.removed_date)])}${ago ? ` · ${ago}` : ''}`
+      : `${__('Off-market {0}', [fmtDate(c.removed_date)])}${ago ? ` · ${ago}` : ''}`
   const when = active
     ? __('Listed {0}', [fmtDate(c.listed_date)])
     : `${__('Listed {0}', [fmtDate(c.listed_date)])}${dom ? ` · ${dom}` : ''}`
@@ -1440,6 +1446,9 @@ function popupHtml(c) {
       <div style="color:#5c5a55">${when}</div>
       ${facts ? `<div style="color:#8a877e;margin-top:2px">${escapeHtml(facts)}</div>` : ''}
       <div style="color:#8a877e;margin-top:2px">${__('{0} mi away', [c.distance_mi])}</div>
+      ${c.source === 'zillow' || c.zillow_refreshed
+        ? `<div style="color:#8a877e;margin-top:2px">${escapeHtml(__('Zillow'))}</div>`
+        : ''}
       ${zlink}
       ${details}
       ${actions}
@@ -1705,6 +1714,15 @@ function toggleRevealHidden() {
 const MAX_SHEET_COMPS = 4
 const creatingSheet = ref(false)
 const selectedNames = computed(() => comps.value.filter((c) => c.selected).map((c) => c.name))
+
+const zillowLine = computed(() => {
+  const z = data.value?.zillow
+  if (!z || z.reason === 'error' || z.reason === 'not_configured') return ''
+  const bits = []
+  if (z.added) bits.push(__('+{0} from Zillow', [z.added]))
+  if (z.updated) bits.push(__('{0} refreshed', [z.updated]))
+  return bits.join(', ')
+})
 
 // Hand the chosen comps to whoever is hosting us, so a host rail can price off
 // exactly what the rep ticked. Selection already persists team-wide on the lead;

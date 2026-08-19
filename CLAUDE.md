@@ -160,6 +160,17 @@ duplicating. Work substantial features in a worktree of your own.
     comp we hold anywhere is pooled and resolved by radius: **718k comps / 604k
     unique addresses**, filtered to our leads' 515 ZIPs → **47k records / 36.6k
     addresses**, covering **92% of our leads** (median 75 nearby).
+  - **Zillow freshness on every map open** (`crm/api/zillow_comps.py`). ISTL
+    comps are last *asks* and go stale. After the pool loads we (A) search the
+    subject's circle (`/search?coordinates=lon lat,diameter`, diameter = 2×
+    radius so 2 mi → `d=4`; street `location=` returns `{zpid}` only) for
+    RecentlySold + ForSale (`sort=Newest`, 12-month sold window, 7-day cache)
+    and (B) `/property` the nearest 5 stale ISTL pins (30-day address cache) to pick
+    up a sale Zillow recorded after ISTL last saw the house. Street-address
+    `/search` returns `{zpid}` only. `dateSold` is
+    epoch-ms. New pins are `zillow::{zpid}`; matching ISTL pins are updated in
+    place (Street/St suffix collapse + 4-decimal lat/lng). BatchData still only
+    fires when the pool is empty *after* this. Quota reserve 500 unchanged.
   - Comps carry a street address but no coordinates, so they ship pre-geocoded
     (Census BATCH endpoint, ~95% match — the one-at-a-time endpoint istl-buyer
     uses would take ~50min for this volume). The **subject** is geocoded on
