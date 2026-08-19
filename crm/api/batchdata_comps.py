@@ -60,17 +60,12 @@ API_BASE = "https://api.batchdata.com/api/v1"
 #: datasets and bills $0.64/row, 21x more, for data this feature never reads.
 CONF_KEY = "batchdata_comps_api_key"
 
-#: Lance's call, from the session that specified this: "pull the most similar
-#: five-ten". Ten is the top of that range and still only $0.30.
-#: 25 x $0.030 = $0.75/lead, against a lead that cost $29. Cost is not the
-#: argument though — the response is NOT relevance-ordered, so `take` decides how
-#: much there is to CHOOSE from, and the choosing is what makes them comps.
-#: Measured on a Brooklyn lead (3bd/1444sf/1930), best-6 after ranking:
-#:     take=10 -> mean score 1.91, median 0.85mi, median $788/sf
-#:     take=25 -> mean score 1.19, median 0.59mi, median $919/sf
-#: FIVE of the best six at 25 were invisible at 10, and the median $/sf moved
-#: 17% — a different ARV, not merely tidier comps.
-DEFAULT_TAKE = 25
+#: Lance's call: "pull the most similar five-ten". Ten is the top of that range
+#: and still only $0.30. take=25 was tried (better median $/sf on one Brooklyn
+#: lead) and then capped back — we are billed per row returned, so 25 is $0.75
+#: on a fallback that already only fires when ISTL and Zillow solds both failed.
+#: KEEP still ranks down to 6 for the map; take is only how many we BUY.
+DEFAULT_TAKE = 10
 
 #: Hard ceiling on how far a "comp" may be. `compAddress` has NO radius control
 #: and has been observed matching out to ~3mi, so this is enforced by us or not at

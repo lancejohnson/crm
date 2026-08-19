@@ -63,8 +63,9 @@ from frappe import _
 DOCTYPE = "CRM Comp"
 SALES_ROLES = ("System Manager", "Sales Manager", "Sales User")
 
-#: Default search radius. Two miles is what LeadMarket's rings top out at, and in
-#: practice a comp further away than that is arguing about a different market.
+#: Fallback when a caller sends no radius. The comps PAGE starts at 0.5 mi and
+#: walks out (0.5 → 1 → 2 → 5) until it has a usable set; this 2-mile default is
+#: only for older callers that omit the argument entirely.
 DEFAULT_RADIUS_MI = 2.0
 #: Hard cap on returned pins. A dense metro ZIP can hold 700+ comps; past ~200
 #: the map is an unreadable wall of pills and the payload starts to hurt.

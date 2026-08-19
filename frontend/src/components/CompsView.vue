@@ -7,6 +7,14 @@
        has to be decided here, from the props, or the map/tray split has no bound
        to scroll inside and grows to ~8,000px. -->
   <div ref="rootEl" class="flex flex-col gap-2" :class="fillHeight && wide ? 'min-h-0 flex-1' : ''">
+  <CompOfferCalc
+    v-if="pageMode"
+    :lead="lead"
+    :subject="data?.subject || null"
+    :comps="selectedComps"
+    @remove="setCompState($event, 'none')"
+    @open="openCompDetail"
+  />
   <!-- Address and counts share ONE line with the controls. They used to be
        stacked, which cost a whole row of height at the top of a page whose
        entire job is to show a map. -->
@@ -62,7 +70,7 @@
                  — a button reading "Details off" is ambiguous about whether that
                  is the current state or what clicking will do. -->
             <label
-              class="flex cursor-pointer select-none items-center gap-1.5 whitespace-nowrap text-sm text-ink-gray-7"
+              class="flex cursor-pointer select-none items-center gap-1.5 whitespace-nowrap text-xs text-ink-gray-7"
               :title="__('Show beds/baths/sqft/year on pills') + ' (D)'"
             >
               <FormControl type="checkbox" size="sm" v-model="showDetail" />
@@ -74,7 +82,7 @@
                  lot ends. A rep zoomed in to judge a comp should not also have
                  to turn on 1,800 context dots. Same checkbox idiom as Details. -->
             <label
-              class="flex cursor-pointer select-none items-center gap-1.5 whitespace-nowrap text-sm text-ink-gray-7"
+              class="flex cursor-pointer select-none items-center gap-1.5 whitespace-nowrap text-xs text-ink-gray-7"
               :title="__('Show lot lines when zoomed in') + ' (P)'"
             >
               <FormControl type="checkbox" size="sm" v-model="showParcels" />
@@ -143,7 +151,7 @@
           class="flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg border border-outline-gray-2 bg-surface-gray-1 px-2 py-1"
         >
           <div class="flex min-w-0 items-center gap-1">
-            <span class="shrink-0 text-2xs font-medium text-ink-gray-5">{{ __('Status') }}</span>
+            <span class="shrink-0 text-xs font-medium text-ink-gray-5">{{ __('Status') }}</span>
             <FormControl
               type="select"
               size="sm"
@@ -159,7 +167,7 @@
               )
             "
           >
-            <span class="shrink-0 text-2xs font-medium text-ink-gray-5">{{ __('Sold') }}</span>
+            <span class="shrink-0 text-xs font-medium text-ink-gray-5">{{ __('Sold') }}</span>
             <FormControl
               type="select"
               size="sm"
@@ -168,29 +176,29 @@
             />
           </div>
 
-          <div v-for="r in rangeRows" :key="r.key" class="flex min-w-0 items-center gap-1">
-            <span class="shrink-0 text-2xs font-medium text-ink-gray-5">{{ r.label }}</span>
-            <FormControl
-              class="w-12"
-              type="number"
-              size="sm"
-              :step="r.step"
+          <div v-for="r in rangeRows" :key="r.key" class="flex shrink-0 items-center gap-1">
+            <span class="shrink-0 text-xs font-medium text-ink-gray-5">{{ r.label }}</span>
+            <input
+              class="comps-filter-num"
+              :style="{ width: r.px + 'px' }"
+              inputmode="numeric"
               :placeholder="__('min')"
-              v-model="draft[r.key + '_min']"
+              :value="fmtInt(draft[r.key + '_min'])"
+              @input="typeFilter(r.key + '_min', $event)"
             />
             <span class="text-ink-gray-4">–</span>
-            <FormControl
-              class="w-12"
-              type="number"
-              size="sm"
-              :step="r.step"
+            <input
+              class="comps-filter-num"
+              :style="{ width: r.px + 'px' }"
+              inputmode="numeric"
               :placeholder="__('max')"
-              v-model="draft[r.key + '_max']"
+              :value="fmtInt(draft[r.key + '_max'])"
+              @input="typeFilter(r.key + '_max', $event)"
             />
           </div>
 
           <div class="flex min-w-0 items-center gap-1">
-            <span class="shrink-0 text-2xs font-medium text-ink-gray-5">{{ __('Type') }}</span>
+            <span class="shrink-0 text-xs font-medium text-ink-gray-5">{{ __('Type') }}</span>
             <FormControl
               type="select"
               size="sm"
@@ -244,6 +252,7 @@
              comparable — square footage says nothing about a gutted shell beside
              a renovated flip. -->
         <div
+          id="comps-map"
           class="flex min-h-0 gap-3"
           :class="[
             wide ? 'flex-row' : 'flex-col',
@@ -305,6 +314,7 @@
                 v-for="c in comps"
                 :key="c.name"
                 :comp="c"
+                :lead="lead"
                 :subject="data?.subject || null"
                 :active="hoveredComp === c.name"
                 :ref="(el) => setCardRef(c.name, el)"
@@ -382,6 +392,7 @@
     :lead="lead"
     :comp="detailComp"
     :subject="data?.subject || null"
+    @use="toggleUse"
   />
 </template>
 
@@ -415,6 +426,7 @@ import { COMP_COLORS } from '@/utils/comps'
 import CompDetailModal from '@/components/CompDetailModal.vue'
 import CompTrayCard from '@/components/CompTrayCard.vue'
 import CompSubjectCard from '@/components/CompSubjectCard.vue'
+import CompOfferCalc from '@/components/CompOfferCalc.vue'
 import FilterIcon from '@/components/Icons/FilterIcon.vue'
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
 
@@ -762,8 +774,15 @@ const SUBJECT = COMP_COLORS.subject.bg
 const mapEl = ref(null)
 const data = ref(null)
 const loading = ref(false)
-const radius = ref(2)
+// Half a mile first: that is the market that actually prices this house.
+// load() walks 0.5 → 1 → 2 → 5 if the tight circle is empty, so a rural
+// lead still gets a set without opening at a two-mile dump of irrelevants.
+const radius = ref(0.5)
+const RADIUS_STEPS = [0.5, 1, 2, 5]
+const MIN_FOR_RADIUS = 5
+let wideningRadius = false
 let map = null
+let lastFitKey = ''
 let sizeObserver = null
 
 const radiusOptions = [
@@ -809,11 +828,11 @@ const typeOptions = [
 ]
 
 const rangeRows = [
-  { key: 'beds', label: __('Beds'), step: 1 },
-  { key: 'baths', label: __('Baths'), step: 0.5 },
-  { key: 'sqft', label: __('Sq ft'), step: 50 },
-  { key: 'year', label: __('Year'), step: 1 },
-  { key: 'price', label: __('Price'), step: 1000 },
+  { key: 'beds', label: __('Beds'), step: 1, width: 'w-[3.6rem]', px: 58 },
+  { key: 'baths', label: __('Baths'), step: 0.5, width: 'w-[3.6rem]', px: 58 },
+  { key: 'sqft', label: __('Sq ft'), step: 50, width: 'w-[4.6rem]', px: 74 },
+  { key: 'year', label: __('Year'), step: 1, width: 'w-[4.6rem]', px: 74 },
+  { key: 'price', label: __('Price'), step: 1000, width: 'w-[5.6rem]', px: 90 },
 ]
 
 const RANGE_KEYS = rangeRows.flatMap((r) => [`${r.key}_min`, `${r.key}_max`])
@@ -1171,12 +1190,22 @@ function pillFacts(c) {
  * handler as the popup's Hide button, so both paths write the same state.
  */
 function hideBadge(c) {
-  return `<span class="comps-pill-x" data-comp-hide="${escapeHtml(c.name)}"
-      title="${__('Remove from map')}"
+  // Selected: − takes it out of the calc table, pin stays. Unselected: ✕ hides
+  // it from the map. Same hover reveal either way.
+  if (c.selected) {
+    return `<span class="comps-pill-x" data-comp-unuse="${escapeHtml(c.name)}"
+        title="${__('Remove from table — stays on the map')}"
+        style="position:absolute;top:-6px;right:-6px;width:15px;height:15px;
+        border-radius:50%;background:#fff;color:#44423d;border:1px solid #cfccc5;
+        box-shadow:0 1px 2px rgba(0,0,0,.3);font:700 10px/13px ui-sans-serif,system-ui;
+        text-align:center;cursor:pointer">−</span>`
+  }
+  return `<span class="comps-pill-x" data-comp-use="${escapeHtml(c.name)}"
+      title="${__('Add to table')}"
       style="position:absolute;top:-6px;right:-6px;width:15px;height:15px;
-      border-radius:50%;background:#fff;color:#44423d;border:1px solid #cfccc5;
-      box-shadow:0 1px 2px rgba(0,0,0,.3);font:700 10px/13px ui-sans-serif,system-ui;
-      text-align:center;cursor:pointer">✕</span>`
+      border-radius:50%;background:#fff;color:#2563c9;border:1px solid #93c5fd;
+      box-shadow:0 1px 2px rgba(0,0,0,.3);font:700 11px/13px ui-sans-serif,system-ui;
+      text-align:center;cursor:pointer">+</span>`
 }
 
 /**
@@ -1260,7 +1289,9 @@ function pillIcon(c) {
   const ink = pal.ink
   const price = priceShort(c.price)
   const { year, line2 } = pillBits(c)
-  const detailed = (showDetail.value || c.selected) && (year || line2)
+  // Selected does NOT switch to the tall pill — that resized the icon under the
+  // pointer and read as the map jumping. The ring is the selected signal.
+  const detailed = showDetail.value && (year || line2)
   const ring = c.selected
     ? `box-shadow:0 0 0 2px #fff,0 0 0 4px ${COMP_COLORS.subject.bg},0 1px 3px rgba(0,0,0,.4);`
     : 'box-shadow:0 1px 3px rgba(0,0,0,.35);'
@@ -1560,6 +1591,18 @@ function popupHtml(c) {
 
 function render() {
   if (!mapEl.value) return
+  const s = data.value?.subject
+  // Keep the view the rep is looking at. Filter / discard / use used to destroy
+  // the map and fitBounds again, which yanked them from a street they had zoomed
+  // into out to the whole circle. Only refit when the SUBJECT or the RADIUS
+  // changed — those are the two things that actually change what "the area" is.
+  const fitKey =
+    s?.lat != null ? `${s.lat.toFixed(5)},${s.lng.toFixed(5)},${Number(radius.value)}` : ''
+  const prev =
+    map && lastFitKey === fitKey
+      ? { center: map.getCenter(), zoom: map.getZoom() }
+      : null
+
   if (map) {
     unbindParcels()
     map.remove()
@@ -1568,14 +1611,17 @@ function render() {
   // Markers are rebuilt below; stale entries would otherwise leak and the hover
   // watcher would try to light up an element no longer on the map.
   markersByName.clear()
-  const s = data.value?.subject
   if (!s?.lat) return
 
   // scrollWheelZoom OFF deliberately. The map sits above the property list on a
   // full page, so a wheel over the map used to be swallowed by Leaflet and the
   // list below was unreachable on a laptop-height window (caught in review).
   // Zoom is still available via the +/- control and pinch on a trackpad.
-  map = L.map(mapEl.value, { center: [s.lat, s.lng], zoom: 14, scrollWheelZoom: false })
+  map = L.map(mapEl.value, {
+    center: prev ? prev.center : [s.lat, s.lng],
+    zoom: prev ? prev.zoom : 14,
+    scrollWheelZoom: false,
+  })
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
     attribution: '© OpenStreetMap',
@@ -1624,28 +1670,7 @@ function render() {
 
   for (const c of comps.value) {
     if (c.lat == null || c.lng == null) continue
-    // Fresher pills stack above faded ones where markers overlap, so the comp
-    // that matters is the one you can actually click in a tight cluster.
-    const fresh = Math.round(pillOpacity(stalenessDays(c)) * 100)
-    const marker = L.marker([c.lat, c.lng], {
-      icon: pillIcon(c),
-      // A selected comp sits above everything so it stays clickable in a cluster.
-      zIndexOffset: (c.selected ? 600 : isActive(c.status) ? 200 : 100) + fresh,
-      opacity: c.hidden ? 0.45 : 1,
-    })
-      .addTo(map)
-      .bindPopup(popupHtml(c), { maxWidth: 280 })
-    // Remember which comp is open so h / u know what they act on.
-    marker.on('popupopen', () => (focusedComp.value = c.name))
-    marker.on('popupclose', () => {
-      if (focusedComp.value === c.name) focusedComp.value = null
-    })
-    // Hover the pin -> highlight its row, and vice versa via `hoveredComp`.
-    marker.on('mouseover', () => hoverFromMap(c.name))
-    marker.on('mouseout', () => {
-      if (hoveredComp.value === c.name) hoveredComp.value = null
-    })
-    markersByName.set(c.name, marker)
+    placePin(c)
     bounds.push([c.lat, c.lng])
   }
 
@@ -1662,12 +1687,15 @@ function render() {
     .addTo(map)
     .bindPopup(subjectPopupHtml(s), { maxWidth: 300 })
 
-  if (bounds.length > 1) {
+  if (!prev && bounds.length > 1) {
     try {
       map.fitBounds(bounds, { padding: [30, 30], maxZoom: 16 })
+      lastFitKey = fitKey
     } catch {
       /* single point / degenerate bounds — keep the default view */
     }
+  } else {
+    lastFitKey = fitKey
   }
   // Popup HTML is injected, so its buttons cannot carry Vue handlers. One
   // delegated listener on the map container covers every popup instead.
@@ -1682,7 +1710,11 @@ function onPopupClick(e) {
   const use = e.target?.closest?.('[data-comp-use]')
   if (use) {
     e.preventDefault()
-    toggleUse(use.getAttribute('data-comp-use'))
+    e.stopPropagation()
+    const name = use.getAttribute('data-comp-use')
+    // After the click, not during: replacing the icon mid-click lets Leaflet
+    // treat the mouseup as a map drag, which is the jump.
+    setTimeout(() => toggleUse(name), 0)
     return
   }
   const detail = e.target?.closest?.('[data-comp-details]')
@@ -1694,7 +1726,17 @@ function onPopupClick(e) {
   const hide = e.target?.closest?.('[data-comp-hide]')
   if (hide) {
     e.preventDefault()
-    setCompState(hide.getAttribute('data-comp-hide'), 'hidden')
+    e.stopPropagation()
+    const name = hide.getAttribute('data-comp-hide')
+    setTimeout(() => setCompState(name, 'hidden'), 0)
+    return
+  }
+  const unuse = e.target?.closest?.('[data-comp-unuse]')
+  if (unuse) {
+    e.preventDefault()
+    e.stopPropagation()
+    const name = unuse.getAttribute('data-comp-unuse')
+    setTimeout(() => setCompState(name, 'none'), 0)
   }
 }
 
@@ -1713,6 +1755,20 @@ function openCompDetail(name) {
   showCompDetail.value = true
 }
 
+function fmtInt(v) {
+  if (v === '' || v == null) return ''
+  const n = Math.round(Number(String(v).replace(/[^0-9-]/g, '')))
+  return Number.isFinite(n) ? n.toLocaleString() : ''
+}
+
+function typeFilter(key, e) {
+  const raw = String(e.target.value).replace(/\D/g, '')
+  draft[key] = raw === '' ? '' : parseInt(raw, 10)
+  nextTick(() => {
+    e.target.value = fmtInt(draft[key])
+  })
+}
+
 /** Draft -> the server's filter shape. Blank means "unconstrained", not zero. */
 function currentFilters() {
   const f = { status: draft.status || 'all', radius_mi: radius.value }
@@ -1720,7 +1776,7 @@ function currentFilters() {
   if (isSet(draft.property_types)) f.property_types = [draft.property_types]
   for (const k of RANGE_KEYS) {
     const v = draft[k]
-    if (v !== '' && v != null && Number.isFinite(Number(v))) f[k] = Number(v)
+    if (v !== '' && v != null && Number.isFinite(Number(v))) f[k] = Math.round(Number(v))
   }
   return f
 }
@@ -1735,7 +1791,7 @@ function syncDraft(f) {
   draft.property_types = type || ANY
   for (const k of RANGE_KEYS) {
     const v = f?.[k]
-    draft[k] = v == null ? '' : v
+    draft[k] = v == null || v === '' ? '' : Math.round(Number(v))
   }
   // Watchers flush before nextTick callbacks, so this releases only after the
   // deep watcher has seen (and ignored) our own programmatic write.
@@ -1744,15 +1800,90 @@ function syncDraft(f) {
   })
 }
 
+function pinZ(c) {
+  const fresh = Math.round(pillOpacity(stalenessDays(c)) * 100)
+  return (c.selected ? 600 : isActive(c.status) ? 200 : 100) + fresh
+}
+
+/** Put or restyle one pin. Does NOT touch the map view. */
+function placePin(c) {
+  if (!map || c.lat == null || c.lng == null) return
+  let marker = markersByName.get(c.name)
+  if (!marker) {
+    marker = L.marker([c.lat, c.lng]).addTo(map)
+    marker.on('click', (ev) => {
+      const t = ev.originalEvent?.target
+      if (t?.closest?.('[data-comp-hide],[data-comp-unuse],[data-comp-use]')) return
+      focusedComp.value = c.name
+      openCompDetail(c.name)
+    })
+    marker.on('mouseover', () => hoverFromMap(c.name))
+    marker.on('mouseout', () => {
+      if (hoveredComp.value === c.name) hoveredComp.value = null
+    })
+    markersByName.set(c.name, marker)
+  }
+  marker.setIcon(pillIcon(c))
+  marker.setZIndexOffset(pinZ(c))
+  const badge = marker.getElement()?.querySelector('.comps-pill-x')
+  if (badge) {
+    L.DomEvent.disableClickPropagation(badge)
+    L.DomEvent.on(badge, 'mousedown', L.DomEvent.stop)
+    L.DomEvent.on(badge, 'touchstart', L.DomEvent.stop)
+  }
+}
+
+function dropPin(name) {
+  const marker = markersByName.get(name)
+  if (!marker || !map) return
+  map.removeLayer(marker)
+  markersByName.delete(name)
+}
+
+/**
+ * Flip selected / hidden on the in-memory board and restyle that one pin.
+ * Replacing the arrays (not mutating a field) is what makes `selectedComps`
+ * recompute; Vue will not notice `row.selected = true` through a computed that
+ * only depends on the array identity.
+ */
+function applyCompState(name, state) {
+  if (!data.value) return
+  const list = data.value.comps || []
+  const disc = data.value.discarded || []
+  const row = list.find((c) => c.name === name) || disc.find((c) => c.name === name)
+  if (!row) return
+  const next = {
+    ...row,
+    selected: state === 'selected',
+    hidden: state === 'hidden',
+  }
+  if (state === 'hidden') {
+    data.value.comps = list.filter((c) => c.name !== name)
+    data.value.discarded = disc.some((c) => c.name === name)
+      ? disc.map((c) => (c.name === name ? next : c))
+      : [...disc, next]
+    dropPin(name)
+  } else {
+    data.value.comps = list.some((c) => c.name === name)
+      ? list.map((c) => (c.name === name ? next : c))
+      : [...list, next]
+    data.value.discarded = disc.filter((c) => c.name !== name)
+    placePin(next)
+  }
+  data.value.selected_count = data.value.comps.filter((c) => c.selected).length
+  if (detailComp.value?.name === name) detailComp.value = next
+}
+
 /**
  * Mark a comp as one we are pricing off, or hide it. Team-wide by design.
  *
- * Optimistic on the pill, then reloaded: hiding removes a pin, which changes the
- * counts and can change which preset tier applies, and re-deriving that on the
- * client would be a second, divergent copy of the ladder.
+ * The map is NOT rebuilt. Adding a comp used to `load()` → `render()`, which
+ * tore Leaflet down and put it back — that's the jump. The server write is
+ * fire-and-forget against local state; a failure reloads to undo.
  */
 async function setCompState(comp, state) {
   if (!props.lead || !comp) return
+  applyCompState(comp, state)
   try {
     const res = await call('crm.api.comps.set_comp_state', {
       lead: props.lead,
@@ -1761,23 +1892,21 @@ async function setCompState(comp, state) {
     })
     if (res?.ok === false) {
       toast.error(__('Comp selection is not set up on this site yet.'))
+      await load()
       return
     }
     if (state === 'hidden') {
       toast.success(__('Comp discarded'))
-      // Opening the drawer on the first discard is what makes the undo
-      // discoverable; without it the card simply vanishes, which is the
-      // behaviour this replaced.
       showDiscarded.value = true
     }
-    await load()
   } catch (e) {
     toast.error(e.messages?.[0] || __('Could not update that comp.'))
+    await load()
   }
 }
 
 function toggleUse(name) {
-  const c = comps.value.find((x) => x.name === name)
+  const c = comps.value.find((x) => x.name === name) || discarded.value.find((x) => x.name === name)
   setCompState(name, c?.selected ? 'none' : 'selected')
 }
 
@@ -1785,28 +1914,36 @@ async function load({ explicit = userTouched.value } = {}) {
   if (!props.lead) return
   loading.value = true
   try {
-    // Always ask for the discards: they render as their own dimmed section in the
-    // tray rather than behind a reveal toggle, and the server keeps them out of
-    // the pool regardless of this flag.
-    const payload = { lead: props.lead, radius_mi: radius.value, include_hidden: 1 }
-    if (explicit) {
-      payload.filters = JSON.stringify(currentFilters())
-      payload.auto = 0
-    } else {
-      payload.auto = 1
+    // Loop, not recurse: a `return load()` still runs this try's `finally`,
+    // which would flip `loading` off while the inner call is in flight.
+    for (;;) {
+      const payload = { lead: props.lead, radius_mi: radius.value, include_hidden: 1 }
+      if (explicit) {
+        payload.filters = JSON.stringify(currentFilters())
+        payload.auto = 0
+      } else {
+        payload.auto = 1
+      }
+      data.value = await call('crm.api.comps.get_lead_comps', payload)
+      emit('subject', data.value?.subject || null)
+      syncDraft(data.value?.filters)
+      // Auto-widen only on the suggested path. A rep who picked ½ mile and got
+      // three houses meant three houses; walking out from under them is the same
+      // silent rewrite as loosening a filter they typed.
+      if (explicit || userTouched.value) break
+      const n = data.value?.total_matched ?? 0
+      const next = RADIUS_STEPS.find((r) => r > Number(radius.value))
+      if (n >= MIN_FOR_RADIUS || next == null) break
+      wideningRadius = true
+      radius.value = next
+      wideningRadius = false
     }
-    data.value = await call('crm.api.comps.get_lead_comps', payload)
-    // Hand the resolved subject facts to whoever is hosting us. `get_lead_comps`
-    // is the only place that merges them best-first and labels each with its
-    // source (Zillow > the property's own comp row > the lead's pick-list bands
-    // > the tax pull), so a host that read CRM Lead directly would show the
-    // vague band -- "1900-1950" -- next to a map pill already saying 1930.
-    // Emitting costs the host nothing and avoids a second call to a function
-    // that geocodes and can hit a paid Zillow lookup.
-    emit('subject', data.value?.subject || null)
-    syncDraft(data.value?.filters)
     await nextTick()
     render()
+    if (detailComp.value) {
+      const next = comps.value.find((c) => c.name === detailComp.value.name)
+      if (next) detailComp.value = next
+    }
   } catch (e) {
     toast.error(e.messages?.[0] || __('Could not load comps.'))
   } finally {
@@ -1822,6 +1959,7 @@ function resetToSuggested() {
 const MAX_SHEET_COMPS = 4
 const creatingSheet = ref(false)
 const selectedNames = computed(() => comps.value.filter((c) => c.selected).map((c) => c.name))
+const selectedComps = computed(() => comps.value.filter((c) => c.selected))
 
 const zillowLine = computed(() => {
   const z = data.value?.zillow
@@ -1932,8 +2070,21 @@ watch(draft, () => {
 }, { deep: true })
 
 watch(radius, () => {
-  if (show.value) load()
+  if (wideningRadius || !show.value) return
+  userTouched.value = true
+  load()
 })
+
+watch(
+  () => props.lead,
+  () => {
+    userTouched.value = false
+    lastFitKey = ''
+    wideningRadius = true
+    radius.value = 0.5
+    wideningRadius = false
+  },
+)
 
 watch(show, (v) => {
   if (v) {
@@ -2038,6 +2189,30 @@ function observeMapSize() {
 }
 .comps-price-pill:hover .comps-pill-x {
   display: block;
+}
+
+/* Number boxes are sized in px (this app's rem is 20px, so w-12 is 60px and
+   chops "2620"). Kill the spinner — it ate the last digit — and let the value
+   use the whole box. */
+input.comps-filter-num {
+  flex: none;
+  box-sizing: border-box;
+  height: 26px;
+  min-width: 0;
+  border: 1px solid #e5e3de;
+  border-radius: 6px;
+  background: #fff;
+  padding: 0 6px;
+  /* inherit is 20px here (app rem). The selects next door are ~13. */
+  font: 13px/1.2 InterVar, Inter, -apple-system, 'Segoe UI', system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  color: #161614;
+  text-align: right;
+}
+.comps-filter-num input::-webkit-outer-spin-button,
+.comps-filter-num input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 /* Hovering the row (or the pin) outlines the matching pill and brings it to full

@@ -1,3 +1,5 @@
+import { call } from 'frappe-ui'
+
 /**
  * Comp map palette — Zillow's grammar: for sale RED, sold/off-market YELLOW,
  * the subject BLUE.
@@ -149,6 +151,30 @@ export function compDifferences(comp, subject) {
 export function formatCompMoney(value) {
   const n = number(value)
   return n === null ? '—' : '$' + Math.round(n).toLocaleString()
+}
+
+/** The street only — "705 Cliff St", not the city/state/ZIP that follows. */
+export function streetAddress(address) {
+  const raw = String(address || '').trim()
+  if (!raw) return ''
+  return raw.split(',')[0].trim()
+}
+
+/**
+ * Photos for one comp, fetched once and remembered for the session.
+ * Hits `get_comp_details` (Zillow /property + /photos), which is already cached
+ * 30 days server-side — this just stops a hover-then-open from asking twice.
+ */
+const photoPromises = new Map()
+export function loadCompPhotos(lead, name) {
+  if (!lead || !name) return Promise.resolve([])
+  const key = `${lead}:${name}`
+  if (photoPromises.has(key)) return photoPromises.get(key)
+  const p = call('crm.api.comps.get_comp_details', { lead, comp: name })
+    .then((r) => (Array.isArray(r?.photos) ? r.photos : []))
+    .catch(() => [])
+  photoPromises.set(key, p)
+  return p
 }
 
 function delta(a, b) {

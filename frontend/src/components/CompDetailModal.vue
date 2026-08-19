@@ -28,7 +28,14 @@
               {{ compLocation }}
             </div>
           </div>
-          <Button variant="ghost" icon="x" class="shrink-0" @click="show = false" />
+          <div class="flex shrink-0 items-center gap-2">
+            <Button
+              :variant="comp?.selected ? 'subtle' : 'solid'"
+              :label="comp?.selected ? __('Remove from table') : __('Add as comp')"
+              @click="$emit('use', comp.name)"
+            />
+            <Button variant="ghost" icon="x" @click="show = false" />
+          </div>
         </div>
 
         <div class="grid min-h-0 flex-1 md:grid-cols-[minmax(0,1.55fr)_minmax(18rem,0.85fr)]">
@@ -169,6 +176,8 @@ import { compFit, formatCompMoney } from '@/utils/comps'
 import { zillowUrl } from '@/utils/propertyLinks'
 import { Badge, Button, Dialog, FeatherIcon, call } from 'frappe-ui'
 import { computed, ref, watch } from 'vue'
+
+defineEmits(['use'])
 
 const props = defineProps({
   lead: { type: String, required: true },

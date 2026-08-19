@@ -10,7 +10,7 @@
             ? 'bg-surface-blue-1'
             : 'hover:bg-surface-gray-1',
     ]"
-    @mouseenter="$emit('hover', comp.name)"
+    @mouseenter="prefetchPhotos(); $emit('hover', comp.name)"
     @mouseleave="$emit('hover', null)"
     @click="$emit('open', comp.name)"
   >
@@ -18,7 +18,10 @@
          has to be able to see what they threw out to know whether to undo it.
          Kept non-interactive so a stray click can't re-open a rejected house. -->
     <div :class="discarded ? 'pointer-events-none opacity-45 grayscale' : ''">
-      <div class="relative aspect-[3/2] w-full overflow-hidden bg-surface-gray-2">
+      <div
+        class="group/photo relative aspect-[3/2] w-full overflow-hidden bg-surface-gray-2"
+        @mouseenter="prefetchPhotos"
+      >
         <img
           v-if="photo"
           :src="photo"
@@ -55,6 +58,33 @@
         >
           {{ __('Using') }}
         </span>
+
+        <!-- Hover either edge of the photo to page through the rest. Arrows
+             stay hidden until the pointer is actually on that half, so a dense
+             tray does not grow a forest of chevrons. Clicking an arrow must
+             not open the detail modal — that's the rest of the card. -->
+        <button
+          v-if="photoIndex > 0"
+          class="absolute bottom-0 left-0 top-9 z-20 flex w-10 items-center justify-center bg-gradient-to-r from-black/40 to-transparent text-white opacity-0 transition group-hover/photo:opacity-100"
+          :aria-label="__('Previous photo')"
+          @click.stop.prevent="stepPhoto(-1)"
+        >
+          <FeatherIcon name="chevron-left" class="size-5 drop-shadow" />
+        </button>
+        <button
+          v-if="photoIndex < photos.length - 1"
+          class="absolute bottom-0 right-0 top-9 z-20 flex w-10 items-center justify-center bg-gradient-to-l from-black/40 to-transparent text-white opacity-0 transition group-hover/photo:opacity-100"
+          :aria-label="__('Next photo')"
+          @click.stop.prevent="stepPhoto(1)"
+        >
+          <FeatherIcon name="chevron-right" class="size-5 drop-shadow" />
+        </button>
+        <span
+          v-if="photos.length > 1"
+          class="pointer-events-none absolute bottom-1.5 left-1.5 z-20 rounded bg-black/55 px-1.5 py-0.5 text-2xs text-white"
+        >
+          {{ photoIndex + 1 }}/{{ photos.length }}
+        </span>
       </div>
 
       <div class="px-3 py-2">
@@ -80,8 +110,8 @@
           >{{ d.text }}</span>
         </div>
 
-        <div class="mt-0.5 truncate text-xs text-ink-gray-6" :title="comp.address">
-          {{ comp.address }}
+        <div class="mt-0.5 truncate text-xs font-medium text-ink-gray-8" :title="comp.address">
+          {{ street }}
         </div>
         <div class="mt-1 text-2xs" :class="isActive ? 'text-ink-red-3' : 'text-ink-gray-5'">
           {{ timing }}
@@ -105,7 +135,7 @@
          hover-only control is simply unreachable. They sit at low contrast
          over the photo and strengthen on hover, which keeps a dense tray calm
          without hiding its primary actions. -->
-    <div v-else class="absolute right-2 top-2 flex gap-1">
+    <div v-else class="absolute right-2 top-2 z-30 flex gap-1">
       <button
         class="rounded bg-surface-white/80 px-1.5 py-1 shadow-sm ring-1 ring-outline-gray-2 transition hover:bg-surface-white"
         :class="selected ? 'text-ink-blue-3' : 'text-ink-gray-6 hover:text-ink-gray-9'"
@@ -139,10 +169,11 @@
  */
 import { Button, FeatherIcon } from 'frappe-ui'
 import { computed, ref } from 'vue'
-import { compColor, isActiveStatus } from '@/utils/comps'
+import { compColor, isActiveStatus, loadCompPhotos, streetAddress } from '@/utils/comps'
 
 const props = defineProps({
   comp: { type: Object, required: true },
+  lead: { type: String, default: '' },
   active: { type: Boolean, default: false },
   discarded: { type: Boolean, default: false },
   // The resolved subject facts from `get_lead_comps`, for the +/- comparison.
@@ -155,7 +186,30 @@ defineEmits(['hover', 'open', 'use', 'discard', 'undiscard'])
 const palette = computed(() => compColor(props.comp.status))
 
 const broken = ref(false)
-const photo = computed(() => props.comp.photo || '')
+const photos = ref([])
+const photoIndex = ref(0)
+const photo = computed(() => {
+  if (photos.value.length) return photos.value[photoIndex.value] || ''
+  return props.comp.photo || ''
+})
+const street = computed(() => streetAddress(props.comp.address) || props.comp.address || '')
+
+function prefetchPhotos() {
+  if (photos.value.length || !props.lead) return
+  loadCompPhotos(props.lead, props.comp.name).then((urls) => {
+    if (!urls.length) return
+    photos.value = urls
+    const cover = props.comp.photo
+    const i = cover ? urls.indexOf(cover) : -1
+    photoIndex.value = i >= 0 ? i : 0
+  })
+}
+function stepPhoto(dir) {
+  const next = photoIndex.value + dir
+  if (next < 0 || next >= photos.value.length) return
+  photoIndex.value = next
+  broken.value = false
+}
 const selected = computed(() => !!props.comp.selected)
 const isActive = computed(() => isActiveStatus(props.comp.status))
 
