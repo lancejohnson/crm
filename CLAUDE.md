@@ -170,8 +170,9 @@ duplicating. Work substantial features in a worktree of your own.
     up a sale Zillow recorded after ISTL last saw the house. Street-address
     `/search` returns `{zpid}` only. `dateSold` is
     epoch-ms. New pins are `zillow::{zpid}`; matching ISTL pins are updated in
-    place (Street/St suffix collapse + 4-decimal lat/lng). BatchData still only
-    fires when the pool is empty *after* this. Quota reserve 500 unchanged.
+    place (Street/St suffix collapse + 4-decimal lat/lng). BatchData fires only
+    when ISTL has nothing in radius AND Zillow returned no priced solds
+    (for-sale listings do not count). Merged in, not a replace. Quota reserve 500 unchanged.
   - Comps carry a street address but no coordinates, so they ship pre-geocoded
     (Census BATCH endpoint, ~95% match — the one-at-a-time endpoint istl-buyer
     uses would take ~50min for this volume). The **subject** is geocoded on

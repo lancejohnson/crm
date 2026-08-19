@@ -856,6 +856,26 @@ def get_lead_comps(lead, radius_mi=None, limit=None, filters=None, auto=0, inclu
 		row["hidden"] = row["name"] in hidden
 
 	out.sort(key=lambda r: r["distance_mi"])
+
+	# BatchData only when BOTH sources failed to produce a priced sale:
+	#   no ISTL pins in radius, AND Zillow RecentlySold came back with no prices
+	#   (non-disclosure). Zillow for-sale listings do not count — an ask is not
+	#   a sale. ISTL last-asks DO count: if the pool has anything, we do not spend.
+	istl = [r for r in out if r.get("source") == "istl"]
+	zillow_solds = [
+		r for r in out
+		if r.get("price")
+		and r.get("source") == "zillow"
+		and str(r.get("status") or "").lower() != "active"
+	]
+	if istl:
+		base["fallback"] = {"source": "batchdata", "used": False, "reason": "istl_has_comps"}
+	elif zillow_solds:
+		base["fallback"] = {"source": "batchdata", "used": False, "reason": "zillow_has_prices"}
+	else:
+		base["fallback"] = _batchdata_fallback(doc, base, merge_into=out)
+		out.sort(key=lambda r: r["distance_mi"])
+
 	base["total_in_radius"] = len(out)
 
 	# A comp a human hid is gone from every count and every tier decision — leaving
@@ -913,21 +933,10 @@ def get_lead_comps(lead, radius_mi=None, limit=None, filters=None, auto=0, inclu
 
 	base["total_matched"] = len(matched)
 	base["comps"] = matched[:cap]
-
-	# Nothing in the pooled index reaches this property. Sampling the 45 most recent
-	# leads, 18% land here — an empty map, which is the one outcome this feature set
-	# out to avoid. Buy a small set from BatchData rather than show nothing.
-	#
-	# Strictly a LAST resort: gated on the unfiltered radius result being empty, not
-	# on the filtered one, so a tight preset that happens to match nothing can never
-	# spend money. `total_in_radius` is the honest "do we hold anything here at all".
-	if not out and not base["comps"]:
-		base["fallback"] = _batchdata_fallback(doc, base)
-
 	return base
 
 
-def _batchdata_fallback(doc, base):
+def _batchdata_fallback(doc, base, merge_into=None):
 	"""Fill an empty comps map from BatchData. Returns a small status dict.
 
 	Split out so the paid path is one obvious, greppable place rather than an inline
@@ -980,13 +989,23 @@ def _batchdata_fallback(doc, base):
 	comps = comps[: batchdata_comps.KEEP]
 	comps.sort(key=lambda r: r["distance_mi"])
 
-	base["comps"] = comps
-	base["total_matched"] = len(comps)
-	base["total_in_radius"] = len(comps)
-	# The rep must be told these came from somewhere else, on a different basis:
-	# recorded sales rather than our pooled listing index, and not distance-ranked
-	# by the provider. Presenting them silently as the same thing would be a lie
-	# about where the number came from.
+	if merge_into is not None:
+		try:
+			from crm.api.zillow_comps import merge_key
+		except Exception:
+			merge_key = lambda a: (a or "").strip().lower()
+		seen = {merge_key(r.get("address") or "") for r in merge_into}
+		for c in comps:
+			k = merge_key(c.get("address") or "")
+			if k in seen:
+				continue
+			seen.add(k)
+			merge_into.append(c)
+	else:
+		# Pre-merge callers (none left) still get a standalone list.
+		base["comps"] = comps
+		base["total_matched"] = len(comps)
+		base["total_in_radius"] = len(comps)
 	return {
 		"source": "batchdata",
 		"used": True,
