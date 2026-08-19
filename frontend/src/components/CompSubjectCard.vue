@@ -51,13 +51,14 @@
  */
 import { FeatherIcon } from 'frappe-ui'
 import { computed, ref } from 'vue'
+import { COMP_COLORS } from '@/utils/comps'
 
 const props = defineProps({
   subject: { type: Object, default: null },
   address: { type: String, default: '' },
 })
 
-const SUBJECT = '#2563c9'
+const SUBJECT = COMP_COLORS.subject.bg
 const broken = ref(false)
 
 const photo = computed(() => props.subject?.cover_photo || '')

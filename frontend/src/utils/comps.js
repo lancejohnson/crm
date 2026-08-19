@@ -1,3 +1,42 @@
+/**
+ * Comp map palette — Zillow's grammar: for sale RED, sold/off-market YELLOW,
+ * the subject BLUE.
+ *
+ * Defined ONCE here because three surfaces have to agree and none of them can
+ * read the others' styles: the Leaflet pills are hand-built HTML strings, the
+ * tray cards are Tailwind components, and the legend is a third thing. A pill
+ * and its card disagreeing about what "sold" looks like is worse than either
+ * colour being slightly off.
+ *
+ * This replaced a blue/amber pair chosen to be dichromat-safe. Red vs yellow is
+ * a weaker hue signal for protan/deutan vision, so the two are kept far apart in
+ * LIGHTNESS as well (a dark red against a light yellow), which survives losing
+ * the hue entirely. Status is also written in words in the pin popup and on
+ * every tray card, so colour is never the only carrier.
+ *
+ * `ink` is the text colour that belongs on `bg`: white on the red, near-black on
+ * the yellow. Yellow with white text is the obvious way to make this unreadable.
+ * `onLight` is the opposite case — the status written as TEXT on a white popup,
+ * where the yellow fill itself would be invisible, so it darkens to a gold.
+ */
+export const COMP_COLORS = {
+  active: { bg: '#d92d20', ink: '#ffffff', border: '#9f1d14', onLight: '#b42318' },
+  sold: { bg: '#f5c518', ink: '#3a2f00', border: '#c99a06', onLight: '#8a6a00' },
+  subject: { bg: '#2563c9', ink: '#ffffff', border: '#1c4ea1', onLight: '#2563c9' },
+}
+
+/** True when a comp is still listed (an ASK), rather than off-market (a sale). */
+export function isActiveStatus(status) {
+  return String(status || '')
+    .toLowerCase()
+    .startsWith('activ')
+}
+
+/** The palette entry for a comp's status. */
+export function compColor(status) {
+  return isActiveStatus(status) ? COMP_COLORS.active : COMP_COLORS.sold
+}
+
 const DIMENSIONS = [
   {
     key: 'type',

@@ -503,6 +503,22 @@ duplicating. Work substantial features in a worktree of your own.
     — 430px of a shared line to say what the disabled state and tooltip already
     say. Measured on the comps page: header block **243px → 142px**, filter strip
     3 rows → 2, map **514px → 621px**.
+  - **Pins use Zillow's grammar** — for sale RED (`#d92d20`), sold/off-market
+    YELLOW (`#f5c518`), subject BLUE (unchanged). One palette in `utils/comps.js`
+    (`COMP_COLORS`) feeds the pills, the tray chips and the legend, because those
+    three surfaces cannot read each other's styles. Yellow pills print **near-black
+    text**, not white — white on `#f5c518` is unreadable. The popup headline uses
+    a darker `onLight` gold, because the yellow fill itself vanishes on white.
+    Replaced a blue/amber pair chosen to be dichromat-safe; red vs yellow is a
+    weaker hue signal, so they are also far apart in LIGHTNESS, and status is
+    written in words on every card and popup so colour is never the only carrier.
+    - **GOTCHA — fade the FILL, never the text.** The old `opacity` on the whole
+      pill washed white-on-red into the basemap at 2.5:1 and made faded yellow
+      vanish at 1.9:1. `withAlpha` now fades only the fill (and only off-market
+      pins — a live listing is current by definition), so the recency fade can
+      stay deep (0.32 floor) while every pill clears 4.5:1. Measured: 0 of 21
+      below the bar after, 6 of 21 before. The legend now says "Fainter = older
+      sale".
   - **GOTCHA — `1rem` is 20px in this app**, not 16px, so a `w-[21rem]` rail
     renders at **420px** and out-sizes the map it is meant to accompany. The tray
     is sized in px deliberately.

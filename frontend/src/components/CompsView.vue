@@ -348,14 +348,17 @@
             {{ __('This property') }}
           </span>
           <span class="flex items-center gap-1.5">
-            <span class="size-2.5 rounded-full" :style="{ background: OFF_MARKET }" />
+            <span
+              class="size-2.5 rounded-full ring-1 ring-inset"
+              :style="{ background: OFF_MARKET, '--tw-ring-color': COMP_COLORS.sold.border }"
+            />
             {{ __('Sold / off-market') }}
           </span>
           <span class="flex items-center gap-1.5">
             <span class="size-2.5 rounded-full" :style="{ background: ACTIVE }" />
             {{ __('Still listed') }}
           </span>
-          <span class="text-ink-gray-5">{{ __('Fainter = older') }}</span>
+          <span class="text-ink-gray-5">{{ __('Fainter = older sale') }}</span>
           <span v-if="data?.selected_count" class="flex items-center gap-1.5">
             <span
               class="size-2.5 rounded-full ring-2 ring-offset-1"
@@ -408,6 +411,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { zillowUrl } from '@/utils/propertyLinks'
+import { COMP_COLORS } from '@/utils/comps'
 import CompDetailModal from '@/components/CompDetailModal.vue'
 import CompTrayCard from '@/components/CompTrayCard.vue'
 import CompSubjectCard from '@/components/CompSubjectCard.vue'
@@ -748,10 +752,12 @@ function toggleHood(force) {
 }
 
 // Canvas/marker colours live in JS because Leaflet can't read Tailwind tokens.
-// Blue/amber rather than red/green: safe for dichromats.
-const ACTIVE = '#d97706' // still listed = an ASK, not a sale
-const OFF_MARKET = '#475569' // off-market = an actual transaction
-const SUBJECT = '#2563c9'
+// Zillow's grammar: for sale RED, sold/off-market YELLOW, subject BLUE. The
+// palette lives in utils/comps.js because the pills (hand-built HTML), the tray
+// cards (Tailwind) and the legend all have to agree.
+const ACTIVE = COMP_COLORS.active.bg // still listed = an ASK, not a sale
+const OFF_MARKET = COMP_COLORS.sold.bg // off-market = an actual transaction
+const SUBJECT = COMP_COLORS.subject.bg
 
 const mapEl = ref(null)
 const data = ref(null)
@@ -1053,10 +1059,29 @@ function stalenessDays(c) {
 }
 
 /** 0d -> 1.0 (solid); 360d+ -> ~0.32. Smoothstep keeps the first month strong. */
+/**
+ * Recency fade. 0d → 1.0, 360d+ → 0.32.
+ *
+ * Applied to the FILL only, and only to off-market pins — see `pillIcon`. Fading
+ * the whole pill (text included) is what made the new palette unreadable: a
+ * faded red pill kept white text that washed into the basemap at 2.5:1, and a
+ * faded yellow one vanished entirely at 1.9:1. With the text held solid the fade
+ * can stay deep, so the signal is stronger than the stopgap that shallowed it.
+ */
 function pillOpacity(days) {
   const t = Math.max(0, Math.min(1, days / 360))
   const eased = t * t * (3 - 2 * t)
   return 1 - eased * 0.68
+}
+
+/** `#rrggbb` + alpha -> `rgba(...)`, so a fill can fade without its text fading. */
+function withAlpha(hex, alpha) {
+  const h = String(hex).replace('#', '')
+  const n = parseInt(
+    h.length === 3 ? h.split('').map((c) => c + c).join('') : h,
+    16,
+  )
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha.toFixed(3)})`
 }
 
 function priceShort(p) {
@@ -1222,16 +1247,25 @@ function subjectIcon(s) {
 function pillIcon(c) {
   const active = isActive(c.status)
   const opacity = pillOpacity(stalenessDays(c))
-  const bg = active ? ACTIVE : OFF_MARKET
+  const pal = active ? COMP_COLORS.active : COMP_COLORS.sold
+  // The fade means ONE thing: how old the SALE is. An active listing is current
+  // by definition -- how long it has sat is already printed on it as DOM -- so
+  // it never fades, which also keeps its white-on-red legible. A selected pill is
+  // never faded either: an explicit human pick outranks the recency signal.
+  const alpha = active || c.selected ? 1 : opacity
+  const bg = withAlpha(pal.bg, alpha)
+  // Text and border are held SOLID while the fill fades. That is what lets the
+  // fade stay deep without the price becoming unreadable, and it is why the ink
+  // can differ per colour: white on the red, near-black on the yellow.
+  const ink = pal.ink
   const price = priceShort(c.price)
   const { year, line2 } = pillBits(c)
   const detailed = (showDetail.value || c.selected) && (year || line2)
   const ring = c.selected
-    ? 'box-shadow:0 0 0 2px #fff,0 0 0 4px #2563c9,0 1px 3px rgba(0,0,0,.4);'
+    ? `box-shadow:0 0 0 2px #fff,0 0 0 4px ${COMP_COLORS.subject.bg},0 1px 3px rgba(0,0,0,.4);`
     : 'box-shadow:0 1px 3px rgba(0,0,0,.35);'
-  const border = `1px solid ${active ? '#b45309' : '#334155'}`
-  // A selected pill is never faded: an explicit pick outranks the recency signal.
-  const op = (c.selected ? 1 : opacity).toFixed(3)
+  const border = `1px solid ${withAlpha(pal.border, Math.max(alpha, 0.55))}`
+  const op = '1'
 
   if (!detailed) {
     const w = Math.max(40, Math.ceil(18 + price.length * 7.4))
@@ -1239,7 +1273,7 @@ function pillIcon(c) {
       className: 'comps-price-pill',
       html: `<div class="comps-pill-body" style="position:relative;display:flex;
           align-items:center;justify-content:center;
-          box-sizing:border-box;width:${w}px;height:24px;background:${bg};color:#fff;
+          box-sizing:border-box;width:${w}px;height:24px;background:${bg};color:${ink};
           font:700 11px/1 ui-sans-serif,system-ui,sans-serif;border-radius:999px;
           border:${border};${ring}white-space:nowrap;
           opacity:${op}">${price}${hideBadge(c)}</div>`,
@@ -1280,7 +1314,7 @@ function pillIcon(c) {
     html: `<div class="comps-pill-body" title="${escapeHtml(pillFacts(c))}"
         style="position:relative;display:flex;flex-direction:column;align-items:center;
         justify-content:center;box-sizing:border-box;width:${w}px;height:34px;
-        background:${bg};color:#fff;border-radius:9px;border:${border};${ring}
+        background:${bg};color:${ink};border-radius:9px;border:${border};${ring}
         white-space:nowrap;line-height:1;opacity:${op}">
         <div style="display:flex;align-items:baseline;justify-content:center">
           <span style="font:700 11.5px/1 ui-sans-serif,system-ui,sans-serif">${price}</span>${yearHtml}${ageHtml}
@@ -1511,7 +1545,7 @@ function popupHtml(c) {
   return `<div style="min-width:190px;font:12px/1.45 system-ui,sans-serif;color:#161614">
       <div style="font-weight:700;margin-bottom:2px">${escapeHtml(c.address)}</div>
       <div style="font-size:15px;font-weight:700;margin:2px 0">${priceShort(c.price)}</div>
-      <div style="color:${active ? '#b45309' : '#44423d'};font-weight:600">${headline}</div>
+      <div style="color:${active ? COMP_COLORS.active.onLight : COMP_COLORS.sold.onLight};font-weight:600">${headline}</div>
       <div style="color:#5c5a55">${when}</div>
       ${facts ? `<div style="color:#8a877e;margin-top:2px">${escapeHtml(facts)}</div>` : ''}
       <div style="color:#8a877e;margin-top:2px">${__('{0} mi away', [c.distance_mi])}</div>

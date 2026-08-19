@@ -44,8 +44,8 @@
         <!-- Status is the first thing that decides whether a row is evidence of a
              sale or of an ask, so it sits on the image rather than below it. -->
         <span
-          class="absolute left-2 top-2 rounded px-1.5 py-0.5 text-2xs font-semibold text-white shadow-sm"
-          :style="{ background: isActive ? ACTIVE : OFF_MARKET }"
+          class="absolute left-2 top-2 rounded px-1.5 py-0.5 text-2xs font-semibold shadow-sm"
+          :style="{ background: palette.bg, color: palette.ink }"
         >
           {{ isActive ? __('For sale') : __('Off-market') }}
         </span>
@@ -83,7 +83,7 @@
         <div class="mt-0.5 truncate text-xs text-ink-gray-6" :title="comp.address">
           {{ comp.address }}
         </div>
-        <div class="mt-1 text-2xs" :class="isActive ? 'text-ink-amber-3' : 'text-ink-gray-5'">
+        <div class="mt-1 text-2xs" :class="isActive ? 'text-ink-red-3' : 'text-ink-gray-5'">
           {{ timing }}
         </div>
       </div>
@@ -139,6 +139,7 @@
  */
 import { Button, FeatherIcon } from 'frappe-ui'
 import { computed, ref } from 'vue'
+import { compColor, isActiveStatus } from '@/utils/comps'
 
 const props = defineProps({
   comp: { type: Object, required: true },
@@ -149,17 +150,14 @@ const props = defineProps({
 })
 defineEmits(['hover', 'open', 'use', 'discard', 'undiscard'])
 
-// Same two colours the map pills use. Kept in JS rather than as Tailwind tokens
-// because the canvas/pill code cannot read CSS variables and the two must agree.
-const ACTIVE = '#d97706'
-const OFF_MARKET = '#475569'
+// Shared with the map pills and the legend, so a card and its pin can never
+// disagree about what "sold" looks like.
+const palette = computed(() => compColor(props.comp.status))
 
 const broken = ref(false)
 const photo = computed(() => props.comp.photo || '')
 const selected = computed(() => !!props.comp.selected)
-const isActive = computed(() =>
-  String(props.comp.status || '').toLowerCase().startsWith('activ'),
-)
+const isActive = computed(() => isActiveStatus(props.comp.status))
 
 const price = computed(() => {
   const p = Number(props.comp.price)
