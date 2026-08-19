@@ -36,7 +36,7 @@ from crm.api import zillow as zillow_api
 AREA_HIT_DAYS = 7
 AREA_MISS_DAYS = 1
 PIN_CACHE_DAYS = 30
-PIN_REFRESH_CAP = 5
+PIN_REFRESH_CAP = 12
 #: Don't spend a /property call on an ISTL pin that already looks current.
 PIN_STALE_DAYS = 90
 SOLD_IN_LAST = "24m"
@@ -405,6 +405,18 @@ def _pin_facts(address):
 	return facts
 
 
+def _apply_facts(existing, incoming):
+	"""Zillow's shape wins. ISTL sqft is the listing/tax figure and is what
+	Dennis just caught disagreeing with the Zillow page — we used to keep it
+	whenever it was already set, so a merge that updated the SALE left the
+	wrong living area on the pin.
+	"""
+	for key in ("square_footage", "bedrooms", "bathrooms", "year_built"):
+		val = incoming.get(key)
+		if val:
+			existing[key] = val
+
+
 def _apply_sale(row, price, date):
 	row["price"] = price or row.get("price")
 	row["removed_date"] = date
@@ -449,6 +461,10 @@ def _merge_one(existing, incoming, today):
 		existing["photo"] = incoming["photo"]
 	if incoming.get("zpid") and not existing.get("zpid"):
 		existing["zpid"] = incoming["zpid"]
+	# Facts ride on ANY match, same as the photo: Zillow livingArea is the
+	# number on the page Dennis is looking at. Leaving ISTL's figure in place
+	# because a price didn't change is how sold comps showed the wrong sqft.
+	_apply_facts(existing, incoming)
 	if incoming.get("status") == "Active":
 		# A live Zillow listing is more current than an ISTL ask, even if ISTL
 		# also thought it was active — the ask may have moved.
@@ -469,22 +485,13 @@ def refresh_pins(rows, cap=PIN_REFRESH_CAP):
 	today = frappe.utils.today()
 	checked = updated = 0
 
-	def _stale(row):
-		if row.get("source") == "zillow" or not row.get("address"):
-			return False
-		# Still listed in ISTL: it may have sold. Off-market and recent: A already
-		# covered the ZIP's newest sales, so a /property here rarely pays off.
-		if str(row.get("status") or "").lower() == "active":
-			return True
-		removed = str(row.get("removed_date") or "")[:10]
-		if not removed:
-			return True
-		try:
-			return frappe.utils.date_diff(today, removed) >= PIN_STALE_DAYS
-		except Exception:
-			return True
+	def _needs_zillow_shape(row):
+		# Any pin still wearing ISTL facts — those are the listing/tax numbers
+		# that disagree with the Zillow page. Zillow-origin rows already carry
+		# livingArea from /search.
+		return bool(row.get("address") and row.get("source") != "zillow")
 
-	candidates = [r for r in rows if _stale(r)]
+	candidates = [r for r in rows if _needs_zillow_shape(r)]
 	candidates.sort(key=lambda r: r.get("distance_mi") or 99)
 	for row in candidates[: max(0, int(cap))]:
 		facts = _pin_facts(row["address"])
@@ -502,11 +509,21 @@ def refresh_pins(rows, cap=PIN_REFRESH_CAP):
 			listing = facts.get("last_listing") or {}
 			_apply_listing(row, listing.get("price") or facts.get("zestimate"), None)
 			changed = True
+		# Shape from /property, even when the sale date did not move — same
+		# reason as _merge_one. Blank-only used to preserve ISTL's listing sqft.
+		if facts.get("sqft"):
+			row["square_footage"] = facts["sqft"]
+			changed = True
+		if facts.get("beds"):
+			row["bedrooms"] = facts["beds"]
+			changed = True
+		if facts.get("baths"):
+			row["bathrooms"] = facts["baths"]
+			changed = True
+		if facts.get("year_built"):
+			row["year_built"] = facts["year_built"]
+			changed = True
 		if changed:
-			if facts.get("sqft") and not row.get("square_footage"):
-				row["square_footage"] = facts["sqft"]
-			if facts.get("year_built") and not row.get("year_built"):
-				row["year_built"] = facts["year_built"]
 			row["recency_days"] = _comps()._recency_days(row, today)
 			updated += 1
 	return {"checked": checked, "updated": updated}
