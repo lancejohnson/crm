@@ -439,7 +439,7 @@ const props = defineProps({
   pageMode: { type: Boolean, default: false },
   // Size to the container rather than to the content (the lead desk), folding
   // the filter card behind a toggle and letting map + list share the height.
-  fill: { type: Boolean, default: false },
+  fill: { type: Boolean, default: undefined },
   // Offer the neighbourhood layer (groundwork-geo). Opt-in for the same reason
   // `fill` is: the comps page is a comps page.
   neighborhood: { type: Boolean, default: false },
@@ -929,10 +929,13 @@ const comps = computed(() => data.value?.comps || [])
 const discarded = computed(() => data.value?.discarded || [])
 const showDiscarded = ref(false)
 
-// The comps page and the desk both want map+tray to fill the height they are
-// given. `fill` additionally folds the filter card away; the two used to be the
-// same flag, which is why the page could not have a full-height tray.
-const fillHeight = computed(() => props.fill || props.pageMode)
+// `fill` sizes map+tray to the container. `pageMode` is the calculator. The
+// comps PAGE passes pageMode and wants fillHeight; the Today modal passes
+// pageMode with `:fill="false"` so the calc sits above a 24rem map and the
+// pane scrolls instead of crushing the map to ~140px.
+const fillHeight = computed(
+  () => props.fill === true || (props.pageMode && props.fill !== false),
+)
 
 /**
  * Is there room beside the map for the tray?
@@ -2140,18 +2143,52 @@ onMounted(() => {
   }
   if (show.value) nextTick(() => load({ explicit: false }))
   observeMapSize()
+  mapEl.value?.addEventListener('wheel', forwardWheel, { passive: false })
 })
 
 onBeforeUnmount(() => {
   rootObserver?.disconnect()
   sizeObserver?.disconnect()
   sizeObserver = null
+  mapEl.value?.removeEventListener('wheel', forwardWheel)
   if (map) {
     unbindParcels()
     map.remove()
     map = null
   }
 })
+
+/**
+ * Scroll the nearest ancestor when the wheel is used over the map.
+ *
+ * Leaflet's container is `overflow:hidden` AND genuinely overflows (transformed
+ * map pane + pills past the edge), which makes it a scroll CONTAINER. Chrome
+ * does not chain wheel scrolling out of one — the same mechanism as
+ * `body { overflow: hidden }`. `scrollWheelZoom` is off by design, so the wheel
+ * is ours to forward. preventDefault only when we actually moved, so hitting
+ * the end of a list still chains outwards.
+ */
+function forwardWheel(e) {
+  if (e.ctrlKey) return
+  const host = scrollHost(mapEl.value)
+  if (!host) return
+  const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? host.clientHeight : 1
+  const before = host.scrollTop
+  host.scrollTop = before + e.deltaY * unit
+  if (host.scrollTop !== before) e.preventDefault()
+}
+
+function scrollHost(el) {
+  let node = el?.parentElement
+  while (node && node !== document.body) {
+    const oy = getComputedStyle(node).overflowY
+    if ((oy === 'auto' || oy === 'scroll') && node.scrollHeight > node.clientHeight)
+      return node
+    node = node.parentElement
+  }
+  const doc = document.scrollingElement
+  return doc && doc.scrollHeight > doc.clientHeight ? doc : null
+}
 
 /**
  * Re-measure the map whenever its container changes size.

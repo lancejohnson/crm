@@ -107,8 +107,9 @@
               >
                 {{ p.label }}
               </button>
-              <!-- Underwriting deliberately lives only on the full page, so the way
-                   to it has to be visible from here rather than remembered. -->
+              <!-- The comps pane is the real comps PAGE (page-mode): cash-offer
+                   calc, red/yellow pins, photo tray, underwriting. Open-in-tab
+                   remains for the extra room. -->
               <Button
                 v-if="pane === 'comps' && item?.lead"
                 class="ml-auto"
@@ -144,9 +145,19 @@
             <div
               v-if="compsOpened && show && item?.lead"
               v-show="pane === 'comps'"
-              class="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5"
+              class="flex min-h-0 flex-1 flex-col overflow-y-auto p-3 sm:p-4"
             >
-              <CompsView :key="item.lead" :lead="item.lead" :address="item.address" />
+              <!-- page-mode: same surface as /leads/:id/comps — CompOfferCalc,
+                   Zillow pin colours, photo tray, underwriting. fillHeight follows
+                   from pageMode so map+tray share the pane when it is wide enough;
+                   when it stacks, this host scrolls. -->
+              <CompsView
+                :key="item.lead"
+                :lead="item.lead"
+                :address="item.address"
+                page-mode
+                :fill="false"
+              />
             </div>
           </div>
         </div>
