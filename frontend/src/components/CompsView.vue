@@ -11,6 +11,7 @@
     v-if="pageMode"
     :lead="lead"
     :subject="data?.subject || null"
+    :address="data?.address || address"
     :comps="selectedComps"
     @remove="setCompState($event, 'none')"
     @open="openCompDetail"

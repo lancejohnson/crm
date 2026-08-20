@@ -4,7 +4,17 @@
        the other — no merged cells. -->
   <div class="wrap">
   <div class="calc" @keydown="onKeys">
-    <div class="head">{{ __('Cash offer') }}</div>
+    <div class="head">
+      <span>{{ __('Cash offer') }}</span>
+      <button
+        type="button"
+        class="save"
+        :disabled="!canSave || saving"
+        @click="save"
+      >
+        {{ saving ? __('Saving…') : __('Save calcs') }}
+      </button>
+    </div>
 
     <div class="grid">
       <span />
@@ -85,9 +95,15 @@
         {{ s[1].arv ? money(run(1).offer) : '—' }}
       </span>
     </div>
+    <textarea
+      v-model="notes"
+      class="notes"
+      rows="3"
+      :placeholder="__('Notes — condition, access, what you told the seller…')"
+    />
   </div>
 
-    <table v-if="rows.length" class="tbl">
+    <table v-if="subjectRow || rows.length" class="tbl">
       <thead>
         <tr>
           <th>{{ __('Address') }}</th>
@@ -102,6 +118,17 @@
         </tr>
       </thead>
       <tbody>
+        <tr v-if="subjectRow" class="subj">
+          <td class="street" :title="subjectRow.address">{{ subjectRow.street }}</td>
+          <td>{{ subjectRow.date }}</td>
+          <td class="n">—</td>
+          <td class="n">{{ subjectRow.sqft }}</td>
+          <td class="n">{{ subjectRow.price }}</td>
+          <td class="n">{{ subjectRow.psf }}</td>
+          <td class="n">—</td>
+          <td>{{ __('Subject') }}</td>
+          <td />
+        </tr>
         <tr v-for="r in rows" :key="r.name">
           <td class="street" :title="r.address">
             <button type="button" @click="$emit('open', r.name)">{{ r.street }}</button>
@@ -146,7 +173,8 @@
  * Scenario 1 starts at 70%, Scenario 2 at 65%. Everything else starts the same
  * ($35/sf, $25k fee, empty ARV) and then each column is its own notebook.
  */
-import { computed, nextTick, reactive, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { call, toast } from 'frappe-ui'
 import { streetAddress } from '@/utils/comps'
 
 defineEmits(['remove', 'open'])
@@ -155,6 +183,7 @@ const props = defineProps({
   lead: { type: String, required: true },
   subject: { type: Object, default: null },
   comps: { type: Array, default: () => [] },
+  address: { type: String, default: '' },
 })
 
 const DEFAULT_PSF = 35
@@ -165,6 +194,9 @@ function fresh(pct) {
 }
 
 const s = reactive([fresh(0.7), fresh(0.65)])
+const notes = ref('')
+const saving = ref(false)
+const canSave = computed(() => s.some((x) => x.arv > 0) && !saving.value)
 const grid = [[null, null], [null, null], [null, null], [null, null], [null, null]]
 
 function setField(row, col, el) {
@@ -174,6 +206,7 @@ function setField(row, col, el) {
 const storageKey = computed(() => `compsCalc:${props.lead}`)
 
 function loadSaved() {
+  notes.value = ''
   try {
     const raw = JSON.parse(localStorage.getItem(storageKey.value) || 'null')
     if (!raw) return
@@ -182,23 +215,23 @@ function loadSaved() {
     if (Array.isArray(raw.s) && raw.s.length === 2) {
       raw.s.forEach((row, i) => Object.assign(s[i], fresh(i ? 0.65 : 0.7), row))
     }
+    if (typeof raw.notes === 'string') notes.value = raw.notes
   } catch {
     /* ignore */
   }
 }
 
+function persist() {
+  try {
+    localStorage.setItem(storageKey.value, JSON.stringify({ s, notes: notes.value }))
+  } catch {
+    /* quota */
+  }
+}
+
 watch(storageKey, loadSaved, { immediate: true })
-watch(
-  s,
-  () => {
-    try {
-      localStorage.setItem(storageKey.value, JSON.stringify({ s }))
-    } catch {
-      /* quota */
-    }
-  },
-  { deep: true },
-)
+watch(s, persist, { deep: true })
+watch(notes, persist)
 
 const sqft = computed(() => Number(props.subject?.sqft) || 0)
 
@@ -222,6 +255,23 @@ const suggestedArv = computed(() =>
   avgPsf.value && sqft.value ? Math.round((avgPsf.value * sqft.value) / 1000) * 1000 : 0,
 )
 const arvHint = computed(() => (suggestedArv.value ? money(suggestedArv.value) : ''))
+
+const subjectRow = computed(() => {
+  const s = props.subject
+  if (!s && !props.address) return null
+  const sf = Number(s?.sqft) || 0
+  const sale = s?.last_sale || {}
+  const price = Number(sale.price) || 0
+  const psf = price && sf ? Math.round(price / sf) : 0
+  return {
+    address: props.address || '',
+    street: streetAddress(props.address) || props.address || __('This property'),
+    date: sale.date ? fmtDate(sale.date) : '—',
+    sqft: sf ? sf.toLocaleString() : '—',
+    price: price ? money(price) : '—',
+    psf: psf ? money(psf) : '—',
+  }
+})
 
 const rows = computed(() =>
   (props.comps || []).map((c) => {
@@ -299,6 +349,39 @@ function typeRehab(col, e) {
   nextTick(() => putCaret(el, digitsBefore, n ? money(n) : ''))
 }
 
+async function save() {
+  if (!canSave.value) return
+  saving.value = true
+  try {
+    await call('crm.api.cash_offer.save_cash_offer', {
+      lead: props.lead,
+      scenarios: JSON.stringify(
+        [0, 1].map((i) => {
+          const x = s[i]
+          return { arv: x.arv, pct: x.pct, rehabPsf: x.rehabPsf, fee: x.fee, ...run(i) }
+        }),
+      ),
+      comps: JSON.stringify(
+        (props.comps || []).map((c) => ({
+          name: c.name,
+          address: c.address,
+          price: c.price,
+          square_footage: c.square_footage,
+          distance_mi: c.distance_mi,
+          status: c.status,
+        })),
+      ),
+      subject_sqft: sqft.value,
+      notes: notes.value,
+    })
+    toast.success(__('Saved to the activity timeline'))
+  } catch (e) {
+    toast.error(e.messages?.[0] || __('Could not save the calc.'))
+  } finally {
+    saving.value = false
+  }
+}
+
 function onKeys(e) {
   let r = -1
   let c = -1
@@ -348,8 +431,45 @@ function onKeys(e) {
   padding: 8px 10px 10px;
 }
 .head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   color: #8a877e;
   margin-bottom: 6px;
+}
+.save {
+  border: 1px solid #e5e3de;
+  border-radius: 5px;
+  background: #161614;
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.save:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.notes {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 8px;
+  border: 1px solid #e5e3de;
+  border-radius: 5px;
+  background: #f8f8f7;
+  padding: 6px 7px;
+  font: inherit;
+  color: #161614;
+  resize: vertical;
+  min-height: 3.4em;
+}
+.notes:focus {
+  outline: none;
+  border-color: #2563c9;
+  background: #fff;
 }
 .grid {
   display: grid;
@@ -456,6 +576,12 @@ input.empty {
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+.tbl .subj td {
+  background: #eef3fb;
+  font-weight: 600;
+  color: #161614;
+  border-bottom: 1px solid #c5d4ee;
 }
 .tbl .avg td {
   color: #8a877e;
