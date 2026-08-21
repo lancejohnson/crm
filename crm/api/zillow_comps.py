@@ -443,6 +443,42 @@ def _search(coordinates, status_type, sold_in_last=None):
 	return rows, complete
 
 
+#: The two searches that together ARE one circle. Kept as one list so the fetch
+#: and the free "is this circle already warm?" probe cannot drift apart — a warmer
+#: that checked a different pair of keys than the reader populates would report
+#: everything warm and prewarm nothing.
+AREA_QUERIES = (
+	("sold", "RecentlySold", SOLD_IN_LAST),
+	("for_sale", "ForSale", None),
+)
+
+
+def _area_key(coordinates, status_type, sold_in_last=None):
+	digest = hashlib.md5(
+		f"{coordinates}|{status_type}|{sold_in_last or ''}".encode()
+	).hexdigest()[:12]
+	return f"zillow_area:v{AREA_CACHE_VERSION}:{digest}"
+
+
+def area_is_cached(lat, lng, radius_mi):
+	"""Is this circle already in cache? FREE — Redis only, never an HTTP call.
+
+	This is what makes prewarming cheap enough to run every five minutes: the sweep
+	can ask about every lead on the board and pay only for the ones that would
+	actually have made someone wait.
+	"""
+	if lat is None or lng is None:
+		return False
+	try:
+		coords = _coordinates(float(lat), float(lng), float(radius_mi))
+	except (TypeError, ValueError):
+		return False
+	return all(
+		_cache_get(_area_key(coords, status_type, sold_in_last), AREA_HIT_DAYS) is not None
+		for _, status_type, sold_in_last in AREA_QUERIES
+	)
+
+
 def _area_cached(coordinates, status_type, sold_in_last=None):
 	"""One circle, from cache when we can. -> (rows, complete).
 
@@ -453,10 +489,7 @@ def _area_cached(coordinates, status_type, sold_in_last=None):
 	most of the market and is worth showing today; what it must not do is masquerade
 	as the finished answer for a week, so it expires overnight and is re-tried.
 	"""
-	digest = hashlib.md5(
-		f"{coordinates}|{status_type}|{sold_in_last or ''}".encode()
-	).hexdigest()[:12]
-	key = f"zillow_area:v{AREA_CACHE_VERSION}:{digest}"
+	key = _area_key(coordinates, status_type, sold_in_last)
 
 	def unpack(rec):
 		# Stored as {rows, complete}; tolerate a bare list so a blob written by an
@@ -487,14 +520,13 @@ def area_comps(lat, lng, radius_mi):
 	if lat is None or lng is None or not zillow_api._api_key():
 		return {"sold": [], "for_sale": [], "location": "", "cached": True}
 	coords = _coordinates(float(lat), float(lng), float(radius_mi))
-	sold, sold_cached = _area_cached(coords, "RecentlySold", SOLD_IN_LAST)
-	sale, sale_cached = _area_cached(coords, "ForSale")
-	return {
-		"sold": sold or [],
-		"for_sale": sale or [],
-		"location": f"{radius_mi:.2f}mi",
-		"cached": bool(sold_cached and sale_cached),
-	}
+	# Driven off AREA_QUERIES so this and `area_is_cached` are the same question.
+	out = {"location": f"{radius_mi:.2f}mi", "cached": True}
+	for key, status_type, sold_in_last in AREA_QUERIES:
+		rows, complete = _area_cached(coords, status_type, sold_in_last)
+		out[key] = rows or []
+		out["cached"] = out["cached"] and bool(complete)
+	return out
 
 
 def _pin_key(address):

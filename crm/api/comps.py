@@ -753,6 +753,63 @@ def get_comp_details(lead, comp):
 	return result
 
 
+#: The radius the client actually opens with (`CompsView`'s `radius` ref). Warming
+#: any other circle would populate a cache key nobody reads.
+WARM_RADIUS_MI = 0.5
+
+
+def warm_lead_area(lead):
+	"""Pull one lead's Zillow AREA search into cache before anybody asks for it.
+
+	The AREA SEARCH ONLY, and that is the whole design. Measured on prod, a cold
+	comps open is ~8.3 RapidAPI calls: roughly 3.3 of them are this circle and the
+	rest are per-pin `/property` lookups. The circle is the half worth prewarming
+	twice over --
+
+	  * it is the SLOW half: it pages and price-splits SERIALLY, because each step
+	    needs the previous one's `totalPages` before it can ask for anything;
+	  * the pins are the EXPENSIVE half: more calls, on a key shared with
+	    istl-buyer, and they are already fast (parallel: 21.3s -> 0.6s).
+
+	So this buys most of the wait for about a third of the spend. A cold open goes
+	from ~14s worst case to ~5s, and from ~5s typical to well under one.
+
+	Returns what it did, so the sweep can report real numbers rather than claiming
+	success for a lead it skipped.
+	"""
+	from crm.api import zillow_comps
+
+	if not _available():
+		return {"warmed": False, "reason": "no_comps_doctype"}
+	doc = frappe.get_doc("CRM Lead", lead)
+	# Geocoding is Census, not RapidAPI — free, and cached on the lead — so a lead
+	# that has never been located gets that out of the way here too.
+	lat, lng, _cached_point = _subject_point(doc)
+	if lat is None:
+		return {"warmed": False, "reason": "no_location"}
+	if zillow_comps.area_is_cached(lat, lng, WARM_RADIUS_MI):
+		return {"warmed": False, "reason": "already_warm"}
+
+	area = zillow_comps.area_comps(lat, lng, WARM_RADIUS_MI)
+	return {
+		"warmed": True,
+		"sold": len(area.get("sold") or []),
+		"for_sale": len(area.get("for_sale") or []),
+		# False means the circle came back partial, so it is cached for a day rather
+		# than a week and a later sweep will retry it.
+		"complete": bool(area.get("cached")),
+	}
+
+
+@frappe.whitelist()
+def warm_lead_comps(lead):
+	"""Manual/whitelisted wrapper, for testing a single lead by hand."""
+	_guard()
+	if not frappe.db.exists("CRM Lead", lead):
+		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)
+	return warm_lead_area(lead)
+
+
 @frappe.whitelist()
 def get_subject_details(lead):
 	"""The SUBJECT's own photos and Zillow facts, in the comp detail shape.

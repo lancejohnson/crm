@@ -535,12 +535,187 @@ def run_today_sync():
 		# This job is on `*/5 * * * *` — every five minutes ROUND THE CLOCK, despite
 		# what the notes say about business hours. Without this it is the other half
 		# of the late-night card problem, alongside the new-lead hook.
+		#
+		# Warming still runs: a card added at 4:55pm is worked at 5:10, and a rep
+		# finishing the day's list after hours deserves the same fast map.
+		enqueue_comps_warm(day)
 		return {"created": 0, "available": _available(), "skipped": "board closed"}
 	try:
-		return _generate_today(day)
+		result = _generate_today(day)
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Today board automatic sync failed")
 		return {"created": 0, "available": _available(), "error": True}
+	# After generation, never before: the cards this run just created are exactly
+	# the ones most likely to be cold.
+	enqueue_comps_warm(day)
+	return result
+
+
+# ---------------------------------------------------------------------------------
+# Prewarming the comps map for the day's work
+# ---------------------------------------------------------------------------------
+#: A cold comps map is 5-14s of third-party HTTP, and it is cold for most of this
+#: board: measured on a real 176-card day, 61 of the 96 distinct leads had never
+#: had their comps looked at. Reps open these one after another, so the wait lands
+#: on them dozens of times a morning.
+#:
+#: Warmed here rather than at lead creation because THIS is the work list. Leads
+#: come back onto the board on cadence weeks after they arrived, by which time a
+#: creation-time warm has long expired (the area cache is 7 days); and a lead that
+#: never reaches the board never costs anything.
+#:
+#: Bounded on BOTH axes. The sweep runs every five minutes, so it does not need to
+#: finish in one pass, and it deliberately does not try: a whole 93-lead board is
+#: ~6 minutes of network, which is fine spread across the ~40 runs between the 5am
+#: generation and the setters starting, and not fine as one 6-minute job holding a
+#: worker. Leads are warmed SERIALLY inside a run for the same reason the fetch
+#: pool is capped at four — RapidAPI answers a burst with HTTP 429.
+WARM_BUDGET_SECONDS = 60
+WARM_MAX_LEADS = 12
+
+
+def enqueue_comps_warm(day=None):
+	"""Hand the warming to its own background job. Never inline.
+
+	TWO reasons it is enqueued rather than run inside `run_today_sync`:
+
+	  * that job is on the SHORT queue and a rep's board sync rides on it. A minute
+	    of third-party network in there is a minute other short jobs are waiting,
+	    to make a map faster that nobody is looking at yet. Prewarming is by
+	    definition the least urgent work in the system.
+	  * `deduplicate` then does the serialising for free. The sync is triggered by
+	    the five-minute scheduler AND by every new lead and lead-task commit, so
+	    several can land together — and warming in parallel is exactly how we would
+	    walk back into the HTTP 429s that capped the fetch pool at four.
+	"""
+	day = getdate(day or now_datetime())
+	try:
+		frappe.enqueue(
+			"crm.api.today_board.warm_today_areas",
+			queue="long",
+			job_id=f"comps-warm-{day}",
+			deduplicate=True,
+			enqueue_after_commit=True,
+			day=str(day),
+		)
+	except TypeError:  # older Frappe enqueue signatures have no deduplicate
+		frappe.enqueue(
+			"crm.api.today_board.warm_today_areas",
+			queue="long",
+			enqueue_after_commit=True,
+			day=str(day),
+		)
+	except Exception:
+		# Prewarming is an optimisation. It must never be able to fail a board sync.
+		frappe.log_error(frappe.get_traceback(), "Comps warm enqueue failed")
+
+
+def warm_today_areas(day=None, budget_seconds=None, max_leads=None):
+	"""Pull the day's comps circles into cache, a few leads per run.
+
+	The work list is DERIVED from the board every time rather than queued when a
+	card is created. Nothing to drift, nothing to race, no state to reset — and it
+	self-heals, because a lead whose warm failed simply still looks cold next run.
+	The same property that makes it safe makes it cheap: "is this circle warm?" is
+	a Redis read, so a sweep over a fully warm board costs nothing at all.
+	"""
+	import time
+
+	info = {"checked": 0, "warmed": 0, "already_warm": 0, "failed": 0, "remaining": 0}
+	if not _available():
+		return info
+	try:
+		from crm.api import comps as comps_api
+		from crm.api import zillow as zillow_api
+
+		if not zillow_api._api_key():
+			info["skipped"] = "not_configured"
+			return info
+
+		day = getdate(day or now_datetime())
+		budget = float(budget_seconds or WARM_BUDGET_SECONDS)
+		cap = int(max_leads or WARM_MAX_LEADS)
+		started = time.time()
+
+		# Two cards per lead in week one, so distinct leads, and in board order so
+		# the ones a rep reaches first are warmed first.
+		rows = frappe.get_all(
+			DOCTYPE,
+			filters={"for_date": day},
+			fields=["lead", "sort_order"],
+			order_by="sort_order asc",
+			limit_page_length=0,
+		)
+		seen, leads = set(), []
+		for r in rows:
+			if r.lead and r.lead not in seen:
+				seen.add(r.lead)
+				leads.append(r.lead)
+
+		for lead in leads:
+			if info["warmed"] >= cap or (time.time() - started) >= budget:
+				# Whatever is left is next run's problem, five minutes from now.
+				info["remaining"] = len(leads) - info["checked"]
+				break
+			info["checked"] += 1
+			try:
+				res = comps_api.warm_lead_area(lead)
+			except Exception:
+				# One bad lead must never stop the sweep, and must never fail the
+				# board sync it rides on.
+				info["failed"] += 1
+				frappe.log_error(frappe.get_traceback(), f"Comps warm failed for {lead}")
+				continue
+			if res.get("warmed"):
+				info["warmed"] += 1
+			elif res.get("reason") == "already_warm":
+				info["already_warm"] += 1
+		return info
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Today board comps warm failed")
+		info["error"] = True
+		return info
+
+
+@frappe.whitelist()
+def warm_status(for_date=None):
+	"""How much of a board is already warm. Read-only, and free — no HTTP at all.
+
+	Exists so "is prewarming actually working?" is a question with an answer, rather
+	than something inferred from how fast a map felt.
+	"""
+	_guard()
+	from crm.api import comps as comps_api
+	from crm.api import zillow_comps
+
+	day = getdate(for_date or now_datetime())
+	rows = frappe.get_all(
+		DOCTYPE, filters={"for_date": day}, fields=["lead"], limit_page_length=0
+	)
+	leads = sorted({r.lead for r in rows if r.lead})
+	warm = cold = unlocated = 0
+	for lead in leads:
+		point = frappe.db.get_value(
+			"CRM Lead", lead, ["property_lat", "property_lng"], as_dict=True
+		)
+		lat = (point or {}).get("property_lat")
+		lng = (point or {}).get("property_lng")
+		if lat is None or lng is None:
+			unlocated += 1
+		elif zillow_comps.area_is_cached(lat, lng, comps_api.WARM_RADIUS_MI):
+			warm += 1
+		else:
+			cold += 1
+	return {
+		"for_date": str(day),
+		"cards": len(rows),
+		"leads": len(leads),
+		"warm": warm,
+		"cold": cold,
+		# Not yet geocoded, so not yet warmable — the sweep geocodes them (free,
+		# Census) the first time it reaches them.
+		"unlocated": unlocated,
+	}
 
 
 def _publish(day):
