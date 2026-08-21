@@ -961,6 +961,17 @@ duplicating. Work substantial features in a worktree of your own.
       its `lead` prop.
     - Underwriting stays page-only (it needs the room), so the tab bar carries an
       **Open comps page** button rather than relying on the rep remembering.
+    - **The left rail collapses on the Comps tab** (gw331) and the header is one
+      dense line. The rail is 288px of First-Call Read beside a map that wants
+      every pixel it can get — measured live, collapsing it takes the map from
+      **360px to 648px wide**. The header spent ~90px on a name and two badges
+      while the **phone number and address** — the two things a rep acts on — sat
+      inside that rail, so those move UP into the header line and nothing
+      actionable goes away with the collapse. The rail follows the PANE rather
+      than being remembered (comps wants the room, activity does not); the
+      chevron in the tab bar overrides it until the pane changes again.
+      `CompsView`'s ResizeObserver re-measures the map on collapse, so no host
+      has to tell it.
   - **The map absorbed the one thing the strip did better: photos.** The pin popup
     and every property-list row now open `CompDetailModal` (`data-comp-details`
     through the same delegated popup-click listener as use/hide). That is a
@@ -3034,6 +3045,28 @@ proxy with the domain rewritten.
 
 **Caveat: you are on the real production database** — anything you create, text
 or delete is real.
+
+**The server publishes itself to the OTHER Mac automatically.** Chrome automation
+defaults to the mini's Chrome, where `localhost` is the MINI — so a vite server
+on the laptop is invisible to the browser doing the verifying, and every UI check
+otherwise has to be driven from whichever machine happens to be running vite. On
+startup `yarn dev` now opens an `ssh -R` remote forward to the peer Mac, so
+`http://localhost:<port>/crm` is the correct URL **from either machine** and
+nothing has to be rewritten. It prints `[crm-dev] mirrored onto mini-ts: …`, and
+`/__crm_dev` reports `peer`. Disable with `CRM_DEV_PEER=`, retarget with
+`CRM_DEV_PEER=<ssh-host>`.
+
+- It is loopback-only on the far side (no `GatewayPorts`) **on purpose**: the
+  proxy carries a prod API key, so binding vite to `0.0.0.0` would hand the whole
+  LAN that user's session.
+- A `tailscale serve` mapping is published too (`https://<host>:<port+1000>/crm`,
+  tailnet-only, torn down on exit) — but **do not rely on it from the mini**: the
+  mini resolves `*.ts.net` through PUBLIC DNS and gets the Funnel ingress
+  addresses, so a tailnet-only URL times out there while the same host answers
+  fine over raw TCP (`nc -z 100.x.x.x 9080` succeeds). That is why the peer
+  mirror uses the `-ts` ssh aliases, which are tailscale IPs and need no MagicDNS.
+- Vite's DNS-rebinding guard rejects a non-localhost Host header, hence
+  `allowedHosts: ['.ts.net']`.
 
 **The `crm-dev-boot` plugin is load-bearing — don't trim it.** Production renders
 `crm.html` through jinja and injects exactly three globals: `site_name`,

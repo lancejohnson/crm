@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vueJsx from '@vitejs/plugin-vue-jsx'
 import path from 'path'
-import { execFileSync } from 'child_process'
+import { execFileSync, spawn } from 'child_process'
 import net from 'node:net'
 import fs from 'node:fs'
 import { VitePWA } from 'vite-plugin-pwa'
@@ -122,6 +122,11 @@ function devWorktree() {
 }
 const devTree = devWorktree()
 
+// Filled in once the server is listening (see serveOnTailnet), so /__crm_dev
+// can hand an agent the URL that works from the OTHER machine's browser.
+let tailnetUrl = null
+let peerMirror = null
+
 // Stamp every PostHog event/report with the deployed source revision. CI can
 // override this when it builds from an exported tree rather than a git checkout.
 function buildId() {
@@ -174,6 +179,158 @@ async function resolveDevPort() {
   throw new Error('[crm-dev] no free port in 8080-8099')
 }
 
+// Publish the dev server on the TAILNET, on by default.
+//
+// Chrome automation defaults to the Mac mini's Chrome, and `localhost` there is
+// the MINI -- so a dev server running on the laptop is simply unreachable from
+// the browser doing the verifying. Every UI check then has to be driven from
+// whichever machine happens to be running vite, which is exactly the kind of
+// per-session detail that gets forgotten and turns into "the page won't load".
+//
+// `tailscale serve` rather than binding vite to 0.0.0.0: the proxy carries a
+// prod API key, so anything that can reach this port acts as that user. Serve
+// keeps it off the LAN entirely (tailnet only, not Funnel), and vite itself
+// stays bound to localhost.
+//
+// Tailnet port = devPort + 1000 (8080 -> 9080), so parallel worktrees stay
+// distinct and nothing collides with the Serve entries already in use
+// (443, 8443-8446, 10000). Opt out with CRM_DEV_TAILSCALE=0.
+function tailscaleBin() {
+  for (const p of [
+    '/usr/local/bin/tailscale',
+    '/opt/homebrew/bin/tailscale',
+    '/Applications/Tailscale.app/Contents/MacOS/Tailscale',
+  ]) {
+    try {
+      if (fs.existsSync(p)) return p
+    } catch {
+      /* keep looking */
+    }
+  }
+  return null
+}
+
+function tailnetHost(bin) {
+  try {
+    const out = execFileSync(bin, ['status', '--json'], {
+      encoding: 'utf8',
+      timeout: 10000,
+    })
+    return (JSON.parse(out).Self?.DNSName || '').replace(/\.$/, '') || null
+  } catch {
+    return null
+  }
+}
+
+// Mirror the dev server onto the OTHER Mac's loopback, on by default.
+//
+// This is the one that makes Chrome automation work without thinking about it:
+// the chrome tools drive the mini's Chrome, where `localhost` means the MINI, so
+// a vite server on the laptop is invisible to the browser doing the verifying.
+// An `ssh -R` remote forward puts it on the mini's loopback at the SAME port, so
+// http://localhost:<port>/crm is correct from either machine and no URL has to
+// be remembered or rewritten.
+//
+// Loopback-only on the far side (no GatewayPorts), which matters because the
+// proxy carries a prod API key -- nothing is exposed to the LAN, and the tailnet
+// only carries the ssh session itself.
+//
+// CRM_DEV_PEER="" disables it; CRM_DEV_PEER=<ssh-host> targets something else.
+function peerHost() {
+  if (process.env.CRM_DEV_PEER !== undefined) return process.env.CRM_DEV_PEER || null
+  let name = ''
+  try {
+    name = execFileSync('scutil', ['--get', 'ComputerName'], {
+      encoding: 'utf8',
+      timeout: 5000,
+    }).toLowerCase()
+  } catch {
+    return null
+  }
+  // Deliberately the tailscale-IP aliases: they do not depend on MagicDNS, which
+  // is exactly what failed here (the mini resolves *.ts.net through PUBLIC DNS
+  // and gets the Funnel ingress addresses, so every tailnet-only URL times out
+  // there while the same address answers fine over raw TCP).
+  if (name.includes('mini')) return 'mbp-ts'
+  if (name.includes('mbp') || name.includes('macbook')) return 'mini-ts'
+  return null
+}
+
+function mirrorToPeer(devPort) {
+  if (!devPort) return null
+  const peer = peerHost()
+  if (!peer) return null
+  let child
+  try {
+    // -N: no command, just the forward. ExitOnForwardFailure so a port already
+    // taken over there fails loudly here instead of pretending to be mirrored.
+    child = spawn(
+      'ssh',
+      [
+        '-N',
+        '-o', 'ExitOnForwardFailure=yes',
+        '-o', 'ConnectTimeout=10',
+        '-o', 'ServerAliveInterval=30',
+        '-R', `${devPort}:localhost:${devPort}`,
+        peer,
+      ],
+      { stdio: 'ignore', detached: false },
+    )
+  } catch {
+    return null
+  }
+  child.on('error', () => {})
+  child.on('exit', (code) => {
+    if (code) console.warn(`[crm-dev] peer mirror to ${peer} ended (exit ${code})`)
+  })
+  const kill = () => {
+    try {
+      child.kill()
+    } catch {
+      /* already gone */
+    }
+  }
+  for (const sig of ['exit', 'SIGINT', 'SIGTERM']) process.once(sig, kill)
+  return peer
+}
+
+// Returns the public URL, or null if tailscale isn't available/usable. The
+// mapping is torn down on exit -- `--bg` outlives this process otherwise, and a
+// stale entry would keep answering for a server that is gone.
+function serveOnTailnet(devPort) {
+  if (!devPort || process.env.CRM_DEV_TAILSCALE === '0') return null
+  const bin = tailscaleBin()
+  if (!bin) return null
+  const host = tailnetHost(bin)
+  if (!host) return null
+  const tailnetPort = devPort + 1000
+  try {
+    execFileSync(
+      bin,
+      ['serve', '--bg', `--https=${tailnetPort}`, `http://localhost:${devPort}`],
+      { encoding: 'utf8', timeout: 20000, stdio: 'ignore' },
+    )
+  } catch {
+    console.warn('[crm-dev] tailscale serve failed — local access only')
+    return null
+  }
+  let removed = false
+  const off = () => {
+    if (removed) return
+    removed = true
+    try {
+      execFileSync(bin, ['serve', `--https=${tailnetPort}`, 'off'], {
+        timeout: 20000,
+        stdio: 'ignore',
+      })
+    } catch {
+      /* nothing else to do while exiting */
+    }
+  }
+  for (const sig of ['exit', 'SIGINT', 'SIGTERM']) process.once(sig, off)
+  return `https://${host}:${tailnetPort}/crm`
+}
+
 export default defineConfig(async ({ mode }) => {
   const isDev = mode === 'development'
   const devPort = remoteTarget ? await resolveDevPort() : undefined
@@ -209,7 +366,28 @@ export default defineConfig(async ({ mode }) => {
         configureServer(server) {
           server.middlewares.use('/__crm_dev', (_req, res) => {
             res.setHeader('Content-Type', 'application/json')
-            res.end(JSON.stringify({ ...devTree, port: devPort }))
+            res.end(
+              JSON.stringify({
+                ...devTree,
+                port: devPort,
+                tailnet: tailnetUrl,
+                peer: peerMirror,
+              }),
+            )
+          })
+          server.httpServer?.once('listening', () => {
+            const url = serveOnTailnet(devPort)
+            if (url) {
+              tailnetUrl = url
+              console.info(`[crm-dev] tailnet -> ${url}`)
+            }
+            const peer = mirrorToPeer(devPort)
+            if (peer) {
+              peerMirror = peer
+              console.info(
+                `[crm-dev] mirrored onto ${peer}: http://localhost:${devPort}/crm`,
+              )
+            }
           })
           const stamp = path.resolve(__dirname, '.dev-port')
           const clean = () => {
@@ -357,6 +535,9 @@ export default defineConfig(async ({ mode }) => {
         // onto a port that already belongs to another worktree.
         port: devPort,
         strictPort: true,
+        // Reached through `tailscale serve`, so the Host header is the tailnet
+        // name, which vite otherwise refuses (its DNS-rebinding guard).
+        allowedHosts: ['.ts.net'],
         proxy: {
           '^/(api|assets|files|private|login|app|desk|socket.io)': {
             target: remoteTarget,

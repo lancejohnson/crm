@@ -5,48 +5,57 @@
   >
     <template #body>
       <div class="flex h-[88vh] max-h-[88vh] flex-col overflow-hidden bg-surface-modal">
-        <div class="flex items-start justify-between gap-4 border-b px-5 py-4 sm:px-6">
-          <div class="min-w-0">
-            <div class="mb-1 flex flex-wrap items-center gap-2">
-              <Badge
-                v-if="item?.lead_status"
-                variant="subtle"
-                theme="gray"
-                :label="item.lead_status"
-              />
-              <Badge
-                v-if="item?.total_calls > 1"
-                variant="subtle"
-                theme="blue"
-                :label="__('Call {0} of {1}', [item.call_number, item.total_calls])"
-              />
-            </div>
-            <h2 class="truncate text-2xl font-semibold text-ink-gray-9">
+        <!-- One dense line. The header used to spend ~90px on a name and two
+             badges, while the phone number and address — the two things a rep
+             acts on — sat in a rail that is now collapsed on the comps pane.
+             Those move up here; everything else keeps its old home. -->
+        <div class="flex items-center gap-x-3 border-b px-5 py-2 sm:px-6">
+          <div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+            <h2 class="max-w-full truncate text-base font-semibold text-ink-gray-9">
               {{ item?.lead_name || __('Lead details') }}
             </h2>
+            <Badge
+              v-if="item?.lead_status"
+              variant="subtle"
+              theme="gray"
+              :label="item.lead_status"
+            />
+            <Badge
+              v-if="item?.total_calls > 1"
+              variant="subtle"
+              theme="blue"
+              :label="__('Call {0} of {1}', [item.call_number, item.total_calls])"
+            />
+            <a
+              v-if="item?.mobile_no"
+              :href="callHref(item.mobile_no)"
+              class="whitespace-nowrap text-sm text-ink-blue-3 hover:underline"
+            >
+              {{ formatPhone(item.mobile_no) }}
+            </a>
+            <button
+              v-if="item?.address"
+              class="min-w-0 truncate text-left text-sm text-ink-gray-6 hover:text-ink-blue-3 hover:underline"
+              :title="item.address"
+              @click="emit('openAddress', item.address)"
+            >
+              {{ item.address }}
+            </button>
           </div>
           <Button variant="ghost" icon="x" class="shrink-0" @click="show = false" />
         </div>
 
         <div class="flex min-h-0 flex-1 flex-col md:flex-row">
-          <aside class="max-h-[42vh] shrink-0 overflow-y-auto border-b p-4 md:max-h-none md:w-72 md:border-b-0 md:border-r sm:p-5">
-            <div class="flex flex-col gap-2 text-sm text-ink-gray-6">
+          <!-- Collapsed on the comps pane: the map wants every pixel it can get,
+               and what the rail holds (email, why-today, the 2×2) is not what a
+               rep reads while comping. Phone and address moved to the header, so
+               nothing actionable goes with it. The tab-bar toggle brings it back. -->
+          <aside
+            v-if="sidebarOpen"
+            class="max-h-[42vh] shrink-0 overflow-y-auto border-b p-4 md:max-h-none md:w-72 md:border-b-0 md:border-r sm:p-5"
+          >
+            <div v-if="item?.email" class="flex flex-col gap-2 text-sm text-ink-gray-6">
               <a
-                v-if="item?.mobile_no"
-                :href="callHref(item.mobile_no)"
-                class="w-fit text-ink-blue-3 hover:underline"
-              >
-                {{ formatPhone(item.mobile_no) }}
-              </a>
-              <button
-                v-if="item?.address"
-                class="text-left hover:text-ink-blue-3 hover:underline"
-                @click="emit('openAddress', item.address)"
-              >
-                {{ item.address }}
-              </button>
-              <a
-                v-if="item?.email"
                 :href="`mailto:${item.email}`"
                 class="w-fit hover:text-ink-gray-8 hover:underline"
               >
@@ -67,7 +76,11 @@
             <!-- The exact same editable 2×2 used on the full Lead page. Keeping
                  one component means a Today answer immediately becomes the lead's
                  durable First-Call Read rather than modal-only state. -->
-            <div v-if="leadDoc && item?.lead" class="-mx-4 mt-4 sm:-mx-5">
+            <div
+              v-if="leadDoc && item?.lead"
+              class="-mx-4 sm:-mx-5"
+              :class="item?.email || item?.reason ? 'mt-4' : ''"
+            >
               <FirstCallReadCard
                 :lead="item.lead"
                 :motivated="leadDoc.first_call_motivated"
@@ -94,6 +107,17 @@
                behave exactly as they do there. -->
           <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface-white">
             <div class="flex shrink-0 items-center gap-4 border-b px-5 sm:px-6">
+              <Button
+                variant="ghost"
+                class="-ml-2 shrink-0"
+                :title="sidebarOpen ? __('Hide lead panel') : __('Show lead panel')"
+                @click="sidebarOpen = !sidebarOpen"
+              >
+                <FeatherIcon
+                  :name="sidebarOpen ? 'chevrons-left' : 'chevrons-right'"
+                  class="size-4"
+                />
+              </Button>
               <button
                 v-for="p in panes"
                 :key="p.value"
@@ -201,8 +225,13 @@ const panes = computed(() => [
   { value: 'comps', label: __('Comps') },
 ])
 const compsOpened = ref(false)
+// The rail follows the PANE rather than being remembered: comps wants the room,
+// activity does not. A manual toggle wins until the pane changes again, so a rep
+// who wants the 2×2 while comping can have it without it sticking for every lead.
+const sidebarOpen = ref(true)
 watch(pane, (v) => {
   if (v === 'comps') compsOpened.value = true
+  sidebarOpen.value = v !== 'comps'
 })
 const leadDoc = ref(null)
 const leadLoading = ref(false)
