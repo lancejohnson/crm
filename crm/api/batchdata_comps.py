@@ -279,6 +279,14 @@ def fetch_for_lead(doc, take=DEFAULT_TAKE, force=False):
 		# token problem. Say which.
 		if e.code == 403 and "insufficient balance" in detail.lower():
 			frappe.log_error(detail, "BatchData comps: WALLET EMPTY - top up to re-enable")
+			# The Error Log is where this went to die: 24 of these accumulated over a
+			# week while reps' tax pulls failed and nobody knew. Tell a person.
+			try:
+				from crm.api import batchdata_wallet
+
+				batchdata_wallet.report_wallet_empty("comps fallback")
+			except Exception:
+				frappe.log_error(frappe.get_traceback(), "BatchData comps: alert failed")
 		else:
 			frappe.log_error(detail, "BatchData comps: HTTP {0}".format(e.code))
 		return []

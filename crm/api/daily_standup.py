@@ -460,6 +460,21 @@ def render_markdown(d, limit=25):
 		f"Today the cadence owes **{d['calls_owed']} calls**. At that rate we can carry "
 		f"**~{d['intake']} new leads per business day**."
 	)
+
+	# 4. what the paid data is costing, and whether it is about to stop working.
+	# One line: this DM is the list Lance runs the morning call from, so spend is
+	# context rather than the point. It earns its place because BatchData is PREPAID
+	# and its failure mode is silent — the wallet ran to $0.26 with reps' tax pulls
+	# 403ing for a week before anyone noticed.
+	try:
+		from crm.api import batchdata_wallet
+
+		line = batchdata_wallet.standup_line()
+		if line:
+			L.append(f"\n{line}")
+	except Exception:
+		# A spend line must never cost anyone their morning call list.
+		frappe.log_error(frappe.get_traceback(), "standup: BatchData line failed")
 	return "\n".join(L)
 
 
