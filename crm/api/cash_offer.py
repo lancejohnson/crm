@@ -7,6 +7,7 @@ must not write the same field or a re-price on one surface silently
 rewrites the other.
 """
 
+import html as html_lib
 import json
 import re
 
@@ -84,13 +85,74 @@ def _comps(raw):
 	return out
 
 
+def _comp_facts(c):
+	psf = (
+		round(c["price"] / c["square_footage"])
+		if c["price"] and c["square_footage"]
+		else 0
+	)
+	bits = [_money(c["price"])]
+	if c["square_footage"]:
+		bits.append(f"{int(c['square_footage']):,} sf")
+	if psf:
+		bits.append(_money(psf) + "/sf")
+	if c["distance_mi"]:
+		bits.append(f"{c['distance_mi']:.2f} mi")
+	return " · ".join(bits)
+
+
+def _payload(lead, scenes, comps, sqft, notes=""):
+	return {
+		"lead": lead,
+		"sqft": sqft,
+		"notes": (notes or "").strip(),
+		"scenarios": [
+			{
+				"arv": sc["arv"],
+				"pct": sc["pct"],
+				"rehab_psf": sc["rehab_psf"],
+				"fee": sc["fee"],
+				"after": sc["after"],
+				"rehab": sc["rehab"],
+				"offer": sc["offer"],
+			}
+			for sc in scenes
+		],
+		"comps": [
+			{
+				"name": c.get("name") or "",
+				"address": c["address"],
+				"price": c["price"],
+				"square_footage": c["square_footage"],
+				"distance_mi": c["distance_mi"],
+				"status": c.get("status") or "",
+			}
+			for c in comps
+		],
+	}
+
+
 def _html(lead, scenes, comps, sqft, notes=""):
-	parts = ["<div><b>{}</b></div>".format(escape_html(_("Cash offer")))]
+	# Vertical on purpose: the activity bubble is ~20rem and `prose-f` is
+	# `break-all`, so a single "Comps: A · B" line wraps mid-number and reads
+	# as a text blob. One row per comp, each a real link. `data-cash-offer` is
+	# the structured copy the timeline card hydrates; the HTML is the fallback
+	# for email / edit-source / anything that is not CommentArea.
+	page = get_url(f"/crm/leads/{lead}/comps")
+	attr = html_lib.escape(
+		json.dumps(_payload(lead, scenes, comps, sqft, notes), separators=(",", ":")),
+		quote=True,
+	)
+	parts = [
+		'<div class="cash-offer" data-cash-offer="{}">'.format(attr),
+		"<div><b>{}</b></div>".format(escape_html(_("Cash offer"))),
+	]
 	for i, sc in enumerate(scenes):
 		label = _("Scenario {0}").format(i + 1)
 		parts.append(
-			"<div>{label} ({pct:.0f}%): {arv} × {pct:.0f}% = {after} − rehab {rehab} "
-			"({psf}/sf × {sf} sf) − fee {fee} = <b>{offer}</b></div>".format(
+			"<div>{label} ({pct:.0f}%): {arv} × {pct:.0f}% = {after}<br>"
+			"− rehab {rehab} ({psf}/sf × {sf} sf) − fee {fee} = "
+			'<b style="white-space:nowrap">{offer}</b></div>'.format(
 				label=escape_html(label),
 				pct=sc["pct"] * 100,
 				arv=_money(sc["arv"]),
@@ -103,33 +165,19 @@ def _html(lead, scenes, comps, sqft, notes=""):
 			)
 		)
 	if comps:
-		page = get_url(f"/crm/leads/{lead}/comps")
-		links = []
+		parts.append("<div><b>{}</b></div>".format(escape_html(_("Comps"))))
 		for c in comps:
 			z = _zillow(c["address"])
 			label = escape_html(_street(c["address"]) or c["address"])
-			psf = (
-				round(c["price"] / c["square_footage"])
-				if c["price"] and c["square_footage"]
-				else 0
-			)
-			bits = [_money(c["price"])]
-			if c["square_footage"]:
-				bits.append(f"{int(c['square_footage']):,} sf")
-			if psf:
-				bits.append(_money(psf) + "/sf")
-			if c["distance_mi"]:
-				bits.append(f"{c['distance_mi']:.2f} mi")
 			href = z or page
-			links.append(
-				'<a href="{href}" target="_blank" rel="noopener noreferrer">{label}</a> '
-				"({facts})".format(href=escape_html(href), label=label, facts=" · ".join(bits))
+			parts.append(
+				'<div><a href="{href}" target="_blank" rel="noopener noreferrer">'
+				"{label}</a> {facts}</div>".format(
+					href=escape_html(href),
+					label=label,
+					facts=escape_html(_comp_facts(c)),
+				)
 			)
-		parts.append(
-			"<div>{0}: {1}</div>".format(
-				escape_html(_("Comps")), " · ".join(links)
-			)
-		)
 	else:
 		parts.append("<div>{}</div>".format(escape_html(_("No comps picked."))))
 	note = (notes or "").strip()
@@ -140,6 +188,13 @@ def _html(lead, scenes, comps, sqft, notes=""):
 				escape_html(note).replace("\n", "<br>"),
 			)
 		)
+	parts.append(
+		'<div><a href="{href}" target="_blank" rel="noopener noreferrer">{label}</a></div>'.format(
+			href=escape_html(page),
+			label=escape_html(_("Tweak calcs")),
+		)
+	)
+	parts.append("</div>")
 	return "".join(parts)
 
 

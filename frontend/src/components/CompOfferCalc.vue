@@ -177,13 +177,17 @@ import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { call, toast } from 'frappe-ui'
 import { streetAddress } from '@/utils/comps'
 
-defineEmits(['remove', 'open'])
+const emit = defineEmits(['remove', 'open', 'saved'])
 
 const props = defineProps({
   lead: { type: String, required: true },
   subject: { type: Object, default: null },
   comps: { type: Array, default: () => [] },
   address: { type: String, default: '' },
+  // Snapshot from a timeline comment. When present, this is the source of
+  // truth for the two columns (not localStorage) so "Tweak calcs" opens on
+  // the numbers that were actually saved, not a later draft.
+  seed: { type: Object, default: null },
 })
 
 const DEFAULT_PSF = 35
@@ -205,8 +209,27 @@ function setField(row, col, el) {
 
 const storageKey = computed(() => `compsCalc:${props.lead}`)
 
+function applyScene(i, row) {
+  Object.assign(s[i], fresh(i ? 0.65 : 0.7), {
+    arv: Number(row.arv) || 0,
+    pct: Number(row.pct) || (i ? 0.65 : 0.7),
+    rehabPsf: Number(row.rehabPsf ?? row.rehab_psf) || DEFAULT_PSF,
+    fee: Number(row.fee) || DEFAULT_FEE,
+  })
+}
+
 function loadSaved() {
   notes.value = ''
+  const seed = props.seed
+  if (seed && Array.isArray(seed.scenarios) && seed.scenarios.length) {
+    applyScene(0, {})
+    applyScene(1, {})
+    seed.scenarios.forEach((row, i) => {
+      if (i < 2) applyScene(i, row)
+    })
+    if (typeof seed.notes === 'string') notes.value = seed.notes
+    return
+  }
   try {
     const raw = JSON.parse(localStorage.getItem(storageKey.value) || 'null')
     if (!raw) return
@@ -375,6 +398,7 @@ async function save() {
       notes: notes.value,
     })
     toast.success(__('Saved to the activity timeline'))
+    emit('saved')
   } catch (e) {
     toast.error(e.messages?.[0] || __('Could not save the calc.'))
   } finally {

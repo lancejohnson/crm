@@ -69,8 +69,14 @@
       v-else
       class="cursor-pointer rounded bg-surface-gray-1 px-3 py-[7.5px] text-base leading-6 transition-all duration-300 ease-in-out"
     >
+      <CashOfferComment
+        v-if="isCashOffer"
+        :html="activity.content"
+        :lead="docname"
+        @saved="activities?.reload()"
+      />
       <!-- eslint-disable-next-line vue/no-v-html -->
-      <div class="prose-f" v-html="sanitizeHTML(activity.content)" />
+      <div v-else class="prose-f" v-html="sanitizeHTML(activity.content)" />
       <div v-if="activity.attachments.length" class="mt-2 flex flex-wrap gap-2">
         <AttachmentItem
           v-for="a in activity.attachments"
@@ -100,6 +106,7 @@
 </template>
 <script setup>
 import AttachmentItem from '@/components/AttachmentItem.vue'
+import CashOfferComment from '@/components/Activities/CashOfferComment.vue'
 import EditIcon from '@/components/Icons/EditIcon.vue'
 import LucideTrash2 from '~icons/lucide/trash-2'
 import { sessionStore } from '@/stores/session'
@@ -110,6 +117,7 @@ import { computed, ref } from 'vue'
 
 const props = defineProps({
   activity: { type: Object, default: () => ({}) },
+  docname: { type: String, default: '' },
 })
 
 // Pass the activities resource (v-model) so we can refresh after an edit.
@@ -119,6 +127,11 @@ const { user } = sessionStore()
 const { users: usersList } = usersStore()
 
 const canEdit = computed(() => props.activity.owner === user)
+
+const isCashOffer = computed(() => {
+  const html = props.activity.content || ''
+  return /data-cash-offer=/.test(html) || /<b>Cash offer<\/b>/i.test(html)
+})
 
 const editing = ref(false)
 const saving = ref(false)

@@ -118,6 +118,7 @@
               class="mb-4"
               v-model="all_activities"
               :activity="comment"
+              :docname="docname"
             />
           </div>
         </div>
@@ -216,7 +217,11 @@
             :id="activity.name"
             class="mb-4"
           >
-            <CommentArea v-model="all_activities" :activity="activity" />
+            <CommentArea
+              v-model="all_activities"
+              :activity="activity"
+              :docname="docname"
+            />
           </div>
           <div
             v-else-if="activity.activity_type == 'attachment_log'"
