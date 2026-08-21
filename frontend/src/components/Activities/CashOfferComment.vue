@@ -16,9 +16,11 @@
         <template v-if="offer.sqft">
           ({{ money(sc.rehab_psf) }}/sf × {{ fmt(offer.sqft) }} sf)
         </template>
-        − {{ __('fee') }} {{ money(sc.fee) }}
       </div>
-      <div class="scene-offer">= {{ money(sc.offer) }}</div>
+      <div>
+        − {{ __('fee') }} {{ money(sc.fee) }} =
+        <b class="scene-offer">{{ money(sc.offer) }}</b>
+      </div>
     </div>
 
     <div class="block">

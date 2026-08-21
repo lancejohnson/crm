@@ -150,9 +150,10 @@ def _html(lead, scenes, comps, sqft, notes=""):
 	for i, sc in enumerate(scenes):
 		label = _("Scenario {0}").format(i + 1)
 		parts.append(
-			"<div>{label} ({pct:.0f}%): {arv} × {pct:.0f}% = {after}<br>"
-			"− rehab {rehab} ({psf}/sf × {sf} sf) − fee {fee} = "
-			'<b style="white-space:nowrap">{offer}</b></div>'.format(
+			"<div>{label} ({pct:.0f}%)</div>"
+			"<div>{arv} × {pct:.0f}% = {after}</div>"
+			"<div>− rehab {rehab} ({psf}/sf × {sf} sf)</div>"
+			'<div>− fee {fee} = <b style="white-space:nowrap">{offer}</b></div>'.format(
 				label=escape_html(label),
 				pct=sc["pct"] * 100,
 				arv=_money(sc["arv"]),
