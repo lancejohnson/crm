@@ -36,6 +36,13 @@ from crm.api import zillow as zillow_api
 AREA_HIT_DAYS = 7
 AREA_MISS_DAYS = 1
 PIN_CACHE_DAYS = 30
+#: DELIBERATELY UNCHANGED at 12, even though these are no longer sequential.
+#: Running them together took this phase from 21.3s to 0.6s, so time is no longer
+#: what limits it -- but the cap was never about time. Each one is a BILLED call
+#: on a key shared with istl-buyer, so raising it doubles the cost of opening a
+#: lead we have not seen before. It is a one-line dial if more photo coverage
+#: turns out to be worth the spend; it should be turned deliberately, not as a
+#: side-effect of making things faster.
 PIN_REFRESH_CAP = 12
 #: Don't spend a /property call on an ISTL pin that already looks current.
 PIN_STALE_DAYS = 90
@@ -48,8 +55,22 @@ MAX_SPLIT_DEPTH = 6
 #: Hard stop on RapidAPI calls for one circle+status so a dense metro cannot
 #: spend the shared quota on a single comps open. 40 pages ≈ 1,600 rows.
 MAX_SEARCH_CALLS = 40
-AREA_CACHE_VERSION = 6  # v4 paged to 800; v5 price-splits past 800; v6 keeps imgSrc
-PIN_CACHE_VERSION = 1
+#: v7 asks for pending/under-contract listings too, so a v6 entry answers a
+#: DIFFERENT (smaller) question and must not be served for this one.
+AREA_CACHE_VERSION = 7  # v5 price-splits past 800; v6 keeps imgSrc; v7 pending
+PIN_CACHE_VERSION = 2  # v2 keeps cover_photo
+
+#: Zillow's own words for a home that is spoken for but has not closed. We have
+#: to ask for these explicitly (`isPendingUnderContract=1`) because the default
+#: ForSale search hides them: measured on prod, Davenport 97 -> 156 listings and
+#: Indianapolis 281 -> 359 once they are included.
+#:
+#: They are worth the extra pages. A pending sale is a price two parties have
+#: AGREED, which an ask is not, and it is happening now, which a closed sale is
+#: not -- so in a moving market it is the most honest read available. It is still
+#: not a completed transaction, which is why it gets its own label everywhere
+#: rather than being quietly counted as either a listing or a sale.
+PENDING_STATUSES = {"PENDING", "UNDER_CONTRACT", "ACCEPTING_BACKUP_OFFERS", "CONTINGENT"}
 
 _SUFFIXES = {
 	"street": "st",
@@ -169,6 +190,28 @@ def _coordinates(lat, lng, radius_mi) -> str:
 	return f"{round(float(lng), 4)} {round(float(lat), 4)},{diameter}"
 
 
+def listing_state(prop, kind):
+	"""What Zillow says this row IS, in three states: sold / pending / for sale.
+
+	Read off the row's own `listingStatus` rather than inferred from which query
+	it arrived in, because the two disagree: a RecentlySold page came back holding
+	a PENDING row on the very first sample. `contingentListingType` is the second
+	signal -- an UNDER_CONTRACT home is still listed as FOR_SALE while accepting
+	backups, so reading only `listingStatus` would call it a plain listing.
+	"""
+	status = str(prop.get("listingStatus") or "").strip().upper()
+	contingent = str(prop.get("contingentListingType") or "").strip().upper()
+	if status == "RECENTLY_SOLD":
+		return "sold"
+	if status in PENDING_STATUSES or contingent in PENDING_STATUSES:
+		return "pending"
+	if status == "FOR_SALE":
+		return "for_sale"
+	# No usable status on the row: fall back to the query it came from, which is
+	# what this did before the field was read at all.
+	return "for_sale" if kind == "sale" else "sold"
+
+
 def _shape_search(prop, kind):
 	"""One RapidAPI search prop → the row shape `get_lead_comps` already emits."""
 	if not isinstance(prop, dict):
@@ -182,9 +225,20 @@ def _shape_search(prop, kind):
 		return None
 
 	sold = _ymd(prop.get("dateSold"))
+	# GOTCHA -- Zillow says `daysOnZillow: -1` for "we don't know", not "zero days".
+	# Passing it through rendered "Under contract - listed -1 days" on a real card,
+	# and would have put "-1d on market" in the popup of any listing it hit.
+	# Unknown is None, which every consumer here already omits rather than prints.
 	dom = zillow_api._num(prop.get("daysOnZillow"))
+	if dom is not None and dom < 0:
+		dom = None
 	home = str(prop.get("propertyType") or "").strip().upper()
-	active = kind == "sale"
+	state = listing_state(prop, kind)
+	# A pending home has NOT sold, so it stays "Active" in the status field every
+	# filter, colour and count in this app already keys on. What makes it pending
+	# rides alongside in `listing_state`, which is additive -- nothing that predates
+	# it has to learn a third status to keep working.
+	active = state != "sold"
 	return {
 		"name": f"zillow::{zpid}",
 		"address": addr,
@@ -195,6 +249,7 @@ def _shape_search(prop, kind):
 		"lng": lng,
 		"price": price,
 		"status": "Active" if active else "Inactive",
+		"listing_state": state,
 		"listed_date": None if not active else None,
 		"removed_date": None if active else sold,
 		"days_on_market": int(dom) if dom is not None else None,
@@ -221,6 +276,13 @@ def _search_params(coordinates, status_type, sold_in_last=None, min_price=None, 
 		"sort": sort,
 		"page": page,
 	}
+	if status_type == "ForSale":
+		# Pending / under-contract homes are excluded by default and are the best
+		# evidence on the board -- an agreed price, on a sale that is happening now.
+		# Must be a NUMBER: `true` returns {"errors": ["Is Pending Under Contract
+		# must be a number."]} with an HTTP 200, i.e. it fails silently as an empty
+		# result rather than as an error.
+		params["isPendingUnderContract"] = 1
 	if sold_in_last:
 		params["soldInLast"] = sold_in_last
 	if min_price is not None:
@@ -228,6 +290,11 @@ def _search_params(coordinates, status_type, sold_in_last=None, min_price=None, 
 	if max_price is not None:
 		params["maxPrice"] = int(max_price)
 	return params
+
+
+def _usable(body):
+	"""RapidAPI answers an unusable query with a 200 and a non-`props` body."""
+	return body if isinstance(body, dict) and "props" in body else None
 
 
 def _get(coordinates, status_type, sold_in_last=None, min_price=None, max_price=None, sort="Newest", page=1):
@@ -241,9 +308,26 @@ def _get(coordinates, status_type, sold_in_last=None, min_price=None, max_price=
 	body = zillow_api._request(
 		"/search", params, f"Zillow: {status_type} {sort} p{page} failed"
 	)
-	if not isinstance(body, dict) or "props" not in body:
-		return None
-	return body
+	return _usable(body)
+
+
+def _get_pages(coordinates, status_type, sold_in_last, min_price, max_price, pages):
+	"""Several pages of one window AT ONCE. -> [body|None] in the order asked.
+
+	Page 1 has already told us `totalPages`, so pages 2..N have no dependency on
+	each other and there is nothing to be gained by waiting between them. This is
+	the single change that took a 2-mile circle from 40.5s to seconds: the work was
+	never computation, it was thirty consecutive round trips to RapidAPI.
+	"""
+	specs = [
+		(
+			"/search",
+			_search_params(coordinates, status_type, sold_in_last, min_price, max_price, page=p),
+		)
+		for p in pages
+	]
+	bodies = zillow_api.fetch_many(specs, f"Zillow: {status_type} paging failed")
+	return [_usable(b) for b in bodies]
 
 
 def _price_edge(coordinates, status_type, sold_in_last, min_price, max_price, high):
@@ -270,17 +354,24 @@ def _collect_pages(coordinates, status_type, sold_in_last, min_price, max_price,
 		total_pages = max(1, int(first_body.get("totalPages") or 1))
 	except (TypeError, ValueError):
 		total_pages = 1
+
+	# Everything left in this window, requested together. The call budget is spent
+	# up front rather than checked between calls, because there is no longer a
+	# "between" -- so the ceiling is enforced by how many pages we ASK for.
+	allowance = max(0, MAX_SEARCH_CALLS - budget["n"])
+	wanted = list(range(2, total_pages + 1))[:allowance]
+	budget["n"] += len(wanted)
 	bodies = [first_body]
-	page = 2
-	while page <= total_pages and budget["n"] < MAX_SEARCH_CALLS:
-		body = _get(
-			coordinates, status_type, sold_in_last, min_price, max_price, page=page
-		)
-		budget["n"] += 1
-		if body is None:
-			break
-		bodies.append(body)
-		page += 1
+	failed = False
+	if wanted:
+		for body in _get_pages(coordinates, status_type, sold_in_last, min_price, max_price, wanted):
+			if body is None:
+				# Keep the pages that did arrive, but remember the hole: `complete`
+				# is what decides whether this circle may be cached for a week, and
+				# caching a partial answer would hide the rest of it until it expires.
+				failed = True
+				continue
+			bodies.append(body)
 	for body in bodies:
 		for prop in body.get("props") or []:
 			shaped = _shape_search(prop, kind)
@@ -288,7 +379,7 @@ def _collect_pages(coordinates, status_type, sold_in_last, min_price, max_price,
 				continue
 			seen.add(shaped["zpid"])
 			rows.append(shaped)
-	complete = page > total_pages
+	complete = not failed and len(wanted) == max(0, total_pages - 1)
 	return rows, complete
 
 
@@ -352,25 +443,75 @@ def _search(coordinates, status_type, sold_in_last=None):
 	return rows, complete
 
 
-def _area_cached(coordinates, status_type, sold_in_last=None):
+#: The two searches that together ARE one circle. Kept as one list so the fetch
+#: and the free "is this circle already warm?" probe cannot drift apart — a warmer
+#: that checked a different pair of keys than the reader populates would report
+#: everything warm and prewarm nothing.
+AREA_QUERIES = (
+	("sold", "RecentlySold", SOLD_IN_LAST),
+	("for_sale", "ForSale", None),
+)
+
+
+def _area_key(coordinates, status_type, sold_in_last=None):
 	digest = hashlib.md5(
 		f"{coordinates}|{status_type}|{sold_in_last or ''}".encode()
 	).hexdigest()[:12]
-	key = f"zillow_area:v{AREA_CACHE_VERSION}:{digest}"
+	return f"zillow_area:v{AREA_CACHE_VERSION}:{digest}"
+
+
+def area_is_cached(lat, lng, radius_mi):
+	"""Is this circle already in cache? FREE — Redis only, never an HTTP call.
+
+	This is what makes prewarming cheap enough to run every five minutes: the sweep
+	can ask about every lead on the board and pay only for the ones that would
+	actually have made someone wait.
+	"""
+	if lat is None or lng is None:
+		return False
+	try:
+		coords = _coordinates(float(lat), float(lng), float(radius_mi))
+	except (TypeError, ValueError):
+		return False
+	return all(
+		_cache_get(_area_key(coords, status_type, sold_in_last), AREA_HIT_DAYS) is not None
+		for _, status_type, sold_in_last in AREA_QUERIES
+	)
+
+
+def _area_cached(coordinates, status_type, sold_in_last=None):
+	"""One circle, from cache when we can. -> (rows, complete).
+
+	A PARTIAL answer is cached too, just not for as long. It used to be thrown
+	away, which meant a single throttled page in a dense circle re-charged the full
+	search on every open forever: measured at 2 miles around a Davenport lead,
+	~27 calls and 13s, repeated every time anyone looked. A partial set is still
+	most of the market and is worth showing today; what it must not do is masquerade
+	as the finished answer for a week, so it expires overnight and is re-tried.
+	"""
+	key = _area_key(coordinates, status_type, sold_in_last)
+
+	def unpack(rec):
+		# Stored as {rows, complete}; tolerate a bare list so a blob written by an
+		# older build in the same cache generation still reads.
+		if isinstance(rec, dict) and "rows" in rec:
+			return rec["rows"] or [], bool(rec.get("complete"))
+		return rec or [], True
+
 	hit = _cache_get(key, AREA_HIT_DAYS)
 	if hit is not None:
-		return hit, True
-	# A remembered miss uses the short TTL so an outage does not lock a circle
-	# out for a week, but also does not re-bill every modal open.
-	miss = _cache_get(key, AREA_MISS_DAYS)
-	if miss is not None:
-		return miss, True
+		rows, complete = unpack(hit)
+		# A complete circle is good for the full week. A partial one is only served
+		# from the short window, so past that it falls through and is re-fetched.
+		if complete or _cache_get(key, AREA_MISS_DAYS) is not None:
+			return rows, complete
 
 	rows, complete = _search(coordinates, status_type, sold_in_last)
 	if rows is None:
+		# Nothing at all came back (quota floor, or a total outage). Remember
+		# nothing: an empty cache entry here would hide a circle that is fine.
 		return [], False
-	if complete:
-		_cache_set(key, rows)
+	_cache_set(key, {"rows": rows, "complete": complete})
 	return rows, complete
 
 
@@ -379,30 +520,63 @@ def area_comps(lat, lng, radius_mi):
 	if lat is None or lng is None or not zillow_api._api_key():
 		return {"sold": [], "for_sale": [], "location": "", "cached": True}
 	coords = _coordinates(float(lat), float(lng), float(radius_mi))
-	sold, sold_cached = _area_cached(coords, "RecentlySold", SOLD_IN_LAST)
-	sale, sale_cached = _area_cached(coords, "ForSale")
-	return {
-		"sold": sold or [],
-		"for_sale": sale or [],
-		"location": f"{radius_mi:.2f}mi",
-		"cached": bool(sold_cached and sale_cached),
-	}
+	# Driven off AREA_QUERIES so this and `area_is_cached` are the same question.
+	out = {"location": f"{radius_mi:.2f}mi", "cached": True}
+	for key, status_type, sold_in_last in AREA_QUERIES:
+		rows, complete = _area_cached(coords, status_type, sold_in_last)
+		out[key] = rows or []
+		out["cached"] = out["cached"] and bool(complete)
+	return out
+
+
+def _pin_key(address):
+	return f"zillow_pin:v{PIN_CACHE_VERSION}:{_comps().address_key(address)}"
 
 
 def _pin_facts(address):
 	"""Cached `/property` normalize for one ISTL pin. None on miss/failure."""
 	if not address:
 		return None
-	key = f"zillow_pin:v{PIN_CACHE_VERSION}:{_comps().address_key(address)}"
-	hit = _cache_get(key, PIN_CACHE_DAYS)
-	if hit is not None:
-		return hit or None
+	return _pin_facts_many([address]).get(address)
 
-	raw = zillow_api.property_details(address)
-	facts = zillow_api._normalize(raw) if raw else None
-	# Cache the empty answer too — same lesson as subject facts.
-	_cache_set(key, facts or {})
-	return facts
+
+def _pin_facts_many(addresses):
+	"""Cached `/property` facts for many pins at once. -> {address: facts|None}.
+
+	Three phases, and the split is the point: read every cache entry HERE, fetch
+	only the misses on worker threads (which have no Frappe at all), then write the
+	results back HERE. Doing the lookups one at a time measured 21.3s of a 27.8s
+	comps load for twelve addresses.
+	"""
+	out = {}
+	misses = []
+	for address in addresses:
+		if not address or address in out or address in misses:
+			continue
+		hit = _cache_get(_pin_key(address), PIN_CACHE_DAYS)
+		if hit is not None:
+			# `{}` is a remembered negative and stays cheap; None means never asked.
+			out[address] = hit or None
+		else:
+			misses.append(address)
+	if not misses:
+		return out
+
+	bodies = zillow_api.fetch_many(
+		[("/property", {"address": a}) for a in misses], "Zillow: pin lookup failed"
+	)
+	for address, raw in zip(misses, bodies):
+		facts = zillow_api._normalize(raw) if raw else None
+		if raw is None:
+			# A failed CALL is not a negative ANSWER. Caching it would lock the pin
+			# out for 30 days over one timeout; leaving it uncached retries next open.
+			out[address] = None
+			continue
+		# Cache the empty answer too — same lesson as subject facts: an address
+		# Zillow cannot resolve would otherwise be re-billed on every open.
+		_cache_set(_pin_key(address), facts or {})
+		out[address] = facts
+	return out
 
 
 def _apply_facts(existing, incoming):
@@ -421,13 +595,18 @@ def _apply_sale(row, price, date):
 	row["price"] = price or row.get("price")
 	row["removed_date"] = date
 	row["status"] = "Inactive"
+	# A confirmed sale overwrites any earlier "pending" read: that is what pending
+	# was always going to become, and leaving the old label would keep calling a
+	# closed transaction an open one.
+	row["listing_state"] = "sold"
 	row["source"] = "zillow"
 	row["zillow_refreshed"] = True
 
 
-def _apply_listing(row, price, days_on_market):
+def _apply_listing(row, price, days_on_market, state="for_sale"):
 	row["price"] = price or row.get("price")
 	row["status"] = "Active"
+	row["listing_state"] = state or "for_sale"
 	if days_on_market is not None:
 		row["days_on_market"] = int(days_on_market)
 	row["source"] = "zillow"
@@ -468,8 +647,20 @@ def _merge_one(existing, incoming, today):
 	if incoming.get("status") == "Active":
 		# A live Zillow listing is more current than an ISTL ask, even if ISTL
 		# also thought it was active — the ask may have moved.
-		if existing.get("status") != "Active" or existing.get("source") != "zillow":
-			_apply_listing(existing, incoming.get("price"), incoming.get("days_on_market"))
+		if (
+			existing.get("status") != "Active"
+			or existing.get("source") != "zillow"
+			# "It went under contract" is news even when we already knew it was
+			# listed at this price, and it is the most decision-relevant news on
+			# the board — so it counts as an update rather than being skipped.
+			or existing.get("listing_state") != incoming.get("listing_state")
+		):
+			_apply_listing(
+				existing,
+				incoming.get("price"),
+				incoming.get("days_on_market"),
+				incoming.get("listing_state"),
+			)
 			existing["recency_days"] = _comps()._recency_days(existing, today)
 			return "updated"
 		return None
@@ -493,8 +684,12 @@ def refresh_pins(rows, cap=PIN_REFRESH_CAP):
 
 	candidates = [r for r in rows if _needs_zillow_shape(r)]
 	candidates.sort(key=lambda r: r.get("distance_mi") or 99)
-	for row in candidates[: max(0, int(cap))]:
-		facts = _pin_facts(row["address"])
+	candidates = candidates[: max(0, int(cap))]
+	# One batch for the whole set, so the nearest 24 pins cost about what two used
+	# to. Resolved up front rather than inside the loop for exactly that reason.
+	facts_by_address = _pin_facts_many([r["address"] for r in candidates])
+	for row in candidates:
+		facts = facts_by_address.get(row["address"])
 		checked += 1
 		if not facts:
 			continue
@@ -502,12 +697,23 @@ def refresh_pins(rows, cap=PIN_REFRESH_CAP):
 		sale_date = _ymd(sale.get("date"))
 		home = str(facts.get("home_status") or "").strip().upper()
 		changed = False
+		# A picture is not "newer" data, it is data the pooled index never had, so it
+		# rides along on ANY hit. We have already paid for this response; the tray
+		# showing "No photo" next to it would be throwing away something we bought.
+		if facts.get("cover_photo") and not row.get("photo"):
+			row["photo"] = facts["cover_photo"]
+			changed = True
+		if facts.get("zpid") and not row.get("zpid"):
+			row["zpid"] = str(facts["zpid"])
 		if sale_date and _newer(sale_date, row.get("removed_date")):
 			_apply_sale(row, sale.get("price"), sale_date)
 			changed = True
 		elif home in {"FOR_SALE", "PENDING", "CONTINGENT", "COMING_SOON"}:
 			listing = facts.get("last_listing") or {}
 			_apply_listing(row, listing.get("price") or facts.get("zestimate"), None)
+			# `/property` knows whether it is merely listed or already spoken for,
+			# which the pooled index never does.
+			row["listing_state"] = "pending" if home in PENDING_STATUSES else "for_sale"
 			changed = True
 		# Shape from /property, even when the sale date did not move — same
 		# reason as _merge_one. Blank-only used to preserve ISTL's listing sqft.
@@ -537,6 +743,7 @@ def apply(doc, out, lat, lng, radius):
 		"updated": 0,
 		"sold": 0,
 		"for_sale": 0,
+		"pending": 0,
 		"pins_checked": 0,
 		"location": "",
 		"cached": True,
@@ -575,7 +782,10 @@ def apply(doc, out, lat, lng, radius):
 		row["hidden"] = False
 		row["recency_days"] = _comps()._recency_days(row, today)
 		incoming.append(row)
-		if row["status"] == "Active":
+		state = row.get("listing_state")
+		if state == "pending":
+			info["pending"] += 1
+		elif row["status"] == "Active":
 			info["for_sale"] += 1
 		else:
 			info["sold"] += 1

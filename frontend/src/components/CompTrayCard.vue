@@ -19,14 +19,31 @@
          Kept non-interactive so a stray click can't re-open a rejected house. -->
     <div :class="discarded ? 'pointer-events-none opacity-45 grayscale' : ''">
       <div
+        ref="photoEl"
         class="group/photo relative aspect-[3/2] w-full overflow-hidden bg-surface-gray-2"
         @mouseenter="prefetchPhotos"
       >
+        <!-- GOTCHA — `loading="lazy"` DOES NOT WORK inside this tray, and it is
+             not subtly broken, it simply never fires. Measured on the comps page:
+             ten cards rendered, ten <img> in the DOM with valid srcs, and ZERO
+             loaded (`complete:false`, `naturalWidth:0`) including the first card,
+             which was fully on screen at y=572 of an 863px viewport. Nudging the
+             tray's scroll changed nothing; flipping one image to `eager` loaded
+             it instantly, so the URLs were always fine.
+
+             That is what "photos don't load until I hover" was: hovering calls
+             `prefetchPhotos`, which replaces the src, and a src change is what
+             finally makes Chrome evaluate the image. The tray is a nested scroll
+             container that the document itself never scrolls, and Chrome's lazy
+             heuristic does not re-run for it.
+
+             So the laziness is ours now, via an IntersectionObserver rooted on
+             the scroller. Still lazy on purpose -- a 200-comp board must not fetch
+             200 thumbnails on open -- but lazy in a way that actually resolves. -->
         <img
-          v-if="photo"
+          v-if="photo && inView"
           :src="photo"
           :alt="comp.address || ''"
-          loading="lazy"
           decoding="async"
           referrerpolicy="no-referrer"
           class="size-full object-cover"
@@ -36,8 +53,15 @@
         <!-- No photo is the normal case for a pooled-index comp that Zillow's
              area search never matched. Say so quietly instead of showing a
              broken frame. -->
+        <!-- A card that has not scrolled into view yet is blank, not "No photo" -
+             claiming we have no picture for a house nobody has looked at would be
+             a lie the width of the tray. -->
         <div
-          v-if="!photo || broken"
+          v-if="!inView"
+          class="size-full"
+        />
+        <div
+          v-else-if="!photo || broken"
           class="flex size-full flex-col items-center justify-center gap-1 text-ink-gray-4"
         >
           <FeatherIcon name="home" class="size-6" />
@@ -45,12 +69,13 @@
         </div>
 
         <!-- Status is the first thing that decides whether a row is evidence of a
-             sale or of an ask, so it sits on the image rather than below it. -->
+             sale or of an ask, so it sits on the image rather than below it.
+             Pending is called out by name, not by colour alone. -->
         <span
           class="absolute left-2 top-2 rounded px-1.5 py-0.5 text-2xs font-semibold shadow-sm"
           :style="{ background: palette.bg, color: palette.ink }"
         >
-          {{ isActive ? __('For sale') : __('Off-market') }}
+          {{ stateLabel }}
         </span>
         <span
           v-if="selected"
@@ -113,7 +138,16 @@
         <div class="mt-0.5 truncate text-xs font-medium text-ink-gray-8" :title="comp.address">
           {{ street }}
         </div>
-        <div class="mt-1 text-2xs" :class="isActive ? 'text-ink-red-3' : 'text-ink-gray-5'">
+        <div
+          class="mt-1 text-2xs"
+          :class="
+            isPendingComp
+              ? 'font-medium text-ink-violet-1'
+              : isActive
+                ? 'text-ink-red-3'
+                : 'text-ink-gray-5'
+          "
+        >
           {{ timing }}
         </div>
       </div>
@@ -168,8 +202,15 @@
  * not a hunt through a 2,000-line template.
  */
 import { Button, FeatherIcon } from 'frappe-ui'
-import { computed, ref } from 'vue'
-import { compColor, isActiveStatus, loadCompPhotos, streetAddress } from '@/utils/comps'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import {
+  compColor,
+  compState,
+  compStateLabel,
+  isActiveStatus,
+  loadCompPhotos,
+  streetAddress,
+} from '@/utils/comps'
 
 const props = defineProps({
   comp: { type: Object, required: true },
@@ -182,8 +223,50 @@ const props = defineProps({
 defineEmits(['hover', 'open', 'use', 'discard', 'undiscard'])
 
 // Shared with the map pills and the legend, so a card and its pin can never
-// disagree about what "sold" looks like.
-const palette = computed(() => compColor(props.comp.status))
+// disagree about what "sold" looks like. Passed the whole comp, not just the
+// status string, because pending is not visible in `status` alone.
+const palette = computed(() => compColor(props.comp))
+const state = computed(() => compState(props.comp))
+const stateLabel = computed(() => compStateLabel(state.value))
+const isPendingComp = computed(() => state.value === 'pending')
+
+// --- our own lazy loading ------------------------------------------------
+// See the GOTCHA in the template: the platform's `loading="lazy"` never fires
+// inside this tray. 400px of margin means a card is fetched just before it is
+// scrolled to, so the picture is there rather than arriving under the eye.
+const photoEl = ref(null)
+const inView = ref(false)
+let io = null
+
+onMounted(() => {
+  if (typeof IntersectionObserver === 'undefined') {
+    inView.value = true
+    return
+  }
+  io = new IntersectionObserver(
+    (entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return
+      // One-way: once a photo has loaded, scrolling past must not throw it away
+      // and re-download it on the way back.
+      inView.value = true
+      io?.disconnect()
+      io = null
+    },
+    // Rooted on the TRAY, not the viewport. `rootMargin` only expands the root
+    // box -- it cannot see past an intermediate clip -- so a viewport-rooted
+    // observer inside this scroller starts a fetch exactly as the card appears
+    // and the 400px of lead time is silently lost (measured: one new photo per
+    // scroll step instead of the three the margin should buy). Rooted here, the
+    // margin does what it says and the photo is ready before the card arrives.
+    { root: photoEl.value?.closest('[data-comp-tray]') || null, rootMargin: '400px 0px' },
+  )
+  if (photoEl.value) io.observe(photoEl.value)
+})
+
+onBeforeUnmount(() => {
+  io?.disconnect()
+  io = null
+})
 
 const broken = ref(false)
 const photos = ref([])
@@ -276,14 +359,34 @@ const deltas = computed(() => {
  */
 const timing = computed(() => {
   const c = props.comp
+  // A pending house is not "listed" any more and has not sold either. What
+  // matters about it is that the price is agreed, so that is what it says.
+  if (isPendingComp.value) {
+    const dom = daysOnMarket(c)
+    return dom
+      ? __('Under contract · listed {0} days', [dom])
+      : __('Under contract · price agreed')
+  }
   if (isActive.value) {
-    const dom = c.days_on_market
+    const dom = daysOnMarket(c)
     return dom ? __('Listed · {0} days on market', [dom]) : __('Listed')
   }
   const d = fmtDate(c.removed_date)
   const ago = agoLabel(c.recency_days)
   return d ? (ago ? `${__('Off-market')} ${d} · ${ago}` : `${__('Off-market')} ${d}`) : __('Off-market')
 })
+
+/**
+ * Days on market, or null when nobody knows.
+ *
+ * Zillow reports `daysOnZillow: -1` for unknown. The server drops that now, but
+ * a circle cached before it did still holds negatives for up to a week — and
+ * "listed -1 days" is the kind of thing a rep screenshots.
+ */
+function daysOnMarket(c) {
+  const n = Number(c?.days_on_market)
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : null
+}
 
 /**
  * GOTCHA — `Date.parse('YYYY-MM-DD')` is UTC midnight, so `toLocaleDateString`

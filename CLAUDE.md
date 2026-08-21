@@ -173,6 +173,95 @@ duplicating. Work substantial features in a worktree of your own.
     place (Street/St suffix collapse + 4-decimal lat/lng). BatchData fires only
     when ISTL has nothing in radius AND Zillow returned no priced solds
     (for-sale listings do not count). Merged in, not a replace. Quota reserve 500 unchanged.
+  - **Every RapidAPI call runs in a THREAD POOL, and that is the whole load
+    time** (gw352). None of the wait was ever computation — measured on prod, a
+    2-mile circle was **30 consecutive HTTP calls and 40.5s**, and a lead needing
+    pin refreshes was 27.8s of which **21.3s was twelve `/property` calls in a
+    row**. Same work, run together: **2 mi 40.5s → 13.3s**, **½ mi 27.8s →
+    5.5s**, **pins 21.3s → 0.6s**, warm **0.21s**. `zillow.fetch_many()` is the
+    one entry point.
+    - **`FETCH_WORKERS = 4`, measured, do not raise it.** Nineteen pages fetched
+      **eight** at a time came back with **thirteen failures — HTTP 429**, each
+      silently dropping ~40 comps *and* marking the circle incomplete. Sweep:
+      1→8/8 in 9.5s, 2→8/8 5.0s, 3→8/8 3.3s, **4→8/8 2.2s**, 6→8/8 2.2s
+      (no gain), 8→7/8 1.6s + a 429. Four is where the curve flattens. The key
+      is shared with istl-buyer's ZIP job, so the limit is not ours alone.
+    - **GOTCHA — `frappe.local` is a THREAD-LOCAL.** A worker thread has no site,
+      no database and no cache, so `frappe.conf` / `frappe.cache()` /
+      `frappe.log_error` RAISE there instead of degrading. `_raw_get` is
+      deliberately pure urllib; the key, the quota guard, the quota write and the
+      error logging all happen on the request thread, before and after the pool.
+    - A 429/5xx **retries once** (1.5s), and a circle that still comes back
+      partial is now **cached for a day** rather than discarded. Discarding it
+      meant `complete=False` → no cache write → the full search was re-charged on
+      **every** open forever (13s, every time, for one dropped page).
+    - `PIN_REFRESH_CAP` stays **12** even though it is now nearly free in time.
+      The cap is about SPEND — each is a billed call — so raising it is a
+      deliberate one-line dial, not a side-effect of going faster.
+  - **The Today board PREWARMS its comps circles** (gw353,
+    `today_board.warm_today_areas`). A cold map is 5–14s and the board is cold far
+    more often than you would guess — measured on a real 176-card day, **61 of the
+    96** distinct leads had never had their comps opened, and reps open these one
+    after another. Measured per open: **prewarmed median 2.14s / 3.4 calls vs cold
+    median 4.95s / 7.0 calls**.
+    - **The AREA SEARCH ONLY.** Of a cold open's ~8.3 calls, ~3.3 are the circle
+      and the rest are per-pin `/property`. The circle is the **slow** half (it
+      pages and price-splits SERIALLY — each step needs the previous one's
+      `totalPages`), the pins are the **expensive** half and are already fast in
+      parallel. So this buys most of the wait for a third of the spend: **~310
+      calls/day, ~9k per cycle** against the shared 57k plan.
+    - **Warmed off the BOARD, not off lead creation** — the board is the actual
+      work list. Leads return to it on cadence weeks after they arrived, by which
+      point a creation-time warm has expired (area cache is 7 days), and a lead
+      that never reaches the board costs nothing. (Context: 16 leads/day arrive,
+      median **5h** to first call, **100% within 7 days**.)
+    - **The work list is DERIVED from the board every run, never queued.** Nothing
+      to drift, nothing to race, no state to reset, and it self-heals — a lead
+      whose warm failed simply still looks cold next run. Affordable because
+      `zillow_comps.area_is_cached()` is a **Redis read with no HTTP**, so a sweep
+      over an already-warm board is free. `AREA_QUERIES` is the single definition
+      of what a circle IS, so the probe and the fetch cannot check different keys
+      and report everything warm while prewarming nothing.
+    - Bounded **12 leads or 60s per run** (it runs every 5 min and does not need
+      to finish in one pass — a 93-lead board is ~6 min of network), and leads are
+      warmed **serially**, for the same reason the pool is capped at four.
+    - **Enqueued to the `long` queue, deduplicated per day, never inline.**
+      `run_today_sync` is on the **short** queue and a rep's board sync rides on
+      it; a minute of third-party network there makes real work wait on the least
+      urgent thing in the system. Dedup also does the serialising for free, since
+      that sync fires from the 5-min scheduler AND from every new lead/task commit.
+    - **No ops step** — it hangs off the already-registered `run_today_sync`, so
+      there is no new scheduler hook and no `bench sync_jobs`.
+    - `today_board.warm_status(for_date)` reports warm/cold/unlocated, so "is it
+      working?" has an answer. Verified on prod: **8 → 20 → 49 → 60** across ticks,
+      0 failures, 0 429s, no overlapping jobs.
+    - **GOTCHA — a DEPLOY empties the warm cache.** `build_image.sh` ends in a
+      cache clear, which flushes the Redis DB the area/pin caches live in
+      (observed: 60 warm → 0 immediately after gw353). Nothing is broken and the
+      sweep refills the board within ~40 minutes on its own — but it does mean the
+      first opens right after any deploy are slow, which has always been true and
+      now has a name. Avoid deploying into the 9:30am start if you can.
+  - **Pending / under contract is asked for explicitly** (gw352):
+    `isPendingUnderContract=1` on the ForSale search. Default ForSale **hides**
+    them — measured Davenport **97 → 156** listings, Indianapolis **281 → 359**.
+    - **It must be a NUMBER.** `true` returns `{"errors": ["Is Pending Under
+      Contract must be a number."]}` inside an **HTTP 200**, so it fails as an
+      empty result rather than as an error.
+    - Vocabulary measured over 482 rows: `listingStatus` ∈ FOR_SALE / PENDING /
+      RECENTLY_SOLD, `contingentListingType` ∈ null / UNDER_CONTRACT /
+      FORECLOSURE. Read the ROW's status, not the query it came from — a
+      RecentlySold page returned a PENDING row in the first sample.
+    - **`status` still says Active; the new `listing_state` carries
+      sold/pending/for_sale/off_market alongside it.** Additive on purpose, so
+      every existing filter, colour, count and `isActive` check keeps working. A
+      pending home has NOT sold, so it must never be counted as a sale — but its
+      price is one two parties AGREED, on a deal happening now, which is the
+      strongest read on the board. Violet pills, and the word written out on the
+      pill/card/popup/gallery because violet is not far enough from the red in
+      LIGHTNESS to carry it alone.
+    - **GOTCHA — `daysOnZillow: -1` means "unknown", not zero.** It rendered as
+      "Under contract · listed **-1 days**". Stripped server-side, and guarded
+      again at the render sites because a week-old cached circle still holds them.
   - Comps carry a street address but no coordinates, so they ship pre-geocoded
     (Census BATCH endpoint, ~95% match — the one-at-a-time endpoint istl-buyer
     uses would take ~50min for this volume). The **subject** is geocoded on
@@ -503,6 +592,36 @@ duplicating. Work substantial features in a worktree of your own.
     — 430px of a shared line to say what the disabled state and tooltip already
     say. Measured on the comps page: header block **243px → 142px**, filter strip
     3 rows → 2, map **514px → 621px**.
+  - **The map claims a FLOOR, and the calculator folds** (gw352). `flex-1` alone
+    means "whatever is left", and what was left measured **342px** on a 919px
+    window because `CompOfferCalc` above it took **358px** — the tool was smaller
+    than the form sitting on it. Now `min-h-[32rem]` on the split, and the calc
+    collapses to a one-line "Cash offer · N picked" button (persisted in
+    `localStorage['compsCalcOpen']`, shortcut **C**, **open by default** — hiding
+    a thing he just built is not our call to make silently). Map **284 → 510px**
+    on the page (598px with the calc folded) and **384 → 544px** in the Today
+    modal. The collapsed state names its pick count so folding it never hides
+    whether the calculator still holds anything.
+  - **GOTCHA — a min-height under `overflow-hidden` SILENTLY EATS the overflow.**
+    `pages/Comps.vue` deliberately did not scroll (so the tray has a bounded
+    height to scroll inside), which was fine while the map took only leftovers.
+    Give it a floor and the content hit **1,030px in an 856px host**: the bottom
+    **174px — including the whole legend — became unreachable**, with no
+    scrollbar to say so. It is `overflow-y-auto` now; the tray keeps its own
+    bounded height either way, so it still scrolls internally. Same trade the lead
+    desk already documents: a scrollbar beats clipping.
+  - **A hovered pill goes above EVERYTHING and stays up** (gw352). The old
+    `el.style.zIndex = 900` failed twice over: the subject carries
+    `zIndexOffset: 1000` and Leaflet computes each marker's z as **latitude +
+    offset**, rewriting the inline style on every pan — so 900 was both too low to
+    clear the subject and erased by the next map move. It goes through
+    `setZIndexOffset` now (the only thing Leaflet respects), and a pill you have
+    looked at **stays** above its neighbours afterwards rather than diving back
+    under — the reason you hovered it was to get it out from under them, and
+    dropping it back makes a dense cluster feel like whack-a-mole. Measured:
+    **401 at rest → 10262 hovered → 5262 after**, against a subject at 1273. The
+    bands are far apart because the pixel-y term can reach ~1,000. `placePin`
+    restyles through `restZ`, or a use/discard/filter change would undo it.
   - **Pins use Zillow's grammar** — for sale RED (`#d92d20`), sold/off-market
     YELLOW (`#f5c518`), subject BLUE (unchanged). One palette in `utils/comps.js`
     (`COMP_COLORS`) feeds the pills, the tray chips and the legend, because those
@@ -1054,6 +1173,40 @@ duplicating. Work substantial features in a worktree of your own.
       (it had to be, back when comps was itself a Dialog), so the gallery had to
       be excluded from `active` BY HAND. Without it `H` hides the very comp whose
       photos are on screen.
+    - **The SUBJECT opens the same gallery** (gw352) — from its pin popup and from
+      its tray card. It was the one house on the board you could not look at,
+      which is backwards since it is the house being priced.
+      `comps.get_subject_details(lead)` reuses `_shape_detail`, so the panel that
+      renders a comp renders this too and the two cannot drift; `CompDetailModal`
+      takes a `subjectMode` flag rather than existing twice. Same lazy contract as
+      a comp — two billed calls, on an explicit click, cached 30 days — keyed on
+      the zpid where we have one (from the lead's cached facts) so two leads on
+      one house share it. No add-as-comp button, no fit badge, no distance: a
+      house is not a comp for itself.
+    - **GOTCHA — `loading="lazy"` DOES NOT FIRE inside the comps tray** (gw352).
+      Not subtly wrong — it never runs. Measured: ten cards, ten `<img>` with
+      valid srcs, **ZERO loaded** (`complete:false`, `naturalWidth:0`), including
+      the first card fully on screen at y=572 of an 863px viewport; nudging the
+      tray's scroll changed nothing; flipping one to `eager` loaded it instantly.
+      The tray is a nested scroll container the document itself never scrolls, and
+      Chrome's heuristic does not re-evaluate for it. **That was the whole "photos
+      only load when I hover" bug** — hovering calls `prefetchPhotos`, which swaps
+      the `src`, and a src change is what finally makes Chrome look. Replaced with
+      an **IntersectionObserver rooted on the tray** (`[data-comp-tray]`): rooted
+      on the viewport it cannot see past the tray's own clip, so the 400px of lead
+      time is silently lost and cards fetch exactly as they appear. Still lazy on
+      purpose — a 200-comp board must not pull 200 thumbnails on open. The
+      gallery's own horizontal thumbnail strip is fine on `lazy` (verified 20/20),
+      so this is specific to that scroller.
+    - **GOTCHA — an occluded Chrome WINDOW reports `visibilityState: "hidden"`,
+      and IntersectionObserver then never fires at all** — including its initial
+      callback. A hand-attached probe logged **zero** entries and
+      `chrome_screenshot` failed with "image readback failed", which together
+      make a perfectly good observer look broken. `chrome_tab activate` is NOT
+      enough (it only raises the tab within its window). `window.open(...,
+      'popup=yes,width=...')` produces a genuinely visible window — the same trick
+      the mobile-layout note uses. Check `document.visibilityState` before
+      concluding anything about IO/RO/rAF.
     - **GOTCHA — Leaflet measures its container ONCE, at init, and a hidden one
       measures 0×0.** The existing one-shot `invalidateSize` 120ms after render
       only covers a container revealed within that window, which a tab is not, so

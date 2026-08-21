@@ -255,13 +255,22 @@ def _band_mid(band):
 	return lo if hi is None else (lo + hi) / 2.0
 
 
-def _band_label(band, unit=""):
+def _band_label(band, unit="", group=False):
+	"""A band as the source named it. `group` adds thousand separators.
+
+	Grouping is opt-in rather than automatic because the same helper labels a YEAR:
+	"1,910" is not a year, it is a bug that looks like a price. Only sqft asks for
+	it — a bare "1155 sqft" beside comps that all read "1,155 sqft" was the one
+	number on the subject card written in a different language from its neighbours.
+	"""
 	if not band:
 		return None
 	lo, hi = band[0], band[1]
 
 	def n(v):
-		return str(int(v)) if float(v).is_integer() else f"{v:g}"
+		if float(v).is_integer():
+			return f"{int(v):,}" if group else str(int(v))
+		return f"{v:,g}" if group else f"{v:g}"
 
 	if hi is None:
 		return f"{n(lo)}+{unit}"
@@ -331,7 +340,7 @@ def _subject_facts(doc):
 		frappe.log_error(frappe.get_traceback(), "Comps: Zillow facts failed")
 	facts = {"source": {}}
 
-	def take(key, lead_field, listing_field=None, zillow_key=None, unit=""):
+	def take(key, lead_field, listing_field=None, zillow_key=None, unit="", group=False):
 		z = (zillow or {}).get(zillow_key or key)
 		listing_val = (listing or {}).get(listing_field or lead_field)
 		if z:
@@ -347,14 +356,15 @@ def _subject_facts(doc):
 		facts[f"{key}_band"] = list(band[:2]) if band else None
 		facts[f"{key}_exact"] = bool(band[2]) if band else False
 		facts[key] = _band_mid(band)
-		facts[f"{key}_label"] = _band_label(band, unit)
+		facts[f"{key}_label"] = _band_label(band, unit, group)
 
 	# Each fact falls through INDEPENDENTLY: Zillow returns null for a fact it lacks
 	# (measured — a home with bathrooms but no bedrooms), so picking one source for
 	# the whole set would throw away good data from the others.
 	take("beds", "bedrooms")
 	take("baths", "bathrooms")
-	take("sqft", "square_footage", zillow_key="sqft")
+	# Grouped: the only one of the four that routinely runs to four digits.
+	take("sqft", "square_footage", zillow_key="sqft", group=True)
 	take("year_built", "year_built")
 
 	z_type = (zillow or {}).get("property_type")
@@ -658,15 +668,23 @@ def _detail_cache_key(comp):
 	return f"crm:comp-detail:v{DETAIL_CACHE_VERSION}:{comp}"
 
 
-def _shape_detail(row):
-	"""Fetch and normalize one comp only after a person explicitly opens it."""
+def _shape_detail(row, zpid=None):
+	"""Fetch and normalize one property only after a person explicitly opens it.
+
+	`zpid` short-circuits address resolution when the caller already holds one (the
+	subject does, from its cached facts). A zpid is an exact identifier where an
+	address string is a guess Zillow has to re-resolve, so it is both cheaper and
+	more reliable when available.
+	"""
 	from crm.api import zillow as zillow_api
 
-	if str(row.get("name") or "").startswith("zillow::"):
-		zpid = str(row.name).split("::", 1)[1]
+	name = str(row.get("name") or "")
+	if not zpid and name.startswith("zillow::"):
+		zpid = name.split("::", 1)[1]
+	if zpid:
 		raw = zillow_api._request("/property", {"zpid": zpid}, "Zillow: zpid lookup failed")
 	else:
-		raw = zillow_api.property_details(row.address)
+		raw = zillow_api.property_details(row.get("address"))
 	details = zillow_api.normalize_detail(raw) if raw else None
 	photo_raw = zillow_api.property_photos(details.get("zpid")) if details else None
 	photos = zillow_api.photo_urls(photo_raw)
@@ -732,6 +750,138 @@ def get_comp_details(lead, comp):
 	frappe.cache().set_value(key, result, expires_in_sec=ttl)
 	# Do not read the cache again in this request: Frappe memoizes cache misses in
 	# `frappe.local.cache`, and an expiring set does not replace that local miss.
+	return result
+
+
+#: The radius the client actually opens with (`CompsView`'s `radius` ref). Warming
+#: any other circle would populate a cache key nobody reads.
+WARM_RADIUS_MI = 0.5
+
+
+def warm_lead_area(lead):
+	"""Pull one lead's Zillow AREA search into cache before anybody asks for it.
+
+	The AREA SEARCH ONLY, and that is the whole design. Measured on prod, a cold
+	comps open is ~8.3 RapidAPI calls: roughly 3.3 of them are this circle and the
+	rest are per-pin `/property` lookups. The circle is the half worth prewarming
+	twice over --
+
+	  * it is the SLOW half: it pages and price-splits SERIALLY, because each step
+	    needs the previous one's `totalPages` before it can ask for anything;
+	  * the pins are the EXPENSIVE half: more calls, on a key shared with
+	    istl-buyer, and they are already fast (parallel: 21.3s -> 0.6s).
+
+	So this buys most of the wait for about a third of the spend. A cold open goes
+	from ~14s worst case to ~5s, and from ~5s typical to well under one.
+
+	Returns what it did, so the sweep can report real numbers rather than claiming
+	success for a lead it skipped.
+	"""
+	from crm.api import zillow_comps
+
+	if not _available():
+		return {"warmed": False, "reason": "no_comps_doctype"}
+	doc = frappe.get_doc("CRM Lead", lead)
+	# Geocoding is Census, not RapidAPI — free, and cached on the lead — so a lead
+	# that has never been located gets that out of the way here too.
+	lat, lng, _cached_point = _subject_point(doc)
+	if lat is None:
+		return {"warmed": False, "reason": "no_location"}
+	if zillow_comps.area_is_cached(lat, lng, WARM_RADIUS_MI):
+		return {"warmed": False, "reason": "already_warm"}
+
+	area = zillow_comps.area_comps(lat, lng, WARM_RADIUS_MI)
+	return {
+		"warmed": True,
+		"sold": len(area.get("sold") or []),
+		"for_sale": len(area.get("for_sale") or []),
+		# False means the circle came back partial, so it is cached for a day rather
+		# than a week and a later sweep will retry it.
+		"complete": bool(area.get("cached")),
+	}
+
+
+@frappe.whitelist()
+def warm_lead_comps(lead):
+	"""Manual/whitelisted wrapper, for testing a single lead by hand."""
+	_guard()
+	if not frappe.db.exists("CRM Lead", lead):
+		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)
+	return warm_lead_area(lead)
+
+
+@frappe.whitelist()
+def get_subject_details(lead):
+	"""The SUBJECT's own photos and Zillow facts, in the comp detail shape.
+
+	The subject pin only ever offered a popup of numbers, so the one house a rep is
+	actually being asked to price was the one house on the board they could not
+	look at. Every comp opens a gallery; this makes the subject open the same one.
+
+	Deliberately the SAME lazy contract as `get_comp_details` — two billed calls,
+	on an explicit click, cached 30 days — rather than folding photos into
+	`get_lead_comps`, which every comps open pays for whether anyone looks or not.
+
+	It reuses `_shape_detail`, so the panel that renders a comp renders this too and
+	the two cannot drift apart. The zpid comes from the lead's already-cached facts,
+	which skips re-resolving an address Zillow has resolved before.
+	"""
+	_guard()
+	if not frappe.db.exists("CRM Lead", lead):
+		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)
+	doc = frappe.get_doc("CRM Lead", lead)
+
+	from crm.api import zillow as zillow_api
+
+	# Free past the first open: cached on the lead for 30 days.
+	facts = zillow_api.facts_for_lead(doc) or {}
+	zpid = str(facts.get("zpid") or "")
+	address = _full_address(doc)
+	if not zpid and not address:
+		return {
+			"available": False,
+			"comp": None,
+			"details": None,
+			"photos": [],
+			"message": _("This lead has no property address yet."),
+		}
+
+	# Keyed on the zpid where we have one so two leads on the same house share the
+	# lookup, and on the lead otherwise — never on the raw address, which changes
+	# whenever somebody tidies up the punctuation on a lead.
+	key = _detail_cache_key(f"subject::{zpid or lead}")
+	cached = frappe.cache().get_value(key)
+	if isinstance(cached, dict):
+		return {**cached, "cached": True}
+
+	row = frappe._dict(
+		{
+			"name": f"subject::{lead}",
+			"address": address,
+			"city": doc.get("property_city") or "",
+			"state": doc.get("property_state") or "",
+			"zip": doc.get("property_zip") or "",
+			# The subject is not for sale and has no comp price; the panel reads its
+			# money off `details` (Zestimate, last sale) exactly as it does for a comp
+			# whose own price is unknown.
+			"price": None,
+			"status": "",
+			"bedrooms": facts.get("beds"),
+			"bathrooms": facts.get("baths"),
+			"square_footage": facts.get("sqft"),
+			"year_built": facts.get("year_built"),
+			"property_type": facts.get("property_type"),
+			"is_subject": True,
+		}
+	)
+	result = _shape_detail(row, zpid=zpid or None)
+	result["cached"] = False
+	ttl = (
+		DETAIL_CACHE_SECONDS
+		if result.get("available") and result.get("photos_available")
+		else DETAIL_RETRY_SECONDS
+	)
+	frappe.cache().set_value(key, result, expires_in_sec=ttl)
 	return result
 
 
@@ -840,6 +990,17 @@ def get_lead_comps(lead, radius_mi=None, limit=None, filters=None, auto=0, inclu
 		# client never has to special-case its absence; the Zillow merge fills it in
 		# for any pin it can match, and the rest render a placeholder.
 		row.setdefault("photo", "")
+		# Whether a house is merely listed or already under contract is something
+		# only Zillow tells us; the pooled index carries a last ASK and no more. The
+		# key is always present so the client renders one grammar, and the honest
+		# value for an unrefreshed ISTL pin is the coarse one it actually has.
+		#
+		# "off_market", NOT "sold": this inventory is the last LIST price, and a
+		# listing disappearing is not a confirmed close. Only a Zillow-recorded
+		# transaction earns the word sold, which is the same line the pin popup has
+		# always drawn -- now drawn once, on the server, instead of re-derived by
+		# each surface that shows a comp.
+		row["listing_state"] = "for_sale" if _is_active(row.get("status")) else "off_market"
 		row["selected"] = row["name"] in selected
 		row["hidden"] = row["name"] in hidden
 		# Computed while the dates are still dates, and returned so the client can

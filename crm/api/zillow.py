@@ -144,36 +144,36 @@ def quota_remaining():
 		return None
 
 
-def _remember_quota(headers):
+def _store_quota(n):
+	"""Remember what RapidAPI last said was left. Called only on a real thread."""
+	if n is None:
+		return
 	try:
-		raw = headers.get("X-RateLimit-Requests-Remaining")
-		if raw is not None:
-			frappe.cache().set_value(_QUOTA_KEY, {"n": int(raw), "t": time.time()})
+		frappe.cache().set_value(_QUOTA_KEY, {"n": int(n), "t": time.time()})
 	except Exception:
 		pass
 
 
-def _request(path: str, params: dict, error_title: str):
-	"""One guarded RapidAPI GET, or None. Every caller degrades softly."""
+#: A throttled call is a TRANSIENT refusal, not an answer, and dropping one is
+#: expensive twice over: the page's ~40 comps vanish from the map, and the circle
+#: is then marked incomplete so the week-long cache is never written and the next
+#: open re-pays for everything. One patient retry is far cheaper than either.
+_RETRY_STATUS = {429, 500, 502, 503, 504}
+_RETRY_BACKOFF = 1.5
+
+
+def _raw_get(key: str, path: str, params: dict, retries: int = 1):
+	"""One RapidAPI GET with NO Frappe involvement. -> (body, remaining, error).
+
+	Deliberately pure: this is the only thing `fetch_many` runs on a worker thread,
+	and `frappe.local` is a thread-local proxy — a worker has no site, no database
+	connection and no cache, so touching `frappe.conf`, `frappe.cache()` or
+	`frappe.log_error` from one raises instead of degrading. The key, the quota
+	guard, the quota update and the error logging all stay on the calling thread.
+	"""
+	import urllib.error
 	import urllib.parse
 	import urllib.request
-
-	key = _api_key()
-	if not key or not params:
-		return None
-
-	# Yield the last of a shared budget rather than spend it: both subject facts and
-	# an on-demand comp gallery are optional, whereas istl-buyer's batch job cannot
-	# degrade at all. This check runs before EACH request, so a property lookup that
-	# lands on the reserve does not spend one more request fetching its photos.
-	left = quota_remaining()
-	if left is not None and left <= QUOTA_RESERVE:
-		frappe.log_error(
-			f"Zillow quota reserve reached ({left} left <= {QUOTA_RESERVE}); skipping "
-			f"{path}. Key is shared with istl-buyer's ZIP-market job.",
-			"Zillow: quota reserve",
-		)
-		return None
 
 	url = f"{BASE}{path}?" + urllib.parse.urlencode(params)
 	req = urllib.request.Request(
@@ -182,11 +182,119 @@ def _request(path: str, params: dict, error_title: str):
 	try:
 		with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
 			body = json.loads(resp.read().decode("utf-8", "replace"))
-			_remember_quota(resp.headers)
-			return body
+			try:
+				remaining = int(resp.headers.get("X-RateLimit-Requests-Remaining"))
+			except (TypeError, ValueError):
+				remaining = None
+			return body, remaining, None
+	except urllib.error.HTTPError as e:
+		if retries > 0 and e.code in _RETRY_STATUS:
+			# Plain `time.sleep` is safe here precisely because this function touches
+			# nothing but the socket — it parks one worker thread, not the request.
+			time.sleep(_RETRY_BACKOFF)
+			return _raw_get(key, path, params, retries - 1)
+		import traceback
+
+		return None, None, traceback.format_exc()
 	except Exception:
-		frappe.log_error(frappe.get_traceback(), error_title)
+		import traceback
+
+		return None, None, traceback.format_exc()
+
+
+def _quota_blocked(path: str):
+	"""True when the SHARED plan is too close to empty to spend anything here."""
+	left = quota_remaining()
+	if left is None or left > QUOTA_RESERVE:
+		return False
+	frappe.log_error(
+		f"Zillow quota reserve reached ({left} left <= {QUOTA_RESERVE}); skipping "
+		f"{path}. Key is shared with istl-buyer's ZIP-market job.",
+		"Zillow: quota reserve",
+	)
+	return True
+
+
+def _request(path: str, params: dict, error_title: str):
+	"""One guarded RapidAPI GET, or None. Every caller degrades softly."""
+	key = _api_key()
+	if not key or not params:
 		return None
+
+	# Yield the last of a shared budget rather than spend it: both subject facts and
+	# an on-demand comp gallery are optional, whereas istl-buyer's batch job cannot
+	# degrade at all. This check runs before EACH request, so a property lookup that
+	# lands on the reserve does not spend one more request fetching its photos.
+	if _quota_blocked(path):
+		return None
+
+	body, remaining, error = _raw_get(key, path, params)
+	_store_quota(remaining)
+	if error:
+		frappe.log_error(error, error_title)
+		return None
+	return body
+
+
+#: How many RapidAPI calls may be in flight at once for one page load.
+#:
+#: Every call here is ~1.35s of pure network wait, and they were being made one
+#: after another: a 2-mile comps circle is ~30 calls, which measured 40.5s on
+#: production while the CPU did nothing. Threads are the right tool precisely
+#: because the work is I/O — each one blocks in `urlopen` with the GIL released.
+#:
+#: FOUR, and that number is measured, not guessed. Nineteen pages fetched eight
+#: at a time came back with THIRTEEN failures — `HTTP 429: Too Many Requests` —
+#: which is worse than being slow, because each dropped page silently removes ~40
+#: comps from the map. Sweeping the same eight calls across worker counts:
+#:
+#:   1 -> 8/8 in 9.5s    3 -> 8/8 in 3.3s    6 -> 8/8 in 2.2s
+#:   2 -> 8/8 in 5.0s    4 -> 8/8 in 2.2s    8 -> 7/8 in 1.6s + a 429
+#:
+#: Four is where the curve flattens: it is the full 4.3x speedup, six buys
+#: literally nothing on top of it, and eight starts losing data. The key is also
+#: SHARED with istl-buyer's ZIP job, so the limit we are near is not ours alone.
+FETCH_WORKERS = 4
+
+
+def fetch_many(specs, error_title="Zillow: batch request failed", workers=FETCH_WORKERS):
+	"""Run several independent RapidAPI GETs at once. [(path, params)] -> [body|None].
+
+	Results come back in the order asked for, with `None` in the slot of anything
+	that failed, so a caller can tell a partial answer from a complete one and
+	decide whether it is safe to cache.
+
+	The quota is checked ONCE, before the batch, rather than before each call as the
+	serial path does: the whole point is that these are in flight together, so there
+	is no "before" to check in between. The reserve is 500 and a batch is at most a
+	few dozen, so the floor still cannot be crossed by more than one batch.
+	"""
+	from concurrent.futures import ThreadPoolExecutor
+
+	specs = list(specs or [])
+	if not specs:
+		return []
+	key = _api_key()
+	if not key or _quota_blocked(specs[0][0]):
+		return [None] * len(specs)
+
+	with ThreadPoolExecutor(max_workers=max(1, min(int(workers), len(specs)))) as pool:
+		results = list(pool.map(lambda s: _raw_get(key, s[0], s[1]), specs))
+
+	# Back on the request thread, where Frappe is usable again.
+	remaining = [r for _, r, _ in results if r is not None]
+	if remaining:
+		# The LOWEST reading is the truthful one: the responses raced, so the
+		# smallest number is the furthest the plan actually got drawn down.
+		_store_quota(min(remaining))
+	errors = [e for _, _, e in results if e]
+	if errors:
+		# One log line for the batch, not one per call: a Zillow outage would
+		# otherwise write 30 identical tracebacks per page load.
+		frappe.log_error(
+			f"{len(errors)} of {len(specs)} calls failed.\n\n{errors[0]}", error_title
+		)
+	return [body for body, _, _ in results]
 
 
 def _fetch(address: str):

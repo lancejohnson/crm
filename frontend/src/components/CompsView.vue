@@ -7,15 +7,49 @@
        has to be decided here, from the props, or the map/tray split has no bound
        to scroll inside and grows to ~8,000px. -->
   <div ref="rootEl" class="flex flex-col gap-2" :class="fillHeight && wide ? 'min-h-0 flex-1' : ''">
-  <CompOfferCalc
-    v-if="pageMode"
-    :lead="lead"
-    :subject="data?.subject || null"
-    :address="data?.address || address"
-    :comps="selectedComps"
-    @remove="setCompState($event, 'none')"
-    @open="openCompDetail"
-  />
+  <!-- The calculator folds away, and that is a HEIGHT decision. Measured on the
+       comps page at a 919px window: the calc is 358px and the map+tray got 342px
+       -- the tool was smaller than the form sitting on top of it. Collapsing it
+       hands those 358px straight to the map.
+
+       Open by default, because it is the thing you do WITH the comps and hiding
+       it would be deciding for the rep. The choice is remembered per user, like
+       Details and Parcels, so folding it once is enough. -->
+  <template v-if="pageMode">
+    <div v-if="!calcOpen" class="flex items-center justify-between gap-2">
+      <button
+        class="flex items-center gap-1.5 rounded-md border border-outline-gray-2 bg-surface-gray-1 px-2.5 py-1 text-xs font-medium text-ink-gray-7 hover:bg-surface-gray-2"
+        :title="__('Show the cash-offer calculator') + ' (C)'"
+        @click="calcOpen = true"
+      >
+        <FeatherIcon name="chevron-right" class="size-3.5" />
+        {{ __('Cash offer') }}
+        <!-- The count is what makes this safe to collapse: the rep can see the
+             calculator still has their picks without opening it. -->
+        <span v-if="selectedComps.length" class="text-ink-gray-5">
+          · {{ __('{0} picked', [selectedComps.length]) }}
+        </span>
+      </button>
+    </div>
+    <div v-else class="relative">
+      <button
+        class="absolute right-1 top-1 z-10 flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-ink-gray-5 hover:bg-surface-gray-2 hover:text-ink-gray-8"
+        :title="__('Hide the calculator and give the map its height') + ' (C)'"
+        @click="calcOpen = false"
+      >
+        <FeatherIcon name="chevron-up" class="size-3.5" />
+        {{ __('Hide') }}
+      </button>
+      <CompOfferCalc
+        :lead="lead"
+        :subject="data?.subject || null"
+        :address="data?.address || address"
+        :comps="selectedComps"
+        @remove="setCompState($event, 'none')"
+        @open="openCompDetail"
+      />
+    </div>
+  </template>
   <!-- Address and counts share ONE line with the controls. They used to be
        stacked, which cost a whole row of height at the top of a page whose
        entire job is to show a map. -->
@@ -252,12 +286,18 @@
              carry a photo, and a photo is the fastest way to know a comp is not
              comparable — square footage says nothing about a gutted shell beside
              a renovated flip. -->
+        <!-- MIN-HEIGHT, not just flex-1. `flex-1` alone means "whatever is left",
+             and what was left measured 342px on a 919px window because the
+             calculator above had taken 358px of it. A map that small is a
+             thumbnail. The floor means the map gets a usable height first and the
+             page scrolls if the rest genuinely does not fit -- the same trade the
+             lead desk already makes, where a scrollbar beats clipping. -->
         <div
           id="comps-map"
           class="flex min-h-0 gap-3"
           :class="[
             wide ? 'flex-row' : 'flex-col',
-            wide ? (fillHeight ? 'min-h-0 flex-1' : 'h-[24rem]') : '',
+            wide ? (fillHeight ? 'min-h-[32rem] flex-1' : 'h-[34rem]') : '',
           ]"
         >
           <!-- GOTCHA — the sizing classes live on this WRAPPER, never on the
@@ -274,8 +314,8 @@
               wide
                 ? 'h-full min-h-0 flex-1'
                 : pageMode
-                  ? 'h-[26rem] sm:h-[32rem]'
-                  : 'h-[20rem] sm:h-[24rem]'
+                  ? 'h-[32rem] sm:h-[38rem]'
+                  : 'h-[26rem] sm:h-[30rem]'
             "
           >
             <div ref="mapEl" class="size-full" />
@@ -293,7 +333,7 @@
           <aside
             v-if="comps.length || discarded.length"
             class="flex shrink-0 flex-col overflow-hidden rounded-lg border border-outline-gray-2"
-            :class="wide ? 'h-full min-h-0 w-[330px]' : 'h-[24rem] w-full'"
+            :class="wide ? 'h-full min-h-0 w-[330px]' : 'h-[28rem] w-full'"
           >
             <div
               class="flex shrink-0 items-center justify-between gap-2 border-b border-outline-gray-2 bg-surface-gray-1 px-3 py-2"
@@ -304,11 +344,17 @@
               <span class="text-xs text-ink-gray-5">{{ __('Nearest first') }}</span>
             </div>
 
-            <div class="min-h-0 flex-1 overflow-auto">
+            <!-- Marked so each card can find the box it scrolls inside and use
+                 it as its IntersectionObserver root. Rooting on the viewport
+                 instead technically works but cannot see past this element's own
+                 clip, so a card is only fetched as it appears rather than just
+                 before -- and a fast scroll shows grey boxes catching up. -->
+            <div data-comp-tray class="min-h-0 flex-1 overflow-auto">
               <CompSubjectCard
                 v-if="data?.subject"
                 :subject="data.subject"
                 :address="data?.address || address"
+                @open="openSubjectDetail"
               />
 
               <CompTrayCard
@@ -369,6 +415,12 @@
             <span class="size-2.5 rounded-full" :style="{ background: ACTIVE }" />
             {{ __('Still listed') }}
           </span>
+          <!-- Only when the board actually holds one. A legend entry for a state
+               nothing on the map is in is one more thing to read for nothing. -->
+          <span v-if="pendingCount" class="flex items-center gap-1.5">
+            <span class="size-2.5 rounded-full" :style="{ background: PENDING }" />
+            {{ __('Pending ({0})', [pendingCount]) }}
+          </span>
           <span class="text-ink-gray-5">{{ __('Fainter = older sale') }}</span>
           <span v-if="data?.selected_count" class="flex items-center gap-1.5">
             <span
@@ -393,6 +445,7 @@
     :lead="lead"
     :comp="detailComp"
     :subject="data?.subject || null"
+    :subject-mode="subjectDetail"
     @use="toggleUse"
   />
 </template>
@@ -423,7 +476,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { zillowUrl } from '@/utils/propertyLinks'
-import { COMP_COLORS } from '@/utils/comps'
+import { COMP_COLORS, compColor, compState, isPending } from '@/utils/comps'
 import CompDetailModal from '@/components/CompDetailModal.vue'
 import CompTrayCard from '@/components/CompTrayCard.vue'
 import CompSubjectCard from '@/components/CompSubjectCard.vue'
@@ -771,6 +824,7 @@ function toggleHood(force) {
 const ACTIVE = COMP_COLORS.active.bg // still listed = an ASK, not a sale
 const OFF_MARKET = COMP_COLORS.sold.bg // off-market = an actual transaction
 const SUBJECT = COMP_COLORS.subject.bg
+const PENDING = COMP_COLORS.pending.bg // spoken for = an AGREED price, still live
 
 const mapEl = ref(null)
 const data = ref(null)
@@ -855,6 +909,17 @@ const userTouched = ref(false)
 let syncing = false
 let applyTimer = null
 
+// Whether the cash-offer calculator is showing. Persisted per user, like the
+// pill details and the parcels layer -- and defaulting OPEN, because it is the
+// point of having picked the comps and nobody asked for it to disappear.
+const calcOpen = ref(localStorage.getItem('compsCalcOpen') !== '0')
+watch(calcOpen, () => {
+  localStorage.setItem('compsCalcOpen', calcOpen.value ? '1' : '0')
+  // The map sizes itself, so hand it the height back in the same frame the calc
+  // leaves rather than waiting for the ResizeObserver to notice.
+  nextTick(() => map && map.invalidateSize())
+})
+
 // Whether pills carry beds/baths/sqft/year, or collapse to the bare price.
 // Persisted per user like dispoView / activityScope — it is a view preference,
 // and having to re-set it on every lead would make the shortcut pointless.
@@ -870,6 +935,9 @@ const focusedComp = ref(null)
 // The comp whose photos/facts are open, if any.
 const detailComp = ref(null)
 const showCompDetail = ref(false)
+// True when that "comp" is actually the subject, which reads its photos from a
+// different endpoint (it is not a CRM Comp row and has no comp name to look up).
+const subjectDetail = ref(false)
 
 // The row/pin the pointer is over, in EITHER direction. Kept as a plain name so
 // the map and the table are pointing at one shared idea of "this one".
@@ -883,19 +951,47 @@ const markersByName = new Map()
  * icon: rebuilding a divIcon on every mouseenter would thrash 200 markers and
  * drop the popup that may be open.
  */
+/**
+ * Where a hovered pill sits in the stack, and where it stays afterwards.
+ *
+ * Above the SUBJECT too, which is why this is a Leaflet z-index OFFSET and not an
+ * inline `style.zIndex`. The subject marker carries `zIndexOffset: 1000`, and
+ * Leaflet computes each marker's real z from its latitude PLUS its offset and
+ * rewrites the inline style on every pan and zoom -- so the old `el.style.zIndex
+ * = 900` was both too low to clear the subject and erased the moment the map
+ * moved. Going through `setZIndexOffset` is the only version Leaflet respects.
+ */
+// The bands are far apart on purpose: Leaflet ADDS the marker's pixel y to the
+// offset, and the map can be ~1,000px tall, so bands any closer together would
+// let a pin near the bottom of the map outrank a raised pin near the top.
+// Normal pins land under ~1,700 and the subject under ~2,000.
+const HOVER_Z = 10000
+// One band below the hovered pill. A pill you have looked at STAYS on top of the
+// ones it overlaps after the pointer leaves, because the reason you hovered it
+// was to bring it out from under them -- dropping it straight back under is the
+// behaviour that makes a dense cluster feel like whack-a-mole. It yields only to
+// whatever is hovered next, so the stack ends up ordered by what you looked at.
+const RAISED_Z = 5000
+const raisedComps = new Set()
+
+function restZ(name) {
+  // Its natural layer, unless it has been hovered at least once this session.
+  if (raisedComps.has(name)) return RAISED_Z
+  const c = comps.value.find((x) => x.name === name)
+  return c ? pinZ(c) : 0
+}
+
 watch(hoveredComp, (name, prev) => {
   const off = markersByName.get(prev)
-  if (off) off.getElement()?.classList.remove('comps-pill-hot')
-  const on = markersByName.get(name)
-  const el = on?.getElement()
-  if (el) {
-    el.classList.add('comps-pill-hot')
-    // Lift it above its neighbours so an emphasised pin is never half-buried.
-    el.style.zIndex = 900
-  }
   if (off) {
-    const prevEl = off.getElement()
-    if (prevEl) prevEl.style.zIndex = ''
+    off.getElement()?.classList.remove('comps-pill-hot')
+    off.setZIndexOffset(restZ(prev))
+  }
+  const on = markersByName.get(name)
+  if (on) {
+    on.getElement()?.classList.add('comps-pill-hot')
+    raisedComps.add(name)
+    on.setZIndexOffset(HOVER_Z)
   }
   // Bring the matching card into the tray's viewport. Only when the map is what
   // moved -- scrolling the list under the pointer while someone is reading it
@@ -922,6 +1018,11 @@ function scrollCardIntoView(name) {
 }
 
 const comps = computed(() => data.value?.comps || [])
+
+// Counted off what is ON THE MAP, not off the server's tally of what it found:
+// the legend describes the pins in front of the rep, and a number that survives
+// filtering is the same mistake the Nearby label documents.
+const pendingCount = computed(() => comps.value.filter((c) => isPending(c)).length)
 
 // Comps a person threw out. They arrive in their own list precisely so they can
 // be shown without ever re-entering the pool: a discarded comp must not keep a
@@ -1279,8 +1380,9 @@ function subjectIcon(s) {
 
 function pillIcon(c) {
   const active = isActive(c.status)
+  const pending = isPending(c)
   const opacity = pillOpacity(stalenessDays(c))
-  const pal = active ? COMP_COLORS.active : COMP_COLORS.sold
+  const pal = compColor(c)
   // The fade means ONE thing: how old the SALE is. An active listing is current
   // by definition -- how long it has sat is already printed on it as DOM -- so
   // it never fades, which also keeps its white-on-red legible. A selected pill is
@@ -1326,7 +1428,11 @@ function pillIcon(c) {
   // The age reads differently by status and the PILL COLOUR is what says which:
   // amber (still listed) → how long it has sat unsold; slate (off-market) → how
   // long since it left. Same rule the popup spells out in words.
-  const age = agoShort(c.recency_days)
+  // A pending pill trades its age for the word. "Pending" is the whole point of
+  // the pin -- an agreed price -- and days-on-market is the least interesting
+  // number on a house that is already spoken for, so it takes the same slot
+  // rather than making the pill wider.
+  const age = pending ? __('Pending') : agoShort(c.recency_days)
   const top =
     price.length * 7.0 +
     (year ? 3 + year.length * 5.0 : 0) +
@@ -1467,6 +1573,15 @@ function subjectPopupHtml(s) {
     )
   }
 
+  // The subject gets the same gallery every comp has. It was the one house on
+  // the board you could not look at -- which is backwards, because it is the
+  // house being priced. Same delegated popup-click listener as the comp buttons.
+  rows.push(
+    `<button data-subject-details="1" style="width:100%;cursor:pointer;margin-top:8px;
+      font:600 11px/1 ui-sans-serif,system-ui;padding:7px 8px;border-radius:6px;
+      border:1px solid #e5e3de;background:#fff;color:${SUBJECT}">${__('Photos & details')}</button>`,
+  )
+
   const sources = Object.values(s.source || {})
   if (sources.length) {
     // Name the strongest source present. A rep reading "1,438 sqft" deserves to
@@ -1518,8 +1633,12 @@ function agoLabel(days) {
 function popupHtml(c) {
   const active = isActive(c.status)
   const ago = agoLabel(c.recency_days)
+  // `> 0`, not `!= null`: Zillow's "unknown" is -1, and "-1d on market" is worse
+  // than saying nothing. The server strips it, but a week-old cached circle can
+  // still be carrying one.
+  const domDays = Number(c.days_on_market)
   const dom =
-    c.days_on_market != null ? __('{0}d on market', [Math.round(c.days_on_market)]) : ''
+    Number.isFinite(domDays) && domDays > 0 ? __('{0}d on market', [Math.round(domDays)]) : ''
   // Lead with the number that actually matters for THIS status. "99 days" means
   // opposite things on the two kinds of pin — 99 days ON the market for a live
   // listing (it is not selling), versus 99 days SINCE it left for an off-market
@@ -1530,15 +1649,23 @@ function popupHtml(c) {
   // Deliberately "off-market", never "sold": this inventory carries the last ASK
   // and leaving the market is not a confirmed close.
   // ISTL pins are last asks, so off-market ≠ sold. A Zillow RecentlySold pin
-  // (or an ISTL pin we refreshed off a Zillow sale) IS a recorded sale.
-  const zillowSale = !active && (c.source === 'zillow' || c.zillow_refreshed)
-  const headline = active
-    ? `${__('For sale')}${dom ? ` · ${dom}` : ''}`
-    : zillowSale
-      ? `${__('Sold {0}', [fmtDate(c.removed_date)])}${ago ? ` · ${ago}` : ''}`
-      : `${__('Off-market {0}', [fmtDate(c.removed_date)])}${ago ? ` · ${ago}` : ''}`
+  // (or an ISTL pin we refreshed off a Zillow sale) IS a recorded sale. Now
+  // resolved once on the server and shared with the pill, the tray and the
+  // gallery, so the four cannot describe the same house differently.
+  const state = compState(c)
+  const headline =
+    state === 'pending'
+      ? // The strongest read on the board: a price two parties have agreed, on a
+        // sale that is happening now. Said plainly, because it is neither a
+        // completed sale nor an ordinary ask and must not be mistaken for either.
+        __('Pending · under contract')
+      : state === 'for_sale'
+        ? `${__('For sale')}${dom ? ` · ${dom}` : ''}`
+        : state === 'sold'
+          ? `${__('Sold {0}', [fmtDate(c.removed_date)])}${ago ? ` · ${ago}` : ''}`
+          : `${__('Off-market {0}', [fmtDate(c.removed_date)])}${ago ? ` · ${ago}` : ''}`
   const when = active
-    ? __('Listed {0}', [fmtDate(c.listed_date)])
+    ? `${__('Listed {0}', [fmtDate(c.listed_date)])}${state === 'pending' && dom ? ` · ${dom}` : ''}`
     : `${__('Listed {0}', [fmtDate(c.listed_date)])}${dom ? ` · ${dom}` : ''}`
   const facts = [
     c.bedrooms ? `${c.bedrooms} bd` : '',
@@ -1579,8 +1706,12 @@ function popupHtml(c) {
     </div>`
   return `<div style="min-width:190px;font:12px/1.45 system-ui,sans-serif;color:#161614">
       <div style="font-weight:700;margin-bottom:2px">${escapeHtml(c.address)}</div>
-      <div style="font-size:15px;font-weight:700;margin:2px 0">${priceShort(c.price)}</div>
-      <div style="color:${active ? COMP_COLORS.active.onLight : COMP_COLORS.sold.onLight};font-weight:600">${headline}</div>
+      <div style="font-size:15px;font-weight:700;margin:2px 0">${priceShort(c.price)}${
+        state === 'pending'
+          ? `<span style="font-size:11px;font-weight:600;color:#8a877e;margin-left:5px">${__('agreed price')}</span>`
+          : ''
+      }</div>
+      <div style="color:${compColor(c).onLight};font-weight:600">${headline}</div>
       <div style="color:#5c5a55">${when}</div>
       ${facts ? `<div style="color:#8a877e;margin-top:2px">${escapeHtml(facts)}</div>` : ''}
       <div style="color:#8a877e;margin-top:2px">${__('{0} mi away', [c.distance_mi])}</div>
@@ -1711,6 +1842,12 @@ function render() {
 }
 
 function onPopupClick(e) {
+  const subject = e.target?.closest?.('[data-subject-details]')
+  if (subject) {
+    e.preventDefault()
+    openSubjectDetail()
+    return
+  }
   const use = e.target?.closest?.('[data-comp-use]')
   if (use) {
     e.preventDefault()
@@ -1755,7 +1892,38 @@ function onPopupClick(e) {
 function openCompDetail(name) {
   const comp = comps.value.find((c) => c.name === name)
   if (!comp) return
+  subjectDetail.value = false
   detailComp.value = comp
+  showCompDetail.value = true
+}
+
+/**
+ * Open the SUBJECT in the same gallery the comps use.
+ *
+ * Shaped into a comp-like row so `CompDetailModal` needs no second layout: the
+ * modal switches only which endpoint it calls. Facts come from the subject's
+ * `*_exact` numbers where we have them and are left blank where we do not --
+ * feeding it a band midpoint would put invented precision on the one property
+ * everything else is measured against.
+ */
+function openSubjectDetail() {
+  const s = data.value?.subject
+  if (!s) return
+  subjectDetail.value = true
+  detailComp.value = {
+    name: `subject::${props.lead}`,
+    address: data.value?.address || props.address || '',
+    bedrooms: s.beds_exact ? s.beds : null,
+    bathrooms: s.baths_exact ? s.baths : null,
+    square_footage: s.sqft_exact ? s.sqft : null,
+    year_built: s.year_built,
+    property_type: s.property_type,
+    price: s.last_sale?.price || null,
+    status: '',
+    listing_state: '',
+    distance_mi: 0,
+    is_subject: true,
+  }
   showCompDetail.value = true
 }
 
@@ -1828,7 +1996,9 @@ function placePin(c) {
     markersByName.set(c.name, marker)
   }
   marker.setIcon(pillIcon(c))
-  marker.setZIndexOffset(pinZ(c))
+  // restZ, not pinZ: a restyle (use / discard / filter change) must not drop a
+  // pill the rep has already pulled to the front back under its neighbours.
+  marker.setZIndexOffset(hoveredComp.value === c.name ? HOVER_Z : restZ(c.name))
   const badge = marker.getElement()?.querySelector('.comps-pill-x')
   if (badge) {
     L.DomEvent.disableClickPropagation(badge)
@@ -2084,6 +2254,9 @@ watch(
   () => {
     userTouched.value = false
     lastFitKey = ''
+    // Which pills were pulled to the front is a fact about the board you were
+    // just looking at, not about this one.
+    raisedComps.clear()
     wideningRadius = true
     radius.value = 0.5
     wideningRadius = false
@@ -2117,6 +2290,8 @@ useKeyboardShortcuts({
   shortcuts: [
     { keys: ['d', 'D'], action: () => (showDetail.value = !showDetail.value) },
     { keys: ['p', 'P'], action: () => (showParcels.value = !showParcels.value) },
+    // Only where the calculator exists, so `c` stays free elsewhere.
+    { keys: ['c', 'C'], action: () => props.pageMode && (calcOpen.value = !calcOpen.value) },
     // Only where the layer is offered, so `n` stays free on the comps page.
     { keys: ['n', 'N'], action: () => props.neighborhood && toggleHood() },
     {

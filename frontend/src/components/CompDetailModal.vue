@@ -9,12 +9,27 @@
           <div class="min-w-0">
             <div class="mb-1 flex flex-wrap items-center gap-2">
               <Badge
+                v-if="subjectMode"
                 variant="subtle"
-                :theme="comp?.status === 'Active' ? 'orange' : 'gray'"
-                :label="comp?.status === 'Active' ? __('For sale') : __('Off-market')"
+                theme="blue"
+                :label="__('This property')"
               />
+              <!-- Hand-styled from the shared palette rather than a Badge:
+                   frappe-ui's Badge only knows gray/blue/green/orange/red, so a
+                   `theme="violet"` would silently render an unstyled chip. This
+                   also means the four states look identical here, on the tray
+                   card and on the map, which is the whole point of one palette. -->
+              <span
+                v-else
+                class="rounded px-1.5 py-0.5 text-xs font-semibold"
+                :style="{ background: palette.bg, color: palette.ink }"
+              >
+                {{ statusLabel }}
+              </span>
+              <!-- A comp is not similar to itself; "5/5 fit" on the subject is
+                   noise where a real judgement belongs. -->
               <Badge
-                v-if="fit.total"
+                v-if="fit.total && !subjectMode"
                 variant="subtle"
                 :theme="fit.theme"
                 :label="__('{0}/{1} fit', [fit.matched, fit.total])"
@@ -29,7 +44,10 @@
             </div>
           </div>
           <div class="flex shrink-0 items-center gap-2">
+            <!-- A house cannot be a comp for itself, so the subject gets no
+                 add-as-comp button rather than one that would corrupt the calc. -->
             <Button
+              v-if="!subjectMode"
               :variant="comp?.selected ? 'subtle' : 'solid'"
               :label="comp?.selected ? __('Remove from table') : __('Add as comp')"
               @click="$emit('use', comp.name)"
@@ -172,7 +190,7 @@
 </template>
 
 <script setup>
-import { compFit, formatCompMoney } from '@/utils/comps'
+import { compColor, compFit, compState, compStateLabel, formatCompMoney } from '@/utils/comps'
 import { zillowUrl } from '@/utils/propertyLinks'
 import { Badge, Button, Dialog, FeatherIcon, call } from 'frappe-ui'
 import { computed, ref, watch } from 'vue'
@@ -183,6 +201,11 @@ const props = defineProps({
   lead: { type: String, required: true },
   comp: { type: Object, default: null },
   subject: { type: Object, default: null },
+  // The same panel, showing the SUBJECT rather than a comp. Only two things
+  // actually differ -- which endpoint supplies the photos, and the handful of
+  // comp-only affordances below -- so this is a flag rather than a second
+  // component that would drift away from this one.
+  subjectMode: { type: Boolean, default: false },
 })
 
 const show = defineModel({ type: Boolean })
@@ -196,13 +219,33 @@ let requestToken = 0
 const details = computed(() => response.value?.details || null)
 const photos = computed(() => response.value?.photos || [])
 const fit = computed(() => compFit(props.comp, props.subject))
+
+// Status, in the same four-state grammar as the pills and the tray cards.
+const state = computed(() => compState(props.comp))
+const statusLabel = computed(() => compStateLabel(state.value))
+const palette = computed(() => compColor(props.comp))
 const compLocation = computed(() =>
   [props.comp?.city, props.comp?.state, props.comp?.zip].filter(Boolean).join(', '),
 )
-const displayPrice = computed(() => details.value?.asking_price || props.comp?.price)
-const displayPriceLabel = computed(() =>
-  details.value?.asking_price ? __('Current Zillow ask') : __('Last known list price'),
+const displayPrice = computed(
+  () => details.value?.asking_price || props.comp?.price || details.value?.zestimate,
 )
+const displayPriceLabel = computed(() => {
+  // Name the number honestly: an agreed contract price, a live ask, a verified
+  // sale, an estimate and a stale last-ask are five different claims, and only
+  // some of them are prices anybody ever committed to.
+  if (details.value?.asking_price) return __('Current Zillow ask')
+  if (state.value === 'pending') return __('Agreed price · under contract')
+  // The subject is not on the market, so its headline number is whatever it last
+  // SOLD for -- which is a recorded transaction and must not inherit the comps'
+  // "last known list price", the exact confusion the pin popup exists to avoid.
+  if (props.subjectMode && props.comp?.price) {
+    const when = details.value?.last_sale?.date
+    return when ? __('Last sold · {0}', [dateOnly(when)]) : __('Last sold')
+  }
+  if (props.comp?.price) return __('Last known list price')
+  return details.value?.zestimate ? __('Zestimate — no listing price on record') : ''
+})
 const zillowLink = computed(() => details.value?.zillow_url || zillowUrl(props.comp?.address || ''))
 const facts = computed(() => {
   const d = details.value || {}
@@ -213,7 +256,15 @@ const facts = computed(() => {
     { label: __('Living area'), value: area(d.sqft || c.square_footage) },
     { label: __('Year built'), value: whole(d.year_built || c.year_built) },
     { label: __('Property type'), value: d.property_type || c.property_type || '—' },
-    { label: __('Distance'), value: c.distance_mi ? `${Number(c.distance_mi).toFixed(1)} mi` : '—' },
+    // "0.0 mi from itself" is not a fact about the subject.
+    ...(props.subjectMode
+      ? []
+      : [
+          {
+            label: __('Distance'),
+            value: c.distance_mi ? `${Number(c.distance_mi).toFixed(1)} mi` : '—',
+          },
+        ]),
     { label: __('Lot size'), value: d.lot_size || '—' },
     { label: __('Zestimate'), value: formatCompMoney(d.zestimate) },
   ]
@@ -263,10 +314,9 @@ async function load(force = false) {
   error.value = ''
   response.value = null
   try {
-    const result = await call('crm.api.comps.get_comp_details', {
-      lead: props.lead,
-      comp: name,
-    })
+    const result = props.subjectMode
+      ? await call('crm.api.comps.get_subject_details', { lead: props.lead })
+      : await call('crm.api.comps.get_comp_details', { lead: props.lead, comp: name })
     if (token !== requestToken) return
     response.value = result
     cache.set(name, result)
@@ -294,7 +344,9 @@ function decimal(value) {
 
 function whole(value) {
   const n = Number(value)
-  return Number.isFinite(n) && n > 0 ? Math.round(n).toLocaleString() : '—'
+  // NO thousand separator: the only thing rendered through this is the year
+  // built, and `toLocaleString` was printing a house built in 1910 as "1,910".
+  return Number.isFinite(n) && n > 0 ? String(Math.round(n)) : '—'
 }
 
 function area(value) {
