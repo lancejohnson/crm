@@ -444,14 +444,14 @@ function onKeys(e) {
   align-items: flex-start;
   gap: 12px 20px;
   font: 13px/1.35 InterVar, Inter, -apple-system, 'Segoe UI', system-ui, sans-serif;
-  color: #44423d;
+  color: var(--ink-gray-7);
 }
 .calc {
   width: 26rem;
   max-width: 100%;
-  border: 1px solid #e5e3de;
+  border: 1px solid var(--outline-gray-2);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface-white);
   padding: 8px 10px 10px;
 }
 .head {
@@ -459,14 +459,14 @@ function onKeys(e) {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  color: #8a877e;
+  color: var(--ink-gray-5);
   margin-bottom: 6px;
 }
 .save {
-  border: 1px solid #e5e3de;
+  border: 1px solid var(--outline-gray-2);
   border-radius: 5px;
-  background: #161614;
-  color: #fff;
+  background: var(--surface-gray-7);
+  color: var(--ink-white);
   font: inherit;
   font-weight: 600;
   padding: 3px 8px;
@@ -481,19 +481,19 @@ function onKeys(e) {
   box-sizing: border-box;
   width: 100%;
   margin-top: 8px;
-  border: 1px solid #e5e3de;
+  border: 1px solid var(--outline-gray-2);
   border-radius: 5px;
-  background: #f8f8f7;
+  background: var(--surface-gray-2);
   padding: 6px 7px;
   font: inherit;
-  color: #161614;
+  color: var(--ink-gray-9);
   resize: vertical;
   min-height: 3.4em;
 }
 .notes:focus {
   outline: none;
-  border-color: #2563c9;
-  background: #fff;
+  border-color: var(--ink-blue-3);
+  background: var(--surface-white);
 }
 .grid {
   display: grid;
@@ -504,41 +504,41 @@ function onKeys(e) {
 }
 .colh {
   font-weight: 600;
-  color: #161614;
+  color: var(--ink-gray-9);
   text-align: right;
 }
 .lab {
-  color: #8a877e;
+  color: var(--ink-gray-5);
 }
 .lab i {
   font-style: normal;
-  color: #b0aea6;
+  color: var(--ink-gray-4);
 }
 .lab.offer,
 .out.offer {
   font-weight: 650;
-  color: #161614;
+  color: var(--ink-gray-9);
 }
 input {
   box-sizing: border-box;
   width: 100%;
   height: 26px;
-  border: 1px solid #e5e3de;
+  border: 1px solid var(--outline-gray-2);
   border-radius: 5px;
-  background: #f8f8f7;
+  background: var(--surface-gray-2);
   padding: 0 7px;
   text-align: right;
   font: inherit;
   font-variant-numeric: tabular-nums;
-  color: #161614;
+  color: var(--ink-gray-9);
 }
 input:focus {
   outline: none;
-  border-color: #2563c9;
-  background: #fff;
+  border-color: var(--ink-blue-3);
+  background: var(--surface-white);
 }
 input.empty {
-  color: #8a877e;
+  color: var(--ink-gray-5);
 }
 .pct {
   display: flex;
@@ -548,7 +548,7 @@ input.empty {
 }
 .pct i {
   font-style: normal;
-  color: #8a877e;
+  color: var(--ink-gray-5);
   flex: none;
 }
 .out {
@@ -557,7 +557,7 @@ input.empty {
   padding-right: 7px;
 }
 .out.bad {
-  color: #b3261e;
+  color: var(--ink-red-3);
 }
 
 .tbl {
@@ -574,10 +574,10 @@ input.empty {
   font-weight: 400;
 }
 .tbl th {
-  color: #8a877e;
+  color: var(--ink-gray-5);
 }
 .tbl td {
-  border-top: 1px solid #ecece8;
+  border-top: 1px solid var(--outline-gray-1);
 }
 .tbl .n {
   text-align: right;
@@ -588,7 +588,7 @@ input.empty {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #161614;
+  color: var(--ink-gray-9);
 }
 .tbl .street button {
   border: 0;
@@ -596,20 +596,20 @@ input.empty {
   padding: 0;
   font: inherit;
   font-weight: inherit;
-  color: #2563c9;
+  color: var(--ink-blue-3);
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 .tbl .subj td {
-  background: #eef3fb;
+  background: var(--surface-blue-1);
   font-weight: 600;
-  color: #161614;
-  border-bottom: 1px solid #c5d4ee;
+  color: var(--ink-gray-9);
+  border-bottom: 1px solid var(--outline-blue-1);
 }
 .tbl .avg td {
-  color: #8a877e;
-  border-top: 1px solid #cfccc5;
+  color: var(--ink-gray-5);
+  border-top: 1px solid var(--outline-gray-2);
 }
 .tbl .rm {
   width: 1.4rem;
@@ -621,11 +621,11 @@ input.empty {
   background: none;
   padding: 0 2px;
   font: inherit;
-  color: #b0aea6;
+  color: var(--ink-gray-4);
   cursor: pointer;
   line-height: 1;
 }
 .tbl .rm button:hover {
-  color: #b3261e;
+  color: var(--ink-red-3);
 }
 </style>

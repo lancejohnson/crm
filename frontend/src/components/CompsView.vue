@@ -2407,20 +2407,33 @@ function observeMapSize() {
 /* Number boxes are sized in px (this app's rem is 20px, so w-12 is 60px and
    chops "2620"). Kill the spinner — it ate the last digit — and let the value
    use the whole box. */
+/* Colours come from the theme's CSS variables, NOT hex. These inputs sit in the
+   app chrome rather than on the map, so in dark mode a hardcoded `#fff` stayed
+   glaring white with near-black text -- which is exactly what "dark mode isn't
+   working for comps" meant. The variables are redefined under
+   `[data-theme=dark]`, so this now follows the theme with no JS and no `dark:`
+   variants.
+
+   The map's own pills and popups deliberately keep their hex: they sit on
+   OpenStreetMap tiles, which are light in either theme, so darkening them would
+   make them harder to read, not easier. */
 input.comps-filter-num {
   flex: none;
   box-sizing: border-box;
   height: 26px;
   min-width: 0;
-  border: 1px solid #e5e3de;
+  border: 1px solid var(--outline-gray-2);
   border-radius: 6px;
-  background: #fff;
+  background: var(--surface-white);
   padding: 0 6px;
   /* inherit is 20px here (app rem). The selects next door are ~13. */
   font: 13px/1.2 InterVar, Inter, -apple-system, 'Segoe UI', system-ui, sans-serif;
   font-variant-numeric: tabular-nums;
-  color: #161614;
+  color: var(--ink-gray-9);
   text-align: right;
+}
+input.comps-filter-num::placeholder {
+  color: var(--ink-gray-4);
 }
 .comps-filter-num input::-webkit-outer-spin-button,
 .comps-filter-num input::-webkit-inner-spin-button {
