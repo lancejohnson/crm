@@ -1,11 +1,22 @@
 <template>
-  <div class="border-b-2 border-outline-blue-2 bg-surface-blue-1">
+  <!-- Clickable for the same reason the pin is: every comp beneath this opens a
+       gallery, and the subject is the house actually being priced. Consistency
+       matters more than novelty here -- a card that looks like the others and
+       does not behave like them is the surprising one. -->
+  <div
+    class="cursor-pointer border-b-2 border-outline-blue-2 bg-surface-blue-1 transition-colors hover:bg-surface-blue-2"
+    :title="__('Photos & details for this property')"
+    @click="$emit('open')"
+  >
     <div class="relative aspect-[3/2] w-full overflow-hidden bg-surface-gray-2">
+      <!-- Deliberately NOT `loading="lazy"`: this is the first card in the tray,
+           always on screen, so there was never anything to defer -- and lazy does
+           not fire inside this scroller anyway (see the note in CompTrayCard),
+           which is why the subject's photo only appeared after a hover. -->
       <img
         v-if="photo && !broken"
         :src="photo"
         :alt="address"
-        loading="lazy"
         decoding="async"
         referrerpolicy="no-referrer"
         class="size-full object-cover"
@@ -34,10 +45,15 @@
       <!-- What it actually SOLD for is a verified transaction and outranks every
            other number here, so it is stated separately rather than folded in
            with the estimates. -->
-      <div v-if="lastSale" class="mt-1 text-xs text-ink-gray-6">
+      <!-- Zillow often records that a house sold and when, without a price (a
+           non-disclosure state, or simply an unpriced public record). "Last sold
+           — · Jun 3, 2021" reads like a rendering fault; the date on its own is a
+           real fact and is worth saying. -->
+      <div v-if="lastSale && (lastSale.price || lastSale.date)" class="mt-1 text-xs text-ink-gray-6">
         {{ __('Last sold') }}
-        <b class="text-ink-gray-8">{{ money(lastSale.price) }}</b>
-        <template v-if="lastSale.date"> · {{ fmtDate(lastSale.date) }}</template>
+        <b v-if="lastSale.price" class="text-ink-gray-8">{{ money(lastSale.price) }}</b>
+        <template v-if="lastSale.price && lastSale.date"> · </template>
+        <template v-if="lastSale.date">{{ fmtDate(lastSale.date) }}</template>
       </div>
     </div>
   </div>
@@ -57,6 +73,7 @@ const props = defineProps({
   subject: { type: Object, default: null },
   address: { type: String, default: '' },
 })
+defineEmits(['open'])
 
 const SUBJECT = COMP_COLORS.subject.bg
 const broken = ref(false)
@@ -68,9 +85,13 @@ const facts = computed(() => {
   const bits = []
   // `*_label` is the interval the SOURCE named ("1000 - 2000"), never a midpoint:
   // a vague seller answer must not be rendered as precision it does not have.
-  if (s.beds_label) bits.push(s.beds_label)
-  if (s.baths_label) bits.push(s.baths_label)
-  if (s.sqft_label) bits.push(s.sqft_label)
+  if (s.beds_label) bits.push(__('{0} bd', [s.beds_label]))
+  if (s.baths_label) bits.push(__('{0} ba', [s.baths_label]))
+  if (s.sqft_label) bits.push(__('{0} sqft', [s.sqft_label]))
+  // Year was missing here while every comp card beneath it showed one, so the
+  // one row you compare the others against was the row you could not compare on
+  // age. "built" spelled out, matching the comp cards exactly.
+  if (s.year_built_label) bits.push(__('built {0}', [s.year_built_label]))
   if (s.property_type) bits.push(s.property_type)
   return bits.join(' · ') || __('No details on file')
 })

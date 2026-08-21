@@ -25,6 +25,15 @@ export const COMP_COLORS = {
   active: { bg: '#d92d20', ink: '#ffffff', border: '#9f1d14', onLight: '#b42318' },
   sold: { bg: '#f5c518', ink: '#3a2f00', border: '#c99a06', onLight: '#8a6a00' },
   subject: { bg: '#2563c9', ink: '#ffffff', border: '#1c4ea1', onLight: '#2563c9' },
+  // Pending / under contract. Violet because that is the convention on MLS maps,
+  // and because it is far from both the red and the yellow in hue.
+  //
+  // It is NOT far from them in lightness, which the note above says is what
+  // survives losing hue — so this one leans harder on the other carrier: every
+  // surface that can show a pending comp also writes the word "Pending" on it
+  // (the pill, the tray badge, the pin popup and the detail header), rather than
+  // leaving colour to say it alone.
+  pending: { bg: '#7c3aed', ink: '#ffffff', border: '#5b21b6', onLight: '#6d28d9' },
 }
 
 /** True when a comp is still listed (an ASK), rather than off-market (a sale). */
@@ -34,9 +43,48 @@ export function isActiveStatus(status) {
     .startsWith('activ')
 }
 
-/** The palette entry for a comp's status. */
-export function compColor(status) {
-  return isActiveStatus(status) ? COMP_COLORS.active : COMP_COLORS.sold
+/**
+ * The four states a comp can be in, resolved once so no surface has to re-derive
+ * it: `for_sale`, `pending`, `sold`, `off_market`.
+ *
+ * The server sends `listing_state` on every row now. The fallback exists because
+ * the frontend and backend deploy separately — for the length of a deploy window
+ * the browser is talking to the other version, the same reason `hoodPoints`
+ * accepts two shapes.
+ *
+ * The sold/off-market distinction is the app's oldest rule about this data: the
+ * pooled index carries a last ASK, so a listing disappearing is not a confirmed
+ * close, and only a Zillow-recorded transaction earns the word "sold".
+ */
+export function compState(comp) {
+  const declared = String(comp?.listing_state || '')
+  if (declared) return declared
+  if (isActiveStatus(comp?.status)) return 'for_sale'
+  return comp?.source === 'zillow' || comp?.zillow_refreshed ? 'sold' : 'off_market'
+}
+
+/** True when a comp is spoken for but not closed — an agreed price, still live. */
+export function isPending(comp) {
+  return compState(comp) === 'pending'
+}
+
+/** What to call a state on a badge. Short: these render inside 24px pills. */
+export function compStateLabel(state) {
+  if (state === 'pending') return __('Pending')
+  if (state === 'for_sale') return __('For sale')
+  if (state === 'sold') return __('Sold')
+  return __('Off-market')
+}
+
+/** The palette entry for a comp, pending included. */
+export function compColor(statusOrComp) {
+  // Accepts either a whole comp (which can be pending) or a bare status string,
+  // because the older callers pass the string and both have to keep working.
+  const comp =
+    statusOrComp && typeof statusOrComp === 'object' ? statusOrComp : { status: statusOrComp }
+  const state = compState(comp)
+  if (state === 'pending') return COMP_COLORS.pending
+  return state === 'for_sale' ? COMP_COLORS.active : COMP_COLORS.sold
 }
 
 const DIMENSIONS = [

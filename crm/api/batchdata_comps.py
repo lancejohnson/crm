@@ -214,6 +214,9 @@ def _shape(row, idx):
 		"price": price,
 		# BatchData returns recorded/closed sales, so these are never live listings.
 		"status": "Inactive",
+		# And unlike the pooled ISTL index, these genuinely ARE closed transactions,
+		# so they earn the word "sold" rather than the weaker "off-market".
+		"listing_state": "sold",
 		"listed_date": None,
 		"removed_date": sold,
 		"days_on_market": None,

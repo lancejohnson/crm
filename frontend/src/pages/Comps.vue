@@ -13,12 +13,19 @@
     </template>
   </LayoutHeader>
 
-  <!-- On a desktop the page must NOT scroll: the map and the tray each scroll
-       internally, and a scrolling page would leave the tray with no bounded
-       height to scroll inside. Below `lg` the split stacks and the page goes
-       back to scrolling normally, because two internally-scrolling panes
-       stacked on a phone is a worse thing than a long page. -->
-  <div class="flex flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-5 lg:overflow-hidden">
+  <!-- The map and the tray each scroll internally, so this page normally does
+       not scroll at all -- that is what gives the tray a bounded height to
+       scroll inside.
+
+       `overflow-y-auto` rather than `hidden` is the floor under that, not a
+       change of plan. The map now claims a minimum height instead of accepting
+       whatever the calculator leaves it, and on a short window the two together
+       can exceed the viewport: measured at 899px with the calculator open, the
+       content came to 1,030px and `hidden` silently ATE the bottom 174px --
+       including the legend, with no way to reach it. The map keeps its real
+       height either way; this just means the remainder is scrollable rather
+       than gone. Same trade the lead desk already makes. -->
+  <div class="flex flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-5">
     <CompsView v-if="leadId" :lead="leadId" :address="address" page-mode />
   </div>
 </template>
