@@ -277,6 +277,13 @@ doc_events = {
 			"crm.api.task_hygiene.on_lead_update",
 			# Status moves during standup can make a lead newly eligible today.
 			"crm.api.today_board.enqueue_today_sync",
+			# Lead changed hands → its open tasks change hands too, and the previous
+			# owner's automatic assignment is dropped. `CRM Lead.validate()` already
+			# shares/assigns the NEW owner, but `assign_agent` only ever ADDS — so
+			# without this a reassigned lead stays assigned to everyone who has ever
+			# owned it, and its open tasks keep pointing at a rep who can no longer
+			# see it. See crm/api/lead_owner_change.py.
+			"crm.api.lead_owner_change.on_lead_update",
 			# Side-panel / import edits of mobile_no/phone/extra_phones — the
 			# dedicated add-phone API uses set_value (no hook) and backfills itself.
 			"crm.api.lead_phones.on_lead_phones_changed",

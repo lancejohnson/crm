@@ -26,6 +26,17 @@
           </Button>
         </Dropdown>
         <Button :label="streakLabel" @click="openTodayReport" />
+        <!-- Handing a deal over is a board-level action, so it lives next to the
+             other board-level controls rather than on each card: the whole point
+             is to move several at once. -->
+        <Button
+          :label="selecting ? __('Done selecting') : __('Select')"
+          :variant="selecting ? 'subtle' : undefined"
+          :theme="selecting ? 'blue' : 'gray'"
+          @click="toggleSelecting"
+        >
+          <template #prefix><FeatherIcon name="check-square" class="size-4" /></template>
+        </Button>
         <Button :label="__('Priority')" @click="showPriorityModal = true">
           <template #prefix><FeatherIcon name="list" class="size-4" /></template>
         </Button>
@@ -77,7 +88,39 @@
     </div>
   </div>
 
-  <div v-else class="flex flex-1 gap-3 overflow-x-auto p-4">
+  <!-- The selection bar counts LEADS, not cards. A lead can hold two call cards,
+       so "4 selected" followed by a toast saying 2 leads moved reads as a bug;
+       ownership moves per lead, so that is the unit to lead with. -->
+  <div
+    v-if="selecting && board.data?.available !== false"
+    class="flex flex-wrap items-center gap-2 border-b border-outline-gray-2 bg-surface-blue-1 px-4 py-2"
+  >
+    <span class="text-sm font-medium text-ink-gray-8">
+      {{ selectionSummary }}
+    </span>
+    <span v-if="selectedLeadCount && selectedNames.length > selectedLeadCount" class="text-xs text-ink-gray-5">
+      {{ __('{0} cards', [selectedNames.length]) }}
+    </span>
+    <div class="ml-auto flex items-center gap-2">
+      <Button
+        v-if="selectedNames.length"
+        :label="__('Clear')"
+        variant="ghost"
+        @click="clearSelection"
+      />
+      <Dropdown :options="assigneeOptions" placement="bottom-end">
+        <Button
+          variant="solid"
+          :disabled="!selectedLeadCount || assigning"
+          :loading="assigning"
+          :label="__('Assign to…')"
+          icon-right="chevron-down"
+        />
+      </Dropdown>
+    </div>
+  </div>
+
+  <div v-if="board.data?.available !== false" class="flex flex-1 gap-3 overflow-x-auto p-4">
     <div
       v-for="col in columns"
       :key="col.state"
@@ -94,19 +137,41 @@
       <!-- `change` rather than `end`: it names the destination column and hands
            back the moved card, which is what decides whether the outcome modal
            has to open before anything is persisted. -->
+      <!-- Dragging is disabled while selecting: a drag and a pick are the same
+           gesture on a card, and a mis-drag in selection mode would resolve a
+           card (and open the outcome modal) when the rep meant to tick it. -->
       <Draggable
         v-model="col.items"
         :group="'today'"
         item-key="name"
+        :disabled="selecting"
         class="flex min-h-[6rem] flex-1 flex-col gap-2 overflow-y-auto px-2 pb-3"
         @change="onChange($event, col)"
       >
         <template #item="{ element: item }">
           <div
-            class="group relative cursor-pointer rounded-lg bg-surface-white p-3 shadow-sm ring-1 ring-outline-gray-1 hover:ring-outline-gray-3"
-            @click="openTodayItem(item)"
+            class="group relative cursor-pointer rounded-lg bg-surface-white p-3 shadow-sm ring-1 hover:ring-outline-gray-3"
+            :class="
+              isSelected(item)
+                ? 'ring-2 ring-outline-blue-2 bg-surface-blue-1'
+                : 'ring-outline-gray-1'
+            "
+            @click="selecting ? toggleCard(item) : openTodayItem(item)"
           >
+            <!-- In selection mode the hover actions are replaced by a checkbox
+                 rather than sitting alongside it: Done/Skip/Put-back all resolve
+                 a card, which is a different job from choosing it. -->
+            <div v-if="selecting" class="absolute right-2 top-2" @click.stop>
+              <input
+                type="checkbox"
+                class="size-4 cursor-pointer rounded border-outline-gray-3 text-ink-blue-3 focus:ring-0"
+                :checked="isSelected(item)"
+                :aria-label="__('Select {0}', [item.lead_name])"
+                @change="toggleCard(item)"
+              />
+            </div>
             <div
+              v-else
               class="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
               @click.stop
             >
@@ -405,6 +470,12 @@ const showTextModal = ref(false)
 const pendingOutcome = ref(null)
 const showOutcomeModal = ref(false)
 const savingOutcome = ref(false)
+// Bulk hand-over. Selection is by CARD name (that is what the user clicks and
+// what the board renders), and collapsed to leads only at the moment it matters,
+// because ownership is a property of the lead and a lead can own two cards.
+const selecting = ref(false)
+const selectedNames = ref([])
+const assigning = ref(false)
 
 const CheckIcon = () =>
   h('svg', { viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [
@@ -625,6 +696,90 @@ const ownerOptions = computed(() => {
   })
   return options
 })
+
+const allCards = computed(() => columns.value.flatMap((col) => col.items))
+const selectedCards = computed(() =>
+  allCards.value.filter((item) => selectedNames.value.includes(item.name)),
+)
+const selectedLeads = computed(() => [
+  ...new Set(selectedCards.value.map((item) => item.lead)),
+])
+const selectedLeadCount = computed(() => selectedLeads.value.length)
+const selectionSummary = computed(() => {
+  const n = selectedLeadCount.value
+  if (!n) return __('Pick the cards you want to hand over')
+  return n === 1 ? __('1 lead selected') : __('{0} leads selected', [n])
+})
+
+const assigneeOptions = computed(() => {
+  const people = board.data?.assignees || []
+  if (!people.length) return [{ label: __('No one to assign to'), onClick: () => {} }]
+  return people.map((person) => ({
+    label: person.full_name,
+    onClick: () => assignSelected(person.user),
+  }))
+})
+
+function isSelected(item) {
+  return selectedNames.value.includes(item.name)
+}
+
+function toggleCard(item) {
+  selectedNames.value = isSelected(item)
+    ? selectedNames.value.filter((name) => name !== item.name)
+    : [...selectedNames.value, item.name]
+}
+
+function clearSelection() {
+  selectedNames.value = []
+}
+
+function toggleSelecting() {
+  selecting.value = !selecting.value
+  // Leaving selection mode drops the picks. Keeping them would mean a stale set
+  // is still armed the next time the mode is entered, and the rep would be one
+  // click from handing over cards they chose minutes ago for another reason.
+  if (!selecting.value) clearSelection()
+}
+
+async function assignSelected(owner) {
+  if (!owner || !selectedNames.value.length || assigning.value) return
+  assigning.value = true
+  try {
+    const r = await call('crm.api.today_board.assign_today_leads', {
+      items: selectedNames.value,
+      owner,
+    })
+    const who =
+      (board.data?.assignees || []).find((p) => p.user === owner)?.full_name || owner
+    // Report what actually happened rather than what was asked for: a lead the
+    // target already owned is not a move, and a lead that could not be saved has
+    // to be named or the rep will believe it went across.
+    if (r.moved) {
+      toast.success(
+        r.moved === 1
+          ? __('1 lead moved to {0}', [who])
+          : __('{0} leads moved to {1}', [r.moved, who]),
+      )
+    } else if (r.skipped && !r.failed?.length) {
+      toast.success(__('Already owned by {0}', [who]))
+    }
+    if (r.failed?.length) {
+      toast.error(
+        __('Could not move {0}: {1}', [
+          r.failed.map((f) => f.lead_name).join(', '),
+          r.failed[0].error,
+        ]),
+      )
+    }
+    clearSelection()
+    await Promise.all([board.reload(), todayReport.reload()])
+  } catch (e) {
+    toast.error(e.messages?.[0] || __('Could not assign these leads'))
+  } finally {
+    assigning.value = false
+  }
+}
 
 function openTodayItem(item) {
   selectedItem.value = item

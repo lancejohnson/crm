@@ -243,6 +243,45 @@ def _resolve_owner(owner):
 	return owner
 
 
+#: Roles that mean "works leads", and therefore "can be handed one". A lead is
+#: only ever moved to somebody who could actually work it; Guest, Administrator
+#: and any disabled login are structurally excluded by `_assignable_users`.
+ASSIGNABLE_ROLES = ("Sales User", "Sales Manager")
+
+
+def _assignable_users():
+	"""Everyone a card can be handed to, whether or not they have cards today.
+
+	Deliberately NOT `_owner_options`, which is built from the day's cards: that
+	list answers "whose board can I look at", and it cannot answer "who can I hand
+	this to" — the person you most need to hand a deal to is precisely the one with
+	an empty board. Dennis closes; he owns almost no chase-status leads, so he would
+	never appear in a cards-derived list and would be unreachable as a destination.
+	"""
+	names = frappe.get_all(
+		"Has Role",
+		filters={"parenttype": "User", "role": ["in", ASSIGNABLE_ROLES]},
+		pluck="parent",
+		distinct=True,
+	)
+	if not names:
+		return []
+	names = [n for n in names if n not in ("Administrator", "Guest")]
+	if not names:
+		return []
+	users = frappe.get_all(
+		"User",
+		filters={
+			"name": ["in", names],
+			"enabled": 1,
+			"user_type": "System User",
+		},
+		fields=["name", "full_name"],
+		order_by="full_name asc",
+	)
+	return [{"user": u.name, "full_name": u.full_name or u.name} for u in users]
+
+
 def _owner_options(rows):
 	"""Everyone with cards today, with their card count, for the board switcher.
 
@@ -591,6 +630,7 @@ def get_today_board(
 			"status_counts": [],
 			"owner": owner,
 			"owners": [],
+			"assignees": _assignable_users(),
 		}
 
 	lead_names = list({r.lead for r in rows})
@@ -769,6 +809,9 @@ def get_today_board(
 		"priority_order": priority_order,
 		"owner": owner,
 		"owners": owners,
+		# Who a selected card can be handed to. Everyone who works leads, not just
+		# whoever happens to have cards today — see `_assignable_users`.
+		"assignees": _assignable_users(),
 	}
 
 
@@ -1278,6 +1321,92 @@ def set_today_state(item, state, outcome=None, outcome_note=None):
 	_log_outcome_comment(doc, state, outcome, outcome_note, corrected=same_state)
 	_publish(doc.for_date)
 	return {"ok": True, "state": state, "outcome": outcome, "outcome_note": outcome_note}
+
+
+@frappe.whitelist()
+def assign_today_leads(items, owner):
+	"""Hand the leads behind a set of Today cards to somebody else.
+
+	The board is where a rep already has the day's work in front of them, so it is
+	the cheapest place to say "these five are Dennis's now" — the alternative is
+	opening five leads and editing a side-panel field on each.
+
+	What moves, and why the whole thing hangs off `lead_owner` alone:
+
+	* The **cards** follow automatically. Ownership is read off the lead at request
+	  time (`get_today_board`, `_scope_rows_to_owner`), never stamped onto the card,
+	  so a reassigned lead's cards simply appear on the new owner's board on the
+	  next load — with their state, order and outcome intact. There is deliberately
+	  nothing to migrate.
+	* The **open tasks** and the stale assignment follow via
+	  `crm.api.lead_owner_change`, which is an `on_update` hook — hence `doc.save()`
+	  here rather than `db.set_value`. The other bulk owner writer
+	  (`lead_owner_backfill`) deliberately uses `set_value` to avoid re-running SLA
+	  across hundreds of leads and leaves no Version row; this is a handful of leads
+	  moved by a person on purpose, and "changed Lead Owner from German to Dennis"
+	  on the timeline is exactly the audit trail anyone will later want.
+
+	Per-lead failures are collected rather than thrown. A lead sitting in a Lost
+	status with no lost reason cannot be saved at all (`validate_lost_reason`), and
+	one such card must not silently abort the other four moves.
+	"""
+	_guard()
+	if not _available():
+		return {"ok": False, "available": False}
+
+	owner = (owner or "").strip()
+	if not owner:
+		frappe.throw(_("Pick who these leads should go to."))
+	if owner not in {u["user"] for u in _assignable_users()}:
+		frappe.throw(_("{0} cannot be given leads.").format(owner))
+
+	if isinstance(items, str):
+		items = frappe.parse_json(items)
+	names = [n for n in (items or []) if n]
+	if not names:
+		return {"ok": True, "moved": 0, "leads": [], "skipped": 0, "failed": []}
+
+	# A lead can hold two call cards; selecting both is one handover, not two.
+	cards = frappe.get_all(
+		DOCTYPE, filters={"name": ["in", names]}, fields=["name", "lead", "for_date"]
+	)
+	leads, days = [], set()
+	for card in cards:
+		days.add(card.for_date)
+		if card.lead not in leads:
+			leads.append(card.lead)
+
+	moved, skipped, failed = [], 0, []
+	for lead_name in leads:
+		try:
+			lead = frappe.get_doc("CRM Lead", lead_name)
+			lead.check_permission("write")
+			if (lead.lead_owner or "") == owner:
+				skipped += 1
+				continue
+			lead.lead_owner = owner
+			lead.save()
+			moved.append(lead_name)
+		except Exception as e:
+			label = frappe.db.get_value("CRM Lead", lead_name, "lead_name") or lead_name
+			failed.append({"lead": lead_name, "lead_name": label, "error": str(e)})
+			frappe.log_error(frappe.get_traceback(), "Today bulk assign failed")
+
+	if moved:
+		frappe.db.commit()
+		# Every open board is now describing a card set that has changed hands —
+		# including the RECEIVER's, which has gained cards it never had.
+		for day in days or {getdate(now_datetime())}:
+			_publish(day)
+
+	return {
+		"ok": True,
+		"owner": owner,
+		"moved": len(moved),
+		"leads": moved,
+		"skipped": skipped,
+		"failed": failed,
+	}
 
 
 @frappe.whitelist()
