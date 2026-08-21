@@ -669,7 +669,7 @@ duplicating. Work substantial features in a worktree of your own.
   dry-run by default). Pure app code — no ops/server-script piece. Backend only
   (no `.vue`). `crm/hooks.py` + `crm/api/name_format.py`.
 
-- **Lead-owner round robin (German ↔ Exe) on new inbound leads** — every
+- **Lead-owner round robin (German ↔ Exe ↔ Dennis) on new inbound leads** — every
   ownerless lead used to be stamped with one hardcoded owner by the ops server
   script `Lead Default Owner`, which is why `lead_owner` said Dennis on ~99% of
   leads even though German and Exe do the calling. A `CRM Lead` **`before_insert`**
@@ -702,6 +702,17 @@ duplicating. Work substantial features in a worktree of your own.
     leads are excluded from the *tally* too, via the NULL-safe
     `import_hidden.isnull() | != 1` form (`!= 1` alone silently drops NULL rows —
     the same trap `leads_dashboard.live()` documents).
+  - **Dennis joined the rotation 2026-08-21** and it needed no code — the roster
+    is a config key, so it was one `bench set-config`. What made it necessary was
+    visible in the data before anyone asked: he had spent the morning
+    hand-taking leads, reassigning 5 of that day's inbound one at a time off Exe
+    and German at 12:10–12:12. The rotation was working perfectly; he simply
+    wasn't in it. **Adding someone mid-day deals them a catch-up burst**, because
+    the balancer works off the DAY's counts — Dennis was 11 behind German, so the
+    next 7 leads went straight to him before alternation resumed (simulated
+    before applying: 18/18/17 after 20 leads, clean G→E→D from the next morning).
+    That is the daily reset doing its job, not a bug, but it is worth saying out
+    loud before flipping it. Reverting is `bench set-config` back to two names.
   - Roster + kill switch live in site_config (`lead_round_robin_users`,
     `lead_round_robin_enabled`); disabled Users drop out automatically, so
     disabling a CRM login is the vacation lever. `round_robin_status()` is the
@@ -748,6 +759,35 @@ duplicating. Work substantial features in a worktree of your own.
     view/sign notifications (`agreement_notify.py`) go to the setter who owns
     the lead instead of Dennis. The Today board is scoped by it (see below), and
     German's/Exe's `/dashboard` populates for the first time.
+  - **And the WORK on the lead moves with it** (`crm/api/lead_owner_change.py`,
+    a `CRM Lead` `on_update` hook). Two things used to stay behind:
+    - **Open tasks kept the old owner**, who can no longer see the lead — so the
+      task was invisible to both of them while still counting as due work
+      against the wrong person. Only OPEN tasks move (a Done task is a record of
+      who did it, and rewriting it would rewrite history), and only tasks that
+      were *following* the old owner — assigned to them or to nobody. One
+      deliberately handed to a third person is a human decision and stays.
+      Moved with `doc.save()`, not `db.set_value`: `CRM Task.validate()` is what
+      unassigns the previous user and creates the new ToDo, and
+      `notify_task_update` is what refreshes every open board and to-do block. A
+      silent column write would move the task on paper only.
+    - **The old owner stayed assigned to the lead.** `CRM Lead.validate()`
+      already shares and assigns the NEW owner on an owner change, but
+      `assign_agent` **only ever ADDS** — there is no removal half — so a lead
+      that changed hands twice ended up assigned to three people and every
+      previous owner kept seeing it. This is the same double-assignment
+      `lead_owner_backfill` had to fix up by hand for its bulk run; it is now
+      fixed once, for every path that changes an owner. Only ever the previous
+      *owner* is dropped; anyone else was put there by a person.
+    - A **cleared** owner is deliberately not treated as a handover: stripping
+      the old owner's assignment would leave the lead owned by nobody AND
+      assigned to nobody, i.e. invisible on every board — strictly worse than
+      leaving it until someone picks it up. Everything is best-effort and
+      swallowed: a hygiene hook must never be why a rep cannot save a lead.
+    - NOTE `lead_owner_backfill` writes with `db.set_value`, which fires no doc
+      events, so a **bulk backfill does NOT move tasks** — deliberate (it fixes
+      assignment itself, and re-running SLA over hundreds of leads is what that
+      module exists to avoid), but remember it if the two ever disagree.
   - **Backfill** — `crm/api/lead_owner_backfill.py` (**new**,
     `backfill_lead_owners(dry_run=1)`) moves EXISTING leads onto the setters.
     Required, not optional: the scoped Today board shows German and Exe nothing
@@ -825,6 +865,38 @@ duplicating. Work substantial features in a worktree of your own.
   - **Not persisted across reloads** — unlike `dispoView`/`activityScope`, which
     are view modes. This is *whose work you are doing*, and silently reopening on
     a teammate's list is the one mistake here that costs real calls.
+  - **Bulk hand-over from the board** (`assign_today_leads`) — a **Select** mode
+    turns every card into a checkbox and puts an "Assign to…" bar above the
+    columns. The board is where a rep already has the day's work in front of
+    them, so it is the cheapest place to say "these five are Dennis's now"; the
+    alternative is opening five leads and editing a side-panel field on each.
+    - **Nothing about the cards is migrated, and that is the design paying off.**
+      Ownership is read off the lead at request time and never stamped onto the
+      card, so a reassigned lead's cards simply appear on the new owner's board
+      on the next load — state, order and outcome intact. There is deliberately
+      nothing to move.
+    - **The destination list is every user who works leads** (`_assignable_users`,
+      Sales User / Sales Manager, enabled, System User), **NOT `_owner_options`**,
+      which is built from the day's cards. That distinction is the whole point:
+      the person you most need to hand a deal to is precisely the one with an
+      empty board. A cards-derived list would have made Dennis unreachable as a
+      destination on exactly the day he needed the deal.
+    - **Counts are stated in LEADS, not cards.** A lead can hold two call cards,
+      so "4 selected" followed by a toast saying 2 leads moved reads as a bug;
+      ownership moves per lead, so that is the unit to lead with (the card count
+      rides alongside only when the two differ).
+    - **Dragging is disabled while selecting.** A drag and a pick are the same
+      gesture on a card, and a mis-drag in selection mode would RESOLVE a card
+      and open the outcome modal when the rep meant to tick it.
+    - Uses `doc.save()`, unlike `lead_owner_backfill`'s `db.set_value` — this is a
+      handful of leads moved by a person on purpose, and "changed Lead Owner from
+      German to Dennis" on the timeline is exactly the audit trail anyone will
+      later want. It is also what fires `lead_owner_change`, so the open tasks and
+      the stale assignment follow. Per-lead failures are collected, never thrown:
+      a lead sitting in a Lost status with no lost reason cannot be saved at all
+      (`validate_lost_reason`), and one such card must not abort the other four.
+    - `frontend/src/pages/Today.vue` + `crm/api/today_board.py`. No ops piece, no
+      schema change.
   - `get_today_report(owner=...)` scopes **today's** figures + `completed_by` the
     same way (a bar reading 12/87 over a 30-card board is worse than no bar), but
     the **streak and recent-day history stay team-wide** — the streak shipped as a
