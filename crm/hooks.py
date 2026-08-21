@@ -150,6 +150,15 @@ override_doctype_class = {
 # Hook on document methods and events
 
 doc_events = {
+	# Keep API keys out of the Error Log. Frappe already sanitises tracebacks, but
+	# it matches its blocklist against variable NAMES and exact dict keys -- so a
+	# variable called `headers` holding an `Authorization` key went straight
+	# through, and 106 of 1,040 rows ended up carrying a live bearer token.
+	# Hooked here rather than patched into apps/frappe because the image is rebuilt
+	# FROM upstream, which would revert an edit there silently.
+	"Error Log": {
+		"before_insert": ["crm.api.error_redaction.on_error_log_insert"],
+	},
 	"Contact": {
 		"validate": ["crm.api.contact.validate"],
 	},
