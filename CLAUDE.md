@@ -198,6 +198,49 @@ duplicating. Work substantial features in a worktree of your own.
     - `PIN_REFRESH_CAP` stays **12** even though it is now nearly free in time.
       The cap is about SPEND — each is a billed call — so raising it is a
       deliberate one-line dial, not a side-effect of going faster.
+  - **The Today board PREWARMS its comps circles** (gw353,
+    `today_board.warm_today_areas`). A cold map is 5–14s and the board is cold far
+    more often than you would guess — measured on a real 176-card day, **61 of the
+    96** distinct leads had never had their comps opened, and reps open these one
+    after another. Measured per open: **prewarmed median 2.14s / 3.4 calls vs cold
+    median 4.95s / 7.0 calls**.
+    - **The AREA SEARCH ONLY.** Of a cold open's ~8.3 calls, ~3.3 are the circle
+      and the rest are per-pin `/property`. The circle is the **slow** half (it
+      pages and price-splits SERIALLY — each step needs the previous one's
+      `totalPages`), the pins are the **expensive** half and are already fast in
+      parallel. So this buys most of the wait for a third of the spend: **~310
+      calls/day, ~9k per cycle** against the shared 57k plan.
+    - **Warmed off the BOARD, not off lead creation** — the board is the actual
+      work list. Leads return to it on cadence weeks after they arrived, by which
+      point a creation-time warm has expired (area cache is 7 days), and a lead
+      that never reaches the board costs nothing. (Context: 16 leads/day arrive,
+      median **5h** to first call, **100% within 7 days**.)
+    - **The work list is DERIVED from the board every run, never queued.** Nothing
+      to drift, nothing to race, no state to reset, and it self-heals — a lead
+      whose warm failed simply still looks cold next run. Affordable because
+      `zillow_comps.area_is_cached()` is a **Redis read with no HTTP**, so a sweep
+      over an already-warm board is free. `AREA_QUERIES` is the single definition
+      of what a circle IS, so the probe and the fetch cannot check different keys
+      and report everything warm while prewarming nothing.
+    - Bounded **12 leads or 60s per run** (it runs every 5 min and does not need
+      to finish in one pass — a 93-lead board is ~6 min of network), and leads are
+      warmed **serially**, for the same reason the pool is capped at four.
+    - **Enqueued to the `long` queue, deduplicated per day, never inline.**
+      `run_today_sync` is on the **short** queue and a rep's board sync rides on
+      it; a minute of third-party network there makes real work wait on the least
+      urgent thing in the system. Dedup also does the serialising for free, since
+      that sync fires from the 5-min scheduler AND from every new lead/task commit.
+    - **No ops step** — it hangs off the already-registered `run_today_sync`, so
+      there is no new scheduler hook and no `bench sync_jobs`.
+    - `today_board.warm_status(for_date)` reports warm/cold/unlocated, so "is it
+      working?" has an answer. Verified on prod: **8 → 20 → 49 → 60** across ticks,
+      0 failures, 0 429s, no overlapping jobs.
+    - **GOTCHA — a DEPLOY empties the warm cache.** `build_image.sh` ends in a
+      cache clear, which flushes the Redis DB the area/pin caches live in
+      (observed: 60 warm → 0 immediately after gw353). Nothing is broken and the
+      sweep refills the board within ~40 minutes on its own — but it does mean the
+      first opens right after any deploy are slow, which has always been true and
+      now has a name. Avoid deploying into the 9:30am start if you can.
   - **Pending / under contract is asked for explicitly** (gw352):
     `isPendingUnderContract=1` on the ForSale search. Default ForSale **hides**
     them — measured Davenport **97 → 156** listings, Indianapolis **281 → 359**.
