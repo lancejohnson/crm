@@ -534,6 +534,22 @@ def send_today_pulse():
 		now = get_datetime(now_datetime())
 		if not is_business_day(getdate(now)):
 			return
+
+		# Piggyback the BatchData wallet check on this slot. It is FREE and it needs
+		# to run during BUSINESS HOURS -- the 5am standup alone meant a wallet that
+		# emptied at 10am went unreported until the next morning while every tax pull
+		# in between failed in a rep's face. Deliberately ABOVE the window guard
+		# below, so it still runs on the 9:00 and 17:00 ticks that the pulse itself
+		# sits out. It alerts Lance directly and never touches this message.
+		try:
+			from crm.api import batchdata_wallet
+
+			batchdata_wallet.watch_balance()
+		except Exception:
+			frappe.log_error(
+				title="today pulse: wallet check failed", message=frappe.get_traceback()
+			)
+
 		start, end = _window_bounds(now)
 		# Cron fires on every half hour of 9–17; these bounds are the real window.
 		if now < start - timedelta(minutes=1) or now > end + timedelta(minutes=1):

@@ -66,6 +66,14 @@ EMPTY_BALANCE_USD = 1.0
 #: alert that repeats every five minutes is an alert that gets muted.
 _ALERT_KEY = "crm:batchdata-wallet-alert"
 
+#: What one app-initiated BatchData call costs. Billing is PER RECORD RETURNED,
+#: not per call, so these are row counts x $0.03: a tax pull reads one property,
+#: the comps fallback takes ten.
+#: `CRM Property Tax Pull` records its own cost per row, so that constant is only
+#: a fallback for a row written before the field existed.
+TAX_PULL_COST = 0.10
+COMPS_FALLBACK_COST = 0.30
+
 
 def _api_key() -> str:
 	# The broad token first: it can read the wallet and is the one most features
@@ -170,6 +178,94 @@ def _spent_on(report, date_str):
 	return 0.0
 
 
+# ---------------------------------------------------------------------------------
+# What the APP spent (as opposed to what the account spent)
+# ---------------------------------------------------------------------------------
+def app_spend_between(start, end):
+	"""What the CRM ITSELF cost between two dates, from OUR OWN records.
+
+	Deliberately NOT the consumption report. That reports everything on the wallet,
+	which includes hand-run API exploration — and the two are nothing alike:
+	measured 2026-08-14..21, the account spent **$205** while the app spent about
+	**$0.45**. Answering "what is the app costing us" with a number dominated by
+	somebody's afternoon in a terminal is worse than not answering.
+
+	There are exactly two billed callers in the whole system, which is what makes
+	this countable at all: the tax pull (ops server script) and the comps fallback.
+	"""
+	out = {"tax_pulls": 0, "tax_cost": 0.0, "comps_leads": 0, "comps_cost": 0.0}
+
+	# Tax pulls are EXACT: the doctype stores the cost on every row.
+	if frappe.db.exists("DocType", "CRM Property Tax Pull"):
+		row = frappe.db.sql(
+			"""SELECT COUNT(*) n, COALESCE(SUM(COALESCE(cost, %s)), 0) c
+			   FROM `tabCRM Property Tax Pull`
+			   WHERE DATE(COALESCE(pulled_at, creation)) BETWEEN %s AND %s""",
+			(TAX_PULL_COST, start, end),
+			as_dict=True,
+		)
+		if row:
+			out["tax_pulls"] = int(row[0].n or 0)
+			out["tax_cost"] = float(row[0].c or 0)
+
+	# The comps fallback keeps no event log — only a per-lead cache stamp — so this
+	# is a LOWER BOUND: a lead re-fetched twice in the window counts once. With a
+	# 90-day cache on a hit that is rare, but it is a bound, not a total.
+	#
+	# Only non-empty results are counted, because billing is per row RETURNED: an
+	# address BatchData cannot match costs $0.00.
+	if frappe.db.has_column("CRM Lead", "batchdata_comps_fetched_at"):
+		row = frappe.db.sql(
+			"""SELECT COUNT(*) n FROM `tabCRM Lead`
+			   WHERE batchdata_comps_fetched_at IS NOT NULL
+			     AND DATE(batchdata_comps_fetched_at) BETWEEN %s AND %s
+			     AND batchdata_comps IS NOT NULL
+			     AND TRIM(batchdata_comps) NOT IN ('', '[]')""",
+			(start, end),
+			as_dict=True,
+		)
+		if row:
+			out["comps_leads"] = int(row[0].n or 0)
+			out["comps_cost"] = out["comps_leads"] * COMPS_FALLBACK_COST
+
+	out["total"] = round(out["tax_cost"] + out["comps_cost"], 2)
+	return out
+
+
+def app_spend():
+	"""App spend for today, this week (from Monday) and this month, to date."""
+	today = frappe.utils.nowdate()
+	date = frappe.utils.getdate(today)
+	week_start = frappe.utils.add_days(today, -date.weekday())
+	month_start = date.replace(day=1)
+	return {
+		"today": app_spend_between(today, today),
+		"week": app_spend_between(week_start, today),
+		"month": app_spend_between(str(month_start), today),
+	}
+
+
+def app_spend_line():
+	"""'App spend: $0.30 today · $1.20 this week · $6.60 this month'.
+
+	Swallows its own failures on purpose. This string is built as an ARGUMENT to
+	the alert, so an exception here would take down the very message it decorates —
+	and losing "the wallet is empty" because a spend query failed is the worst
+	trade in this file. A missing number is a footnote; a missing alert is an
+	outage nobody hears about.
+	"""
+	try:
+		s = app_spend()
+		return (
+			f"App spend: **${s['today']['total']:,.2f}** today"
+			f" · **${s['week']['total']:,.2f}** this week"
+			f" · **${s['month']['total']:,.2f}** this month"
+		)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "BatchData wallet: app spend failed")
+		return _("App spend: unavailable")
+
+
 @frappe.whitelist()
 def get_spend(days=14):
 	"""Balance + per-day spend, for a person who wants to look. Costs nothing."""
@@ -235,21 +331,24 @@ def _notify(text, kind):
 		return False
 
 
+def _empty_message(bal, source=""):
+	where = f" ({source})" if source else ""
+	amount = f"${bal:,.2f}" if bal is not None else _("unknown")
+	return (
+		f"🔴 **BatchData wallet is empty** — balance {amount}{where}.\n"
+		f"Tax pulls and the comps fallback are failing right now.\n"
+		f"{app_spend_line()}\n"
+		f"Top up at https://app.batchdata.com to re-enable them."
+	)
+
+
 def report_wallet_empty(source=""):
 	"""Called from a 403 'Insufficient balance'. Alerts the moment a rep is hit.
 
-	The daily check below would catch this too, but up to a day later — and by
-	then a rep has already had a button fail on them with no explanation.
+	The periodic check below would catch this too, but up to half an hour later —
+	and by then a rep has already had a button fail on them with no explanation.
 	"""
-	bal = balance()
-	where = f" ({source})" if source else ""
-	amount = f"${bal:,.2f}" if bal is not None else _("unknown")
-	_notify(
-		f"🔴 **BatchData wallet is empty** — balance {amount}{where}.\n"
-		f"Tax pulls and the comps BatchData fallback are failing right now. "
-		f"Top up at https://app.batchdata.com to re-enable them.",
-		"empty",
-	)
+	_notify(_empty_message(balance(), source), "empty")
 
 
 def check_balance():
@@ -268,18 +367,13 @@ def check_balance():
 	state = "ok"
 	if bal < EMPTY_BALANCE_USD:
 		state = "empty"
-		_notify(
-			f"🔴 **BatchData wallet is empty** — balance ${bal:,.2f}.\n"
-			f"Tax pulls and the comps fallback are failing. Top up at "
-			f"https://app.batchdata.com.",
-			"empty",
-		)
+		_notify(_empty_message(bal), "empty")
 	elif bal < LOW_BALANCE_USD:
 		state = "low"
 		_notify(
-			f"🟠 **BatchData is low** — ${bal:,.2f} left, ${yesterday:,.2f} spent "
-			f"yesterday. Top up at https://app.batchdata.com before tax pulls start "
-			f"failing.",
+			f"🟠 **BatchData is low** — ${bal:,.2f} left.\n"
+			f"{app_spend_line()}\n"
+			f"Top up at https://app.batchdata.com before tax pulls start failing.",
 			"low",
 		)
 	return {
@@ -289,6 +383,26 @@ def check_balance():
 		"yesterday": yesterday,
 		"week": report["total"],
 	}
+
+
+def watch_balance():
+	"""Cheap periodic guard, safe to call from any job. Never raises.
+
+	The 5am standup alone was not enough to honour "tell me when it is empty": a
+	wallet that runs dry at 10am would have gone unreported until the next morning,
+	while every tax pull in between failed in a rep's face. This rides the
+	half-hourly pulse instead, so the gap is at most 30 minutes of business hours.
+
+	Costs nothing — `/wallet/balance` is free — and `_notify` deduplicates to one
+	message per kind per day, so a half-hourly check cannot become half-hourly spam.
+	"""
+	try:
+		if not configured():
+			return None
+		return check_balance()
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "BatchData wallet: watch failed")
+		return None
 
 
 def standup_line():
@@ -306,8 +420,15 @@ def standup_line():
 		return ""
 	mark = {"empty": "🔴", "low": "🟠"}.get(info["state"], "")
 	tail = " — top up" if info["state"] in ("empty", "low") else ""
-	return (
-		f"{mark} BatchData ${info['balance']:,.2f} left"
-		f" · ${info['yesterday']:,.2f} yesterday"
-		f" · ${info['week']:,.2f} last 7d{tail}"
-	).strip()
+	# APP spend, not account spend. The account number is dominated by whatever was
+	# run by hand that week ($205 against the app's $0.45) and would read here as if
+	# the CRM had done it.
+	try:
+		s = app_spend()
+		spend = (
+			f" · app spend ${s['today']['total']:,.2f} today · "
+			f"${s['week']['total']:,.2f} wk · ${s['month']['total']:,.2f} mo"
+		)
+	except Exception:
+		spend = ""
+	return f"{mark} BatchData ${info['balance']:,.2f} left{spend}{tail}".strip()
