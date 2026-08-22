@@ -159,6 +159,21 @@ doc_events = {
 	"Error Log": {
 		"before_insert": ["crm.api.error_redaction.on_error_log_insert"],
 	},
+	# The ops server scripts hold their credentials as module constants, and
+	# `safe_exec` prints the WHOLE script source into any traceback raised inside
+	# it -- so one failing script reprints its own key on every error. That was 839
+	# of the leaked rows, and none of them contained the word "Authorization".
+	"Scheduled Job Log": {
+		"before_insert": ["crm.api.error_redaction.on_error_log_insert"],
+	},
+	"Deleted Document": {
+		"before_insert": ["crm.api.error_redaction.on_error_log_insert"],
+	},
+	# Gated on ref_doctype inside the handler: Version rows are written on nearly
+	# every save, so this must not put a regex in that path for every lead edit.
+	"Version": {
+		"before_insert": ["crm.api.error_redaction.on_version_insert"],
+	},
 	"Contact": {
 		"validate": ["crm.api.contact.validate"],
 	},

@@ -71,13 +71,35 @@ _SECRET_NAMES = (
 
 _NAMES_RE = "|".join(re.escape(n) for n in _SECRET_NAMES)
 
+#: Words that make an IDENTIFIER a secret holder, matched as a SUFFIX so
+#: `QUO_KEY`, `PUSHOVER_TOKEN`, `RAPIDAPI_ZILLOW_KEY` and `DOCUSEAL_API_TOKEN`
+#: are all caught without having to enumerate them.
+#:
+#: This is the rule that was missing, and it is the one that mattered most. The
+#: ops server scripts hold their credentials as module-level constants
+#: (`QUO_KEY = "..."`), and `frappe.utils.safe_exec` puts the ENTIRE script source
+#: into the traceback of any error raised inside it — so a single failing script
+#: reprints its own key on every exception. That is 839 of the leaked rows, and
+#: none of them said "Authorization" anywhere, which is why the first pass missed
+#: them completely.
+_IDENT_SUFFIX = r"[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD)"
+
 _PATTERNS = (
+	# `QUO_KEY = "..."` / `TOKEN = '...'` / escaped `TOKEN = \"...\"` inside JSON.
+	# The trailing quote is matched loosely so an escaped \" closes correctly.
+	(
+		re.compile(r"(\b" + _IDENT_SUFFIX + r"\s*=\s*\\?['\"])([^'\"\\\n]{8,})", re.I),
+		r"\1" + PLACEHOLDER,
+	),
 	# `Bearer eyJhbGciOi...` anywhere at all, including inside a quoted dict repr.
 	# This is the shape that actually leaked, so it is matched on its own rather
 	# than relying on the surrounding key being recognised.
 	(re.compile(r"(Bearer\s+)([A-Za-z0-9._\-]{8,})", re.I), r"\1" + PLACEHOLDER),
 	# `'Authorization': 'Bearer xyz'` / `"api_key": "xyz"` / `token = 'xyz'`
 	# Keeps the NAME and the quotes so the traceback still reads naturally.
+	# NOTE the value here has NO `Bearer` prefix requirement: Quo/OpenPhone sends
+	# the raw key as the Authorization value, which is exactly why a Bearer-only
+	# rule reported a clean log while 839 rows still held a live key.
 	(
 		re.compile(
 			r"(['\"]?(?:" + _NAMES_RE + r")['\"]?\s*[:=]\s*)(['\"])([^'\"\n]{4,})(['\"])",
@@ -121,78 +143,174 @@ def has_secret(text):
 	return redact(text) != str(text)
 
 
+#: Every place a secret was actually found, and the fields that held it.
+#: Derived from a known-plaintext audit: the real site_config values were
+#: searched for across all 286 tables / 3,525 text columns of production.
+REDACTED_FIELDS = {
+	"Error Log": ("error", "method"),
+	"Scheduled Job Log": ("details",),
+	"Deleted Document": ("data",),
+}
+
+#: NOT redacted, deliberately: `Server Script.script` IS the credential's home.
+#: The ops sync substitutes `__INFISICAL:QUO_API_KEY__` into the source because
+#: the script sandbox cannot reach site_config, so blanking it there would simply
+#: break texting and the webhooks. That is a real exposure, but it is an ops
+#: design question (rotate the keys, restrict Server Script read), not something
+#: a log scrubber gets to decide by breaking production.
+NEVER_REDACT = ("Server Script",)
+
+
+def _scrub_doc(doc, fields):
+	for field in fields:
+		value = doc.get(field)
+		if not value:
+			continue
+		cleaned = redact(value)
+		if cleaned != value:
+			doc.set(field, cleaned)
+
+
 def on_error_log_insert(doc, method=None):
-	"""`Error Log` before_insert — scrub before the row is ever written."""
+	"""before_insert for the log doctypes — scrub before the row is ever written."""
 	try:
-		for field in ("error", "method"):
-			value = doc.get(field)
-			if not value:
-				continue
-			cleaned = redact(value)
-			if cleaned != value:
-				doc.set(field, cleaned)
+		fields = REDACTED_FIELDS.get(doc.doctype)
+		if fields:
+			_scrub_doc(doc, fields)
 	except Exception:
-		# Deliberately silent, and deliberately NOT frappe.log_error: we are inside
-		# the creation of an Error Log, and logging from here risks recursion.
+		# Deliberately silent, and deliberately NOT frappe.log_error: we may be
+		# inside the creation of an Error Log, and logging from here risks recursion.
 		pass
+
+
+def on_version_insert(doc, method=None):
+	"""`Version` before_insert, gated on the one doctype whose history holds keys.
+
+	Version rows are written on essentially every save in the system, so running a
+	handful of regexes over every one of them would be a real cost for no benefit.
+	The audit found secrets in Version only where the versioned document was a
+	Server Script -- whose source legitimately contains the credential -- so the
+	gate is a single string compare and the regex work happens on the rare edit of
+	a script rather than on every lead update.
+
+	The HISTORY is safe to redact even though the live script is not: nothing
+	executes a Version row, it is an audit trail.
+	"""
+	try:
+		if doc.get("ref_doctype") in NEVER_REDACT:
+			_scrub_doc(doc, ("data",))
+	except Exception:
+		pass
+
+
+def _site_secrets(min_len=12):
+	"""The literal secret values this site holds, from site_config.
+
+	Used as a KNOWN-PLAINTEXT search. Pattern matching alone is what produced a
+	false all-clear the first time round; searching for the actual strings is the
+	only check that cannot be fooled by a shape nobody thought of.
+	"""
+	words = ("key", "token", "secret", "password", "pwd")
+	out = {}
+	for name, value in (frappe.conf or {}).items():
+		if not isinstance(value, str) or len(value) < min_len:
+			continue
+		if any(w in name.lower() for w in words):
+			out[name] = value
+	return out
 
 
 @frappe.whitelist()
 def scrub_existing(dry_run=1, limit=None, batch=200):
-	"""Redact secrets already sitting in the Error Log.
+	"""Redact secrets already sitting in the log tables.
 
-	REDACTS rather than deletes. The rows are real diagnostics — the BatchData 403
-	that started this is exactly the kind of thing you want to still be able to
-	read next month — and deleting them to hide a token would throw away the
-	evidence along with the secret.
+	Covers every table a known-plaintext audit actually found secrets in, not just
+	Error Log — the first pass cleaned one table with one pattern and reported a
+	clean bill of health while 839 rows still held a live Quo key.
 
-	Written with raw SQL on purpose: `doc.save()` on an Error Log would stamp
-	`modified`, fire hooks and generate Version rows for a thousand records, none
-	of which is wanted for a cleanup pass.
+	Rows are selected by searching for the REAL secret values as well as by shape,
+	so a credential in a form nobody anticipated is still found.
+
+	REDACTS rather than deletes. These are real diagnostics and deleting them to
+	hide a token would throw away the evidence with the secret.
+
+	Raw SQL on purpose: `doc.save()` here would stamp `modified`, fire hooks and
+	generate Version rows for thousands of records — and, for Version itself, would
+	recurse.
 	"""
 	if not frappe.has_permission("Error Log", "write"):
 		frappe.throw(frappe._("Not permitted."), frappe.PermissionError)
 	dry = int(dry_run or 0)
+	secrets = list(_site_secrets().values())
 
-	rows = frappe.db.sql(
-		"""SELECT name, error, method FROM `tabError Log`
-		   WHERE error LIKE %(b)s OR error LIKE %(a)s OR error LIKE %(k)s
-		      OR method LIKE %(b)s OR method LIKE %(a)s OR method LIKE %(k)s
-		   ORDER BY creation DESC""",
-		{"b": "%Bearer %", "a": "%uthorization%", "k": "%api_key%"},
-		as_dict=True,
-	)
-	if limit:
-		rows = rows[: int(limit)]
+	targets = dict(REDACTED_FIELDS)
+	targets["Version"] = ("data",)
 
-	changed, checked = 0, 0
-	for row in rows:
-		checked += 1
-		updates = {}
-		for field in ("error", "method"):
-			value = row.get(field)
-			if value and redact(value) != value:
-				updates[field] = redact(value)
-		if not updates:
+	result = {"dry_run": bool(dry), "tables": {}, "redacted": 0, "scanned": 0}
+	for doctype, fields in targets.items():
+		table = f"tab{doctype}"
+		if not frappe.db.table_exists(doctype):
 			continue
-		changed += 1
-		if dry:
-			continue
-		frappe.db.sql(
-			"UPDATE `tabError Log` SET "
-			+ ", ".join(f"`{f}` = %({f})s" for f in updates)
-			+ " WHERE name = %(name)s",
-			{**updates, "name": row.name},
+		# Shape-based OR value-based. The value clauses are what catch the shapes
+		# we have not thought of yet.
+		clauses, params = [], {}
+		for field in fields:
+			for i, needle in enumerate(["%Bearer %", "%uthorization%", "%api_key%"]):
+				key = f"p_{field}_{i}"
+				clauses.append(f"`{field}` LIKE %({key})s")
+				params[key] = needle
+			for i, value in enumerate(secrets):
+				key = f"s_{field}_{i}"
+				clauses.append(f"`{field}` LIKE %({key})s")
+				params[key] = f"%{value}%"
+		select = ", ".join(["name"] + [f"`{f}`" for f in fields])
+		rows = frappe.db.sql(
+			f"SELECT {select} FROM `{table}` WHERE " + " OR ".join(clauses),
+			params,
+			as_dict=True,
 		)
-		if changed % int(batch) == 0:
+		if limit:
+			rows = rows[: int(limit)]
+
+		changed = 0
+		for row in rows:
+			result["scanned"] += 1
+			updates = {}
+			for field in fields:
+				value = row.get(field)
+				if not value:
+					continue
+				cleaned = redact(value)
+				# Belt and braces: if a real secret survived the patterns, replace it
+				# literally. This is what makes the sweep verifiable rather than hopeful.
+				for secret in secrets:
+					if secret in cleaned:
+						cleaned = cleaned.replace(secret, PLACEHOLDER)
+				if cleaned != value:
+					updates[field] = cleaned
+			if not updates:
+				continue
+			changed += 1
+			if dry:
+				continue
+			frappe.db.sql(
+				f"UPDATE `{table}` SET "
+				+ ", ".join(f"`{f}` = %({f})s" for f in updates)
+				+ " WHERE name = %(name)s",
+				{**updates, "name": row.name},
+			)
+			if changed % int(batch) == 0:
+				frappe.db.commit()
+		if not dry:
 			frappe.db.commit()
-	if not dry:
-		frappe.db.commit()
-	return {
-		"scanned": checked,
-		"redacted": changed,
-		"dry_run": bool(dry),
-		# Counted, never echoed: printing the offending text to prove it was found
-		# would leak the secret into whatever read the result.
-		"note": "values replaced with " + PLACEHOLDER,
-	}
+		result["tables"][doctype] = changed
+		result["redacted"] += changed
+
+	# Counted, never echoed: printing the offending text to prove it was found
+	# would leak the secret into whatever read the result.
+	result["note"] = "values replaced with " + PLACEHOLDER
+	result["server_script_excluded"] = (
+		"Server Script.script holds the live credential by design; redacting it "
+		"would break texting and the webhooks. Rotate + restrict instead."
+	)
+	return result

@@ -352,6 +352,7 @@
             <div data-comp-tray class="min-h-0 flex-1 overflow-auto">
               <CompSubjectCard
                 v-if="data?.subject"
+                ref="subjectCardEl"
                 :subject="data.subject"
                 :address="data?.address || address"
                 @open="openSubjectDetail"
@@ -1015,6 +1016,20 @@ function scrollCardIntoView(name) {
   const comp = cardRefs.get(name)
   const el = comp?.$el
   if (el?.scrollIntoView) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+}
+
+/**
+ * Bring the subject's own card (and its photo) into the tray's viewport.
+ *
+ * Found by ref rather than through `cardRefs`, which is keyed by comp name and
+ * the subject has none. `block: 'start'` rather than `'nearest'` because the
+ * subject sits at the very top of the tray -- "nearest" from below would leave
+ * it flush against the top edge with its photo still cut off.
+ */
+const subjectCardEl = ref(null)
+function scrollSubjectIntoView() {
+  const el = subjectCardEl.value?.$el || subjectCardEl.value
+  if (el?.scrollIntoView) el.scrollIntoView({ block: 'start', behavior: 'smooth' })
 }
 
 const comps = computed(() => data.value?.comps || [])
@@ -1810,7 +1825,7 @@ function render() {
   }
 
   // The subject goes on LAST so it is never buried under a comp pill.
-  L.marker([s.lat, s.lng], {
+  const subjectMarker = L.marker([s.lat, s.lng], {
     zIndexOffset: 1000,
     // A real iconSize + centre anchor, NOT the 0x0-plus-transform trick the rings
     // use. With a zero-width container the horizontal translate(-50%) collapsed to
@@ -1821,6 +1836,15 @@ function render() {
   })
     .addTo(map)
     .bindPopup(subjectPopupHtml(s), { maxWidth: 300 })
+
+  // Hovering the subject pin scrolls its card -- and so its photo -- into view in
+  // the tray, exactly as hovering a comp pin already did. The subject was the one
+  // pin on the map that did nothing on hover, which made it feel like it was not
+  // part of the same board.
+  subjectMarker.on('mouseover', () => {
+    hoverSource = 'map'
+    scrollSubjectIntoView()
+  })
 
   if (!prev && bounds.length > 1) {
     try {
