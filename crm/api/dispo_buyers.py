@@ -1,17 +1,19 @@
 """Does one of our disposition buyers work this lead's area?
 
-Two national buyers publish where they operate, so a lead in their footprint has
-a likely exit before we ever call it. `crm/api/data/dispo_buyers.json` is a
-snapshot of both, generated from the istl-buyer repo (see build_dispo_buyers.py
-beside it) -- the scraping, the CBSA expansion and the FIPS crosswalk all live
-there, and the CRM carries only the finished lookup tables.
+Three buyers tell us where they operate, so a lead in their footprint has a
+likely exit before we ever call it. `crm/api/data/dispo_buyers.json` is a
+snapshot of all of them, generated from the leadmarket repo (see
+build_dispo_buyers.py beside it) -- the scraping, the CBSA expansion and the
+FIPS crosswalk all live there, and the CRM carries only the finished lookup
+tables.
 
     new_western  "Yes - NW city" | "Nearby - NW county" | "No"
     keyglee      "Yes - KG operating" | "Sold out - KG" | "No"
+    ezrei        "Yes - EZ velocity" | "No"        (+ ezrei_rank, 1-62)
 
-Both keep TWO positive levels rather than one, and the split is the whole point:
-one of them is the company's own published claim and the other is our inference.
-Collapsing them would quietly promote a guess to a fact.
+The first two keep TWO positive levels rather than one, and the split is the
+whole point: one of them is the company's own published claim and the other is
+our inference. Collapsing them would quietly promote a guess to a fact.
 
   * New Western publishes a CITY list. A city on it is their claim; a lead
     merely in the same COUNTY as a listed city is us guessing at their metro buy
@@ -24,6 +26,13 @@ Collapsing them would quietly promote a guess to a fact.
     map's raw status "Available" means a franchise is OPERATING, not one that is
     for sale; upstream already flips it, and this file inherits the flipped
     value.
+
+ezREIdispo is the exception, and has ONE positive level for the opposite reason:
+none of it is inference. EZ REI Closings publishes no coverage at all -- they
+emailed us a ranked list of 62 counties ("EZ Velocity Markets V1 5/26"), so a
+county is on that list or it is not, and counties merely NEXT to a listed one
+are deliberately not claimed. What they DO carry that the others don't is their
+own rank, which is the part of the document we could not have derived.
 """
 
 from __future__ import annotations
@@ -45,6 +54,7 @@ NW_MARKET = "Yes - NW market"
 NW_COUNTY = "Nearby - NW county"
 KG_OPERATING = "Yes - KG operating"
 KG_SOLD_OUT = "Sold out - KG"
+EZ_VELOCITY = "Yes - EZ velocity"
 NO = "No"
 
 _DATA_FILE = os.path.join(os.path.dirname(__file__), "data", "dispo_buyers.json")
@@ -131,14 +141,14 @@ def _load() -> dict:
 			# A missing or unreadable snapshot must degrade to "we don't know",
 			# never take a board down. Every caller treats {} as no coverage.
 			frappe.log_error(title="dispo_buyers dataset unavailable")
-			_DATA = {"new_western": {}, "keyglee": {}}
+			_DATA = {"new_western": {}, "keyglee": {}, "ezrei": {}}
 	return _DATA
 
 
 def resolve(city=None, state=None, county=None) -> dict:
-	"""(city, state, county) -> both buyers' verdicts.
+	"""(city, state, county) -> every buyer's verdict.
 
-	Returns the two status strings plus the market that answered, ready to be
+	Returns each status string plus the market that answered, ready to be
 	rendered. Everything is "No" when the state is unknown: there are 40
 	Madisons, and guessing which one is worse than saying nothing.
 	"""
@@ -149,6 +159,9 @@ def resolve(city=None, state=None, county=None) -> dict:
 		"new_western_market": None,
 		"keyglee": NO,
 		"keyglee_market": None,
+		"ezrei": NO,
+		"ezrei_market": None,
+		"ezrei_rank": None,
 	}
 	if not st:
 		return out
@@ -174,6 +187,22 @@ def resolve(city=None, state=None, county=None) -> dict:
 		if hit:
 			out["keyglee"] = hit[1] or NO
 			out["keyglee_market"] = hit[0]
+			break
+
+	# NOTE: three of their 62 entries are INDEPENDENT CITIES (Baltimore City MD,
+	# Richmond city VA, Norfolk city VA), and two of those share a name with a
+	# real county in the same state. A CRM lead stores a bare county name with no
+	# C/N flag, so `_county_keys`'s city fallback will answer a "Richmond, VA"
+	# lead with the CITY's entry even when the lead means the county. That is the
+	# documented tradeoff of the fallback (see `_county_keys`) rather than
+	# anything new here, and it over-claims in at most those two names.
+	ez = (data.get("ezrei") or {}).get("counties") or {}
+	for key in _county_keys(county, st):
+		hit = ez.get(key)
+		if hit:
+			out["ezrei"] = EZ_VELOCITY
+			out["ezrei_market"] = hit[0]
+			out["ezrei_rank"] = hit[1]
 			break
 
 	return out
@@ -203,6 +232,16 @@ def summary(city=None, state=None, county=None) -> dict | None:
 			"market": r["keyglee_market"],
 			"strong": r["keyglee"] == KG_OPERATING,
 			"status": r["keyglee"],
+		})
+	if r["ezrei"] != NO:
+		badges.append({
+			"buyer": "ez",
+			"market": r["ezrei_market"],
+			# Always strong: there is no weak tier to render, because none of
+			# this buyer's coverage is our inference.
+			"strong": True,
+			"status": r["ezrei"],
+			"rank": r["ezrei_rank"],
 		})
 	return badges or None
 

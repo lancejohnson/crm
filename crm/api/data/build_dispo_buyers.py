@@ -1,19 +1,23 @@
 """Generate `dispo_buyers.json` -- the CRM's copy of "who buys here?".
 
-Run from an UP-TO-DATE checkout of ../istl-buyer (which owns the scraping):
+Run from an UP-TO-DATE checkout of ../leadmarket (which owns the scraping; the
+repo was called istl-buyer when this script was written, hence the flag name):
 
-    python3 crm/api/data/build_dispo_buyers.py --istl ~/Projects/Groundwork/istl-buyer
+    python3 crm/api/data/build_dispo_buyers.py --istl ~/Projects/Groundwork/leadmarket
 
-istl-buyer resolves these two differently, and the difference is why this script
+leadmarket resolves the three differently, and the difference is why this script
 exists rather than the CRM importing its modules:
 
   * New Western is keyed on (city, state) with a (county, state) fallback -- its
     dataset already ships that way, so it is copied across almost verbatim.
   * KeyGlee is keyed on **county FIPS**, and building FIPS needs a Zillow county
-    CSV that istl-buyer caches and the CRM has no reason to carry. So each
+    CSV that leadmarket caches and the CRM has no reason to carry. So each
     KeyGlee territory's FIPS list is expanded HERE, once, into (county, state)
-    keys. The CRM then does one kind of lookup for both buyers and ships no FIPS
+    keys. The CRM then does one kind of lookup for every buyer and ships no FIPS
     table, no Zillow dependency and no scraper.
+  * ezREIdispo is FIPS too, and expanded the same way. It carries a RANK rather
+    than a status, because their list is ordered and that ordering is the only
+    thing on it we could not have worked out ourselves.
 
 The county keys keep istl-buyer's `C`/`N` flag (independent city vs county)
 because collapsing them is a real error: Virginia has both Richmond City and
@@ -21,9 +25,10 @@ Richmond County, Maryland has Baltimore City and Baltimore County, Missouri has
 St. Louis city and St. Louis County. They are different places and a buyer can
 work one and not the other.
 
-This is a SNAPSHOT. Both companies open and close markets, so re-run it after
-`python -m src.newwestern refresh` / `python -m src.keyglee refresh` upstream.
-The generated file records where each half came from and when.
+This is a SNAPSHOT. All three open and close markets, so re-run it after
+`python -m src.newwestern refresh` / `python -m src.keyglee refresh` /
+`python -m src.ezrei rebuild` upstream. The generated file records where each
+part came from and when.
 """
 
 from __future__ import annotations
@@ -86,6 +91,7 @@ def main() -> int:
 
     nw_raw = json.load(open(os.path.join(args.istl, "src/data/newwestern_markets.json")))
     kg_raw = json.load(open(os.path.join(args.istl, "src/data/keyglee_markets.json")))
+    ez_raw = json.load(open(os.path.join(args.istl, "src/data/ezrei_markets.json")))
 
     # --- New Western: city index + county index ---------------------------
     # This mirrors newwestern._load() step for step, including the overrides,
@@ -152,8 +158,22 @@ def main() -> int:
             name, flag, st = key.split("|")
             kg_counties[f"{name}|{flag}|{st}"] = [display, status]
 
+    # --- ezREIdispo: FIPS -> (county, state) ------------------------------
+    # Same expansion as KeyGlee, but the value is [label, rank]: one positive
+    # tier, so there is no status to carry, and the rank is what the badge says.
+    ez_counties: dict[str, list] = {}
+    ez_unresolved = []
+    for c in ez_raw.get("counties") or []:
+        key = fips_to_key.get(str(c["fips"]).zfill(5))
+        if not key:
+            ez_unresolved.append([c["fips"], c["label"]])
+            continue
+        ez_counties[key] = [c["label"], c["rank"]]
+
     out = {
-        "generated_from": "istl-buyer (src/newwestern.py, src/keyglee.py)",
+        "generated_from": (
+            "leadmarket (src/newwestern.py, src/keyglee.py, src/ezrei.py)"
+        ),
         "new_western": {
             "source": nw_raw.get("source"),
             "retrieved": nw_raw.get("retrieved"),
@@ -172,6 +192,14 @@ def main() -> int:
             "counties": kg_counties,
             "unresolved_fips": unresolved,
         },
+        "ezrei": {
+            "source": ez_raw.get("source"),
+            "version": ez_raw.get("version"),
+            "note": ez_raw.get("note"),
+            # key -> [label, rank]
+            "counties": ez_counties,
+            "unresolved_fips": ez_unresolved,
+        },
     }
     with open(args.out, "w") as fh:
         json.dump(out, fh, separators=(",", ":"), sort_keys=True)
@@ -181,6 +209,8 @@ def main() -> int:
         f"({len(nw_asserted)} asserted)"
     )
     print(f"keyglee:     {len(kg_counties)} counties ({len(unresolved)} FIPS unresolved)")
+    print(f"ezreidispo:  {len(ez_counties)} counties "
+          f"({len(ez_unresolved)} FIPS unresolved) [{ez_raw.get('version')}]")
     print(f"wrote {args.out} ({os.path.getsize(args.out):,} bytes)")
     return 0
 
