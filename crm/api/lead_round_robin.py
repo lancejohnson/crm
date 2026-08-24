@@ -38,6 +38,15 @@ Who is eligible
   LeadPack landing in the daily rotation would swamp it, and those leads are
   parked rather than worked anyway.
 
+Which people are in play
+------------------------
+Per **lead source**, configured in Settings -> Lead Assignment and stored by
+`crm.api.lead_assignment`: iSpeedToLead can rotate between the setters while
+every Leadzolo lead goes to one person. This module still owns the *turn*; that
+module owns *whose turn it is among whom*. Until someone saves a rule there,
+`rule_for()` returns None and everything falls back to the site_config roster
+below, so the behaviour is unchanged by default.
+
 How the turn is decided
 -----------------------
 Not a stored counter. The rotation is **derived from the leads themselves**:
@@ -60,6 +69,8 @@ the goal is an even share of real work, not an even share of webhook events.
 import frappe
 from frappe import _
 from frappe.query_builder.functions import Count
+
+from crm.api import lead_assignment
 
 LEAD = "CRM Lead"
 
@@ -95,14 +106,15 @@ def is_enabled() -> bool:
 	return bool(frappe.conf.get(ENABLED_KEY, True))
 
 
-def get_roster() -> list[str]:
-	"""The rotation, in order, filtered to users who actually exist and are
-	enabled. Disabling a CRM user is the intended way to take someone out of
-	the rotation (vacation, offboarding) — the leads then all go to whoever
-	remains rather than piling up on a login nobody is reading."""
-	configured = frappe.conf.get(ROSTER_KEY) or list(DEFAULT_ROSTER)
+def _enabled_users(configured) -> list[str]:
+	"""Dedup a configured list of users down to the ones that exist and are
+	enabled, preserving order. Disabling a CRM user is the intended way to take
+	someone out of a rotation (vacation, offboarding) — the leads then all go to
+	whoever remains rather than piling up on a login nobody is reading."""
 	if isinstance(configured, str):
 		configured = frappe.parse_json(configured)
+	if not configured:
+		return []
 
 	roster = []
 	for user in configured:
@@ -112,6 +124,13 @@ def get_roster() -> list[str]:
 		if frappe.db.get_value("User", user, "enabled"):
 			roster.append(user)
 	return roster
+
+
+def get_roster() -> list[str]:
+	"""The site_config rotation — the fallback used when no per-source rules have
+	been saved in Settings. Kept intact so deploying the settings page changes
+	nothing until a human actually writes a rule."""
+	return _enabled_users(frappe.conf.get(ROSTER_KEY) or list(DEFAULT_ROSTER))
 
 
 # ---------------------------------------------------------------------------
@@ -265,15 +284,50 @@ def _choose(roster: list[str]) -> str:
 	return _pick(roster, _todays_counts(roster), _last_owner(roster))
 
 
-def next_owner() -> str | None:
-	"""The user the next inbound lead should go to, or None if the rotation is
-	off / unconfigured. Pure read — safe to call for previews."""
+def next_owner(source: str | None = None) -> str | None:
+	"""The user the next inbound lead from `source` should go to, or None if
+	assignment is off / unconfigured. Pure read — safe to call for previews."""
 	if not is_enabled():
 		return None
-	roster = get_roster()
-	if not roster:
+	return _apply_rule(lead_assignment.rule_for(source))
+
+
+def _apply_rule(rule: dict | None) -> str | None:
+	"""Turn a resolved rule into an owner. The single place a rule becomes a
+	person, so the hook, the preview and the status endpoint cannot disagree.
+
+	`rule is None` means nothing has been configured in Settings yet, which falls
+	back to the site_config roster this module has always used.
+	"""
+	if rule is None:
+		roster = get_roster()
+		return _choose(roster) if roster else None
+
+	if rule.get("mode") == "off":
 		return None
+
+	roster = _enabled_users(rule.get("users"))
+	if not roster:
+		# Every named person is disabled or deleted. Deliberately not a silent
+		# fall-through to the default rule: someone configured this source, and
+		# quietly routing it somewhere else is worse than leaving it ownerless
+		# for the legacy default owner to catch.
+		return None
+
+	if rule.get("mode") == "fixed":
+		return roster[0]
 	return _choose(roster)
+
+
+def preview_for_rule(rule: dict | None) -> str | None:
+	"""Who this rule would pick right now. Used by the settings page so a manager
+	can see the consequence of a rule before saving it."""
+	if not is_enabled():
+		return None
+	try:
+		return _apply_rule(rule)
+	except Exception:
+		return None
 
 
 # ---------------------------------------------------------------------------
@@ -292,6 +346,8 @@ def _skip_reason(doc) -> str | None:
 		return "migration"
 	if not is_enabled():
 		return "disabled"
+	if not lead_assignment.is_enabled():
+		return "paused in settings"
 	return None
 
 
@@ -307,11 +363,9 @@ def assign_round_robin_owner(doc, method=None):
 		if _skip_reason(doc):
 			return
 
-		roster = get_roster()
-		if not roster:
-			return
-
-		doc.lead_owner = _choose(roster)
+		owner = _apply_rule(lead_assignment.rule_for(doc.get("source")))
+		if owner:
+			doc.lead_owner = owner
 	except Exception:
 		frappe.log_error("Lead round robin failed", frappe.get_traceback())
 
@@ -322,16 +376,24 @@ def assign_round_robin_owner(doc, method=None):
 
 
 @frappe.whitelist()
-def round_robin_status():
+def round_robin_status(source: str | None = None):
 	"""Who is in the rotation, what today's split looks like, and who is up
 	next — so "why did that lead go to Exe?" has an answer that doesn't require
-	a database session."""
+	a database session.
+
+	Pass `source` to ask the question the way a lead actually arrives: rules are
+	per-source, so with no source this reports whatever governs "everything
+	else".
+	"""
 	frappe.only_for(("System Manager", "Sales Manager", "Sales User"))
 
-	roster = get_roster()
+	rule = lead_assignment.rule_for(source)
+	roster = get_roster() if rule is None else _enabled_users(rule.get("users"))
 	if not roster:
 		return {
-			"enabled": is_enabled(),
+			"enabled": is_enabled() and lead_assignment.is_enabled(),
+			"source": source,
+			"rule": rule,
 			"roster": [],
 			"today": [],
 			"last_owner": None,
@@ -341,7 +403,9 @@ def round_robin_status():
 	counts = _todays_counts(roster)
 	ramp = _ramp_state(roster)
 	return {
-		"enabled": is_enabled(),
+		"enabled": is_enabled() and lead_assignment.is_enabled(),
+		"source": source,
+		"rule": rule,
 		"roster": roster,
 		"today": [
 			{
@@ -355,10 +419,12 @@ def round_robin_status():
 		],
 		"last_owner": _last_owner(roster),
 		"ramp": ramp,
-		"next_owner": _choose(roster) if is_enabled() else None,
+		"next_owner": next_owner(source),
 		"why": (
 			_("catch-up ramp: {0} of {1} delivered").format(ramp["delivered"], ramp["count"])
 			if ramp and ramp["remaining"] > 0
+			else _("fixed assignment")
+			if rule and rule.get("mode") == "fixed"
 			else _("normal rotation")
 		),
 	}

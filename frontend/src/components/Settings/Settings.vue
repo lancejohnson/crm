@@ -88,10 +88,16 @@ import {
 import { Dialog, Avatar } from 'frappe-ui'
 import { ref, markRaw, computed, watch, h } from 'vue'
 import AssignmentRulePage from './AssignmentRules/AssignmentRulePage.vue'
+import LeadAssignmentSettings from '@/components/Settings/LeadAssignmentSettings.vue'
+import LucideUsers from '~icons/lucide/users'
 
 const { isManager, getUser } = usersStore()
 
 const user = computed(() => getUser() || {})
+
+// Flip to true to bring upstream's generic Assignment Rules page back into the
+// menu (it stays wired up and importable either way).
+const SHOW_UPSTREAM_ASSIGNMENT_RULES = false
 
 const tabs = computed(() => {
   let _tabs = [
@@ -194,10 +200,25 @@ const tabs = computed(() => {
       label: __('Automation & Rules'),
       items: [
         {
-          label: __('Assignment Rules'),
-          icon: markRaw(h(SettingsIcon2, { class: 'rotate-90' })),
-          component: markRaw(AssignmentRulePage),
+          label: __('Lead Assignment'),
+          icon: markRaw(LucideUsers),
+          component: markRaw(LeadAssignmentSettings),
         },
+        // Upstream's Assignment Rules page is deliberately hidden, not deleted:
+        // core Frappe's Assignment Rule writes `_assign` on after_insert, while
+        // this CRM decides `lead_owner` on before_insert (see
+        // crm/api/lead_assignment.py). Two deciders across two hooks is the
+        // double-assignment bug. Keeping the import means a rebase that touches
+        // that page still compiles.
+        ...(SHOW_UPSTREAM_ASSIGNMENT_RULES
+          ? [
+              {
+                label: __('Assignment Rules'),
+                icon: markRaw(h(SettingsIcon2, { class: 'rotate-90' })),
+                component: markRaw(AssignmentRulePage),
+              },
+            ]
+          : []),
       ],
       condition: () => isManager(),
     },

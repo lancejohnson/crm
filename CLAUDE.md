@@ -834,8 +834,76 @@ duplicating. Work substantial features in a worktree of your own.
     loud before flipping it. Reverting is `bench set-config` back to two names.
   - Roster + kill switch live in site_config (`lead_round_robin_users`,
     `lead_round_robin_enabled`); disabled Users drop out automatically, so
-    disabling a CRM login is the vacation lever. `round_robin_status()` is the
-    whitelisted read-only "who's up next and why".
+    disabling a CRM login is the vacation lever. `round_robin_status(source)` is
+    the whitelisted read-only "who's up next and why" (it now takes the source,
+    because rules are per-source — see **Lead Assignment settings** below).
+
+- **Lead Assignment settings page (per-source rules)** — Settings → Automation &
+  Rules → **Lead Assignment**: one row per lead source, in plain language
+  (*iSpeedToLead → rotate between German, Exe* · *Leadzolo → always Lance*), plus
+  a catch-all for everything else and a pause switch. Replaces editing
+  `lead_round_robin_users` with `bench set-config`, and gives Leadzolo a home in
+  the CRM instead of LeadMarket's hardcoded `LEADZOLO_CRM_OWNER`.
+  `crm/api/lead_assignment.py` (**new**) + `LeadAssignmentSettings.vue` +
+  `LeadAssignmentRuleRow.vue` (**both new**).
+  - **The split of responsibility is the design**: `lead_assignment` decides
+    *whose turn it is among whom* (the per-source roster), `lead_round_robin`
+    still decides *whose turn it is* (fewest-today-wins, ramp, disabled-user
+    filtering, swallow-every-error). `_apply_rule()` is the single place a rule
+    becomes a person, so hook / preview / status cannot disagree. One-way
+    import: `lead_round_robin` imports `lead_assignment`, never the reverse (the
+    settings endpoint imports back **inside the function** to avoid the cycle).
+  - **Upstream's "Assignment Rules" page is HIDDEN, not deleted**
+    (`SHOW_UPSTREAM_ASSIGNMENT_RULES = false` in `Settings.vue`). Core Frappe's
+    `Assignment Rule` writes `_assign` on **after_insert**; this CRM keys
+    everything off `lead_owner` on **before_insert**, so running both is two
+    deciders racing across two hooks and a lead carrying both fields is the
+    double-assignment bug `lead_import` warns about. There were **0** rules on
+    prod, so nothing was lost. Keeping the import means a rebase that touches
+    that page still compiles.
+  - **Modes are `rotate` / `fixed` / `off`.** `fixed` is not just a
+    one-person rotation — saying so out loud lets the UI render it as a choice,
+    and switching rotate→fixed **narrows the picker visibly** rather than
+    silently keeping four names and using the first. `off` leaves the lead
+    ownerless, i.e. exactly the pre-rotation behaviour, and the legacy
+    `Lead Default Owner` server script still catches it.
+  - **Stored as one JSON blob in a global Frappe default** (`frappe.db.get_default`,
+    key `crm_lead_assignment_rules`) — the same no-new-doctype trick the Team
+    Activity goals use. **No ops script**, readable by **Guest** (which is how
+    every inbound webhook inserts), and one query on a hot insert path.
+  - **Unconfigured ≠ empty.** `rule_for()` returns None until a human saves, and
+    everything then falls back to the site_config roster, so **deploying this
+    changes no behaviour at all**. A corrupt blob degrades to the same fallback
+    rather than breaking lead creation.
+  - **A rule with nobody in it is REFUSED, not ignored**: silently falling
+    through to the default looks identical on screen to a rule that is working.
+    Same for an unknown user or an unknown source.
+  - **A rule whose every named person is disabled assigns NOBODY** rather than
+    falling through to the default — someone configured that source, and quietly
+    routing it elsewhere is worse than leaving it for the legacy default owner.
+  - **GOTCHA — `frappe.db.get_default` can serve a STALE value to a
+    `set_default` in the same process.** Saving `enabled: false` and immediately
+    inserting a lead still assigned an owner, while the identical write in a
+    fresh process paused correctly — i.e. it fails *intermittently* and reads as
+    a logic bug. `frappe.defaults._clear_cache("__default")` after the write is
+    the fix. Note the helper is **private and singular**; `frappe.defaults.clear_cache`
+    does not exist, and calling it inside a whitelisted method makes
+    `bench execute` swallow the AttributeError and raise a completely unrelated
+    **`NameError: name 'crm' is not defined`** (`frappe/commands/utils.py` falls
+    back to `eval` when `get_attr(...)()` throws). That message means "this
+    function threw" — never trust it at face value.
+  - **GOTCHA (again) — reka-ui drops a Select item whose value is `''`.** The
+    `{label:'Select a person', value:''}` placeholder option simply never
+    rendered. Use the `placeholder` prop. Third time this trap has been hit in
+    this repo.
+  - Verified on **staging** end-to-end (`ENV=staging ./scripts/build_image.sh`),
+    inserting as **Guest** the way the webhooks do: Leadzolo→Lance twice,
+    Website→German then Exe, hand-created-with-owner untouched, `off`→no owner,
+    paused→no owner, all four validation refusals, corrupt blob→roster fallback,
+    and the UI round-tripping a save across a full page reload.
+  - **NOTE `build_image.sh` ships TRACKED FILES ONLY** (`git stash create` +
+    `git archive`). New files must be `git add`ed or they silently do not deploy
+    — the app then imports a module that isn't there.
   - **Catch-up ramp** (`lead_round_robin_ramp_user` / `_ramp_count` /
     `_ramp_since` in site_config) — hands the first N leads after a moment to
     one person before alternation starts, because the continuity backfill lands
