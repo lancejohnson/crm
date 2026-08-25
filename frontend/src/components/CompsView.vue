@@ -1488,6 +1488,7 @@ function pillIcon(c) {
           style="position:relative;display:flex;
           align-items:center;justify-content:center;
           box-sizing:border-box;width:${w}px;height:24px;background:${bg};color:${ink};
+          --pill-bg-solid:${pal.bg};--pill-border-solid:${pal.border};
           font:700 11px/1 ui-sans-serif,system-ui,sans-serif;border-radius:999px;
           border:${border};${ring}white-space:nowrap;
           opacity:${op}">${bareStar}${price}${hideBadge(c)}</div>`,
@@ -1560,6 +1561,7 @@ function pillIcon(c) {
         style="position:relative;display:flex;flex-direction:column;align-items:center;
         justify-content:center;box-sizing:border-box;width:${w}px;height:34px;
         background:${bg};color:${ink};border-radius:9px;border:${border};${ring}
+        --pill-bg-solid:${pal.bg};--pill-border-solid:${pal.border};
         white-space:nowrap;line-height:1;opacity:${op}">
         <div style="display:flex;align-items:baseline;justify-content:center">
           ${starHtml}<span style="font:700 11.5px/1 ui-sans-serif,system-ui,sans-serif">${price}</span>${yearHtml}${ageHtml}
@@ -2017,6 +2019,12 @@ function placePin(c) {
   // restZ, not pinZ: a restyle (use / discard / filter change) must not drop a
   // pill the rep has already pulled to the front back under its neighbours.
   marker.setZIndexOffset(hoveredComp.value === c.name ? HOVER_Z : restZ(c.name))
+  // `setIcon` REPLACES the element, so the hover class goes with it. The z-index
+  // was already being restored on the line above; the highlight was not, so a
+  // pill under the pointer went flat the moment anything restyled the board.
+  if (hoveredComp.value === c.name) {
+    marker.getElement()?.classList.add('comps-pill-hot')
+  }
   const badge = marker.getElement()?.querySelector('.comps-pill-x')
   if (badge) {
     L.DomEvent.disableClickPropagation(badge)
@@ -2469,11 +2477,19 @@ input.comps-filter-num::placeholder {
    the element did not take. Outline + opacity are what actually render, so they
    are what the highlight is built from. */
 .comps-price-pill.comps-pill-hot .comps-pill-body {
-  opacity: 1 !important;
+  /* The fade lives in the FILL's alpha channel, not in `opacity` -- the pill's
+     inline opacity is always 1. So `opacity: 1 !important` here was a no-op and
+     a hovered old comp stayed washed out. This restores the pill to its solid
+     colour instead, which is what "highlight" was always meant to mean.
+     `!important` is what lets a stylesheet beat the inline background. */
+  background: var(--pill-bg-solid) !important;
+  border-color: var(--pill-border-solid) !important;
   outline: 3px solid #161614;
   outline-offset: 2px;
 }
 .comps-pill-body {
-  transition: opacity 90ms ease-out;
+  /* Transition the property that actually changes. Was `opacity`, which no
+     longer moves, so the highlight also snapped rather than easing. */
+  transition: background-color 90ms ease-out, border-color 90ms ease-out;
 }
 </style>
