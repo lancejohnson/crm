@@ -1,0 +1,725 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Comp analyzer · Today modal · v1</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+/* Tokens lifted verbatim from the v17 lead-desk mockup so this reads as the same
+   product rather than a second design. */
+:root{
+  --t1:#18181a; --t2:#62636a; --t3:#9a9ba3;
+  --bg:#fff; --bg1:#fbfbfc; --bg2:#f4f4f6; --bg3:#ebebef;
+  --br:#e8e8ec; --br2:#dcdce2;
+  --accent:#2563c9; --subject:#2563c9; --active:#d92d20; --offmkt:#f5c518;
+  --green:#15683c; --amber:#9a5308; --red:#b3261e; --dead:#7a7a82;
+  --r:6px; --rs:5px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{font:13px/1.5 Inter,-apple-system,"Segoe UI",system-ui,sans-serif;color:var(--t1);
+  background:#e6e6ea;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;
+  height:100vh;overflow:auto}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+.lb{font-size:10px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;color:var(--t3)}
+
+/* ── the stage ────────────────────────────────────────────────────────────────
+   The Today modal is `size:'5xl'` at `h-[88vh]`. This app's 1rem is 20px, so
+   max-w-5xl (64rem) is 1280px, which reconciles with the measured geometry:
+   288px rail + 648px map + ~330px tray ≈ 1280. Rendered at exactly that, because
+   the whole question is whether the analyzer fits the SMALLEST of the three
+   hosts — the comps page has 800px of pane and a phone has 260px. */
+.stagewrap{padding:22px;display:flex;flex-direction:column;align-items:center;gap:14px}
+.caption{width:1280px;font-size:12px;color:#55565d;display:flex;align-items:baseline;gap:10px}
+.caption b{color:#18181a;font-weight:600;font-size:13px}
+.caption .sp{margin-left:auto;color:#8a8b92;font-size:11px}
+.modal{width:1280px;height:792px;background:var(--bg);border:1px solid var(--br2);
+  border-radius:9px;overflow:hidden;display:flex;flex-direction:column;position:relative;
+  box-shadow:0 18px 50px -20px rgba(0,0,0,.35)}
+
+/* ── modal header: the one dense line the real modal already uses ── */
+.hd{display:flex;align-items:center;gap:10px;padding:7px 14px;border-bottom:1px solid var(--br);flex:none}
+.hd h2{margin:0;font-size:14.5px;font-weight:600;letter-spacing:-.01em;white-space:nowrap}
+.hd .ad{font-size:12px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hd .tel{font-size:12px;color:var(--accent);white-space:nowrap}
+.badge{font-size:10.5px;padding:2px 7px;border-radius:var(--rs);background:var(--bg2);color:var(--t2);
+  white-space:nowrap}
+.badge.blue{background:#eef4fe;color:var(--accent)}
+.x{width:25px;height:25px;border-radius:var(--rs);color:var(--t3);display:grid;place-items:center;
+  flex:none;margin-left:auto}
+.x:hover{background:var(--bg2);color:var(--t1)}
+
+/* ── tab bar ── */
+.tabs{display:flex;align-items:center;gap:16px;padding:0 14px;border-bottom:1px solid var(--br);flex:none}
+.tabs .chev{color:var(--t3);padding:6px 2px;font-size:13px}
+.tab{padding:9px 0;font-size:13px;color:var(--t3);border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab.on{color:var(--t1);font-weight:500;border-bottom-color:var(--br2)}
+.tabs .oc{margin-left:auto;font-size:12px;color:var(--t2);display:flex;align-items:center;gap:5px}
+
+/* ── comps pane ── */
+.pane{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.filters{display:flex;gap:5px;align-items:center;padding:6px 10px;border-bottom:1px solid var(--br);flex:none}
+.fsel{border:1px solid var(--br);border-radius:var(--rs);background:var(--bg1);font-size:11px;
+  color:var(--t2);padding:3px 6px;white-space:nowrap}
+.fsel b{color:var(--t1);font-weight:500}
+.seg{display:flex;gap:2px;background:var(--bg2);padding:2px;border-radius:var(--rs);margin-left:auto;flex:none}
+.sgb{padding:3px 10px;border-radius:4px;font-size:11.5px;font-weight:500;color:var(--t2);white-space:nowrap}
+.sgb.on{background:var(--bg);color:var(--t1);box-shadow:0 1px 2px rgba(0,0,0,.06)}
+
+.split{flex:1;min-height:0;display:flex}
+.mapcol{flex:1;min-width:0;position:relative}
+.mapel{position:absolute;inset:0}
+.leg{position:absolute;left:8px;bottom:8px;z-index:500;display:flex;gap:9px;align-items:center;
+  background:rgba(255,255,255,.94);border:1px solid var(--br);border-radius:var(--r);
+  padding:3px 8px;font-size:10px;color:var(--t2)}
+.leg span{display:flex;align-items:center;gap:3px}
+.leg i{width:7px;height:7px;border-radius:2px;flex:none}
+.bnd{position:absolute;right:8px;top:8px;z-index:500;max-width:250px;
+  background:rgba(255,255,255,.95);border:1px solid var(--br);border-radius:var(--r);
+  padding:5px 8px;font-size:10.5px;color:var(--t2);line-height:1.45}
+.bnd b{color:var(--t1);font-weight:600}
+
+/* ── the rail: 330px, sized in px on purpose (1rem is 20px here) ── */
+.rail{width:330px;flex:none;border-left:1px solid var(--br);display:flex;flex-direction:column;
+  min-height:0;background:var(--bg)}
+.railhd{display:flex;align-items:center;gap:6px;padding:6px 11px;border-bottom:1px solid var(--br);flex:none}
+.railhd .sp{margin-left:auto;font-size:10px;color:var(--t3);font-weight:400;text-transform:none;
+  letter-spacing:0}
+.railbody{flex:1;overflow-y:auto;min-height:0}
+
+/* idle */
+.idle{padding:16px 13px;display:flex;flex-direction:column;gap:10px}
+.idle .big{font-size:13px;line-height:1.55;color:var(--t2)}
+.idle .big b{color:var(--t1);font-weight:600}
+.runbtn{height:32px;border-radius:var(--rs);background:var(--t1);color:#fff;font-size:12.5px;
+  font-weight:500;display:flex;align-items:center;justify-content:center;gap:6px}
+.cost{font-size:10.5px;color:var(--t3);line-height:1.5}
+
+/* running */
+.steps{padding:14px 13px;display:flex;flex-direction:column;gap:9px}
+.step{display:flex;gap:8px;font-size:12px;line-height:1.45;color:var(--t2)}
+.step .tick{width:13px;flex:none;text-align:center;font-size:11px}
+.step.done .tick{color:var(--green)} .step.done{color:var(--t1)}
+.step.now .tick{color:var(--accent)}
+.step.wait{color:var(--t3)}
+.step b{font-weight:600;color:var(--t1)}
+.spin{display:inline-block;animation:sp 1s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+/* result */
+.res{display:flex;flex-direction:column}
+.arvhead{padding:12px 13px 11px;border-bottom:1px solid var(--br)}
+.arvhead .k{font-size:10px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;color:var(--t3)}
+.arvrow{display:flex;align-items:baseline;gap:8px;margin-top:3px}
+.arvrow .v{font-size:27px;font-weight:600;letter-spacing:-.02em;line-height:1.1}
+.conf{font-size:10.5px;padding:2px 7px;border-radius:var(--rs);background:#fdf3e6;color:var(--amber);
+  font-weight:500;white-space:nowrap}
+.arvsub{font-size:11px;color:var(--t3);margin-top:5px}
+
+.sec{padding:11px 13px;border-bottom:1px solid var(--br)}
+.sec .h{font-size:10px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;color:var(--t3);
+  margin-bottom:7px;display:flex;align-items:center;gap:6px}
+.sec .h .sp{margin-left:auto;text-transform:none;letter-spacing:0;font-size:10.5px;color:var(--t3)}
+.say{font-size:12.5px;line-height:1.6;color:var(--t1)}
+.say b{font-weight:600}
+.say + .say{margin-top:9px}
+.strike{color:var(--t3);text-decoration:line-through;text-decoration-color:#c9cad1}
+.cap{margin-top:9px;padding:8px 9px;background:#fdf3e6;border-radius:var(--rs);
+  font-size:12px;line-height:1.55;color:#6b3d05}
+.cap b{font-weight:600;color:#4d2c03}
+
+/* neighbourhood range bar */
+.rng{margin-top:2px}
+.rngbar{height:5px;border-radius:3px;background:linear-gradient(90deg,#e4e4e9,#d3d4da);position:relative;
+  margin:11px 0 5px}
+.rngbar .me{position:absolute;top:-4px;width:3px;height:13px;border-radius:2px;background:var(--accent)}
+.rngbar .lab{position:absolute;top:-19px;transform:translateX(-50%);font-size:10px;font-weight:600;
+  color:var(--accent);white-space:nowrap}
+.rngends{display:flex;justify-content:space-between;font-size:10.5px;color:var(--t2)}
+.rngends b{color:var(--t1);font-weight:600}
+
+/* tiers */
+.tier{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12px}
+.tier + .tier{border-top:1px solid var(--br)}
+.tier .sw{width:3px;height:26px;border-radius:2px;flex:none}
+.tier .nm{font-weight:500;color:var(--t1);white-space:nowrap}
+.tier .ct{font-size:10.5px;color:var(--t3)}
+.tier .psf{margin-left:auto;font-size:11px;color:var(--t2);white-space:nowrap}
+.tier.src{background:#f3f8f4;margin:0 -13px;padding-left:13px;padding-right:13px}
+.tier .arvtag{font-size:9.5px;font-weight:600;color:var(--green);text-transform:uppercase;
+  letter-spacing:.03em}
+.nonefound{font-size:11px;color:var(--t3);margin-top:7px;line-height:1.5}
+
+/* comps used */
+.cu{display:flex;gap:8px;padding:8px 0;font-size:12px;align-items:flex-start}
+.cu + .cu{border-top:1px solid var(--br)}
+.cu:hover{background:var(--bg1);margin:0 -13px;padding-left:13px;padding-right:13px}
+.cu .n{width:17px;height:17px;border-radius:50%;flex:none;display:grid;place-items:center;
+  font-size:10px;font-weight:600;color:#fff;margin-top:1px}
+.cu .bd{min-width:0;flex:1}
+.cu .t{display:flex;align-items:baseline;gap:6px}
+.cu .a{font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cu .p{margin-left:auto;font-weight:600;white-space:nowrap}
+.cu .m{font-size:10.5px;color:var(--t3);margin-top:1px}
+.cu .w{font-size:11px;color:var(--t2);line-height:1.45;margin-top:3px}
+
+/* chain of thought */
+.cot{padding:11px 13px}
+.cotbtn{width:100%;display:flex;align-items:center;gap:6px;font-size:12px;color:var(--accent);
+  font-weight:500}
+.cotbody{margin-top:9px;font-size:12px;line-height:1.65;color:var(--t2);
+  border-left:2px solid var(--br2);padding-left:10px;display:flex;flex-direction:column;gap:8px}
+.cotbody b{color:var(--t1);font-weight:600}
+.cotbody .q{font-size:10px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--t3);display:block;margin-bottom:2px}
+
+/* actions */
+.acts{flex:none;border-top:1px solid var(--br2);background:var(--bg1);padding:8px 11px;
+  display:flex;gap:6px}
+.pri{flex:1;height:30px;border-radius:var(--rs);background:var(--accent);color:#fff;
+  font-size:12px;font-weight:500}
+.gho{height:30px;padding:0 11px;border-radius:var(--rs);border:1px solid var(--br2);
+  background:var(--bg);color:var(--t2);font-size:12px;font-weight:500}
+
+/* offer calc, folded — it already collapses to one line in the real thing */
+.calcbar{flex:none;border-top:1px solid var(--br);background:var(--bg1);padding:6px 12px;
+  display:flex;align-items:center;gap:9px;font-size:12px;color:var(--t2)}
+.calcbar b{color:var(--t1);font-weight:600}
+.calcbar .sp{margin-left:auto;color:var(--accent);font-weight:500;font-size:11.5px}
+
+/* ── the Today BOARD card inset ── */
+.cardwrap{width:1280px;display:flex;gap:18px;align-items:flex-start}
+.cardnote{flex:1;font-size:12px;line-height:1.6;color:#55565d}
+.cardnote b{color:#18181a;font-weight:600}
+.tcard{width:268px;flex:none;border:1px solid var(--br2);border-radius:8px;background:#fff;
+  padding:9px 10px;box-shadow:0 2px 8px -3px rgba(0,0,0,.18)}
+.tcard .nm{font-size:13px;font-weight:600}
+.tcard .ad2{font-size:11.5px;color:var(--t2);margin-top:1px}
+.tcard .ph{font-size:11.5px;color:var(--accent);margin-top:1px}
+.tcard .arvchip{margin-top:7px;display:flex;align-items:center;gap:6px;padding:5px 7px;
+  border-radius:var(--rs);background:#f3f8f4;font-size:11.5px}
+.tcard .arvchip .k2{color:var(--green);font-weight:600}
+.tcard .arvchip .v2{font-weight:600;color:var(--t1)}
+.tcard .arvchip .o2{margin-left:auto;color:var(--t2);font-size:11px}
+.tcard .foot{margin-top:7px;display:flex;gap:8px;font-size:10.5px;color:var(--t3)}
+</style>
+</head>
+<body>
+<div class="stagewrap">
+
+  <div class="caption">
+    <b>AI price analyzer — Today modal, Comps pane</b>
+    <span>1280 × 792 (5xl @ 88vh) · rail collapsed, as it already is on this pane</span>
+    <span class="sp" id="stamp"></span>
+  </div>
+
+  <div class="modal">
+    <!-- header: the dense one-line header the modal already has -->
+    <div class="hd">
+      <h2>Janice Whitfield</h2>
+      <span class="badge">New Lead</span>
+      <span class="badge blue">Call 1 of 2</span>
+      <span class="tel">(317) 555-0148</span>
+      <span class="ad">3184 S Randolph St, Indianapolis, IN 46203</span>
+      <button class="x">✕</button>
+    </div>
+
+    <!-- tabs -->
+    <div class="tabs">
+      <span class="chev">»</span>
+      <button class="tab" data-pane="activity">Activity</button>
+      <button class="tab on" data-pane="comps">Comps</button>
+      <span class="oc">Open comps page ↗</span>
+    </div>
+
+    <div class="pane">
+      <!-- filter strip: unchanged, plus ONE new segmented control on the right -->
+      <div class="filters">
+        <span class="fsel">Sold within <b>12 mo</b></span>
+        <span class="fsel">Status <b>Any</b></span>
+        <span class="fsel">Beds <b>2–4</b></span>
+        <span class="fsel">Sq ft <b>1,000–1,800</b></span>
+        <span class="fsel">½ mi</span>
+        <div class="seg">
+          <button class="sgb" data-rail="photos">Photos</button>
+          <button class="sgb on" data-rail="analysis">Analysis</button>
+        </div>
+      </div>
+
+      <div class="split">
+        <div class="mapcol">
+          <div class="mapel" id="map"></div>
+          <div class="bnd" id="bnd" hidden>
+            <b>Boundary.</b> Kept west of S Keystone Ave — sales east of it run
+            20–30% cheaper and read as a different market.
+          </div>
+          <!-- The legend swaps with the mode, because the pins do. In analysis
+               mode the pill's own second line carries the tier as a WORD, so the
+               legend just names the three tiers it actually drew. -->
+          <div class="leg" id="leg"></div>
+        </div>
+
+        <!-- ── the analysis rail ── -->
+        <div class="rail">
+          <div class="railhd">
+            <span class="lb">How I comped it</span>
+            <span class="sp" id="railMeta"></span>
+          </div>
+          <div class="railbody" id="railBody"></div>
+          <div class="acts" id="railActs" hidden>
+            <button class="pri" id="useBtn">Use as ARV</button>
+            <button class="gho">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- the cash-offer calc, folded to its one-line state -->
+      <div class="calcbar" id="calcbar"></div>
+    </div>
+  </div>
+
+  <!-- ── the board card, because "today card" could mean this one ── -->
+  <div class="cardwrap">
+    <div class="cardnote">
+      <b>And on the board card itself.</b> The analyzer is far too big to live on a
+      268px card, but its <i>answer</i> is one line — so a lead that has been
+      comped says so, and a rep can see the number without opening anything. The
+      chip only appears once an analysis exists; nothing is shown for a lead
+      nobody has worked yet, because an empty ARV row on every card is noise.
+      <br><br>
+      Clicking the chip opens the modal <b>on the Comps pane</b> with the rail
+      already showing this result, rather than dropping the rep on the timeline
+      to find it.
+    </div>
+    <div class="tcard">
+      <div class="nm">Janice Whitfield</div>
+      <div class="ad2">3184 S Randolph St</div>
+      <div class="ph">(317) 555-0148</div>
+      <div class="arvchip">
+        <span class="k2">ARV</span>
+        <span class="v2">$202k</span>
+        <span class="o2">offer $67k</span>
+      </div>
+      <div class="foot"><span>◯ Follow up · Tue</span><span>Call 1 of 2</span></div>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+document.getElementById('stamp').textContent =
+  'v1 · ' + new Date().toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+
+/* ── the subject ────────────────────────────────────────────────────────────
+   Deliberately BIGGER than its comp set (1,420 sf against a 1,245 sf median,
+   +14%). That is the case Lance raised and the case the measurement says is
+   common: 40% of subjects are >5% bigger than their set, and when they are, the
+   naive average-$/sf number tops every comp in its own set 29% of the time. */
+const S = { a:'3184 S Randolph St', sqft:1420, bd:3, ba:1, yr:1953,
+            lat:39.7351, lng:-86.1249 };
+
+/* Tier vocabulary. Only tiers actually FOUND are drawn — most neighbourhoods
+   have no new construction, and a permanently empty "New build" row would train
+   people to ignore the whole block. */
+const TIERS = {
+  asis:   { nm:'Needs a lot of work', sw:'#b3261e', ink:'#b3261e' },
+  retail: { nm:'Standard retail',     sw:'#2563c9', ink:'#2563c9' },
+  reno:   { nm:'Renovated / flip',    sw:'#15683c', ink:'#15683c' },
+  newb:   { nm:'New build',           sw:'#7c3aed', ink:'#7c3aed' },
+};
+
+/* The nine it used. `w` is the per-comp why-note the rail and the pin both show. */
+const USED = [
+  { n:1, t:'reno', a:'1104 Cameron St',   p:204000, sf:1310, bd:3, ba:2, yr:1951, d:0.21, days:41,
+    st:'sold', lat:39.7369, lng:-86.1281,
+    w:'Full flip, and the ceiling for this street. Bought $96k in February, back on 5 months later — new kitchen, bath, LVP throughout, 22 interior photos. Note it is a 3/2.' },
+  { n:2, t:'reno', a:'2839 Shelby St',    p:189000, sf:1180, bd:3, ba:1, yr:1948, d:0.38, days:88,
+    st:'sold', lat:39.7318, lng:-86.1305,
+    w:'Flip. Bought $71k last October; listing text leads with new roof and HVAC.' },
+  { n:3, t:'retail', a:'3021 S Randolph St', p:164000, sf:1285, bd:3, ba:1, yr:1955, d:0.09, days:63,
+    st:'sold', lat:39.7368, lng:-86.1246,
+    w:'Lived-in and clean, original kitchen in the photos. Nothing renovated.' },
+  { n:4, t:'retail', a:'1247 E Sumner Ave', p:152000, sf:1190, bd:2, ba:1, yr:1950, d:0.31, days:112,
+    st:'sold', lat:39.7327, lng:-86.1211,
+    w:'Dated but sound. Carpet over hardwood, 1990s bath.' },
+  { n:5, t:'retail', a:'3402 Carson Ave',  p:171000, sf:1380, bd:3, ba:1, yr:1957, d:0.34, days:74,
+    st:'sold', lat:39.7382, lng:-86.1198,
+    w:'Closest in size to yours of anything retail-grade. Same floor plan era.' },
+  { n:6, t:'retail', a:'2915 Barth Ave',   p:148000, sf:1255, bd:3, ba:1, yr:1946, d:0.43, days:156,
+    st:'sold', lat:39.7305, lng:-86.1268,
+    w:'Six months old, so it is the weakest of the four — kept for the size match.' },
+  { n:7, t:'asis',  a:'3310 S State Ave',  p:86000,  sf:1140, bd:2, ba:1, yr:1949, d:0.26, days:52,
+    st:'sold', lat:39.7338, lng:-86.1192,
+    w:'"Investor special, sold as-is." No interior photos past the living room — that is the tell.' },
+  { n:8, t:'asis',  a:'1520 Orange St',    p:74000,  sf:1215, bd:3, ba:1, yr:1944, d:0.44, days:97,
+    st:'sold', lat:39.7297, lng:-86.1229,
+    w:'Estate sale, cash only, roof visibly failing in the one exterior shot.' },
+  { n:9, t:'asis',  a:'3055 Villa Ave',    p:91000,  sf:1190, bd:2, ba:1, yr:1952, d:0.29, days:133,
+    st:'sold', lat:39.7362, lng:-86.1310,
+    w:'Sold as-is to an investor; relisted since at $179k but has not moved in 74 days.' },
+];
+
+/* Everything else in radius — drawn faded, so "what it did not use" is visible
+   rather than silently absent. */
+const OTHER = [
+  {p:219000,sf:1690,lat:39.7392,lng:-86.1262,st:'sold'},
+  {p:134000,sf:1090,lat:39.7331,lng:-86.1338,st:'sold'},
+  {p:159000,sf:1420,lat:39.7290,lng:-86.1288,st:'sold'},
+  {p:112000,sf:980, lat:39.7378,lng:-86.1330,st:'sold'},
+  {p:179000,sf:1205,lat:39.7361,lng:-86.1312,st:'active'},
+  {p:96000, sf:1010,lat:39.7312,lng:-86.1178,st:'sold'},
+  {p:205000,sf:1560,lat:39.7405,lng:-86.1240,st:'sold'},
+  {p:88000, sf:1150,lat:39.7284,lng:-86.1250,st:'sold'},
+  {p:143000,sf:1240,lat:39.7345,lng:-86.1160,st:'sold'},
+  {p:167000,sf:1330,lat:39.7398,lng:-86.1295,st:'active'},
+  {p:121000,sf:1120,lat:39.7302,lng:-86.1330,st:'sold'},
+  {p:198000,sf:1480,lat:39.7386,lng:-86.1218,st:'sold'},
+  {p:104000,sf:1060,lat:39.7276,lng:-86.1210,st:'sold'},
+  {p:156000,sf:1290,lat:39.7412,lng:-86.1276,st:'sold'},
+  {p:132000,sf:1175,lat:39.7322,lng:-86.1352,st:'sold'},
+  {p:186000,sf:1395,lat:39.7375,lng:-86.1170,st:'active'},
+  {p:79000, sf:1085,lat:39.7268,lng:-86.1272,st:'sold'},
+  {p:174000,sf:1350,lat:39.7418,lng:-86.1225,st:'sold'},
+  {p:118000,sf:1130,lat:39.7294,lng:-86.1318,st:'sold'},
+  {p:191000,sf:1440,lat:39.7402,lng:-86.1188,st:'sold'},
+  {p:127000,sf:1200,lat:39.7338,lng:-86.1368,st:'sold'},
+  {p:163000,sf:1310,lat:39.7424,lng:-86.1300,st:'sold'},
+  {p:99000, sf:1045,lat:39.7262,lng:-86.1232,st:'sold'},
+  {p:181000,sf:1370,lat:39.7392,lng:-86.1160,st:'sold'},
+  {p:145000,sf:1260,lat:39.7280,lng:-86.1180,st:'sold'},
+];
+
+const money = n => '$' + Math.round(n).toLocaleString();
+const short = n => n >= 1000 ? '$' + Math.round(n/1000) + 'k' : '$' + n;
+
+/* ── the numbers the rail talks about ──────────────────────────────────────
+   Every one of these is arithmetic the SERVER would do. The model's job is to
+   choose the tier, assign the comps and write the words — never to invent a
+   figure. Recomputed here only so the mockup cannot drift from its own prose. */
+const reno    = USED.filter(c => c.t === 'reno');
+const renoPsf = Math.round(reno.reduce((s,c) => s + c.p/c.sf, 0) / reno.length);
+const renoMedSf = Math.round(reno.reduce((s,c) => s + c.sf, 0) / reno.length);
+const MARGINAL = 65;                          // measured for 46203: $65/sf marginal
+const NAIVE  = Math.round(renoPsf * S.sqft / 1000) * 1000;
+const SIZED  = Math.round((renoPsf*renoMedSf + (S.sqft-renoMedSf)*MARGINAL) / 1000) * 1000;
+const CEIL   = Math.max(...reno.map(c => c.p));   // best renovated sale on this street
+const ARV    = 202000;                            // held just under the ceiling
+const ARVPSF = Math.round(ARV / S.sqft);
+
+/* The comps-page calculator's formula, not the desk rail's: ARV x % − rehab − fee. */
+const OFFER = Math.round(ARV*0.70 - S.sqft*35 - 25000);
+
+const HOOD_LO = 74000, HOOD_HI = 219000;
+const HOOD_AT = Math.round((ARV - HOOD_LO) / (HOOD_HI - HOOD_LO) * 100);
+
+/* ── map ── */
+let map;
+function drawMap(){
+  map = L.map('map',{zoomControl:false,scrollWheelZoom:false,attributionControl:false})
+        .setView([S.lat, S.lng], 15);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+    {maxZoom:19}).addTo(map);
+  render();
+}
+
+/** Recency fade, off-market only — a live listing is current by definition. */
+const fade = d => 0.32 + 0.68 * Math.max(0, 1 - Math.min(d,360)/360);
+
+function pill(html, w, h){
+  return L.divIcon({className:'', iconSize:[w,h], iconAnchor:[w/2,h/2], html});
+}
+
+function render(){
+  const analysis = state.rail === 'analysis' && state.phase === 'done';
+  document.getElementById('bnd').hidden = !analysis;
+
+  document.getElementById('leg').innerHTML = analysis
+    ? `<span><i style="background:#2563c9"></i>Subject</span>`
+      + `<span><i style="background:${TIERS.asis.sw}"></i>Needs work</span>`
+      + `<span><i style="background:${TIERS.retail.sw}"></i>Retail</span>`
+      + `<span><i style="background:${TIERS.reno.sw}"></i>Flip</span>`
+      + `<span><i style="background:#b9bac1"></i>Not used</span>`
+    : `<span><i style="background:#2563c9"></i>Subject</span>`
+      + `<span><i style="background:#d92d20"></i>For sale</span>`
+      + `<span><i style="background:#f5c518"></i>Sold</span>`
+      + `<span><i class="fade" style="width:26px;background:linear-gradient(90deg,#f5c518,rgba(245,197,24,.32))"></i>0–360d</span>`;
+
+  map.eachLayer(l => { if (l instanceof L.Marker) map.removeLayer(l); });
+
+  /* Unused comps. In analysis mode they go grey and quiet: the question the rep
+     is asking has become "which ones did it use", and 25 full-colour pills
+     drown out the nine that matter. Faded, never hidden — a comp the analyzer
+     passed over is information, and removing it would look like it never
+     existed. */
+  OTHER.forEach(c => {
+    const col = analysis ? '#b9bac1' : (c.st === 'active' ? '#d92d20' : '#f5c518');
+    const ink = analysis ? '#fff' : (c.st === 'active' ? '#fff' : '#3a2f00');
+    const op  = analysis ? 0.55 : fade(150);
+    L.marker([c.lat,c.lng], {icon: pill(
+      `<div style="display:grid;place-items:center;width:46px;height:20px;border-radius:4px;
+        background:${col};opacity:${op};color:${ink};font:600 10px Inter,sans-serif;
+        border:1.5px solid rgba(255,255,255,.9)">${short(c.p)}</div>`, 46, 20)}).addTo(map);
+  });
+
+  /* The nine it used. Numbered to match the rail exactly, and carrying the TIER
+     as a word rather than a fifth colour: the palette already spends red on
+     "for sale", yellow on "sold", blue on the subject and violet on pending, so
+     a tier hue would be the one signal too many. The pill's second line already
+     exists — this just changes what it says. */
+  USED.forEach(c => {
+    const t = TIERS[c.t];
+    const base = c.st === 'active' ? '#d92d20' : '#f5c518';
+    const ink  = c.st === 'active' ? '#fff' : '#3a2f00';
+    if (analysis){
+      L.marker([c.lat,c.lng], {icon: pill(
+        `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
+           width:78px;height:34px;border-radius:5px;background:#fff;color:#18181a;
+           border:2px solid ${t.sw};box-shadow:0 1px 6px rgba(0,0,0,.22);line-height:1.1;
+           font-family:Inter,sans-serif">
+           <span style="font:600 11px Inter,sans-serif">${short(c.p)}</span>
+           <span style="font-size:8.5px;color:${t.ink};font-weight:600;margin-top:1px">
+             ${c.n} · ${c.t==='reno'?'Flip':c.t==='asis'?'As-is':'Retail'}</span>
+         </div>`, 78, 34)}).addTo(map);
+    } else {
+      L.marker([c.lat,c.lng], {icon: pill(
+        `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
+           width:70px;height:32px;border-radius:5px;background:${base};color:${ink};
+           opacity:${fade(c.days)};border:1.5px solid rgba(255,255,255,.9);line-height:1.1">
+           <span style="font:600 10.5px Inter,sans-serif">${short(c.p)}</span>
+           <span style="font-size:8.5px;margin-top:1px">${c.bd}/${c.ba} · ${c.sf}sf</span>
+         </div>`, 70, 32)}).addTo(map);
+    }
+  });
+
+  /* The subject, in the same two-line pill grammar, blue with a heavier ring. */
+  L.marker([S.lat,S.lng], {zIndexOffset:1000, icon: pill(
+    `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
+       width:82px;height:34px;border-radius:5px;background:#2563c9;color:#fff;
+       border:2px solid #fff;box-shadow:0 1px 6px rgba(37,99,201,.5);line-height:1.1">
+       <span style="font:600 10.5px Inter,sans-serif">Subject
+         <span style="font-weight:400;font-size:8.5px;opacity:.85">${S.yr}</span></span>
+       <span style="font-size:8.5px;opacity:.9;margin-top:1px">${S.bd}/${S.ba} · ${S.sqft}sf</span>
+     </div>`, 82, 34)}).addTo(map);
+}
+
+/* ── rail states ───────────────────────────────────────────────────────────── */
+const state = { rail:'analysis', phase:'idle', cot:false };
+
+const STEPS = [
+  'Framed the neighbourhood — <b>34</b> sales inside ½ mi, west of S Keystone',
+  'Read <b>14</b> listings on Zillow — text, photo counts and sale history',
+  'Graded condition — <b>3</b> as-is, <b>4</b> retail, <b>2</b> flips, no new build',
+  'Sized against the subject and checked it against the top of the street',
+];
+
+function railIdle(){
+  return `<div class="idle">
+    <div class="big">Work out an <b>ARV</b> from the sales around this house, and
+      write up how it got there so you can talk it through with ${'Janice'}.</div>
+    <button class="runbtn" id="go">Work out the ARV</button>
+    <div class="cost">Reads up to <b>40</b> nearby listings. About 10 seconds.
+      Cached for 30 days — running it again later is free, and it only runs when
+      you ask.</div>
+  </div>`;
+}
+
+function railRunning(i){
+  return `<div class="steps">` + STEPS.map((s,n) => {
+    const cls = n < i ? 'done' : n === i ? 'now' : 'wait';
+    const tick = n < i ? '✓' : n === i ? '<span class="spin">◌</span>' : '·';
+    return `<div class="step ${cls}"><span class="tick">${tick}</span><span>${s}</span></div>`;
+  }).join('') + `</div>`;
+}
+
+function tierRow(key, count, lo, hi, isSource){
+  const t = TIERS[key];
+  return `<div class="tier ${isSource?'src':''}">
+    <span class="sw" style="background:${t.sw}"></span>
+    <span>
+      <span class="nm">${t.nm}</span>
+      <span class="ct"> · ${count}</span>
+      ${isSource?'<br><span class="arvtag">ARV comes from here</span>':''}
+    </span>
+    <span class="psf">$${lo}–${hi}/sf</span>
+  </div>`;
+}
+
+function compRow(c){
+  const t = TIERS[c.t];
+  return `<div class="cu">
+    <span class="n" style="background:${t.sw}">${c.n}</span>
+    <span class="bd">
+      <span class="t"><span class="a">${c.a}</span><span class="p">${money(c.p)}</span></span>
+      <span class="m">${c.bd}/${c.ba} · ${c.sf.toLocaleString()} sf · ${c.yr} · ${c.d} mi · ${c.days}d ago</span>
+      <span class="w">${c.w}</span>
+    </span>
+  </div>`;
+}
+
+function railDone(){
+  return `<div class="res">
+
+    <div class="arvhead">
+      <div class="k">After repair value</div>
+      <div class="arvrow">
+        <span class="v">${money(ARV)}</span>
+        <span class="conf">Thin — 2 flips</span>
+      </div>
+      <div class="arvsub">$${ARVPSF}/sf on ${S.sqft.toLocaleString()} sf · 9 comps · ½ mi · read ${new Date().toLocaleDateString(undefined,{month:'short',day:'numeric'})}</div>
+    </div>
+
+    <!-- THE METHOD. This is the section the whole feature exists for: it shows
+         the number it did NOT use, and why, in the rep's own words. -->
+    <div class="sec">
+      <div class="h">How I got there</div>
+      <div class="say">
+        The two flips went <b>$156</b> and <b>$160</b> a foot. Straight multiplication
+        would put yours at <span class="strike">${money(NAIVE)}</span> —
+        but that is the trap: yours is <b>${S.sqft.toLocaleString()} sf</b> against a
+        <b>${renoMedSf.toLocaleString()} sf</b> median, and around here an extra foot
+        is only worth about <b>$${MARGINAL}</b>, not the <b>$${renoPsf}</b> average.
+        Nearly half of what a house sells for on this street has nothing to do with
+        floor area.
+      </div>
+      <div class="say">Sized properly, that lands at <b>${money(SIZED)}</b>.</div>
+      <div class="cap">
+        <b>Held to ${money(ARV)}.</b> ${money(SIZED)} would put you past
+        <b>1104 Cameron</b> at ${money(CEIL)}, the best renovated sale this street has
+        recorded — and Cameron is a <b>3/2</b>. Yours is a <b>3/1</b>. Being 175 feet
+        bigger does not beat a second bathroom, so I held just under it.
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="h">The neighbourhood <span class="sp">34 sales · ½ mi</span></div>
+      <div class="rng">
+        <div class="rngbar">
+          <span class="me" style="left:${HOOD_AT}%"></span>
+          <span class="lab" style="left:${HOOD_AT}%;transform:translateX(-82%)">yours, fixed up</span>
+        </div>
+        <div class="rngends"><span><b>$74k</b> as-is</span><span><b>$219k</b> top sale</span></div>
+      </div>
+      <div class="nonefound">
+        Only two sales clear ${money(CEIL)}: <b>1418 Hoyt</b> at $219k (1,690 sf, a
+        4/2) and <b>3210 Fletcher</b> at $205k (1,560 sf) — both too big to price
+        yours off. No new construction within the ring.
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="h">Tiers I could see</div>
+      ${tierRow('asis',   3, 61, 76,  false)}
+      ${tierRow('retail', 4, 118, 133, false)}
+      ${tierRow('reno',   2, 160, 162, true)}
+      <div class="nonefound">
+        The as-is three are what yours is worth <b>today</b>, roughly
+        <b>$86k–$91k</b> — the number to reach for when she pushes back on the offer.
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="h">The nine I used <span class="sp">tap one to see it</span></div>
+      ${USED.map(compRow).join('')}
+    </div>
+
+    <div class="cot">
+      <button class="cotbtn" id="cotBtn">
+        <span id="cotArrow">›</span> ${state.cot ? 'Hide' : 'Show'} the full reasoning
+      </button>
+      ${state.cot ? `<div class="cotbody">
+        <div><span class="q">Where I drew the neighbourhood</span>
+          S Keystone Ave is a four-lane arterial and everything east of it sells
+          20–30% under this pocket, so I treated it as the edge rather than a
+          radius. Pleasant Run Creek closes the north side. That left 34 sales.</div>
+        <div><span class="q">What is actually on the market</span>
+          Three live listings. <b>3055 Villa</b> is the one worth knowing: sold
+          as-is at $91k, relisted at $179k, and it has sat <b>74 days</b>. Past 30
+          days a price is wrong, so I did not let that ask pull the ARV up.</div>
+        <div><span class="q">Why only two flips</span>
+          Fourteen listings read, two with a clear buy-low-then-remodel history
+          and renovation language. Two is thin. If this one matters, the honest
+          move is a walkthrough on Cameron before the offer goes firm.</div>
+        <div><span class="q">Why not price on $/sf</span>
+          Across our own 92,693 comps, an extra foot is worth about <b>half</b>
+          what the average $/sf implies, and <b>44%</b> of a home's price is
+          size-independent. When the subject is bigger than its comp set, the
+          naive number tops every comp in that set about <b>29%</b> of the time.</div>
+        <div><span class="q">What would change my mind</span>
+          A renovated sale over 1,400 sf inside the ring, or interior photos on
+          <b>3310 S State</b> — if that as-is went at $75/sf with a sound roof,
+          the as-is floor is higher than I have it.</div>
+      </div>` : ''}
+    </div>
+
+  </div>`;
+}
+
+function paint(){
+  const body = document.getElementById('railBody');
+  const meta = document.getElementById('railMeta');
+  const acts = document.getElementById('railActs');
+
+  if (state.rail === 'photos'){
+    meta.textContent = '9 of 34';
+    acts.hidden = true;
+    body.innerHTML = `<div class="idle"><div class="big" style="color:var(--t3)">
+      The photo tray, unchanged — this is what the rail shows today.</div></div>`;
+    document.querySelector('.railhd .lb').textContent = 'Photos';
+    render();
+    return;
+  }
+  document.querySelector('.railhd .lb').textContent = 'How I comped it';
+
+  if (state.phase === 'idle'){
+    meta.textContent = ''; acts.hidden = true;
+    body.innerHTML = railIdle();
+    document.getElementById('go').onclick = run;
+  } else if (state.phase === 'running'){
+    meta.textContent = 'working…'; acts.hidden = true;
+    body.innerHTML = railRunning(state.step);
+  } else {
+    meta.textContent = '9 of 34 · 14 reads';
+    acts.hidden = false;
+    document.getElementById('useBtn').textContent = `Use ${money(ARV)} as ARV`;
+    body.innerHTML = railDone();
+    document.getElementById('cotBtn').onclick = () => { state.cot = !state.cot; paint(); };
+    if (state.scroll) body.scrollTop = state.scroll;
+  }
+  render();
+}
+
+function run(){
+  state.phase = 'running'; state.step = 0; paint();
+  const tick = () => {
+    state.step++;
+    if (state.step >= STEPS.length){ state.phase = 'done'; paint(); return; }
+    paint(); setTimeout(tick, 700);
+  };
+  setTimeout(tick, 700);
+}
+
+document.querySelectorAll('[data-rail]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('[data-rail]').forEach(x => x.classList.toggle('on', x === b));
+  state.rail = b.dataset.rail; paint();
+});
+
+document.getElementById('calcbar').innerHTML =
+  `<span>Cash offer</span><span>·</span><b>9 picked</b>`
+  + `<span style="color:var(--t3)">— ARV ${money(ARV)} → offer <b>${money(OFFER)}</b></span>`
+  + `<span class="sp">Expand ⌄</span>`;
+
+drawMap();
+state.phase = 'done';   // open on the answer; press Photos, then Analysis, to replay
+
+/* ?scroll=N pre-scrolls the rail, so a screenshot can show the half that lives
+   below the fold without anyone having to drive the page. */
+const qs = new URLSearchParams(location.search);
+if (qs.has('scroll')) state.scroll = Number(qs.get('scroll')) || 0;
+if (qs.has('cot')) state.cot = true;
+paint();
+</script>
+</body>
+</html>
