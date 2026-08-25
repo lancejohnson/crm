@@ -1,29 +1,63 @@
 <template>
-  <!-- Two independent columns, like the sheet. Shared-looking defaults (both
-       ARVs empty, both $35/sf, both $25k fee) but typing in one never writes
-       the other — no merged cells. -->
+  <!-- ONE column by default; "+ Compare" adds the second. Two calculators
+       side by side is the exception, not the norm, and the second column was
+       costing ~5rem of width on a surface whose whole job is the map.
+
+       The columns stay independent, like the sheet: shared-looking defaults
+       (both ARVs empty, both $25k fee) but typing in one never writes the
+       other — no merged cells. -->
   <div class="wrap">
-  <div class="calc" @keydown="onKeys">
+  <div
+    class="calc"
+    :style="{ width: cols === 2 ? '30rem' : '21rem' }"
+    @keydown="onKeys"
+  >
     <div class="head">
       <span>{{ __('Cash offer') }}</span>
-      <button
-        type="button"
-        class="save"
-        :disabled="!canSave || saving"
-        @click="save"
-      >
-        {{ saving ? __('Saving…') : __('Save calcs') }}
-      </button>
+      <span class="head-r">
+        <button
+          v-if="cols === 1"
+          type="button"
+          class="link"
+          :title="__('Run a second set of numbers beside this one')"
+          @click="cols = 2"
+        >
+          {{ __('+ Compare') }}
+        </button>
+        <button
+          type="button"
+          class="save"
+          :disabled="!canSave || saving"
+          @click="save"
+        >
+          {{ saving ? __('Saving…') : __('Save calcs') }}
+        </button>
+      </span>
     </div>
 
-    <div class="grid">
-      <span />
-      <span class="colh">{{ __('Scenario 1') }}</span>
-      <span class="colh">{{ __('Scenario 2') }}</span>
+    <div
+      class="grid"
+      :style="{ gridTemplateColumns: cols === 2 ? '6.5rem 1fr 1fr' : '6.5rem 1fr' }"
+    >
+      <template v-if="cols === 2">
+        <span />
+        <span class="colh">{{ __('Scenario 1') }}</span>
+        <span class="colh">
+          {{ __('Scenario 2') }}
+          <button
+            type="button"
+            class="drop"
+            :title="__('Drop this scenario')"
+            @click="cols = 1"
+          >
+            ×
+          </button>
+        </span>
+      </template>
 
       <span class="lab">{{ __('ARV') }}</span>
       <input
-        v-for="col in [0, 1]"
+        v-for="col in visible"
         :key="'arv' + col"
         :ref="(el) => setField(0, col, el)"
         :class="{ empty: !s[col].arv }"
@@ -35,7 +69,7 @@
       />
 
       <span class="lab">{{ __('% of ARV') }}</span>
-      <label v-for="col in [0, 1]" :key="'pct' + col" class="pct">
+      <label v-for="col in visible" :key="'pct' + col" class="pct">
         <input
           :ref="(el) => setField(1, col, el)"
           inputmode="numeric"
@@ -47,23 +81,77 @@
       </label>
 
       <span class="lab">{{ __('After %') }}</span>
-      <span class="out">{{ s[0].arv ? money(run(0).after) : '—' }}</span>
-      <span class="out">{{ s[1].arv ? money(run(1).after) : '—' }}</span>
+      <span v-for="col in visible" :key="'after' + col" class="out">
+        {{ s[col].arv ? money(run(col).after) : '—' }}
+      </span>
 
-      <span class="lab">{{ __('Rehab $/sf') }}</span>
-      <input
-        v-for="col in [0, 1]"
-        :key="'psf' + col"
-        :ref="(el) => setField(2, col, el)"
-        inputmode="numeric"
-        :value="money(s[col].rehabPsf)"
-        @focus="$event.target.select()"
-        @input="typeMoney(col, 'rehabPsf', $event)"
-      />
+      <!-- Repairs is a NAMED choice, not a number to invent. The rep is on the
+           phone with a seller describing a house; "kitchen & baths" is a thing
+           they can hear, "$30/sf" is not. Each row carries what that level
+           costs on THIS house so the ladder has a felt price, not just a rate.
+           "Other…" keeps the raw $/sf field one click away — the preset is a
+           shortcut, never a cage. -->
+      <span class="lab">{{ __('Repairs') }}</span>
+      <div v-for="col in visible" :key="'rep' + col" class="rep">
+        <template v-if="isCustom(col)">
+          <input
+            :ref="(el) => setField(2, col, el)"
+            class="rep-psf"
+            inputmode="numeric"
+            :value="money(s[col].rehabPsf)"
+            @focus="$event.target.select()"
+            @input="typeMoney(col, 'rehabPsf', $event)"
+          />
+          <button
+            type="button"
+            class="rep-caret"
+            :title="__('Pick a repair level')"
+            @click="toggleMenu(col)"
+          >
+            ▾
+          </button>
+          <span class="rep-sf">{{ __('/sf') }}</span>
+        </template>
+        <button
+          v-else
+          type="button"
+          class="rep-btn"
+          :class="{ open: menuFor === col }"
+          @click="toggleMenu(col)"
+        >
+          <span class="rep-name">{{ tierFor(col).label }}</span>
+          <span class="vals">
+            <i>{{ money(s[col].rehabPsf) }}/sf</i><b v-if="sqft">
+              ({{ k(s[col].rehabPsf * sqft) }})</b>
+          </span>
+          <span class="caret">▾</span>
+        </button>
+
+        <div v-if="menuFor === col" class="menu">
+          <button
+            v-for="t in TIERS"
+            :key="t.key"
+            type="button"
+            class="mrow"
+            :class="{ on: s[col].rehabPsf === t.psf }"
+            @click="pickTier(col, t)"
+          >
+            <span>{{ t.label }}</span>
+            <span class="vals">
+              <i>{{ money(t.psf) }}/sf</i><b v-if="sqft">
+                ({{ k(t.psf * sqft) }})</b>
+            </span>
+          </button>
+          <div class="msep" />
+          <button type="button" class="mrow other" @click="pickOther(col)">
+            {{ __('Other…') }}
+          </button>
+        </div>
+      </div>
 
       <span class="lab">{{ __('Rehab') }} <i>{{ fmt(sqft) }} sf</i></span>
       <input
-        v-for="col in [0, 1]"
+        v-for="col in visible"
         :key="'rehab' + col"
         :ref="(el) => setField(3, col, el)"
         inputmode="numeric"
@@ -73,12 +161,13 @@
       />
 
       <span class="lab">{{ __('Wholesale') }}</span>
-      <span class="out">{{ s[0].arv ? money(run(0).wholesale) : '—' }}</span>
-      <span class="out">{{ s[1].arv ? money(run(1).wholesale) : '—' }}</span>
+      <span v-for="col in visible" :key="'ws' + col" class="out">
+        {{ s[col].arv ? money(run(col).wholesale) : '—' }}
+      </span>
 
       <span class="lab">{{ __('Fee') }}</span>
       <input
-        v-for="col in [0, 1]"
+        v-for="col in visible"
         :key="'fee' + col"
         :ref="(el) => setField(4, col, el)"
         inputmode="numeric"
@@ -88,11 +177,13 @@
       />
 
       <span class="lab offer">{{ __('Offer') }}</span>
-      <span class="out offer" :class="{ bad: s[0].arv && run(0).offer <= 0 }">
-        {{ s[0].arv ? money(run(0).offer) : '—' }}
-      </span>
-      <span class="out offer" :class="{ bad: s[1].arv && run(1).offer <= 0 }">
-        {{ s[1].arv ? money(run(1).offer) : '—' }}
+      <span
+        v-for="col in visible"
+        :key="'offer' + col"
+        class="out offer"
+        :class="{ bad: s[col].arv && run(col).offer <= 0 }"
+      >
+        {{ s[col].arv ? money(run(col).offer) : '—' }}
       </span>
     </div>
     <textarea
@@ -164,16 +255,22 @@
 
 <script setup>
 /**
- * Cash Offer — same arithmetic as the underwriting template, twice:
+ * Cash Offer — same arithmetic as the underwriting template:
  *   after      = ARV × %
  *   rehab      = $/sf × subject sqft
  *   wholesale  = after − rehab
  *   offer      = wholesale − fee
  *
- * Scenario 1 starts at 70%, Scenario 2 at 65%. Everything else starts the same
- * ($35/sf, $25k fee, empty ARV) and then each column is its own notebook.
+ * One scenario by default at 70%; "+ Compare" opens a second at 65%. Each
+ * column is its own notebook.
+ *
+ * Repairs are picked by NAME off a four-rung ladder. There is deliberately no
+ * stored `tier` field — the tier is DERIVED from the $/sf, so there is nothing
+ * to drift, an old saved calc names itself, and typing 30 into "Other…" is the
+ * same thing as picking Kitchen & baths. A $/sf that matches no rung simply
+ * renders as the raw input it always was.
  */
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { call, toast } from 'frappe-ui'
 import { streetAddress } from '@/utils/comps'
 
@@ -185,12 +282,21 @@ const props = defineProps({
   comps: { type: Array, default: () => [] },
   address: { type: String, default: '' },
   // Snapshot from a timeline comment. When present, this is the source of
-  // truth for the two columns (not localStorage) so "Tweak calcs" opens on
+  // truth for the columns (not localStorage) so "Tweak calcs" opens on
   // the numbers that were actually saved, not a later draft.
   seed: { type: Object, default: null },
 })
 
-const DEFAULT_PSF = 35
+const TIERS = [
+  { key: 'paint', label: __('Paint & carpet'), psf: 10 },
+  { key: 'kitchen', label: __('Kitchen & baths'), psf: 30 },
+  { key: 'full', label: __('Full rehab'), psf: 50 },
+  { key: 'studs', label: __('Down to studs'), psf: 75 },
+]
+
+// Kitchen & baths — the middle-low rung, and the one the ladder opens on so
+// the control reads as a named condition rather than an unnamed number.
+const DEFAULT_PSF = 30
 const DEFAULT_FEE = 25000
 
 function fresh(pct) {
@@ -198,9 +304,17 @@ function fresh(pct) {
 }
 
 const s = reactive([fresh(0.7), fresh(0.65)])
+const cols = ref(1)
+// Only needed to hold the raw input open when the typed number happens to land
+// on a rung; every other custom case falls out of `tierFor` returning nothing.
+const custom = reactive([false, false])
+const menuFor = ref(-1)
 const notes = ref('')
 const saving = ref(false)
-const canSave = computed(() => s.some((x) => x.arv > 0) && !saving.value)
+const visible = computed(() => (cols.value === 2 ? [0, 1] : [0]))
+const canSave = computed(
+  () => visible.value.some((i) => s[i].arv > 0) && !saving.value,
+)
 const grid = [[null, null], [null, null], [null, null], [null, null], [null, null]]
 
 function setField(row, col, el) {
@@ -220,6 +334,9 @@ function applyScene(i, row) {
 
 function loadSaved() {
   notes.value = ''
+  menuFor.value = -1
+  custom[0] = false
+  custom[1] = false
   const seed = props.seed
   if (seed && Array.isArray(seed.scenarios) && seed.scenarios.length) {
     applyScene(0, {})
@@ -227,9 +344,11 @@ function loadSaved() {
     seed.scenarios.forEach((row, i) => {
       if (i < 2) applyScene(i, row)
     })
+    cols.value = Math.min(2, Math.max(1, seed.scenarios.length))
     if (typeof seed.notes === 'string') notes.value = seed.notes
     return
   }
+  cols.value = 1
   try {
     const raw = JSON.parse(localStorage.getItem(storageKey.value) || 'null')
     if (!raw) return
@@ -238,6 +357,7 @@ function loadSaved() {
     if (Array.isArray(raw.s) && raw.s.length === 2) {
       raw.s.forEach((row, i) => Object.assign(s[i], fresh(i ? 0.65 : 0.7), row))
     }
+    if (raw.cols === 2) cols.value = 2
     if (typeof raw.notes === 'string') notes.value = raw.notes
   } catch {
     /* ignore */
@@ -246,7 +366,10 @@ function loadSaved() {
 
 function persist() {
   try {
-    localStorage.setItem(storageKey.value, JSON.stringify({ s, notes: notes.value }))
+    localStorage.setItem(
+      storageKey.value,
+      JSON.stringify({ s, cols: cols.value, notes: notes.value }),
+    )
   } catch {
     /* quota */
   }
@@ -254,9 +377,41 @@ function persist() {
 
 watch(storageKey, loadSaved, { immediate: true })
 watch(s, persist, { deep: true })
-watch(notes, persist)
+watch([notes, cols], persist)
 
 const sqft = computed(() => Number(props.subject?.sqft) || 0)
+
+function tierFor(col) {
+  return TIERS.find((t) => t.psf === Number(s[col].rehabPsf)) || null
+}
+function isCustom(col) {
+  return custom[col] || !tierFor(col)
+}
+function toggleMenu(col) {
+  menuFor.value = menuFor.value === col ? -1 : col
+}
+function pickTier(col, t) {
+  s[col].rehabPsf = t.psf
+  custom[col] = false
+  menuFor.value = -1
+}
+function pickOther(col) {
+  custom[col] = true
+  menuFor.value = -1
+  nextTick(() => {
+    const el = grid[2][col]
+    el?.focus()
+    el?.select?.()
+  })
+}
+// A click anywhere else closes the menu. Capture phase so it still fires when
+// the click lands on something that stops propagation.
+function onDocClick(e) {
+  if (menuFor.value < 0) return
+  if (!e.target?.closest?.('.rep')) menuFor.value = -1
+}
+onMounted(() => document.addEventListener('click', onDocClick, true))
+onBeforeUnmount(() => document.removeEventListener('click', onDocClick, true))
 
 function run(col) {
   const x = s[col]
@@ -324,6 +479,10 @@ function parseMoney(v) {
 function money(n) {
   return '$' + Math.round(Number(n) || 0).toLocaleString()
 }
+/** Rounded to whole thousands: this is a feel for the size, not a quote. */
+function k(n) {
+  return '$' + Math.round((Number(n) || 0) / 1000).toLocaleString() + 'k'
+}
 function fmt(n) {
   return (Number(n) || 0).toLocaleString()
 }
@@ -379,7 +538,7 @@ async function save() {
     await call('crm.api.cash_offer.save_cash_offer', {
       lead: props.lead,
       scenarios: JSON.stringify(
-        [0, 1].map((i) => {
+        visible.value.map((i) => {
           const x = s[i]
           return { arv: x.arv, pct: x.pct, rehabPsf: x.rehabPsf, fee: x.fee, ...run(i) }
         }),
@@ -407,6 +566,10 @@ async function save() {
 }
 
 function onKeys(e) {
+  if (e.key === 'Escape' && menuFor.value >= 0) {
+    menuFor.value = -1
+    return
+  }
   let r = -1
   let c = -1
   for (let i = 0; i < grid.length; i++) {
@@ -420,8 +583,8 @@ function onKeys(e) {
   if (r < 0) return
   let nr = r
   let nc = c
-  if (e.key === 'ArrowDown') nr++
-  else if (e.key === 'ArrowUp') nr--
+  const step = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0
+  if (step) nr += step
   else if (e.key === 'ArrowRight') {
     if (e.target.selectionStart < String(e.target.value || '').length) return
     nc++
@@ -429,7 +592,19 @@ function onKeys(e) {
     if (e.target.selectionStart > 0) return
     nc--
   } else return
-  const next = grid[nr] && grid[nr][nc]
+  // Walk past rows with nothing focusable in this column: the Repairs row is a
+  // dropdown rather than an input unless the rep chose "Other…", and a stale
+  // ref can outlive the element it pointed at.
+  let next = null
+  while (nr >= 0 && nr < grid.length) {
+    const cand = grid[nr] && grid[nr][nc]
+    if (cand && cand.isConnected) {
+      next = cand
+      break
+    }
+    if (!step) break
+    nr += step
+  }
   if (!next) return
   e.preventDefault()
   next.focus()
@@ -447,7 +622,6 @@ function onKeys(e) {
   color: var(--ink-gray-7);
 }
 .calc {
-  width: 26rem;
   max-width: 100%;
   border: 1px solid var(--outline-gray-2);
   border-radius: 8px;
@@ -461,6 +635,36 @@ function onKeys(e) {
   gap: 8px;
   color: var(--ink-gray-5);
   margin-bottom: 6px;
+}
+.head-r {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.link {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink-blue-3);
+  cursor: pointer;
+}
+.link:hover {
+  text-decoration: underline;
+}
+.drop {
+  border: 0;
+  background: none;
+  padding: 0 0 0 3px;
+  font: inherit;
+  font-weight: 400;
+  color: var(--ink-gray-4);
+  cursor: pointer;
+  line-height: 1;
+}
+.drop:hover {
+  color: var(--ink-red-3);
 }
 .save {
   border: 1px solid var(--outline-gray-2);
@@ -497,7 +701,6 @@ function onKeys(e) {
 }
 .grid {
   display: grid;
-  grid-template-columns: 6.5rem 1fr 1fr;
   column-gap: 8px;
   row-gap: 4px;
   align-items: center;
@@ -558,6 +761,153 @@ input.empty {
 }
 .out.bad {
   color: var(--ink-red-3);
+}
+
+/* Repairs picker. The trigger's value column and the menu's have to land on
+   the SAME x or the selected row reads as misaligned with the list it came
+   from: the trigger reserves 6px + a 10px caret inside its 7px padding (23px),
+   and the menu rows carry 20px of right padding inside the 3px popover pad to
+   match it exactly. */
+.rep {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  container-type: inline-size;
+}
+/* The NAME is the one thing on the trigger that has to survive a narrow cell
+   — it truncated to "Kitc…" in the Today modal on a phone. The rate and the
+   total are both a glance away (the open menu, and the Rehab row directly
+   below), so they give way first: the total, then the rate. */
+@container (max-width: 230px) {
+  .rep-btn .vals b {
+    display: none;
+  }
+}
+@container (max-width: 185px) {
+  .rep-btn .vals {
+    display: none;
+  }
+}
+.rep-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 26px;
+  border: 1px solid var(--outline-gray-2);
+  border-radius: 5px;
+  background: var(--surface-gray-2);
+  padding: 0 7px;
+  font: inherit;
+  color: var(--ink-gray-9);
+  cursor: pointer;
+}
+.rep-btn:hover,
+.rep-btn.open {
+  border-color: var(--ink-blue-3);
+  background: var(--surface-white);
+}
+.rep-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.caret {
+  flex: none;
+  width: 10px;
+  text-align: right;
+  color: var(--ink-gray-5);
+}
+.vals {
+  flex: none;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.vals i {
+  font-style: normal;
+  color: var(--ink-gray-5);
+}
+.vals b {
+  font-weight: 400;
+  color: var(--ink-gray-9);
+}
+.rep-psf {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: 0;
+}
+.rep-caret {
+  flex: none;
+  height: 26px;
+  border: 1px solid var(--outline-gray-2);
+  border-top-right-radius: 5px;
+  border-bottom-right-radius: 5px;
+  background: var(--surface-gray-3);
+  color: var(--ink-gray-6);
+  padding: 0 6px;
+  font: inherit;
+  cursor: pointer;
+}
+.rep-caret:hover {
+  color: var(--ink-gray-9);
+}
+.rep-sf {
+  flex: none;
+  padding-left: 5px;
+  color: var(--ink-gray-5);
+}
+/* Anchored to the RIGHT edge, never to the cell: the value column's alignment
+   is a right-edge relationship, so growing leftward keeps it while letting the
+   rows stay on one line. Inside the Today modal at 390px the Repairs cell is
+   only 160px, which wrapped every row in half. */
+.menu {
+  position: absolute;
+  z-index: 50;
+  top: 29px;
+  right: 0;
+  min-width: max(260px, 100%);
+  max-width: calc(100vw - 24px);
+  border: 1px solid var(--outline-gray-2);
+  border-radius: 6px;
+  background: var(--surface-white);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 13%);
+  padding: 3px;
+  font-size: 12.5px;
+}
+.mrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  padding: 5px 20px 5px 9px;
+  font: inherit;
+  text-align: left;
+  color: var(--ink-gray-8);
+  cursor: pointer;
+}
+.mrow.on {
+  background: var(--surface-gray-2);
+}
+.mrow:hover {
+  background: var(--surface-gray-3);
+}
+.mrow .vals b {
+  color: var(--ink-gray-7);
+}
+.mrow.other {
+  color: var(--ink-gray-6);
+}
+.msep {
+  border-top: 1px solid var(--outline-gray-1);
+  margin: 3px 0;
 }
 
 .tbl {
