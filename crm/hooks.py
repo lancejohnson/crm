@@ -24,6 +24,41 @@ add_to_apps_screen = [
 
 get_site_info = "crm.activation.get_site_info"
 
+# Cache
+# ------------------
+
+#: Cache prefixes that must SURVIVE `bench clear-cache`.
+#:
+#: `build_image.sh` ends every deploy in `clear-cache`, and Frappe's
+#: `clear_cache()` deletes *every* key for the site except the prefixes listed
+#: here. That is right for state derived from our code -- hooks, doctype meta,
+#: server scripts and rendered website pages all go stale the moment a build
+#: ships. It is wrong for these: they are PAID third-party responses, and
+#: Zillow's answer about a house does not change because we deployed.
+#:
+#: Measured on prod: a deploy was taking **175 area circles + 22 pin lookups**
+#: with it -- ~300 RapidAPI calls, on a key shared with istl-buyer's ZIP job --
+#: which the Today-board prewarm then spent the next ~40 minutes buying back.
+#: On a day with several deploys that was the single largest consumer of the
+#: plan, and it bought nothing: the data thrown away and the data re-fetched
+#: were identical.
+#:
+#: CONSEQUENCE, and it is why this is a deliberate trade rather than a free win:
+#: the deploy wipe was invalidating these caches by ACCIDENT. With it gone, the
+#: version numbers already baked into the keys -- `AREA_CACHE_VERSION`,
+#: `PIN_CACHE_VERSION`, `DETAIL_CACHE_VERSION` -- are the ONLY invalidation
+#: path. That is the mechanism they exist for, and it is surgical where the wipe
+#: was blanket, but it means anyone changing the SHAPE of a cached row has to
+#: bump the matching version constant. A deploy no longer papers over forgetting.
+#:
+#: TTLs are unaffected (area 7d, pin 30d, detail 30d), so nothing lives forever.
+persistent_cache_keys = [
+	"zillow_area",  # circle searches -- ~3.3 calls each, the expensive ones
+	"zillow_pin",  # per-pin /property
+	"crm:comp-detail",  # on-click property + photos
+	"zillow_quota_remaining",  # else the quota guard is blind after every deploy
+]
+
 export_python_type_annotations = True
 require_type_annotated_api_methods = True
 
