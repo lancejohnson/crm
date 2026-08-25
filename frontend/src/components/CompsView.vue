@@ -971,13 +971,40 @@ const HOVER_Z = 10000
 // ones it overlaps after the pointer leaves, because the reason you hovered it
 // was to bring it out from under them -- dropping it straight back under is the
 // behaviour that makes a dense cluster feel like whack-a-mole. It yields only to
-// whatever is hovered next, so the stack ends up ordered by what you looked at.
+// whatever is hovered next, so the stack ends up ordered by what you looked at
+// -- see `markRaised`, which is what actually makes that ordering true.
 const RAISED_Z = 5000
-const raisedComps = new Set()
+//: How much room the raised band has to order itself in. RAISED_Z + rank + the
+//: marker's pixel y (~1,000 max) has to stay clear of HOVER_Z, so 3,000 leaves
+//: headroom on both sides.
+const RAISED_SPAN = 3000
+//: name -> how recently it was hovered. A SET was not enough: every raised pill
+//: shared one flat RAISED_Z, so as soon as two overlapping pills had both been
+//: hovered they tied, and the tie was settled by latitude -- whichever sat lower
+//: on the map won, regardless of which one you had just looked at. That is the
+//: whack-a-mole the raised band exists to prevent, reappearing the moment you
+//: use it on more than one pin. Insertion order is kept equal to recency (the
+//: hover handler deletes before re-setting) so the ranks can be renumbered.
+const raisedComps = new Map()
+let raiseSeq = 0
+
+/** Rank the most recently hovered pill highest, without letting z run away. */
+function markRaised(name) {
+  // delete-then-set so Map iteration order stays oldest -> newest.
+  raisedComps.delete(name)
+  raisedComps.set(name, ++raiseSeq)
+  if (raiseSeq < RAISED_SPAN) return
+  // Renumber 1..N in place rather than clamping: clamping would silently stop
+  // ordering after 3,000 hovers, and a flat tie is the exact bug this replaced.
+  raiseSeq = 0
+  for (const key of raisedComps.keys()) raisedComps.set(key, ++raiseSeq)
+}
 
 function restZ(name) {
-  // Its natural layer, unless it has been hovered at least once this session.
-  if (raisedComps.has(name)) return RAISED_Z
+  // Its natural layer, unless it has been hovered at least once this session --
+  // and among those, the one looked at most recently sits highest.
+  const rank = raisedComps.get(name)
+  if (rank !== undefined) return RAISED_Z + rank
   const c = comps.value.find((x) => x.name === name)
   return c ? pinZ(c) : 0
 }
@@ -991,7 +1018,7 @@ watch(hoveredComp, (name, prev) => {
   const on = markersByName.get(name)
   if (on) {
     on.getElement()?.classList.add('comps-pill-hot')
-    raisedComps.add(name)
+    markRaised(name)
     on.setZIndexOffset(HOVER_Z)
   }
   // Bring the matching card into the tray's viewport. Only when the map is what
