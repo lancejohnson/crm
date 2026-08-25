@@ -20,7 +20,7 @@
           type="button"
           class="link"
           :title="__('Run a second set of numbers beside this one')"
-          @click="cols = 2"
+          @click="addCompare"
         >
           {{ __('+ Compare') }}
         </button>
@@ -207,10 +207,33 @@
         v-for="col in visible"
         :key="'offer' + col"
         class="out offer"
-        :class="{ bad: s[col].arv && run(col).offer <= 0 }"
+        :class="{ bad: s[col].arv && run(col).offer <= 0, win: winner === col }"
       >
+        <!-- Which one is bigger, and by how much. The gap is the whole reason
+             anyone runs two of these, and eyeballing two five-figure numbers
+             for a $800 difference is exactly the arithmetic this tool exists
+             to stop doing in your head. -->
+        <b v-if="winner === col" class="gap" :title="__('Higher of the two')">
+          +{{ money(offerGap) }}
+        </b>
         {{ s[col].arv ? money(run(col).offer) : '—' }}
       </span>
+    </div>
+
+    <!-- With one column the comparison cannot be on screen, so the other
+         formula reports itself rather than making the rep toggle, read, and
+         toggle back holding a number in their head. Its OWN percentage, since
+         that is part of what is being compared. -->
+    <div v-if="altOffer !== null" class="alt">
+      {{
+        __('{0} would offer {1}', [altFormula.label, money(altOffer)])
+      }}<template v-if="altOffer !== run(0).offer">
+        —
+        <b :class="altOffer > run(0).offer ? 'up' : 'down'">
+          {{ money(Math.abs(altOffer - run(0).offer)) }}
+          {{ altOffer > run(0).offer ? __('more') : __('less') }}
+        </b>
+      </template>
     </div>
     <textarea
       v-model="notes"
@@ -294,8 +317,11 @@
  * is read as Classic — which is what those numbers meant when they were
  * written.
  *
- * One scenario by default; "+ Compare" opens a second on the OTHER formula, so
- * the comparison explains itself. Each column is its own notebook.
+ * One scenario by default; "+ Compare" opens a second one carrying whatever
+ * the rep is already on, and each column keeps its own toggle. Seeding it with
+ * the other formula was tried and removed: it decided for them what was being
+ * compared, when the far more common comparison is the same formula at two
+ * percentages. Each column is its own notebook.
  *
  * Repairs are picked by NAME off a four-rung ladder. There is deliberately no
  * stored `tier` field — the tier is DERIVED from the $/sf, so there is nothing
@@ -356,16 +382,12 @@ const TIERS = [
 const DEFAULT_PSF = 30
 const DEFAULT_FEE = 25000
 
-// Column 0 opens on the default formula, column 1 on the other one.
-function formulaFor(i) {
-  return FORMULAS[i ? 1 : 0]
-}
-function fresh(i) {
-  const f = formulaFor(i)
-  return { arv: 0, pct: f.pct, mult: f.mult, rehabPsf: DEFAULT_PSF, fee: DEFAULT_FEE }
+function fresh(f) {
+  const g = f || FORMULAS[0]
+  return { arv: 0, pct: g.pct, mult: g.mult, rehabPsf: DEFAULT_PSF, fee: DEFAULT_FEE }
 }
 
-const s = reactive([fresh(0), fresh(1)])
+const s = reactive([fresh(), fresh()])
 const cols = ref(1)
 // Only needed to hold the raw input open when the typed number happens to land
 // on a rung; every other custom case falls out of `tierFor` returning nothing.
@@ -386,7 +408,7 @@ function setField(row, col, el) {
 const storageKey = computed(() => `compsCalc:${props.lead}`)
 
 function applyScene(i, row) {
-  const base = fresh(i)
+  const base = fresh()
   const blank = !row || !Object.keys(row).length
   Object.assign(s[i], base, {
     arv: Number(row.arv) || 0,
@@ -426,7 +448,7 @@ function loadSaved() {
       // Same rule as a saved snapshot: a draft with no `mult` predates the
       // toggle and is classic.
       raw.s.forEach((row, i) =>
-        Object.assign(s[i], fresh(i), row, { mult: Number(row.mult) || 1 }),
+        Object.assign(s[i], fresh(), row, { mult: Number(row.mult) || 1 }),
       )
     }
     if (raw.cols === 2) cols.value = 2
@@ -495,6 +517,22 @@ function setFormula(col, f) {
   s[col].pct = f.pct
 }
 
+/** A second column starts as a copy of the one the rep is looking at — same
+ *  formula, same percentage, same repair level — so the only thing different
+ *  about it is what they deliberately change. An untouched column only; a
+ *  dropped-then-restored one keeps whatever was in it. */
+function addCompare() {
+  if (!s[1].arv) {
+    Object.assign(s[1], {
+      pct: s[0].pct,
+      mult: multOf(0),
+      rehabPsf: s[0].rehabPsf,
+      fee: s[0].fee,
+    })
+  }
+  cols.value = 2
+}
+
 function run(col) {
   const x = s[col]
   const after = Math.round(x.arv * x.pct)
@@ -503,6 +541,32 @@ function run(col) {
   const wholesale = after - rehab
   return { after, repairs, rehab, wholesale, offer: wholesale - x.fee }
 }
+
+// Only ever a comparison between two PRICED columns: an empty scenario reads
+// as an offer of minus the fee, and crowning the other one for beating it
+// would be noise dressed up as a finding.
+const winner = computed(() => {
+  if (cols.value !== 2 || !s[0].arv || !s[1].arv) return -1
+  const a = run(0).offer
+  const b = run(1).offer
+  if (a === b) return -1
+  return a > b ? 0 : 1
+})
+const offerGap = computed(() =>
+  winner.value < 0 ? 0 : Math.abs(run(0).offer - run(1).offer),
+)
+
+// What the other formula would pay for the same house, at ITS percentage.
+const altFormula = computed(
+  () => FORMULAS.find((f) => f.mult !== multOf(0)) || FORMULAS[0],
+)
+const altOffer = computed(() => {
+  if (cols.value !== 1 || !s[0].arv) return null
+  const f = altFormula.value
+  const after = Math.round(s[0].arv * f.pct)
+  const rehab = Math.round((Number(s[0].rehabPsf) || 0) * sqft.value) * f.mult
+  return after - rehab - s[0].fee
+})
 
 const usable = computed(() =>
   (props.comps || []).filter((c) => Number(c.price) > 0 && Number(c.square_footage) > 0),
@@ -854,6 +918,38 @@ input.empty {
 }
 .out.bad {
   color: var(--ink-red-3);
+}
+/* The winning column keeps its number on the same right edge as the loser's —
+   the badge grows leftward — or the two offers stop being comparable at a
+   glance, which is the one thing this row exists for. */
+.out.offer {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.gap {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-green-3);
+  background: var(--surface-green-1);
+  border-radius: 4px;
+  padding: 1px 4px;
+  white-space: nowrap;
+}
+.alt {
+  margin-top: 7px;
+  color: var(--ink-gray-5);
+  font-size: 12px;
+}
+.alt b {
+  font-weight: 600;
+}
+.alt .up {
+  color: var(--ink-green-3);
+}
+.alt .down {
+  color: var(--ink-gray-7);
 }
 
 /* Formula toggle. A segmented pair rather than a dropdown: there are exactly

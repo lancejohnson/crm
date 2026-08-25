@@ -659,6 +659,47 @@ duplicating. Work substantial features in a worktree of your own.
     a row or a pin highlights the other. A map answers "where", a list answers
     "which". Every pill also carries a hover-only ✕ that removes it, wired to the
     same handler as the popup's Hide.
+  - **The cash-offer calculator picks its repairs by NAME and its formula by
+    toggle** (`CompOfferCalc.vue`, gw360/gw361/gw362). Repairs is a four-rung
+    ladder — Paint & carpet $10 / Kitchen & baths $30 / Full rehab $50 / Down to
+    studs $75 — each row carrying what that level costs on THIS house ($13k /
+    $38k / $63k / $95k at 1,260 sf), because a rep on the phone hears "kitchen &
+    baths", not "$30/sf". "Other…" keeps the raw $/sf one click away.
+    - **The tier is DERIVED from the $/sf, never stored** — nothing to drift, an
+      old calc names itself, and typing 30 into "Other…" IS Kitchen & baths.
+      **`mult` IS stored**, because it genuinely cannot be derived: a 70% column
+      does not imply a single deduction once the percentage is editable.
+    - Two formulas: **`2× repairs` (ARV × 90% − 2×repairs − fee, the default)** and
+      **`Classic` (× 70% − repairs − fee)**. The first is not new — it is what
+      `OfferRail.vue` already runs on the lead desk, so this borrows the rail's
+      wording (`Repairs × 2`) rather than inventing a second name for the same
+      arithmetic. Picking one sets its canonical %, which stays editable: the
+      toggle owns the SHAPE, the rep owns the number.
+    - **The Rehab row is the DEDUCTION, not the repair bill.** At 2× they differ,
+      and the number that reaches the offer has to be the visible one or the
+      column stops adding up. Typing a total back-solves $/sf THROUGH the
+      multiplier ($75,600 at 2× is $30/sf, not $60).
+    - **Anything saved before the toggle has no `mult` and reads as Classic** —
+      what those numbers meant when written. The rule is applied identically in
+      three places (seed, localStorage draft, server) so an old calc cannot
+      render one way on the timeline and another when reopened. The server
+      RECOMPUTES the multiplier rather than trusting the client, and the timeline
+      card names the formula, or a doubled deduction reads as a mistake later.
+    - **One column by default; "+ Compare" inherits whatever the rep is on.**
+      Seeding the second column with the OTHER formula was built and removed — it
+      decided for them what was being compared, when the commoner comparison is
+      one formula at two percentages. With both priced, the higher offer wears a
+      `+$800` badge (numbers stay right-aligned; the badge grows leftward). With
+      one column the other formula reports itself in a line under the Offer, at
+      ITS own percentage, so "which pays more" never costs a toggle-and-remember.
+    - **GOTCHA — the picker's menu is anchored to its RIGHT edge, not the grid
+      cell.** Alignment between the trigger's value column and the menu's is a
+      right-edge relationship (trigger reserves 6px + a 10px caret inside 7px of
+      padding; menu rows carry 20px of right padding inside the 3px popover pad).
+      In the Today modal at 390px the cell is 160px, which wrapped every row in
+      half. Container queries drop the total, then the rate, off the trigger —
+      the NAME is what has to survive.
+
   - **Underwrite straight from the comps you picked** —
     `underwriting.create_underwriting_from_comps(lead, comps)`. The template needs
     NO change: its comp block is rows **14–20, column A = a Zillow link**, and the
