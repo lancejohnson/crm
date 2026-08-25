@@ -67,9 +67,25 @@ SALES_ROLES = ("System Manager", "Sales Manager", "Sales User")
 #: walks out (0.5 → 1 → 2 → 5) until it has a usable set; this 2-mile default is
 #: only for older callers that omit the argument entirely.
 DEFAULT_RADIUS_MI = 2.0
-#: Hard cap on returned pins. A dense metro ZIP can hold 700+ comps; past ~200
-#: the map is an unreadable wall of pills and the payload starts to hurt.
-MAX_COMPS = 200
+#: Hard cap on returned pins, and since gw366 it is a DATA-COMPLETENESS promise
+#: rather than only a rendering limit: every comp that reaches the map gets its
+#: full sale history fetched (`_attach_sale_history`), so the board can be read
+#: as "everything shown here, we know everything about". A two-tier board -- some
+#: pins carrying a flip warning and some silently lacking one -- would be worse
+#: than no warning at all, because absence would look like evidence of no flip.
+#:
+#: 50 is a SPEND decision, measured. Sale history is one billed RapidAPI call per
+#: comp on a key shared with istl-buyer's ZIP job. At 25 leads/day against the
+#: 57,000/cycle plan, ~53 comps/lead is what the budget affords once istl-buyer's
+#: ~10,500 is reserved; every comp in a 1/2-mile circle (mean 126, and 253 in
+#: Indianapolis) would need roughly double the plan. Raising this is a one-line
+#: dial, but it is a bill, so turn it deliberately.
+#:
+#: It is applied AFTER filtering, never before -- capping first would take the 50
+#: nearest and then filter those, hiding better-fitting comps slightly further
+#: out. The tier ladder still runs over the whole filtered set, so what lands on
+#: the board is unchanged; only how many of them are drawn.
+MAX_COMPS = 50
 
 #: How many matches make a tier "usable". Below this you are not comping, you are
 #: reading anecdotes, so the ladder loosens instead of presenting 2 pins as an
@@ -86,7 +102,7 @@ DEFAULT_WITHIN_DAYS = 365
 #: opens the same house. A failed/partial lookup gets a short retry window.
 DETAIL_CACHE_SECONDS = 30 * 24 * 60 * 60
 DETAIL_RETRY_SECONDS = 60 * 60
-DETAIL_CACHE_VERSION = 1
+DETAIL_CACHE_VERSION = 2  # v2 carries sale_history
 
 #: Per-lead, TEAM-WIDE record of which comps a human hid or picked. Not per-user:
 #: a junk comp is junk for everyone, and "the comps we used" is a deal artifact
@@ -1118,6 +1134,29 @@ def get_lead_comps(lead, radius_mi=None, limit=None, filters=None, auto=0, inclu
 
 	base["total_matched"] = len(matched)
 	base["comps"] = matched[:cap]
+
+	# LAST, and only on the capped set. This is the first point at which we know
+	# which comps a person will actually see, and the promise is that every one of
+	# them has complete information -- so this must not run before the filter (it
+	# would bill for comps nobody looks at) nor before the cap (same, and far
+	# worse: a 1/2-mile circle holds 126 comps on average and 253 in Indianapolis).
+	#
+	# Best-effort by construction: `attach_sale_history` marks a row it could not
+	# resolve rather than raising, because a comps map that renders without flip
+	# warnings beats a lead page that 500s.
+	try:
+		# Imported again rather than relying on the binding from the refresh block
+		# above: that one lives inside a `try` whose `except` swallows an ImportError,
+		# so the name is not guaranteed to exist down here.
+		from crm.api import zillow_comps as _zc
+
+		base["sale_history"] = _zc.attach_sale_history(base["comps"], today)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Comps: sale history failed")
+		base["sale_history"] = {"checked": 0, "with_history": 0, "flips": 0, "missing": len(base["comps"])}
+		for row in base["comps"]:
+			row.setdefault("sale_history", None)
+			row.setdefault("sale_history_missing", True)
 	return base
 
 

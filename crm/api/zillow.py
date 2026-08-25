@@ -352,6 +352,36 @@ def _price_history(raw):
 	return sale, listing
 
 
+#: Kept per priceHistory event, and no more. This is CACHED for 30 days, so it is
+#: the raw material every later question is answered from.
+_HISTORY_FIELDS = ("date", "event", "price", "source", "postingIsRental")
+
+
+def _slim_history(raw):
+	"""The part of `priceHistory` worth keeping. Cached INSTEAD of a parse of it.
+
+	Caching the raw events rather than `sale_history.parse()`'s output is a
+	deliberate trade, and it was made after getting it the other way round first:
+
+	  * a parser fix is then FREE. The first version cached the parse, so
+	    discovering that a chain must not span a rental (15256 Edmore Dr was
+	    reporting 1,115 days to sell) meant every cached property had to be
+	    re-fetched -- one billed call each -- to correct a pure arithmetic bug.
+	  * ages cannot go stale. Two of the parse's numbers are relative to today, so
+	    a cached parse quietly drifts by up to a month. Parsing on read means the
+	    answer is always computed against the date being asked about.
+
+	The cost is a few hundred bytes per property, against a payload we already keep
+	photos and coordinates in.
+	"""
+	out = []
+	for e in (raw or {}).get("priceHistory") or []:
+		if not isinstance(e, dict) or not e.get("date"):
+			continue
+		out.append({k: e.get(k) for k in _HISTORY_FIELDS})
+	return out
+
+
 def _normalize(raw):
 	"""Zillow's blob -> the small, flat shape the comps map actually consumes."""
 	if not isinstance(raw, dict) or not raw.get("zpid"):
@@ -384,6 +414,9 @@ def _normalize(raw):
 		# without a second call. Leads cached before this shipped simply have no key
 		# and fall back to the area search's self-match, which is also free.
 		"cover_photo": raw.get("imgSrc") or "",
+		# The SAME `priceHistory` we already pay for, kept so time-on-market and flips
+		# can be derived later for free. Parsed on READ, never here -- see _slim_history.
+		"price_history": _slim_history(raw),
 	}
 
 
@@ -431,6 +464,10 @@ def normalize_detail(raw):
 		"description": raw.get("description") or "",
 		"last_sale": sale,
 		"last_listing": listing,
+		# A rep who has opened the photos is the one most likely to be asking "why did
+		# this sell for that?", so the history rides along here too -- raw, and parsed
+		# on read for the same two reasons `_slim_history` explains.
+		"price_history": _slim_history(raw),
 		"zillow_url": url,
 		"cover_photo": raw.get("imgSrc") or "",
 		"photo_count": int(_num(raw.get("photoCount")) or 0),
@@ -464,7 +501,7 @@ def photo_urls(raw, limit=60):
 # lookup per lead and then rides the normal 30-day cache. Cheaper than the
 # alternative it replaces (a per-comp `/property` call just to get a picture),
 # and self-limiting because the refetch rewrites the cache with the key present.
-REQUIRED_FACT_KEYS = ("cover_photo",)
+REQUIRED_FACT_KEYS = ("cover_photo", "price_history")
 
 
 def _cached(doc):

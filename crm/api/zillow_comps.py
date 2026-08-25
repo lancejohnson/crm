@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 
 import frappe
 
+from crm.api import sale_history
 from crm.api import zillow as zillow_api
 
 AREA_HIT_DAYS = 7
@@ -57,8 +58,13 @@ MAX_SPLIT_DEPTH = 6
 MAX_SEARCH_CALLS = 40
 #: v7 asks for pending/under-contract listings too, so a v6 entry answers a
 #: DIFFERENT (smaller) question and must not be served for this one.
-AREA_CACHE_VERSION = 7  # v5 price-splits past 800; v6 keeps imgSrc; v7 pending
-PIN_CACHE_VERSION = 2  # v2 keeps cover_photo
+# v8 stops writing days-since-sale into `days_on_market` on sold rows, so a v7
+# entry answers the question WRONG rather than merely differently -- it must not
+# be served. NOTE these bumps are now the ONLY way a cached circle is
+# invalidated: since gw365 the caches survive `bench clear-cache`, so a deploy no
+# longer quietly does it for you (crm/hooks.py, persistent_cache_keys).
+AREA_CACHE_VERSION = 8  # v5 price-splits past 800; v6 imgSrc; v7 pending; v8 DOM fix
+PIN_CACHE_VERSION = 4  # v2 cover_photo; v3 parsed history (dropped); v4 raw price_history
 
 #: Zillow's own words for a home that is spoken for but has not closed. We have
 #: to ask for these explicitly (`isPendingUnderContract=1`) because the default
@@ -252,7 +258,22 @@ def _shape_search(prop, kind):
 		"listing_state": state,
 		"listed_date": None if not active else None,
 		"removed_date": None if active else sold,
-		"days_on_market": int(dom) if dom is not None else None,
+		# ONLY on a live listing. `daysOnZillow` means two different things depending
+		# on the row, and this field is rendered as "N days on market" everywhere:
+		#
+		#   ForSale row       -> days the listing has been up. Correct.
+		#   RecentlySold row  -> days SINCE THE SALE. Nothing to do with time on
+		#                        market at all.
+		#
+		# Measured on 1128 Pleasant St, Indianapolis: `daysOnZillow` = 4, while the
+		# house was listed 2026-07-16 and sold 2026-08-21 -- 36 days. Passing it
+		# through put "Listed  · 4d on market" in the map popup (with a blank date,
+		# since a sold search row carries no `listed_date` either).
+		#
+		# For a sold row the number is redundant anyway: it IS the recency, which
+		# `_recency_days` already derives from `removed_date`. Real time-to-sell now
+		# comes from the listing chain in `sale_history`.
+		"days_on_market": int(dom) if (dom is not None and active) else None,
 		"days_old": None,
 		"bedrooms": zillow_api._num(prop.get("bedrooms")),
 		"bathrooms": zillow_api._num(prop.get("bathrooms")),
@@ -733,6 +754,67 @@ def refresh_pins(rows, cap=PIN_REFRESH_CAP):
 			row["recency_days"] = _comps()._recency_days(row, today)
 			updated += 1
 	return {"checked": checked, "updated": updated}
+
+
+def attach_sale_history(rows, today=None):
+	"""Give every row in `rows` its sale history. Mutates them. -> status dict.
+
+	Called with the FINAL, already-filtered and already-capped board, because that
+	is the first moment we know which comps a person is actually going to look at.
+	The promise it exists to keep is that a pin on the map has complete
+	information: a board where some pins carry a flip warning and others silently
+	lack one is worse than a board with no warnings at all, because a missing
+	warning reads as "this one is clean".
+
+	That is also why a row whose lookup FAILED is marked `sale_history_missing`
+	rather than left blank -- the UI says "unknown", never nothing.
+
+	One billed `/property` per row, so the caller's cap is the bill. Shares the
+	30-day `zillow_pin` cache with `refresh_pins`, so the pins that were already
+	refreshed cost nothing here, and a lead reopened within the month is free.
+	"""
+	today = today or frappe.utils.today()
+	info = {"checked": 0, "with_history": 0, "flips": 0, "missing": 0}
+	rows = [r for r in (rows or []) if r.get("address")]
+	if not rows or not zillow_api._api_key():
+		for row in rows:
+			row["sale_history"] = None
+			row["sale_history_missing"] = True
+		info["missing"] = len(rows)
+		return info
+
+	facts_by_address = _pin_facts_many([r["address"] for r in rows])
+	for row in rows:
+		info["checked"] += 1
+		facts = facts_by_address.get(row["address"])
+		# Parsed HERE, from the raw events, on every read. The cache holds Zillow's
+		# priceHistory, not our reading of it, so a parser fix costs nothing and the
+		# ages inside are always computed against today rather than against whenever
+		# the entry happened to be written.
+		history = sale_history.parse(
+			(facts or {}).get("price_history"), today, (facts or {}).get("home_status")
+		)
+		if not history:
+			# Two different nothings, deliberately collapsed to one for the UI: an
+			# address Zillow cannot resolve, and a house with no recorded history.
+			# Neither lets us vouch for the comp, which is all the rep needs to know.
+			row["sale_history"] = None
+			row["sale_history_missing"] = True
+			info["missing"] += 1
+			continue
+		row["sale_history"] = history
+		row["sale_history_missing"] = False
+		info["with_history"] += 1
+		if row["sale_history"].get("flip"):
+			info["flips"] += 1
+		# A confirmed sale date from the history is better evidence than whatever the
+		# pooled index had, but only ever used to FILL a gap here -- re-dating a comp
+		# at this point would silently contradict the filter that already selected it.
+		last = row["sale_history"].get("last_sale") or {}
+		if last.get("date") and not row.get("removed_date") and row.get("status") != "Active":
+			row["removed_date"] = last["date"]
+			row["recency_days"] = _comps()._recency_days(row, today)
+	return info
 
 
 def apply(doc, out, lat, lng, radius):
