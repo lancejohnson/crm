@@ -109,7 +109,7 @@
            costs on THIS house so the ladder has a felt price, not just a rate.
            "Other…" keeps the raw $/sf field one click away — the preset is a
            shortcut, never a cage. -->
-      <span class="lab">{{ __('Repairs') }}</span>
+      <span class="lab">{{ __('Condition') }}</span>
       <div v-for="col in visible" :key="'rep' + col" class="rep">
         <template v-if="isCustom(col)">
           <input
@@ -167,27 +167,32 @@
         </div>
       </div>
 
-      <!-- This row is the DEDUCTION, not the repair bill: at 2× the two differ,
-           and the number that hits the offer is the one that has to be on
-           screen or the arithmetic above it stops adding up. The repair bill
-           itself stays visible one row up, in the picker's (…k). -->
-      <span class="lab">
-        {{ multOf(0) === 2 || (cols === 2 &amp;&amp; multOf(1) === 2) ? __('Repairs') : __('Rehab') }}
-        <i>{{ fmt(sqft) }} sf</i>
-      </span>
-      <div v-for="col in visible" :key="'rehab' + col" class="ded">
-        <span v-if="multOf(col) === 2" class="x2" :title="DOUBLE_WHY">× 2</span>
-        <input
-          :ref="(el) => setField(3, col, el)"
-          inputmode="numeric"
-          :value="money(run(col).rehab)"
-          @focus="$event.target.select()"
-          @input="typeRehab(col, $event)"
-        />
-      </div>
+      <!-- The repair BILL, and only ever the bill: what this house costs to fix
+           is a fact about the house, so it must read the same whichever formula
+           is running. Doubling is something a formula does to it, not something
+           that happens to the number. -->
+      <span class="lab">{{ __('Repairs') }} <i>{{ fmt(sqft) }} sf</i></span>
+      <input
+        v-for="col in visible"
+        :key="'rehab' + col"
+        :ref="(el) => setField(3, col, el)"
+        inputmode="numeric"
+        :value="money(run(col).repairs)"
+        @focus="$event.target.select()"
+        @input="typeRehab(col, $event)"
+      />
 
+      <!-- … and the doubling lands here, on the line it actually produces. This
+           row is derived, so it can carry a derived figure without asking the
+           rep to maintain one. Shown ONLY at 2×, i.e. only when the deduction
+           differs from the repairs row above it and the column would otherwise
+           stop adding up. -->
       <span class="lab">{{ __('Wholesale') }}</span>
-      <span v-for="col in visible" :key="'ws' + col" class="out">
+      <span v-for="col in visible" :key="'ws' + col" class="out annot">
+        <i
+          v-if="s[col].arv && multOf(col) === 2"
+          :title="__('2× repairs.') + ' ' + DOUBLE_WHY"
+        >−{{ money(run(col).rehab) }}</i>
         {{ s[col].arv ? money(run(col).wholesale) : '—' }}
       </span>
 
@@ -670,14 +675,13 @@ function typeMoney(col, key, e) {
   nextTick(() => putCaret(el, digitsBefore, formatted))
 }
 
-/** This field is the DEDUCTION, so back-solving $/sf divides the multiplier
- *  back out — typing $75,600 at 2× is $30/sf, not $60. */
+/** The repair bill, so this is a straight divide — no multiplier in the path.
+ *  Typing $37,800 is $30/sf under either formula. */
 function typeRehab(col, e) {
   const el = e.target
   const digitsBefore = (el.value.slice(0, el.selectionStart).match(/\d/g) || []).length
   const n = parseMoney(el.value)
-  const div = sqft.value * multOf(col)
-  if (div) s[col].rehabPsf = n ? Math.round((n / div) * 100) / 100 : 0
+  if (sqft.value) s[col].rehabPsf = n ? Math.round((n / sqft.value) * 100) / 100 : 0
   nextTick(() => putCaret(el, digitsBefore, n ? money(n) : ''))
 }
 
@@ -989,20 +993,20 @@ input.empty {
   box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
 }
 
-/* The deduction row wears its multiplier, so a doubled figure is never just a
-   number that looks too big. */
-.ded {
+/* A derived row can carry the figure it derived from. Same shape as the offer
+   badge: annotation grows leftward, the number keeps the column's right edge. */
+.out.annot {
   display: flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 6px;
 }
-.x2 {
-  flex: none;
+.out.annot i {
+  font-style: normal;
   font-size: 11.5px;
-  font-weight: 600;
   color: var(--ink-gray-5);
   cursor: help;
+  white-space: nowrap;
 }
 
 /* Repairs picker. The trigger's value column and the menu's have to land on
