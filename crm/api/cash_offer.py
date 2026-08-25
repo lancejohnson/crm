@@ -31,6 +31,19 @@ def _money(n):
 	return "$" + f"{int(round(_num(n))):,}"
 
 
+def _psf_money(n):
+	"""$/sf, with cents only when it has them.
+
+	A repair bill typed as a round number rarely divides evenly into the square
+	footage ($45,000 over 1,260 sf is $35.714…), and the calculator keeps that
+	remainder on the RATE so the bill stays exactly what was typed. Rounding it
+	here would print "$36/sf × 1,260 sf = $45,000" on the timeline, which is off
+	by $360 and reads as the card contradicting itself.
+	"""
+	v = _num(n)
+	return _money(v) if float(v).is_integer() else f"${v:,.2f}"
+
+
 def _street(addr):
 	return (addr or "").split(",")[0].strip()
 
@@ -168,7 +181,7 @@ def _html(lead, scenes, comps, sqft, notes=""):
 			else _("{0:.0f}%").format(sc["pct"] * 100)
 		)
 		bill = "{psf}/sf × {sf} sf".format(
-			psf=_money(sc["rehab_psf"]), sf=f"{int(sqft):,}" if sqft else "—"
+			psf=_psf_money(sc["rehab_psf"]), sf=f"{int(sqft):,}" if sqft else "—"
 		)
 		if sc["mult"] == 2:
 			bill += " = {0} × 2".format(_money(sc["repairs"]))

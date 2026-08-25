@@ -116,7 +116,7 @@
             :ref="(el) => setField(2, col, el)"
             class="rep-psf"
             inputmode="numeric"
-            :value="money(s[col].rehabPsf)"
+            :value="psfText(s[col].rehabPsf)"
             @focus="$event.target.select()"
             @input="typeMoney(col, 'rehabPsf', $event)"
           />
@@ -139,7 +139,7 @@
         >
           <span class="rep-name">{{ tierFor(col).label }}</span>
           <span class="vals">
-            <i>{{ money(s[col].rehabPsf) }}/sf</i><b v-if="sqft">
+            <i>{{ psfText(s[col].rehabPsf) }}/sf</i><b v-if="sqft">
               ({{ k(s[col].rehabPsf * sqft) }})</b>
           </span>
           <span class="caret">▾</span>
@@ -675,14 +675,32 @@ function typeMoney(col, key, e) {
   nextTick(() => putCaret(el, digitsBefore, formatted))
 }
 
-/** The repair bill, so this is a straight divide — no multiplier in the path.
- *  Typing $37,800 is $30/sf under either formula. */
+/** Type a repair BILL and get the $/sf. A straight divide — no multiplier in
+ *  the path — so $37,800 is $30/sf under either formula.
+ *
+ *  Full precision on purpose. This field displays `$/sf × sqft`, so rounding
+ *  the $/sf here loses the total the rep just typed: at 1,260 sf a half-typed
+ *  "3" is $0.0024/sf, which to the nearest cent is ZERO, so the field
+ *  re-rendered as "$0" and the caret restore interleaved the next keystroke
+ *  into it — "$03", then "$38", then "$391". Unrounded, psf × sqft returns
+ *  exactly what was typed and the field holds still while you type. */
 function typeRehab(col, e) {
   const el = e.target
   const digitsBefore = (el.value.slice(0, el.selectionStart).match(/\d/g) || []).length
   const n = parseMoney(el.value)
-  if (sqft.value) s[col].rehabPsf = n ? Math.round((n / sqft.value) * 100) / 100 : 0
+  if (sqft.value) s[col].rehabPsf = n / sqft.value
   nextTick(() => putCaret(el, digitsBefore, n ? money(n) : ''))
+}
+
+/** $/sf, carrying cents only when it has them. A typed bill rarely divides
+ *  evenly — $45,000 over 1,260 sf is $35.714… — and snapping that to the cent
+ *  was tried and removed: it dragged the total the rep had just typed to
+ *  $44,995 the moment they clicked away, which reads as the tool losing their
+ *  number. The bill is what they typed; the rate is the derived half, so the
+ *  rate is where the remainder lives. */
+function psfText(n) {
+  const v = Number(n) || 0
+  return Number.isInteger(v) ? money(v) : '$' + v.toFixed(2)
 }
 
 async function save() {

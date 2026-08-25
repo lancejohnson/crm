@@ -20,7 +20,7 @@
         − {{ Number(sc.mult) === 2 ? __('repairs') : __('rehab') }}
         {{ money(sc.rehab) }}
         <template v-if="offer.sqft">
-          ({{ money(sc.rehab_psf) }}/sf × {{ fmt(offer.sqft) }} sf<template
+          ({{ psfText(sc.rehab_psf) }}/sf × {{ fmt(offer.sqft) }} sf<template
             v-if="Number(sc.mult) === 2"
           > = {{ money(sc.repairs) }} × 2</template>)
         </template>
@@ -119,6 +119,15 @@ function decodeEntities(s) {
 function num(s) {
   const n = Number(String(s || '').replace(/[^0-9.]/g, ''))
   return Number.isFinite(n) ? n : 0
+}
+
+/** $/sf keeps its cents when it has them: a typed repair bill rarely divides
+ *  evenly into the square footage, and the calculator leaves that remainder on
+ *  the rate so the bill stays exactly what was typed. Rounding it here would
+ *  make this card disagree with its own arithmetic. */
+function psfText(n) {
+  const v = Number(n) || 0
+  return Number.isInteger(v) ? money(v) : '$' + v.toFixed(2)
 }
 
 function money(n) {
