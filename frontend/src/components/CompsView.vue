@@ -1012,10 +1012,29 @@ function hoverFromCard(name) {
   hoveredComp.value = name
 }
 
+/**
+ * A component ref -> its first real ELEMENT.
+ *
+ * GOTCHA -- `$el` is not always an element. A template that opens with a COMMENT
+ * compiles to a FRAGMENT, and `$el` is then the leading comment node, which has
+ * no `scrollIntoView`. Vue strips template comments in production builds but
+ * KEEPS them in dev, so a component like `CompSubjectCard` (whose template opens
+ * with an explanatory comment) works in prod and silently does nothing on the dev
+ * server -- which reads as "this used to work and now it doesn't". Verified:
+ * the prod chunk has 0 comment vnodes, the dev module has 10.
+ *
+ * Walking to the first element node makes both behave the same, and makes it
+ * safe for any component here to grow a leading comment.
+ */
+function cardElementOf(refValue) {
+  let el = refValue?.$el ?? refValue
+  while (el && el.nodeType !== 1) el = el.nextSibling
+  return el && el.nodeType === 1 ? el : null
+}
+
 function scrollCardIntoView(name) {
-  const comp = cardRefs.get(name)
-  const el = comp?.$el
-  if (el?.scrollIntoView) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  const el = cardElementOf(cardRefs.get(name))
+  if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
 }
 
 /**
@@ -1028,8 +1047,8 @@ function scrollCardIntoView(name) {
  */
 const subjectCardEl = ref(null)
 function scrollSubjectIntoView() {
-  const el = subjectCardEl.value?.$el || subjectCardEl.value
-  if (el?.scrollIntoView) el.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  const el = cardElementOf(subjectCardEl.value)
+  if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' })
 }
 
 const comps = computed(() => data.value?.comps || [])
