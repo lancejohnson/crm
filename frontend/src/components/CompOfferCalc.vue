@@ -55,6 +55,24 @@
         </span>
       </template>
 
+      <!-- The formula comes first because it frames every number under it.
+           Per column, like everything else here: "+ Compare" then puts the two
+           formulas side by side on the same house, which is the comparison a
+           wholesaler actually wants. -->
+      <span class="lab">{{ __('Formula') }}</span>
+      <div v-for="col in visible" :key="'form' + col" class="seg">
+        <button
+          v-for="f in FORMULAS"
+          :key="f.key"
+          type="button"
+          :class="{ on: multOf(col) === f.mult }"
+          :title="f.why"
+          @click="setFormula(col, f)"
+        >
+          {{ f.label }}
+        </button>
+      </div>
+
       <span class="lab">{{ __('ARV') }}</span>
       <input
         v-for="col in visible"
@@ -149,16 +167,24 @@
         </div>
       </div>
 
-      <span class="lab">{{ __('Rehab') }} <i>{{ fmt(sqft) }} sf</i></span>
-      <input
-        v-for="col in visible"
-        :key="'rehab' + col"
-        :ref="(el) => setField(3, col, el)"
-        inputmode="numeric"
-        :value="money(run(col).rehab)"
-        @focus="$event.target.select()"
-        @input="typeRehab(col, $event)"
-      />
+      <!-- This row is the DEDUCTION, not the repair bill: at 2× the two differ,
+           and the number that hits the offer is the one that has to be on
+           screen or the arithmetic above it stops adding up. The repair bill
+           itself stays visible one row up, in the picker's (…k). -->
+      <span class="lab">
+        {{ multOf(0) === 2 || (cols === 2 &amp;&amp; multOf(1) === 2) ? __('Repairs') : __('Rehab') }}
+        <i>{{ fmt(sqft) }} sf</i>
+      </span>
+      <div v-for="col in visible" :key="'rehab' + col" class="ded">
+        <span v-if="multOf(col) === 2" class="x2" :title="DOUBLE_WHY">× 2</span>
+        <input
+          :ref="(el) => setField(3, col, el)"
+          inputmode="numeric"
+          :value="money(run(col).rehab)"
+          @focus="$event.target.select()"
+          @input="typeRehab(col, $event)"
+        />
+      </div>
 
       <span class="lab">{{ __('Wholesale') }}</span>
       <span v-for="col in visible" :key="'ws' + col" class="out">
@@ -255,14 +281,21 @@
 
 <script setup>
 /**
- * Cash Offer — same arithmetic as the underwriting template:
- *   after      = ARV × %
- *   rehab      = $/sf × subject sqft
- *   wholesale  = after − rehab
- *   offer      = wholesale − fee
+ * Cash Offer. Two formulas, because the desk uses both:
+ *   2× repairs  ARV × 90% − 2×repairs − fee   (default; what OfferRail runs)
+ *   Classic     ARV × 70% −   repairs − fee   (the 70% rule)
+ * i.e. after = ARV × %, deduction = mult × $/sf × sqft, offer = after −
+ * deduction − fee. Picking a formula sets its canonical %, and the % stays
+ * editable afterwards — the toggle owns the SHAPE, the rep owns the number.
  *
- * One scenario by default at 70%; "+ Compare" opens a second at 65%. Each
- * column is its own notebook.
+ * `mult` is stored, unlike the repair tier, because it genuinely cannot be
+ * derived: a 70% column does not imply a single deduction once the rep is free
+ * to edit the percentage. Anything saved before this existed has no `mult` and
+ * is read as Classic — which is what those numbers meant when they were
+ * written.
+ *
+ * One scenario by default; "+ Compare" opens a second on the OTHER formula, so
+ * the comparison explains itself. Each column is its own notebook.
  *
  * Repairs are picked by NAME off a four-rung ladder. There is deliberately no
  * stored `tier` field — the tier is DERIVED from the $/sf, so there is nothing
@@ -287,6 +320,30 @@ const props = defineProps({
   seed: { type: Object, default: null },
 })
 
+// Matches OfferRail.vue's rail so the two surfaces cannot name the same
+// formula differently. Order is display order: the default leads.
+const FORMULAS = [
+  {
+    key: 'double',
+    label: __('2× repairs'),
+    pct: 0.9,
+    mult: 2,
+    why: __('ARV × 90% − 2× repairs − fee'),
+  },
+  {
+    key: 'classic',
+    label: __('Classic'),
+    pct: 0.7,
+    mult: 1,
+    why: __('ARV × 70% − repairs − fee — the 70% rule'),
+  },
+]
+// Same reason the desk rail gives, and for the same doubling.
+const DOUBLE_WHY = __(
+  'Doubled on purpose: a buffer that overruns is recoverable where an offer ' +
+    'that was too high is not.',
+)
+
 const TIERS = [
   { key: 'paint', label: __('Paint & carpet'), psf: 10 },
   { key: 'kitchen', label: __('Kitchen & baths'), psf: 30 },
@@ -299,11 +356,16 @@ const TIERS = [
 const DEFAULT_PSF = 30
 const DEFAULT_FEE = 25000
 
-function fresh(pct) {
-  return { arv: 0, pct, rehabPsf: DEFAULT_PSF, fee: DEFAULT_FEE }
+// Column 0 opens on the default formula, column 1 on the other one.
+function formulaFor(i) {
+  return FORMULAS[i ? 1 : 0]
+}
+function fresh(i) {
+  const f = formulaFor(i)
+  return { arv: 0, pct: f.pct, mult: f.mult, rehabPsf: DEFAULT_PSF, fee: DEFAULT_FEE }
 }
 
-const s = reactive([fresh(0.7), fresh(0.65)])
+const s = reactive([fresh(0), fresh(1)])
 const cols = ref(1)
 // Only needed to hold the raw input open when the typed number happens to land
 // on a rung; every other custom case falls out of `tierFor` returning nothing.
@@ -324,11 +386,17 @@ function setField(row, col, el) {
 const storageKey = computed(() => `compsCalc:${props.lead}`)
 
 function applyScene(i, row) {
-  Object.assign(s[i], fresh(i ? 0.65 : 0.7), {
+  const base = fresh(i)
+  const blank = !row || !Object.keys(row).length
+  Object.assign(s[i], base, {
     arv: Number(row.arv) || 0,
-    pct: Number(row.pct) || (i ? 0.65 : 0.7),
+    pct: Number(row.pct) || base.pct,
     rehabPsf: Number(row.rehabPsf ?? row.rehab_psf) || DEFAULT_PSF,
     fee: Number(row.fee) || DEFAULT_FEE,
+    // A snapshot written before the toggle existed carries no `mult`, and its
+    // numbers were computed with a single deduction — so it IS the classic
+    // one. Only a genuine reset falls back to the column's default.
+    mult: Number(row.mult) || (blank ? base.mult : 1),
   })
 }
 
@@ -355,7 +423,11 @@ function loadSaved() {
     // New shape is [{…},{…}]. The previous single-ARV blob is ignored — better
     // to start clean than to write one number into both columns.
     if (Array.isArray(raw.s) && raw.s.length === 2) {
-      raw.s.forEach((row, i) => Object.assign(s[i], fresh(i ? 0.65 : 0.7), row))
+      // Same rule as a saved snapshot: a draft with no `mult` predates the
+      // toggle and is classic.
+      raw.s.forEach((row, i) =>
+        Object.assign(s[i], fresh(i), row, { mult: Number(row.mult) || 1 }),
+      )
     }
     if (raw.cols === 2) cols.value = 2
     if (typeof raw.notes === 'string') notes.value = raw.notes
@@ -413,12 +485,23 @@ function onDocClick(e) {
 onMounted(() => document.addEventListener('click', onDocClick, true))
 onBeforeUnmount(() => document.removeEventListener('click', onDocClick, true))
 
+function multOf(col) {
+  return Number(s[col]?.mult) === 2 ? 2 : 1
+}
+function setFormula(col, f) {
+  s[col].mult = f.mult
+  // The percentage is part of the formula's identity, so picking one sets it.
+  // It stays editable afterwards; the rep just starts from the canonical number.
+  s[col].pct = f.pct
+}
+
 function run(col) {
   const x = s[col]
   const after = Math.round(x.arv * x.pct)
-  const rehab = Math.round((Number(x.rehabPsf) || 0) * sqft.value)
+  const repairs = Math.round((Number(x.rehabPsf) || 0) * sqft.value)
+  const rehab = repairs * multOf(col)
   const wholesale = after - rehab
-  return { after, rehab, wholesale, offer: wholesale - x.fee }
+  return { after, repairs, rehab, wholesale, offer: wholesale - x.fee }
 }
 
 const usable = computed(() =>
@@ -523,11 +606,14 @@ function typeMoney(col, key, e) {
   nextTick(() => putCaret(el, digitsBefore, formatted))
 }
 
+/** This field is the DEDUCTION, so back-solving $/sf divides the multiplier
+ *  back out — typing $75,600 at 2× is $30/sf, not $60. */
 function typeRehab(col, e) {
   const el = e.target
   const digitsBefore = (el.value.slice(0, el.selectionStart).match(/\d/g) || []).length
   const n = parseMoney(el.value)
-  if (sqft.value) s[col].rehabPsf = n ? Math.round((n / sqft.value) * 100) / 100 : 0
+  const div = sqft.value * multOf(col)
+  if (div) s[col].rehabPsf = n ? Math.round((n / div) * 100) / 100 : 0
   nextTick(() => putCaret(el, digitsBefore, n ? money(n) : ''))
 }
 
@@ -540,7 +626,14 @@ async function save() {
       scenarios: JSON.stringify(
         visible.value.map((i) => {
           const x = s[i]
-          return { arv: x.arv, pct: x.pct, rehabPsf: x.rehabPsf, fee: x.fee, ...run(i) }
+          return {
+            arv: x.arv,
+            pct: x.pct,
+            mult: multOf(i),
+            rehabPsf: x.rehabPsf,
+            fee: x.fee,
+            ...run(i),
+          }
         }),
       ),
       comps: JSON.stringify(
@@ -761,6 +854,59 @@ input.empty {
 }
 .out.bad {
   color: var(--ink-red-3);
+}
+
+/* Formula toggle. A segmented pair rather than a dropdown: there are exactly
+   two, and which one is running has to be readable without opening anything. */
+.seg {
+  display: flex;
+  min-width: 0;
+  border: 1px solid var(--outline-gray-2);
+  border-radius: 5px;
+  background: var(--surface-gray-2);
+  padding: 1px;
+  gap: 1px;
+}
+.seg button {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  padding: 0 4px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--ink-gray-6);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.seg button:hover {
+  color: var(--ink-gray-9);
+}
+.seg button.on {
+  background: var(--surface-white);
+  color: var(--ink-gray-9);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
+}
+
+/* The deduction row wears its multiplier, so a doubled figure is never just a
+   number that looks too big. */
+.ded {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.x2 {
+  flex: none;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink-gray-5);
+  cursor: help;
 }
 
 /* Repairs picker. The trigger's value column and the menu's have to land on

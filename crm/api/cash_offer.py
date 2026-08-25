@@ -1,10 +1,15 @@
 """Save a cash-offer calc to the lead's activity timeline.
 
 This is the comps-page calculator, not the desk rail. The rail is
-90% ARV − 2×repairs − fee and lives in `price_determination`. This is
-ARV × % − rehab − assignment fee, twice (Scenario 1 / Scenario 2). They
-must not write the same field or a re-price on one surface silently
-rewrites the other.
+90% ARV − 2×repairs − fee and lives in `price_determination`. This runs
+ARV × % − (mult × repairs) − assignment fee per scenario, where `mult` is
+1 (the classic 70% rule) or 2 (the same shape the rail uses). They must not
+write the same field or a re-price on one surface silently rewrites the other.
+
+The multiplier is recomputed here rather than trusted from the client, so the
+timeline card and the calculator cannot disagree about what an offer was. A
+scenario saved before the toggle existed carries no `mult` and is read as 1 —
+which is what its numbers meant when they were written.
 """
 
 import html as html_lib
@@ -48,16 +53,20 @@ def _scene(raw, sqft):
 		return None
 	rehab_psf = _num(raw.get("rehabPsf") or raw.get("rehab_psf"))
 	fee = _num(raw.get("fee"))
+	mult = 2 if int(_num(raw.get("mult")) or 1) == 2 else 1
 	after = round(arv * pct)
-	rehab = round(rehab_psf * _num(sqft))
+	repairs = round(rehab_psf * _num(sqft))
+	rehab = repairs * mult
 	wholesale = after - rehab
 	offer = wholesale - fee
 	return {
 		"arv": arv,
 		"pct": pct,
+		"mult": mult,
 		"rehab_psf": rehab_psf,
 		"fee": fee,
 		"after": after,
+		"repairs": repairs,
 		"rehab": rehab,
 		"wholesale": wholesale,
 		"offer": offer,
@@ -110,9 +119,11 @@ def _payload(lead, scenes, comps, sqft, notes=""):
 			{
 				"arv": sc["arv"],
 				"pct": sc["pct"],
+				"mult": sc["mult"],
 				"rehab_psf": sc["rehab_psf"],
 				"fee": sc["fee"],
 				"after": sc["after"],
+				"repairs": sc["repairs"],
 				"rehab": sc["rehab"],
 				"offer": sc["offer"],
 			}
@@ -149,18 +160,31 @@ def _html(lead, scenes, comps, sqft, notes=""):
 	]
 	for i, sc in enumerate(scenes):
 		label = _("Scenario {0}").format(i + 1)
+		# The formula is named on the card. Without it a doubled deduction reads
+		# as an arithmetic mistake to anyone reading the timeline later.
+		shape = (
+			_("{0:.0f}% · 2× repairs").format(sc["pct"] * 100)
+			if sc["mult"] == 2
+			else _("{0:.0f}%").format(sc["pct"] * 100)
+		)
+		bill = "{psf}/sf × {sf} sf".format(
+			psf=_money(sc["rehab_psf"]), sf=f"{int(sqft):,}" if sqft else "—"
+		)
+		if sc["mult"] == 2:
+			bill += " = {0} × 2".format(_money(sc["repairs"]))
 		parts.append(
-			"<div>{label} ({pct:.0f}%)</div>"
+			"<div>{label} ({shape})</div>"
 			"<div>{arv} × {pct:.0f}% = {after}</div>"
-			"<div>− rehab {rehab} ({psf}/sf × {sf} sf)</div>"
+			"<div>− {word} {rehab} ({bill})</div>"
 			'<div>− fee {fee} = <b style="white-space:nowrap">{offer}</b></div>'.format(
 				label=escape_html(label),
+				shape=escape_html(shape),
+				word=escape_html(_("repairs") if sc["mult"] == 2 else _("rehab")),
 				pct=sc["pct"] * 100,
 				arv=_money(sc["arv"]),
 				after=_money(sc["after"]),
 				rehab=_money(sc["rehab"]),
-				psf=_money(sc["rehab_psf"]),
-				sf=f"{int(sqft):,}" if sqft else "—",
+				bill=escape_html(bill),
 				fee=_money(sc["fee"]),
 				offer=_money(sc["offer"]),
 			)

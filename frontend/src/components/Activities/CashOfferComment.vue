@@ -5,16 +5,24 @@
     <div v-for="(sc, i) in offer.scenarios" :key="i" class="scene">
       <div class="scene-h">
         {{ __('Scenario {0}', [i + 1]) }}
-        <span v-if="sc.pct">({{ Math.round(sc.pct * 100) }}%)</span>
+        <span v-if="sc.pct">
+          ({{ Math.round(sc.pct * 100) }}%<template v-if="Number(sc.mult) === 2">
+            · {{ __('2× repairs') }}</template>)
+        </span>
       </div>
       <div>
         {{ money(sc.arv) }} × {{ Math.round((sc.pct || 0) * 100) }}% =
         {{ money(sc.after) }}
       </div>
+      <!-- Names the doubling, or a deduction twice the repair bill reads as an
+           arithmetic mistake to whoever finds this later. -->
       <div>
-        − {{ __('rehab') }} {{ money(sc.rehab) }}
+        − {{ Number(sc.mult) === 2 ? __('repairs') : __('rehab') }}
+        {{ money(sc.rehab) }}
         <template v-if="offer.sqft">
-          ({{ money(sc.rehab_psf) }}/sf × {{ fmt(offer.sqft) }} sf)
+          ({{ money(sc.rehab_psf) }}/sf × {{ fmt(offer.sqft) }} sf<template
+            v-if="Number(sc.mult) === 2"
+          > = {{ money(sc.repairs) }} × 2</template>)
         </template>
       </div>
       <div>
