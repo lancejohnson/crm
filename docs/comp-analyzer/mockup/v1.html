@@ -31,7 +31,12 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
    288px rail + 648px map + ~330px tray ≈ 1280. Rendered at exactly that, because
    the whole question is whether the analyzer fits the SMALLEST of the three
    hosts — the comps page has 800px of pane and a phone has 260px. */
-.stagewrap{padding:22px;display:flex;flex-direction:column;align-items:center;gap:14px}
+/* `align-items:center` on a fixed-width child in a narrower viewport pushes the
+   left edge to negative x, where nothing can scroll to it. `safe center` falls
+   back to start alignment the moment it would overflow; min-width:max-content
+   makes the scroll area as wide as the content for browsers without it. */
+.stagewrap{padding:22px;display:flex;flex-direction:column;align-items:flex-start;
+  align-items:safe center;gap:14px;min-width:max-content}
 .caption{width:1280px;font-size:12px;color:#55565d;display:flex;align-items:baseline;gap:10px}
 .caption b{color:#18181a;font-weight:600;font-size:13px}
 .caption .sp{margin-left:auto;color:#8a8b92;font-size:11px}
@@ -76,6 +81,8 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
   padding:3px 8px;font-size:10px;color:var(--t2)}
 .leg span{display:flex;align-items:center;gap:3px}
 .leg i{width:7px;height:7px;border-radius:2px;flex:none}
+.leg i.ring{width:11px;height:9px;border-radius:3px;background:#f5c518;
+  box-shadow:0 0 0 1.5px #fff,0 0 0 3px #2563c9}
 .bnd{position:absolute;right:8px;top:8px;z-index:500;max-width:250px;
   background:rgba(255,255,255,.95);border:1px solid var(--br);border-radius:var(--r);
   padding:5px 8px;font-size:10.5px;color:var(--t2);line-height:1.45}
@@ -156,8 +163,9 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .cu{display:flex;gap:8px;padding:8px 0;font-size:12px;align-items:flex-start}
 .cu + .cu{border-top:1px solid var(--br)}
 .cu:hover{background:var(--bg1);margin:0 -13px;padding-left:13px;padding-right:13px}
-.cu .n{width:17px;height:17px;border-radius:50%;flex:none;display:grid;place-items:center;
-  font-size:10px;font-weight:600;color:#fff;margin-top:1px}
+/* Tier lives HERE, in the list, not on the pin. A pill that changes shape or
+   colour to say "used" fights the status palette it already carries. */
+.cu .n{width:7px;height:7px;border-radius:2px;flex:none;margin-top:5px}
 .cu .bd{min-width:0;flex:1}
 .cu .t{display:flex;align-items:baseline;gap:6px}
 .cu .a{font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -365,31 +373,31 @@ const USED = [
 /* Everything else in radius — drawn faded, so "what it did not use" is visible
    rather than silently absent. */
 const OTHER = [
-  {p:219000,sf:1690,lat:39.7392,lng:-86.1262,st:'sold'},
-  {p:134000,sf:1090,lat:39.7331,lng:-86.1338,st:'sold'},
-  {p:159000,sf:1420,lat:39.7290,lng:-86.1288,st:'sold'},
-  {p:112000,sf:980, lat:39.7378,lng:-86.1330,st:'sold'},
-  {p:179000,sf:1205,lat:39.7361,lng:-86.1312,st:'active'},
-  {p:96000, sf:1010,lat:39.7312,lng:-86.1178,st:'sold'},
-  {p:205000,sf:1560,lat:39.7405,lng:-86.1240,st:'sold'},
-  {p:88000, sf:1150,lat:39.7284,lng:-86.1250,st:'sold'},
-  {p:143000,sf:1240,lat:39.7345,lng:-86.1160,st:'sold'},
-  {p:167000,sf:1330,lat:39.7398,lng:-86.1295,st:'active'},
-  {p:121000,sf:1120,lat:39.7302,lng:-86.1330,st:'sold'},
-  {p:198000,sf:1480,lat:39.7386,lng:-86.1218,st:'sold'},
-  {p:104000,sf:1060,lat:39.7276,lng:-86.1210,st:'sold'},
-  {p:156000,sf:1290,lat:39.7412,lng:-86.1276,st:'sold'},
-  {p:132000,sf:1175,lat:39.7322,lng:-86.1352,st:'sold'},
-  {p:186000,sf:1395,lat:39.7375,lng:-86.1170,st:'active'},
-  {p:79000, sf:1085,lat:39.7268,lng:-86.1272,st:'sold'},
-  {p:174000,sf:1350,lat:39.7418,lng:-86.1225,st:'sold'},
-  {p:118000,sf:1130,lat:39.7294,lng:-86.1318,st:'sold'},
-  {p:191000,sf:1440,lat:39.7402,lng:-86.1188,st:'sold'},
-  {p:127000,sf:1200,lat:39.7338,lng:-86.1368,st:'sold'},
-  {p:163000,sf:1310,lat:39.7424,lng:-86.1300,st:'sold'},
-  {p:99000, sf:1045,lat:39.7262,lng:-86.1232,st:'sold'},
-  {p:181000,sf:1370,lat:39.7392,lng:-86.1160,st:'sold'},
-  {p:145000,sf:1260,lat:39.7280,lng:-86.1180,st:'sold'},
+  {p:219000,sf:1690,bd:4,ba:2,yr:1962,days:120,lat:39.7392,lng:-86.1262,st:'sold'},
+  {p:134000,sf:1090,bd:2,ba:1,yr:1941,days:210,lat:39.7331,lng:-86.1338,st:'sold'},
+  {p:159000,sf:1420,bd:3,ba:1,yr:1954,days:95, lat:39.7290,lng:-86.1288,st:'sold'},
+  {p:112000,sf:980, bd:2,ba:1,yr:1939,days:280,lat:39.7378,lng:-86.1330,st:'sold'},
+  {p:179000,sf:1205,bd:3,ba:1,yr:1950,days:74, lat:39.7361,lng:-86.1312,st:'active'},
+  {p:96000, sf:1010,bd:2,ba:1,yr:1946,days:160,lat:39.7312,lng:-86.1178,st:'sold'},
+  {p:205000,sf:1560,bd:3,ba:2,yr:1958,days:66, lat:39.7405,lng:-86.1240,st:'sold'},
+  {p:88000, sf:1150,bd:3,ba:1,yr:1943,days:300,lat:39.7284,lng:-86.1250,st:'sold'},
+  {p:143000,sf:1240,bd:3,ba:1,yr:1952,days:145,lat:39.7345,lng:-86.1160,st:'sold'},
+  {p:167000,sf:1330,bd:3,ba:1,yr:1956,days:31, lat:39.7398,lng:-86.1295,st:'active'},
+  {p:121000,sf:1120,bd:2,ba:1,yr:1948,days:240,lat:39.7302,lng:-86.1330,st:'sold'},
+  {p:198000,sf:1480,bd:3,ba:2,yr:1960,days:58, lat:39.7386,lng:-86.1218,st:'sold'},
+  {p:104000,sf:1060,bd:2,ba:1,yr:1940,days:190,lat:39.7276,lng:-86.1210,st:'sold'},
+  {p:156000,sf:1290,bd:3,ba:1,yr:1953,days:118,lat:39.7412,lng:-86.1276,st:'sold'},
+  {p:132000,sf:1175,bd:3,ba:1,yr:1947,days:265,lat:39.7322,lng:-86.1352,st:'sold'},
+  {p:186000,sf:1395,bd:3,ba:2,yr:1959,days:22, lat:39.7375,lng:-86.1170,st:'active'},
+  {p:79000, sf:1085,bd:2,ba:1,yr:1938,days:330,lat:39.7268,lng:-86.1272,st:'sold'},
+  {p:174000,sf:1350,bd:3,ba:2,yr:1957,days:88, lat:39.7418,lng:-86.1225,st:'sold'},
+  {p:118000,sf:1130,bd:2,ba:1,yr:1944,days:225,lat:39.7294,lng:-86.1318,st:'sold'},
+  {p:191000,sf:1440,bd:3,ba:2,yr:1961,days:49, lat:39.7402,lng:-86.1188,st:'sold'},
+  {p:127000,sf:1200,bd:3,ba:1,yr:1949,days:275,lat:39.7338,lng:-86.1368,st:'sold'},
+  {p:163000,sf:1310,bd:3,ba:1,yr:1955,days:102,lat:39.7424,lng:-86.1300,st:'sold'},
+  {p:99000, sf:1045,bd:2,ba:1,yr:1942,days:310,lat:39.7262,lng:-86.1232,st:'sold'},
+  {p:181000,sf:1370,bd:3,ba:2,yr:1958,days:71, lat:39.7392,lng:-86.1160,st:'sold'},
+  {p:145000,sf:1260,bd:3,ba:1,yr:1951,days:135,lat:39.7280,lng:-86.1180,st:'sold'},
 ];
 
 const money = n => '$' + Math.round(n).toLocaleString();
@@ -436,63 +444,47 @@ function render(){
   const analysis = state.rail === 'analysis' && state.phase === 'done';
   document.getElementById('bnd').hidden = !analysis;
 
-  document.getElementById('leg').innerHTML = analysis
-    ? `<span><i style="background:#2563c9"></i>Subject</span>`
-      + `<span><i style="background:${TIERS.asis.sw}"></i>Needs work</span>`
-      + `<span><i style="background:${TIERS.retail.sw}"></i>Retail</span>`
-      + `<span><i style="background:${TIERS.reno.sw}"></i>Flip</span>`
-      + `<span><i style="background:#b9bac1"></i>Not used</span>`
-    : `<span><i style="background:#2563c9"></i>Subject</span>`
-      + `<span><i style="background:#d92d20"></i>For sale</span>`
-      + `<span><i style="background:#f5c518"></i>Sold</span>`
-      + `<span><i class="fade" style="width:26px;background:linear-gradient(90deg,#f5c518,rgba(245,197,24,.32))"></i>0–360d</span>`;
+  document.getElementById('leg').innerHTML =
+    `<span><i style="background:#2563c9"></i>Subject</span>`
+    + `<span><i style="background:#d92d20"></i>For sale</span>`
+    + `<span><i style="background:#f5c518"></i>Sold</span>`
+    + `<span><i class="fade" style="width:26px;background:linear-gradient(90deg,#f5c518,rgba(245,197,24,.32))"></i>Fainter = older</span>`
+    + (analysis ? `<span><i class="ring"></i>Used in the ARV</span>` : '');
 
   map.eachLayer(l => { if (l instanceof L.Marker) map.removeLayer(l); });
 
-  /* Unused comps. In analysis mode they go grey and quiet: the question the rep
-     is asking has become "which ones did it use", and 25 full-colour pills
-     drown out the nine that matter. Faded, never hidden — a comp the analyzer
-     passed over is information, and removing it would look like it never
-     existed. */
-  OTHER.forEach(c => {
-    const col = analysis ? '#b9bac1' : (c.st === 'active' ? '#d92d20' : '#f5c518');
-    const ink = analysis ? '#fff' : (c.st === 'active' ? '#fff' : '#3a2f00');
-    const op  = analysis ? 0.55 : fade(150);
-    L.marker([c.lat,c.lng], {icon: pill(
-      `<div style="display:grid;place-items:center;width:46px;height:20px;border-radius:4px;
-        background:${col};opacity:${op};color:${ink};font:600 10px Inter,sans-serif;
-        border:1.5px solid rgba(255,255,255,.9)">${short(c.p)}</div>`, 46, 20)}).addTo(map);
-  });
+  /* ONE pill builder for every comp, used or not. The badge does not change to
+     say "the analyzer picked this" — it keeps its status colour, its two lines
+     and its recency fade, and gains the SELECTED RING the app already uses.
+     `pillIcon()` in CompsView.vue settled this: "Selected does not switch to
+     the tall pill ... the ring is the selected signal", and a selected pill is
+     never faded, because an explicit pick outranks recency.
 
-  /* The nine it used. Numbered to match the rail exactly, and carrying the TIER
-     as a word rather than a fifth colour: the palette already spends red on
-     "for sale", yellow on "sold", blue on the subject and violet on pending, so
-     a tier hue would be the one signal too many. The pill's second line already
-     exists — this just changes what it says. */
-  USED.forEach(c => {
-    const t = TIERS[c.t];
-    const base = c.st === 'active' ? '#d92d20' : '#f5c518';
-    const ink  = c.st === 'active' ? '#fff' : '#3a2f00';
-    if (analysis){
-      L.marker([c.lat,c.lng], {icon: pill(
-        `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
-           width:78px;height:34px;border-radius:5px;background:#fff;color:#18181a;
-           border:2px solid ${t.sw};box-shadow:0 1px 6px rgba(0,0,0,.22);line-height:1.1;
-           font-family:Inter,sans-serif">
-           <span style="font:600 11px Inter,sans-serif">${short(c.p)}</span>
-           <span style="font-size:8.5px;color:${t.ink};font-weight:600;margin-top:1px">
-             ${c.n} · ${c.t==='reno'?'Flip':c.t==='asis'?'As-is':'Retail'}</span>
-         </div>`, 78, 34)}).addTo(map);
-    } else {
-      L.marker([c.lat,c.lng], {icon: pill(
-        `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
-           width:70px;height:32px;border-radius:5px;background:${base};color:${ink};
-           opacity:${fade(c.days)};border:1.5px solid rgba(255,255,255,.9);line-height:1.1">
-           <span style="font:600 10.5px Inter,sans-serif">${short(c.p)}</span>
-           <span style="font-size:8.5px;margin-top:1px">${c.bd}/${c.ba} · ${c.sf}sf</span>
-         </div>`, 70, 32)}).addTo(map);
-    }
-  });
+     Tier is deliberately NOT encoded here. The palette already spends red on
+     for-sale, yellow on sold, blue on the subject and violet on pending; a
+     fifth hue for condition would be the signal too many. Tier lives in the
+     rail, where there is room to write the word. */
+  function drawComp(c, used){
+    const act  = c.st === 'active';
+    const base = act ? '#d92d20' : '#f5c518';
+    const ink  = act ? '#fff' : '#3a2f00';
+    const alpha = (act || used) ? 1 : fade(c.days);
+    const ring = used
+      ? 'box-shadow:0 0 0 2px #fff,0 0 0 4px #2563c9,0 1px 3px rgba(0,0,0,.4);'
+      : 'box-shadow:0 1px 3px rgba(0,0,0,.35);';
+    L.marker([c.lat,c.lng], {zIndexOffset: used ? 400 : 0, icon: pill(
+      `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
+         box-sizing:border-box;width:70px;height:32px;border-radius:5px;
+         background:${base};opacity:${alpha};color:${ink};
+         border:1px solid rgba(255,255,255,.85);${ring}line-height:1.1">
+         <span style="font:700 10.5px Inter,sans-serif">${short(c.p)}
+           <span style="font-weight:400;font-size:8px;opacity:.8">${c.yr}</span></span>
+         <span style="font-size:8.5px;margin-top:1px">${c.bd}/${c.ba} · ${c.sf}sf</span>
+       </div>`, 70, 32)}).addTo(map);
+  }
+
+  OTHER.forEach(c => drawComp(c, false));
+  USED.forEach(c => drawComp(c, analysis));
 
   /* The subject, in the same two-line pill grammar, blue with a heavier ring. */
   L.marker([S.lat,S.lng], {zIndexOffset:1000, icon: pill(
@@ -550,7 +542,7 @@ function tierRow(key, count, lo, hi, isSource){
 function compRow(c){
   const t = TIERS[c.t];
   return `<div class="cu">
-    <span class="n" style="background:${t.sw}">${c.n}</span>
+    <span class="n" style="background:${t.sw}" title="${t.nm}"></span>
     <span class="bd">
       <span class="t"><span class="a">${c.a}</span><span class="p">${money(c.p)}</span></span>
       <span class="m">${c.bd}/${c.ba} · ${c.sf.toLocaleString()} sf · ${c.yr} · ${c.d} mi · ${c.days}d ago</span>
