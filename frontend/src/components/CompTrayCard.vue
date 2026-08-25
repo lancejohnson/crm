@@ -150,6 +150,20 @@
         >
           {{ timing }}
         </div>
+        <!-- Same star as the map pin, so the mark is learned once and recognised
+             here without relearning. Amber, not red: a flip is "look closer", not
+             an error, and plenty are perfectly good comps once you have seen the
+             photos. The card can afford the words the pill cannot, which is what
+             makes a bare star on the pill legible at all. -->
+        <div
+          v-if="flipBadge"
+          class="mt-1 flex items-baseline gap-1 rounded bg-surface-amber-1 px-1.5 py-1 text-2xs text-ink-amber-3"
+          :title="`${flipBadge.label} — ${flipBadge.detail}`"
+        >
+          <span aria-hidden="true">★</span>
+          <span class="shrink-0 font-semibold">{{ flipBadge.label }}</span>
+          <span class="truncate">{{ flipBadge.detail }}</span>
+        </div>
       </div>
     </div>
 
@@ -373,7 +387,43 @@ const timing = computed(() => {
   }
   const d = fmtDate(c.removed_date)
   const ago = agoLabel(c.recency_days)
-  return d ? (ago ? `${__('Off-market')} ${d} · ${ago}` : `${__('Off-market')} ${d}`) : __('Off-market')
+  // Both numbers, and never the same word for them. How long AGO is what makes a
+  // comp good evidence; how long it TOOK is what the market thought of the price.
+  // Time-to-sell comes from the listing chain, not from `days_on_market`, which
+  // on a sold Zillow row is days since the sale rather than days on market.
+  const took = soldInDays(c)
+  const base = d
+    ? ago
+      ? `${__('Off-market')} ${d} · ${ago}`
+      : `${__('Off-market')} ${d}`
+    : __('Off-market')
+  return took ? `${base} · ${__('took {0}d to sell', [took])}` : base
+})
+
+/** Days from the first listing of the run that ended in the sale. null if unknown. */
+function soldInDays(c) {
+  const n = Number(c?.sale_history?.days_to_sell)
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : null
+}
+
+/**
+ * The flip warning for the tray, as a badge rather than a sentence.
+ *
+ * Same star as the map pin, deliberately: the rep meets the mark on the pill and
+ * has to recognise it here without relearning it. The words are affordable in the
+ * tray in a way they are not on a 90px pill.
+ */
+const flipBadge = computed(() => {
+  const f = props.comp?.sale_history?.flip
+  if (!f) return null
+  const pct = Math.round((f.pct || 0) * 100)
+  return {
+    label: f.kind === 'relist' ? __('Possible flip in progress') : __('Possible flip'),
+    detail:
+      f.kind === 'relist'
+        ? __('bought {0} ago · asking {1}% more', [agoLabel(f.hold_days), pct])
+        : __('held {0} · resold {1}% higher', [agoLabel(f.hold_days), pct]),
+  }
 })
 
 /**

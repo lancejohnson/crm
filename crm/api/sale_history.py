@@ -57,18 +57,22 @@ MIN_REAL_SALE = 5_000
 #: a quick resale at the same price is a wash sale or a correction, and a big
 #: gain over eight years is just the market.
 #:
-#: 730 days is deliberately generous for the word "quickly" — a gut renovation
-#: routinely takes a year to buy, permit, build and re-list. Measured holds in
-#: the sample that this flags: 75, 129, 305, 312, 462, 610 days. The raw
-#: `hold_days` rides in the result so the UI can show it and the rep can judge;
-#: this constant only decides when we volunteer the warning.
-FLIP_MAX_HOLD_DAYS = 730
+#: EIGHTEEN MONTHS (Lance, 2026-08-25). Two years was too generous to still mean
+#: "quickly": it flagged 15241 Eastburn St, Detroit at a 730-day hold, which is
+#: someone who owned a house for two years, not someone who flipped one. 18
+#: months still comfortably covers a gut renovation -- buy, permit, build,
+#: re-list -- which is the longest thing we actually want to catch. Measured
+#: holds still flagged on the Detroit board: 109, 181, 217, 272, 305 days.
+#:
+#: The raw `hold_days` rides in the result either way, so the UI can show it and
+#: the rep can judge; this constant only decides when we volunteer the warning.
+FLIP_MAX_HOLD_DAYS = 548  # 18 months
 FLIP_MIN_GAIN_PCT = 0.30
 
 #: An ACTIVE listing asking far more than it last sold for is the same story
 #: caught mid-flight: someone bought it and is now trying to resell. Not proof —
 #: the ask is not a sale — so it is labelled as an ask, never counted as one.
-ASK_MAX_HOLD_DAYS = 730
+ASK_MAX_HOLD_DAYS = FLIP_MAX_HOLD_DAYS
 ASK_MIN_GAIN_PCT = 0.30
 
 _SOLD = "sold"

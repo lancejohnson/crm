@@ -1226,9 +1226,37 @@ function withAlpha(hex, alpha) {
 function priceShort(p) {
   const n = Number(p)
   if (!Number.isFinite(n) || n <= 0) return '—'
-  if (n >= 1000000) return '$' + (n / 1000000).toFixed(n >= 10000000 ? 0 : 1) + 'm'
+  // `>= 999500`, not `>= 1000000`: rounding happens BEFORE the unit is chosen, so
+  // the old threshold let $999,500 round up to "$1000k" — four digits, and the
+  // widest thing on any pill, for the one price that should have read "$1.0m".
+  if (n >= 999500) return '$' + (n / 1000000).toFixed(n >= 10000000 ? 0 : 1) + 'm'
   if (n >= 1000) return '$' + Math.round(n / 1000) + 'k'
   return '$' + Math.round(n)
+}
+
+/**
+ * How long it took to sell, for the pill's bottom-right slot. '' when unknown.
+ *
+ * Deliberately UNLABELLED and positional: the top line's right end already means
+ * "how long since this pin's news", so the second line's right end is the only
+ * other time slot on the pill and can only mean the other number. Spelling out
+ * "77d to sell" costs ~40px on a 90px pill to say what position already says.
+ */
+function soldInShort(c) {
+  const n = Number(c?.sale_history?.days_to_sell)
+  return Number.isFinite(n) && n >= 0 ? `${Math.round(n)}d` : ''
+}
+
+/**
+ * True when this comp was bought and resold (or relisted) fast enough, and for
+ * enough more, that it should not be priced off without a second look.
+ *
+ * The threshold lives on the SERVER (18 months, +30%) so the map, the tray and
+ * the detail panel cannot disagree about what counts. This only asks whether the
+ * server said so.
+ */
+function isFlip(c) {
+  return !!c?.sale_history?.flip
 }
 
 function fmtDate(v) {
@@ -1283,10 +1311,37 @@ function pillBits(c) {
   }
 }
 
-/** Everything a detailed pill says, for the title tooltip / measurement. */
+/**
+ * Everything a detailed pill says, for the title tooltip / measurement.
+ *
+ * The two positional numbers get spelled out in WORDS here, which is the whole
+ * reason position is affordable on the pill itself: hovering is how you resolve
+ * "what does that bare 77d mean" without the pill having to carry the answer.
+ */
 function pillFacts(c) {
   const { year, line2 } = pillBits(c)
-  return [line2, year].filter(Boolean).join(' · ')
+  const sold = soldInShort(c)
+  const f = c?.sale_history?.flip
+  return [
+    line2,
+    year,
+    sold ? __('took {0} to sell', [sold]) : '',
+    f
+      ? f.kind === 'relist'
+        ? __('possible flip — bought {0} ago for {1}, now asking {2}% more', [
+            agoShort(f.hold_days),
+            priceShort(f.bought_price),
+            Math.round((f.pct || 0) * 100),
+          ])
+        : __('possible flip — bought {0} earlier for {1}, resold {2}% higher', [
+            agoShort(f.hold_days),
+            priceShort(f.bought_price),
+            Math.round((f.pct || 0) * 100),
+          ])
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
 }
 
 /**
@@ -1420,15 +1475,22 @@ function pillIcon(c) {
   const op = '1'
 
   if (!detailed) {
-    const w = Math.max(40, Math.ceil(18 + price.length * 7.4))
+    // The star survives the `D` collapse. Details are hidden on a dense board --
+    // exactly where a bad comp is easiest to price off by mistake -- so the one
+    // thing that says "do not trust this number" is not part of what gets hidden.
+    const bareStar = isFlip(c)
+      ? `<span style="font-size:10px;line-height:1;margin-right:1px">\u2605</span>`
+      : ''
+    const w = Math.max(40, Math.ceil(18 + (isFlip(c) ? 11 : 0) + price.length * 7.4))
     return L.divIcon({
       className: 'comps-price-pill',
-      html: `<div class="comps-pill-body" style="position:relative;display:flex;
+      html: `<div class="comps-pill-body" title="${escapeHtml(pillFacts(c))}"
+          style="position:relative;display:flex;
           align-items:center;justify-content:center;
           box-sizing:border-box;width:${w}px;height:24px;background:${bg};color:${ink};
           font:700 11px/1 ui-sans-serif,system-ui,sans-serif;border-radius:999px;
           border:${border};${ring}white-space:nowrap;
-          opacity:${op}">${price}${hideBadge(c)}</div>`,
+          opacity:${op}">${bareStar}${price}${hideBadge(c)}</div>`,
       iconSize: [w, 24],
       iconAnchor: [w / 2, 12],
       popupAnchor: [0, -14],
@@ -1448,11 +1510,25 @@ function pillIcon(c) {
   // number on a house that is already spoken for, so it takes the same slot
   // rather than making the pill wider.
   const age = pending ? __('Pending') : agoShort(c.recency_days)
+  // The OTHER time number. `age` says how long since the news; this says how long
+  // the house took to sell, from the first listing of the run that ended in the
+  // sale (price cuts included -- a seller who cut twice sat there the whole time).
+  // A live listing has not sold, so it never has one and the slot stays empty.
+  const soldIn = soldInShort(c)
+  // A flip is marked by SHAPE, not by a word and not by a colour. Colour is spoken
+  // for by status and the fill fades with age, so a hue-based mark would vanish on
+  // exactly the stale comps; a star is drawn in the ink colour, which is held solid
+  // while the fill fades, so it survives both. Measured 10 flips on a real 50-comp
+  // Detroit board -- 7 sold, 1 for sale, 1 pending -- so it has to read on all three.
+  const flip = isFlip(c)
+  const starW = flip ? 11 : 0
   const top =
+    starW +
     price.length * 7.0 +
     (year ? 3 + year.length * 5.0 : 0) +
     (age ? 3 + age.length * 5.0 : 0)
-  const w = Math.max(52, Math.ceil(12 + Math.max(top, line2.length * 5.05)))
+  const line2w = line2.length * 5.05 + (soldIn ? 6 + soldIn.length * 5.05 : 0)
+  const w = Math.max(52, Math.ceil(12 + Math.max(top, line2w)))
   const yearHtml = year
     ? `<span style="font:500 9px/1 ui-sans-serif,system-ui,sans-serif;opacity:.72;
          margin-left:3px">${year}</span>`
@@ -1461,9 +1537,22 @@ function pillIcon(c) {
     ? `<span style="font:500 9px/1 ui-sans-serif,system-ui,sans-serif;opacity:.72;
          margin-left:3px">${age}</span>`
     : ''
-  const line2Html = line2
-    ? `<div style="font:500 9px/1 ui-sans-serif,system-ui,sans-serif;opacity:.9;
-         margin-top:2px">${escapeHtml(line2)}</div>`
+  const starHtml = flip
+    ? `<span style="font-size:10px;line-height:1;margin-right:1px">\u2605</span>`
+    : ''
+  // Stretched to the pill's width so the two halves can sit at opposite ends --
+  // facts left, time-to-sell right. Without a soldIn it stays centred exactly as
+  // before, so a pill that has nothing new to say is byte-identical to the old one.
+  const line2Html = line2 || soldIn
+    ? `<div style="display:flex;align-items:baseline;width:100%;padding:0 1px;
+         box-sizing:border-box;gap:6px;justify-content:${
+           soldIn && line2 ? 'space-between' : 'center'
+         };font:500 9px/1 ui-sans-serif,system-ui,sans-serif;opacity:.9;
+         margin-top:2px"><span>${escapeHtml(line2)}</span>${
+           soldIn
+             ? `<span style="font-variant-numeric:tabular-nums">${soldIn}</span>`
+             : ''
+         }</div>`
     : ''
   return L.divIcon({
     className: 'comps-price-pill',
@@ -1473,7 +1562,7 @@ function pillIcon(c) {
         background:${bg};color:${ink};border-radius:9px;border:${border};${ring}
         white-space:nowrap;line-height:1;opacity:${op}">
         <div style="display:flex;align-items:baseline;justify-content:center">
-          <span style="font:700 11.5px/1 ui-sans-serif,system-ui,sans-serif">${price}</span>${yearHtml}${ageHtml}
+          ${starHtml}<span style="font:700 11.5px/1 ui-sans-serif,system-ui,sans-serif">${price}</span>${yearHtml}${ageHtml}
         </div>
         ${line2Html}
         ${hideBadge(c)}
@@ -1635,109 +1724,14 @@ function agoShort(days) {
   return `${y < 2 ? y.toFixed(1) : Math.round(y)}y`
 }
 
-/** "4 mo ago" from the server's own recency figure — the same number the fade uses. */
-function agoLabel(days) {
-  const d = Number(days)
-  if (!Number.isFinite(d) || d < 0) return ''
-  if (d < 31) return __('{0}d ago', [Math.round(d)])
-  if (d < 365) return __('{0} mo ago', [Math.round(d / 30.44)])
-  const y = d / 365.25
-  return __('{0} yr ago', [y < 2 ? y.toFixed(1) : Math.round(y)])
-}
-
-function popupHtml(c) {
-  const active = isActive(c.status)
-  const ago = agoLabel(c.recency_days)
-  // `> 0`, not `!= null`: Zillow's "unknown" is -1, and "-1d on market" is worse
-  // than saying nothing. The server strips it, but a week-old cached circle can
-  // still be carrying one.
-  const domDays = Number(c.days_on_market)
-  const dom =
-    Number.isFinite(domDays) && domDays > 0 ? __('{0}d on market', [Math.round(domDays)]) : ''
-  // Lead with the number that actually matters for THIS status. "99 days" means
-  // opposite things on the two kinds of pin — 99 days ON the market for a live
-  // listing (it is not selling), versus 99 days SINCE it left for an off-market
-  // one (how current the evidence is) — so they are not rendered the same way.
-  // For an off-market comp the date it left is the headline and DOM is context;
-  // for a live listing it is the other way round.
-  //
-  // Deliberately "off-market", never "sold": this inventory carries the last ASK
-  // and leaving the market is not a confirmed close.
-  // ISTL pins are last asks, so off-market ≠ sold. A Zillow RecentlySold pin
-  // (or an ISTL pin we refreshed off a Zillow sale) IS a recorded sale. Now
-  // resolved once on the server and shared with the pill, the tray and the
-  // gallery, so the four cannot describe the same house differently.
-  const state = compState(c)
-  const headline =
-    state === 'pending'
-      ? // The strongest read on the board: a price two parties have agreed, on a
-        // sale that is happening now. Said plainly, because it is neither a
-        // completed sale nor an ordinary ask and must not be mistaken for either.
-        __('Pending · under contract')
-      : state === 'for_sale'
-        ? `${__('For sale')}${dom ? ` · ${dom}` : ''}`
-        : state === 'sold'
-          ? `${__('Sold {0}', [fmtDate(c.removed_date)])}${ago ? ` · ${ago}` : ''}`
-          : `${__('Off-market {0}', [fmtDate(c.removed_date)])}${ago ? ` · ${ago}` : ''}`
-  const when = active
-    ? `${__('Listed {0}', [fmtDate(c.listed_date)])}${state === 'pending' && dom ? ` · ${dom}` : ''}`
-    : `${__('Listed {0}', [fmtDate(c.listed_date)])}${dom ? ` · ${dom}` : ''}`
-  const facts = [
-    c.bedrooms ? `${c.bedrooms} bd` : '',
-    c.bathrooms ? `${c.bathrooms} ba` : '',
-    c.square_footage ? `${Number(c.square_footage).toLocaleString()} sqft` : '',
-    c.year_built ? `built ${c.year_built}` : '',
-  ]
-    .filter(Boolean)
-    .join(' · ')
-  // Deep-link straight to the comp on Zillow. Same slug builder the Lead page
-  // uses, so a comp and a lead resolve the same way. rel=noopener because these
-  // open in a new tab from injected popup HTML.
-  const zurl = zillowUrl(c.address)
-  const zlink = zurl
-    ? `<div style="margin-top:6px"><a href="${escapeHtml(zurl)}" target="_blank" rel="noopener noreferrer"
-         style="color:#2563c9;font-weight:600;text-decoration:underline">${__('Open on Zillow')} ↗</a></div>`
-    : ''
-  // Photos are the fastest way to know whether a comp is really comparable —
-  // square footage says nothing about a gutted shell next to a renovated flip.
-  // Full width and above the use/hide row because it is the thing most worth
-  // doing before deciding either.
-  const details = `<button data-comp-details="${escapeHtml(c.name)}" style="width:100%;
-      cursor:pointer;margin-top:8px;font:600 11px/1 ui-sans-serif,system-ui;
-      padding:7px 8px;border-radius:6px;border:1px solid #e5e3de;background:#fff;
-      color:#2563c9">${__('Photos & details')}</button>`
-  // Hide / use live in the popup rather than on the pill: a pill is 24px tall and
-  // already the click target for "tell me about this one".
-  const actions = `<div style="display:flex;gap:6px;margin-top:6px;padding-top:7px;
-      border-top:1px solid #e5e3de">
-      <button data-comp-use="${escapeHtml(c.name)}" style="flex:1;cursor:pointer;
-        font:600 11px/1 ui-sans-serif,system-ui;padding:6px 8px;border-radius:6px;
-        border:1px solid ${c.selected ? '#2563c9' : '#e5e3de'};
-        background:${c.selected ? '#2563c9' : '#fff'};color:${c.selected ? '#fff' : '#44423d'}">
-        ${c.selected ? `✓ ${__('Using')}` : __('Use as comp')}</button>
-      <button data-comp-hide="${escapeHtml(c.name)}" style="cursor:pointer;
-        font:600 11px/1 ui-sans-serif,system-ui;padding:6px 8px;border-radius:6px;
-        border:1px solid #e5e3de;background:#fff;color:#8a877e">${__('Hide')}</button>
-    </div>`
-  return `<div style="min-width:190px;font:12px/1.45 system-ui,sans-serif;color:#161614">
-      <div style="font-weight:700;margin-bottom:2px">${escapeHtml(c.address)}</div>
-      <div style="font-size:15px;font-weight:700;margin:2px 0">${priceShort(c.price)}${
-        state === 'pending'
-          ? `<span style="font-size:11px;font-weight:600;color:#8a877e;margin-left:5px">${__('agreed price')}</span>`
-          : ''
-      }</div>
-      <div style="color:${compColor(c).onLight};font-weight:600">${headline}</div>
-      <div style="color:#5c5a55">${when}</div>
-      ${facts ? `<div style="color:#8a877e;margin-top:2px">${escapeHtml(facts)}</div>` : ''}
-      <div style="color:#8a877e;margin-top:2px">${__('{0} mi away', [c.distance_mi])}</div>
-      ${c.source === 'zillow' || c.zillow_refreshed
-        ? `<div style="color:#8a877e;margin-top:2px">${escapeHtml(__('Zillow'))}</div>`
-        : ''}
-      ${zlink}
-      ${details}
-      ${actions}
-    </div>`
-}
+// NOTE the comps pin has no Leaflet popup. `popupHtml` used to build one, but
+// gw (698523dd, "Comps: cash-offer calc, hover add/remove, stop the map jump")
+// made a pin click call `openCompDetail()` instead, and left the 147-line
+// builder behind uncalled. Rolldown tree-shook it, so it silently vanished from
+// the bundle -- which is exactly how it cost an afternoon: edits to it compiled
+// clean, shipped nothing, and could not be found in the output. Everything a pin
+// used to say now lives in CompDetailModal (click) and CompTrayCard (the rail).
+// `subjectPopupHtml` below IS still live -- the SUBJECT pin does use a popup.
 
 function render() {
   if (!mapEl.value) return

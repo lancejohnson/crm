@@ -285,6 +285,35 @@ const timeline = computed(() => {
   } else if (props.comp?.days_on_market) {
     rows.push({ label: __('Time on market'), value: __('{0} days', [props.comp.days_on_market]) })
   }
+  // Time to sell is a FINISHED measurement off the listing chain, so it is named
+  // differently from "time on market" above, which on a live listing is a clock
+  // still running. Price cuts ride with it because "sold in 169 days after 3 cuts"
+  // and "sold in 169 days at the asking price" are opposite stories about a price.
+  const sh = props.comp?.sale_history
+  const took = Number(sh?.days_to_sell)
+  if (Number.isFinite(took) && took >= 0) {
+    const cuts = Number(sh?.price_cuts) || 0
+    rows.push({
+      label: __('Took to sell'),
+      value:
+        __('{0} days', [Math.round(took)]) +
+        (cuts > 0 ? ` · ${cuts === 1 ? __('1 price cut') : __('{0} price cuts', [cuts])}` : ''),
+    })
+  }
+  // The purchase that makes this a possible flip. Shown as its own row rather than
+  // folded into "Last sold", because the point is the PAIR of transactions.
+  const f = sh?.flip
+  if (f) {
+    rows.push({
+      label: f.kind === 'relist' ? __('Bought before relisting') : __('Bought before resale'),
+      value: __('{0} on {1} · held {2} · {3}% more', [
+        formatCompMoney(f.bought_price),
+        dateOnly(f.bought_date),
+        __('{0} days', [Math.round(f.hold_days)]),
+        Math.round((f.pct || 0) * 100),
+      ]),
+    })
+  }
   return rows
 })
 
