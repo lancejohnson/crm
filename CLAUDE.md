@@ -680,7 +680,16 @@ duplicating. Work substantial features in a worktree of your own.
       old calc names itself, and typing 30 into "Other…" IS Kitchen & baths.
       **`mult` IS stored**, because it genuinely cannot be derived: a 70% column
       does not imply a single deduction once the percentage is editable.
-    - Two formulas: **`2× repairs` (ARV × 90% − 2×repairs − fee, the default)** and
+    - **Cash or novation**, cash by default. Two independent notebooks — switching
+      does not rewrite the other kind's numbers or its comps, and a save writes
+      only the kind on screen. Novation is **Current value − 10% − fee ($40k
+      default)**; no repairs, because we list the house as-is. Current value
+      soft-fills from that kind's comps-table average, same suggested-ARV cash
+      uses. Every figure is editable (After % / Offer back-solve value / fee).
+      Old saved calcs have no `kind` and stay cash. Server recomputes; the
+      timeline card titles itself "Novation offer" so a $40k fee without a rehab
+      line does not look like a missing row.
+    - Two cash formulas: **`2× repairs` (ARV × 90% − 2×repairs − fee, the default)** and
       **`Classic` (× 70% − repairs − fee)**. The first is not new — it is what
       `OfferRail.vue` already runs on the lead desk, so this borrows the rail's
       wording (`Repairs × 2`) rather than inventing a second name for the same

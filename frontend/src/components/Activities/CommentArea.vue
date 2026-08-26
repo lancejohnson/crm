@@ -130,7 +130,9 @@ const canEdit = computed(() => props.activity.owner === user)
 
 const isCashOffer = computed(() => {
   const html = props.activity.content || ''
-  return /data-cash-offer=/.test(html) || /<b>Cash offer<\/b>/i.test(html)
+  return (
+    /data-cash-offer=/.test(html) || /<b>(Cash|Novation) offer<\/b>/i.test(html)
+  )
 })
 
 const editing = ref(false)

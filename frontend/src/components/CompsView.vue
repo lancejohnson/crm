@@ -19,11 +19,11 @@
     <div v-if="!calcOpen" class="flex items-center justify-between gap-2">
       <button
         class="flex items-center gap-1.5 rounded-md border border-outline-gray-2 bg-surface-gray-1 px-2.5 py-1 text-xs font-medium text-ink-gray-7 hover:bg-surface-gray-2"
-        :title="__('Show the cash-offer calculator') + ' (C)'"
+        :title="__('Show the offer calculator') + ' (C)'"
         @click="calcOpen = true"
       >
         <FeatherIcon name="chevron-right" class="size-3.5" />
-        {{ __('Cash offer') }}
+        {{ __('Offer') }}
         <!-- The count is what makes this safe to collapse: the rep can see the
              calculator still has their picks without opening it. -->
         <span v-if="selectedComps.length" class="text-ink-gray-5">

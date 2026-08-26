@@ -1,30 +1,40 @@
 <template>
   <div class="offer">
-    <div class="title">{{ __('Cash offer') }}</div>
+    <div class="title">{{ isNovation ? __('Novation offer') : __('Cash offer') }}</div>
 
     <div v-for="(sc, i) in offer.scenarios" :key="i" class="scene">
       <div class="scene-h">
         {{ __('Scenario {0}', [i + 1]) }}
-        <span v-if="sc.pct">
-          ({{ Math.round(sc.pct * 100) }}%<template v-if="Number(sc.mult) === 2">
+        <span v-if="sc.pct || isNovation">
+          ({{ Math.round(sc.pct * 100) }}%<template
+            v-if="!isNovation && Number(sc.mult) === 2"
+          >
             · {{ __('2× repairs') }}</template>)
         </span>
       </div>
-      <div>
-        {{ money(sc.arv) }} × {{ Math.round((sc.pct || 0) * 100) }}% =
-        {{ money(sc.after) }}
-      </div>
-      <!-- Names the doubling, or a deduction twice the repair bill reads as an
-           arithmetic mistake to whoever finds this later. -->
-      <div>
-        − {{ Number(sc.mult) === 2 ? __('repairs') : __('rehab') }}
-        {{ money(sc.rehab) }}
-        <template v-if="offer.sqft">
-          ({{ psfText(sc.rehab_psf) }}/sf × {{ fmt(offer.sqft) }} sf<template
-            v-if="Number(sc.mult) === 2"
-          > = {{ money(sc.repairs) }} × 2</template>)
-        </template>
-      </div>
+      <template v-if="isNovation">
+        <div>
+          {{ money(sc.arv) }} − {{ Math.round((sc.pct || 0) * 100) }}% =
+          {{ money(sc.after) }}
+        </div>
+      </template>
+      <template v-else>
+        <div>
+          {{ money(sc.arv) }} × {{ Math.round((sc.pct || 0) * 100) }}% =
+          {{ money(sc.after) }}
+        </div>
+        <!-- Names the doubling, or a deduction twice the repair bill reads as an
+             arithmetic mistake to whoever finds this later. -->
+        <div>
+          − {{ Number(sc.mult) === 2 ? __('repairs') : __('rehab') }}
+          {{ money(sc.rehab) }}
+          <template v-if="offer.sqft">
+            ({{ psfText(sc.rehab_psf) }}/sf × {{ fmt(offer.sqft) }} sf<template
+              v-if="Number(sc.mult) === 2"
+            > = {{ money(sc.repairs) }} × 2</template>)
+          </template>
+        </div>
+      </template>
       <div>
         − {{ __('fee') }} {{ money(sc.fee) }} =
         <b class="scene-offer">{{ money(sc.offer) }}</b>
@@ -61,7 +71,7 @@
 
   <Dialog
     v-model="tweakOpen"
-    :options="{ title: __('Cash offer'), size: '5xl' }"
+    :options="{ title: isNovation ? __('Novation offer') : __('Cash offer'), size: '5xl' }"
   >
     <template #body-content>
       <div class="mb-3 flex justify-end">
@@ -76,7 +86,12 @@
         :lead="lead"
         :subject="{ sqft: offer.sqft }"
         :comps="draftComps"
-        :seed="{ scenarios: offer.scenarios, notes: offer.notes }"
+        :seed="{
+          kind: offer.kind,
+          scenarios: offer.scenarios,
+          notes: offer.notes,
+          comps: offer.comps,
+        }"
         @remove="removeComp"
         @open="openComp"
         @saved="onSaved"
@@ -87,7 +102,7 @@
 
 <script setup>
 /**
- * Timeline card for a saved cash-offer comment.
+ * Timeline card for a saved cash- or novation-offer comment.
  *
  * The stored HTML used to be one wrapping line of "Comps: A · B", and
  * `.prose-f { break-all }` split prices mid-number so it read as plain text.
@@ -236,14 +251,22 @@ const compsPage = computed(() =>
 const offer = computed(() => {
   const raw = parsePayload(props.html) || parseLegacy(props.html) || {}
   const lead = raw.lead || props.lead || ''
+  const scenarios = raw.scenarios || []
+  const kind =
+    raw.kind === 'novation' || scenarios[0]?.kind === 'novation'
+      ? 'novation'
+      : 'cash'
   return {
     lead,
+    kind,
     sqft: Number(raw.sqft) || 0,
     notes: raw.notes || '',
-    scenarios: raw.scenarios || [],
+    scenarios,
     comps: (raw.comps || []).map(shapeComp),
   }
 })
+
+const isNovation = computed(() => offer.value.kind === 'novation')
 
 const lead = computed(() => offer.value.lead || props.lead || '')
 

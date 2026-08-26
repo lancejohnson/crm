@@ -13,7 +13,24 @@
     @keydown="onKeys"
   >
     <div class="head">
-      <span>{{ __('Cash offer') }}</span>
+      <div class="seg kind" role="group" :aria-label="__('Offer type')">
+        <button
+          type="button"
+          :class="{ on: kind === 'cash' }"
+          :title="__('ARV × % − repairs − fee')"
+          @click="setKind('cash')"
+        >
+          {{ __('Cash') }}
+        </button>
+        <button
+          type="button"
+          :class="{ on: kind === 'novation' }"
+          :title="__('Current value − 10% − fee')"
+          @click="setKind('novation')"
+        >
+          {{ __('Novation') }}
+        </button>
+      </div>
       <span class="head-r">
         <button
           v-if="cols === 1"
@@ -58,22 +75,24 @@
       <!-- The formula comes first because it frames every number under it.
            Per column, like everything else here: "+ Compare" then puts the two
            formulas side by side on the same house, which is the comparison a
-           wholesaler actually wants. -->
-      <span class="lab">{{ __('Formula') }}</span>
-      <div v-for="col in visible" :key="'form' + col" class="seg">
-        <button
-          v-for="f in FORMULAS"
-          :key="f.key"
-          type="button"
-          :class="{ on: multOf(col) === f.mult }"
-          :title="f.why"
-          @click="setFormula(col, f)"
-        >
-          {{ f.label }}
-        </button>
-      </div>
+           wholesaler actually wants. Cash-only: novation has one shape. -->
+      <template v-if="kind === 'cash'">
+        <span class="lab">{{ __('Formula') }}</span>
+        <div v-for="col in visible" :key="'form' + col" class="seg">
+          <button
+            v-for="f in FORMULAS"
+            :key="f.key"
+            type="button"
+            :class="{ on: multOf(col) === f.mult }"
+            :title="f.why"
+            @click="setFormula(col, f)"
+          >
+            {{ f.label }}
+          </button>
+        </div>
+      </template>
 
-      <span class="lab">{{ __('ARV') }}</span>
+      <span class="lab">{{ kind === 'novation' ? __('Current value') : __('ARV') }}</span>
       <input
         v-for="col in visible"
         :key="'arv' + col"
@@ -86,7 +105,7 @@
         @input="typeMoney(col, 'arv', $event)"
       />
 
-      <span class="lab">{{ __('% of ARV') }}</span>
+      <span class="lab">{{ kind === 'novation' ? __('− %') : __('% of ARV') }}</span>
       <label v-for="col in visible" :key="'pct' + col" class="pct">
         <input
           :ref="(el) => setField(1, col, el)"
@@ -99,21 +118,29 @@
       </label>
 
       <span class="lab">{{ __('After %') }}</span>
-      <span v-for="col in visible" :key="'after' + col" class="out">
-        {{ s[col].arv ? money(run(col).after) : '—' }}
-      </span>
+      <input
+        v-for="col in visible"
+        :key="'after' + col"
+        :ref="(el) => setField(2, col, el)"
+        inputmode="numeric"
+        :value="s[col].arv ? money(run(col).after) : ''"
+        @focus="$event.target.select()"
+        @input="typeAfter(col, $event)"
+      />
 
       <!-- Repairs is a NAMED choice, not a number to invent. The rep is on the
            phone with a seller describing a house; "kitchen & baths" is a thing
            they can hear, "$30/sf" is not. Each row carries what that level
            costs on THIS house so the ladder has a felt price, not just a rate.
            "Other…" keeps the raw $/sf field one click away — the preset is a
-           shortcut, never a cage. -->
+           shortcut, never a cage. Novation lists the house as-is, so none of
+           this applies. -->
+      <template v-if="kind === 'cash'">
       <span class="lab">{{ __('Condition') }}</span>
       <div v-for="col in visible" :key="'rep' + col" class="rep">
         <template v-if="isCustom(col)">
           <input
-            :ref="(el) => setField(2, col, el)"
+            :ref="(el) => setField(3, col, el)"
             class="rep-psf"
             inputmode="numeric"
             :value="psfText(s[col].rehabPsf)"
@@ -175,7 +202,7 @@
       <input
         v-for="col in visible"
         :key="'rehab' + col"
-        :ref="(el) => setField(3, col, el)"
+        :ref="(el) => setField(4, col, el)"
         inputmode="numeric"
         :value="money(run(col).repairs)"
         @focus="$event.target.select()"
@@ -195,12 +222,13 @@
         >−{{ money(run(col).rehab) }}</i>
         {{ s[col].arv ? money(run(col).wholesale) : '—' }}
       </span>
+      </template>
 
       <span class="lab">{{ __('Fee') }}</span>
       <input
         v-for="col in visible"
         :key="'fee' + col"
-        :ref="(el) => setField(4, col, el)"
+        :ref="(el) => setField(5, col, el)"
         inputmode="numeric"
         :value="money(s[col].fee)"
         @focus="$event.target.select()"
@@ -208,11 +236,11 @@
       />
 
       <span class="lab offer">{{ __('Offer') }}</span>
-      <span
+      <label
         v-for="col in visible"
         :key="'offer' + col"
-        class="out offer"
-        :class="{ bad: s[col].arv && run(col).offer <= 0, win: winner === col }"
+        class="offer-in"
+        :class="{ win: winner === col }"
       >
         <!-- Which one is bigger, and by how much. The gap is the whole reason
              anyone runs two of these, and eyeballing two five-figure numbers
@@ -221,15 +249,23 @@
         <b v-if="winner === col" class="gap" :title="__('Higher of the two')">
           +{{ money(offerGap) }}
         </b>
-        {{ s[col].arv ? money(run(col).offer) : '—' }}
-      </span>
+        <input
+          :ref="(el) => setField(6, col, el)"
+          class="offer"
+          :class="{ bad: s[col].arv && run(col).offer <= 0 }"
+          inputmode="numeric"
+          :value="s[col].arv ? money(run(col).offer) : ''"
+          @focus="$event.target.select()"
+          @input="typeOffer(col, $event)"
+        />
+      </label>
     </div>
 
     <!-- With one column the comparison cannot be on screen, so the other
          formula reports itself rather than making the rep toggle, read, and
          toggle back holding a number in their head. Its OWN percentage, since
          that is part of what is being compared. -->
-    <div v-if="altOffer !== null" class="alt">
+    <div v-if="kind === 'cash' && altOffer !== null" class="alt">
       {{
         __('{0} would offer {1}', [altFormula.label, money(altOffer)])
       }}<template v-if="altOffer !== run(0).offer">
@@ -289,7 +325,7 @@
             <button
               type="button"
               :title="__('Remove from table — stays on the map')"
-              @click="$emit('remove', r.name)"
+              @click="removeComp(r.name)"
             >
               ×
             </button>
@@ -309,12 +345,22 @@
 
 <script setup>
 /**
- * Cash Offer. Two formulas, because the desk uses both:
+ * Offer calculator. Cash or novation — cash by default, one kind at a time.
+ *
+ * Cash has two formulas, because the desk uses both:
  *   2× repairs  ARV × 90% − 2×repairs − fee   (default; what OfferRail runs)
  *   Classic     ARV × 70% −   repairs − fee   (the 70% rule)
  * i.e. after = ARV × %, deduction = mult × $/sf × sqft, offer = after −
  * deduction − fee. Picking a formula sets its canonical %, and the % stays
  * editable afterwards — the toggle owns the SHAPE, the rep owns the number.
+ *
+ * Novation is Current value − 10% − fee ($40k default). No repairs: we list
+ * the house as-is. The 10% stays editable the same way cash's % does.
+ *
+ * Cash and novation are separate notebooks: switching does not rewrite the
+ * other kind's numbers or its comps. Each kind soft-fills its value from the
+ * average of ITS comps table (same suggested-ARV the cash column has always
+ * used), and every figure in the column is editable — derived rows back-solve.
  *
  * `mult` is stored, unlike the repair tier, because it genuinely cannot be
  * derived: a 70% column does not imply a single deduction once the rep is free
@@ -386,88 +432,203 @@ const TIERS = [
 // the control reads as a named condition rather than an unnamed number.
 const DEFAULT_PSF = 30
 const DEFAULT_FEE = 25000
+const DEFAULT_NOVATION_FEE = 40000
+const DEFAULT_NOVATION_PCT = 0.1
 
-function fresh(f) {
+function fresh(k, f) {
+  if (k === 'novation') {
+    return {
+      arv: 0,
+      pct: DEFAULT_NOVATION_PCT,
+      mult: 1,
+      rehabPsf: DEFAULT_PSF,
+      fee: DEFAULT_NOVATION_FEE,
+    }
+  }
   const g = f || FORMULAS[0]
   return { arv: 0, pct: g.pct, mult: g.mult, rehabPsf: DEFAULT_PSF, fee: DEFAULT_FEE }
 }
 
-const s = reactive([fresh(), fresh()])
-const cols = ref(1)
+function emptyBook(k) {
+  return {
+    s: [fresh(k), fresh(k)],
+    cols: 1,
+    notes: '',
+    comps: null,
+  }
+}
+
+const kind = ref('cash')
+const books = reactive({
+  cash: emptyBook('cash'),
+  novation: emptyBook('novation'),
+})
+// Template reads these; script uses S() so a kind switch cannot point at a
+// stale array. Comps live on the book — cash and novation keep their own.
+const s = computed(() => books[kind.value].s)
+const cols = computed({
+  get: () => books[kind.value].cols,
+  set: (v) => {
+    books[kind.value].cols = v
+  },
+})
+const notes = computed({
+  get: () => books[kind.value].notes,
+  set: (v) => {
+    books[kind.value].notes = v
+  },
+})
+function S() {
+  return books[kind.value].s
+}
 // Only needed to hold the raw input open when the typed number happens to land
 // on a rung; every other custom case falls out of `tierFor` returning nothing.
 const custom = reactive([false, false])
 const menuFor = ref(-1)
-const notes = ref('')
 const saving = ref(false)
 const visible = computed(() => (cols.value === 2 ? [0, 1] : [0]))
 const canSave = computed(
-  () => visible.value.some((i) => s[i].arv > 0) && !saving.value,
+  () => visible.value.some((i) => S()[i].arv > 0) && !saving.value,
 )
-const grid = [[null, null], [null, null], [null, null], [null, null], [null, null]]
+const grid = [
+  [null, null],
+  [null, null],
+  [null, null],
+  [null, null],
+  [null, null],
+  [null, null],
+  [null, null],
+]
 
 function setField(row, col, el) {
   grid[row][col] = el || grid[row][col]
 }
 
+function cloneComps(list) {
+  return (list || []).map((c) => ({ ...c }))
+}
+
+function ensureComps(k) {
+  if (books[k].comps) return
+  if (!props.comps?.length) return
+  books[k].comps = cloneComps(props.comps)
+}
+
+function removeComp(name) {
+  const b = books[kind.value]
+  if (!b.comps) b.comps = cloneComps(props.comps)
+  b.comps = b.comps.filter((c) => (c.name || c.address) !== name)
+}
+
+const tableComps = computed(
+  () => books[kind.value].comps || props.comps || [],
+)
+
 const storageKey = computed(() => `compsCalc:${props.lead}`)
 
-function applyScene(i, row) {
-  const base = fresh()
+function applyScene(k, i, row) {
+  const base = fresh(k)
   const blank = !row || !Object.keys(row).length
-  Object.assign(s[i], base, {
+  Object.assign(books[k].s[i], base, {
     arv: Number(row.arv) || 0,
     pct: Number(row.pct) || base.pct,
     rehabPsf: Number(row.rehabPsf ?? row.rehab_psf) || DEFAULT_PSF,
-    fee: Number(row.fee) || DEFAULT_FEE,
+    fee: Number(row.fee) || base.fee,
     // A snapshot written before the toggle existed carries no `mult`, and its
     // numbers were computed with a single deduction — so it IS the classic
     // one. Only a genuine reset falls back to the column's default.
-    mult: Number(row.mult) || (blank ? base.mult : 1),
+    // Novation has no multiplier; leave the cash default in the slot unused.
+    mult: k === 'novation' ? 1 : Number(row.mult) || (blank ? base.mult : 1),
   })
 }
 
-function loadSaved() {
-  notes.value = ''
+function loadBook(k, raw) {
+  if (!raw) return
+  if (Array.isArray(raw.s) && raw.s.length) {
+    applyScene(k, 0, {})
+    applyScene(k, 1, {})
+    raw.s.forEach((row, i) => {
+      if (i < 2) applyScene(k, i, row)
+    })
+  }
+  if (raw.cols === 2) books[k].cols = 2
+  if (typeof raw.notes === 'string') books[k].notes = raw.notes
+  if (Array.isArray(raw.comps)) books[k].comps = cloneComps(raw.comps)
+}
+
+function resetBooks() {
+  books.cash = emptyBook('cash')
+  books.novation = emptyBook('novation')
+  kind.value = 'cash'
   menuFor.value = -1
   custom[0] = false
   custom[1] = false
-  const seed = props.seed
-  if (seed && Array.isArray(seed.scenarios) && seed.scenarios.length) {
-    applyScene(0, {})
-    applyScene(1, {})
-    seed.scenarios.forEach((row, i) => {
-      if (i < 2) applyScene(i, row)
-    })
-    cols.value = Math.min(2, Math.max(1, seed.scenarios.length))
-    if (typeof seed.notes === 'string') notes.value = seed.notes
-    return
-  }
-  cols.value = 1
+}
+
+let hydrating = false
+
+function loadSaved() {
+  hydrating = true
   try {
-    const raw = JSON.parse(localStorage.getItem(storageKey.value) || 'null')
-    if (!raw) return
-    // New shape is [{…},{…}]. The previous single-ARV blob is ignored — better
-    // to start clean than to write one number into both columns.
-    if (Array.isArray(raw.s) && raw.s.length === 2) {
-      // Same rule as a saved snapshot: a draft with no `mult` predates the
-      // toggle and is classic.
-      raw.s.forEach((row, i) =>
-        Object.assign(s[i], fresh(), row, { mult: Number(row.mult) || 1 }),
-      )
+    resetBooks()
+    let stored = null
+    try {
+      stored = JSON.parse(localStorage.getItem(storageKey.value) || 'null')
+    } catch {
+      stored = null
     }
-    if (raw.cols === 2) cols.value = 2
-    if (typeof raw.notes === 'string') notes.value = raw.notes
-  } catch {
-    /* ignore */
+    if (stored?.cash || stored?.novation) {
+      loadBook('cash', stored.cash)
+      loadBook('novation', stored.novation)
+      if (stored.kind === 'novation') kind.value = 'novation'
+    } else if (stored && Array.isArray(stored.s)) {
+      // Pre-split draft: one notebook. Drop it into whichever kind it was.
+      const k = stored.kind === 'novation' ? 'novation' : 'cash'
+      kind.value = k
+      loadBook(k, stored)
+    }
+    const seed = props.seed
+    if (seed && Array.isArray(seed.scenarios) && seed.scenarios.length) {
+      const k =
+        seed.kind === 'novation' || seed.scenarios[0]?.kind === 'novation'
+          ? 'novation'
+          : 'cash'
+      kind.value = k
+      applyScene(k, 0, {})
+      applyScene(k, 1, {})
+      seed.scenarios.forEach((row, i) => {
+        if (i < 2) applyScene(k, i, row)
+      })
+      books[k].cols = Math.min(2, Math.max(1, seed.scenarios.length))
+      if (typeof seed.notes === 'string') books[k].notes = seed.notes
+      if (Array.isArray(seed.comps)) books[k].comps = cloneComps(seed.comps)
+      else if (props.comps?.length) books[k].comps = cloneComps(props.comps)
+    }
+  } finally {
+    hydrating = false
   }
 }
 
 function persist() {
+  if (hydrating) return
   try {
     localStorage.setItem(
       storageKey.value,
-      JSON.stringify({ s, cols: cols.value, notes: notes.value }),
+      JSON.stringify({
+        kind: kind.value,
+        cash: {
+          s: books.cash.s,
+          cols: books.cash.cols,
+          notes: books.cash.notes,
+          comps: books.cash.comps,
+        },
+        novation: {
+          s: books.novation.s,
+          cols: books.novation.cols,
+          notes: books.novation.notes,
+          comps: books.novation.comps,
+        },
+      }),
     )
   } catch {
     /* quota */
@@ -475,13 +636,42 @@ function persist() {
 }
 
 watch(storageKey, loadSaved, { immediate: true })
-watch(s, persist, { deep: true })
-watch([notes, cols], persist)
+watch(books, persist, { deep: true })
+watch(kind, persist)
+
+watch(
+  () => props.comps,
+  (list) => {
+    const k = kind.value
+    if (!books[k].comps) {
+      if (list?.length) books[k].comps = cloneComps(list)
+      return
+    }
+    const have = new Set(books[k].comps.map((c) => c.name || c.address))
+    for (const c of list || []) {
+      const key = c.name || c.address
+      if (key && !have.has(key)) {
+        books[k].comps.push({ ...c })
+        have.add(key)
+      }
+    }
+  },
+  { deep: true },
+)
+
+function setKind(next) {
+  if (kind.value === next) return
+  kind.value = next
+  ensureComps(next)
+  menuFor.value = -1
+  custom[0] = false
+  custom[1] = false
+}
 
 const sqft = computed(() => Number(props.subject?.sqft) || 0)
 
 function tierFor(col) {
-  return TIERS.find((t) => t.psf === Number(s[col].rehabPsf)) || null
+  return TIERS.find((t) => t.psf === Number(S()[col].rehabPsf)) || null
 }
 function isCustom(col) {
   return custom[col] || !tierFor(col)
@@ -490,7 +680,7 @@ function toggleMenu(col) {
   menuFor.value = menuFor.value === col ? -1 : col
 }
 function pickTier(col, t) {
-  s[col].rehabPsf = t.psf
+  S()[col].rehabPsf = t.psf
   custom[col] = false
   menuFor.value = -1
 }
@@ -498,7 +688,7 @@ function pickOther(col) {
   custom[col] = true
   menuFor.value = -1
   nextTick(() => {
-    const el = grid[2][col]
+    const el = grid[3][col]
     el?.focus()
     el?.select?.()
   })
@@ -513,13 +703,13 @@ onMounted(() => document.addEventListener('click', onDocClick, true))
 onBeforeUnmount(() => document.removeEventListener('click', onDocClick, true))
 
 function multOf(col) {
-  return Number(s[col]?.mult) === 2 ? 2 : 1
+  return Number(S()[col]?.mult) === 2 ? 2 : 1
 }
 function setFormula(col, f) {
-  s[col].mult = f.mult
+  S()[col].mult = f.mult
   // The percentage is part of the formula's identity, so picking one sets it.
   // It stays editable afterwards; the rep just starts from the canonical number.
-  s[col].pct = f.pct
+  S()[col].pct = f.pct
 }
 
 /** A second column starts as a copy of the one the rep is looking at — same
@@ -527,19 +717,24 @@ function setFormula(col, f) {
  *  about it is what they deliberately change. An untouched column only; a
  *  dropped-then-restored one keeps whatever was in it. */
 function addCompare() {
-  if (!s[1].arv) {
-    Object.assign(s[1], {
-      pct: s[0].pct,
+  if (!S()[1].arv) {
+    Object.assign(S()[1], {
+      pct: S()[0].pct,
       mult: multOf(0),
-      rehabPsf: s[0].rehabPsf,
-      fee: s[0].fee,
+      rehabPsf: S()[0].rehabPsf,
+      fee: S()[0].fee,
     })
   }
   cols.value = 2
 }
 
 function run(col) {
-  const x = s[col]
+  const x = S()[col]
+  if (kind.value === 'novation') {
+    const cut = Math.round(x.arv * x.pct)
+    const after = Math.round(x.arv - cut)
+    return { after, cut, repairs: 0, rehab: 0, wholesale: after, offer: after - x.fee }
+  }
   const after = Math.round(x.arv * x.pct)
   const repairs = Math.round((Number(x.rehabPsf) || 0) * sqft.value)
   const rehab = repairs * multOf(col)
@@ -551,7 +746,7 @@ function run(col) {
 // as an offer of minus the fee, and crowning the other one for beating it
 // would be noise dressed up as a finding.
 const winner = computed(() => {
-  if (cols.value !== 2 || !s[0].arv || !s[1].arv) return -1
+  if (cols.value !== 2 || !S()[0].arv || !S()[1].arv) return -1
   const a = run(0).offer
   const b = run(1).offer
   if (a === b) return -1
@@ -566,15 +761,15 @@ const altFormula = computed(
   () => FORMULAS.find((f) => f.mult !== multOf(0)) || FORMULAS[0],
 )
 const altOffer = computed(() => {
-  if (cols.value !== 1 || !s[0].arv) return null
+  if (cols.value !== 1 || !S()[0].arv) return null
   const f = altFormula.value
-  const after = Math.round(s[0].arv * f.pct)
-  const rehab = Math.round((Number(s[0].rehabPsf) || 0) * sqft.value) * f.mult
-  return after - rehab - s[0].fee
+  const after = Math.round(S()[0].arv * f.pct)
+  const rehab = Math.round((Number(S()[0].rehabPsf) || 0) * sqft.value) * f.mult
+  return after - rehab - S()[0].fee
 })
 
 const usable = computed(() =>
-  (props.comps || []).filter((c) => Number(c.price) > 0 && Number(c.square_footage) > 0),
+  tableComps.value.filter((c) => Number(c.price) > 0 && Number(c.square_footage) > 0),
 )
 const avgPsf = computed(() => {
   if (!usable.value.length) return 0
@@ -585,6 +780,22 @@ const suggestedArv = computed(() =>
   avgPsf.value && sqft.value ? Math.round((avgPsf.value * sqft.value) / 1000) * 1000 : 0,
 )
 const arvHint = computed(() => (suggestedArv.value ? money(suggestedArv.value) : ''))
+
+// Soft-fill: write the comps-table average into an empty (or still-suggested)
+// value so Current value / ARV starts from the same number the table is
+// pointing at. Per-kind, so editing cash cannot move novation's value.
+const lastSoft = { cash: 0, novation: 0 }
+function applySoft(k) {
+  const v = suggestedArv.value
+  if (!v) return
+  for (const i of [0, 1]) {
+    const col = books[k].s[i]
+    if (!col.arv || col.arv === lastSoft[k]) col.arv = v
+  }
+  lastSoft[k] = v
+}
+watch(suggestedArv, () => applySoft(kind.value))
+watch(kind, (k) => applySoft(k))
 
 const subjectRow = computed(() => {
   const s = props.subject
@@ -604,7 +815,7 @@ const subjectRow = computed(() => {
 })
 
 const rows = computed(() =>
-  (props.comps || []).map((c) => {
+  tableComps.value.map((c) => {
     const price = Number(c.price) || 0
     const sf = Number(c.square_footage) || 0
     const psf = price && sf ? Math.round(price / sf) : 0
@@ -647,7 +858,9 @@ function fmtDate(v) {
 }
 function setPct(col, e) {
   const n = parseMoney(e.target.value)
-  s[col].pct = (n > 1 ? n / 100 : n) || (col ? 0.65 : 0.7)
+  const fallback =
+    kind.value === 'novation' ? DEFAULT_NOVATION_PCT : col ? 0.65 : 0.7
+  S()[col].pct = (n > 1 ? n / 100 : n) || fallback
 }
 
 /** After Vue writes `$1,250`, put the caret after the same digit it was on. */
@@ -670,9 +883,39 @@ function typeMoney(col, key, e) {
   const el = e.target
   const digitsBefore = (el.value.slice(0, el.selectionStart).match(/\d/g) || []).length
   const n = parseMoney(el.value)
-  s[col][key] = n
+  S()[col][key] = n
   const formatted = n ? money(n) : ''
   nextTick(() => putCaret(el, digitsBefore, formatted))
+}
+
+/** After % back-solves the value so the column still adds up. Novation is
+ *  value × (1 − %), cash is value × %. Full precision, same reason as the
+ *  repair bill: rounding here would make the field twitch while typing. */
+function typeAfter(col, e) {
+  const el = e.target
+  const digitsBefore = (el.value.slice(0, el.selectionStart).match(/\d/g) || []).length
+  const n = parseMoney(el.value)
+  const pct = Number(S()[col].pct) || 0
+  if (kind.value === 'novation') {
+    if (pct < 1) S()[col].arv = n / (1 - pct)
+  } else if (pct) {
+    S()[col].arv = n / pct
+  }
+  nextTick(() => putCaret(el, digitsBefore, n ? money(n) : ''))
+}
+
+/** Offer back-solves the fee: offer = after − fee (novation) or wholesale − fee
+ *  (cash). The value and the % stay put. */
+function typeOffer(col, e) {
+  const el = e.target
+  const digitsBefore = (el.value.slice(0, el.selectionStart).match(/\d/g) || []).length
+  const n = parseMoney(el.value)
+  if (S()[col].arv) {
+    const r = run(col)
+    const base = kind.value === 'novation' ? r.after : r.wholesale
+    S()[col].fee = base - n
+  }
+  nextTick(() => putCaret(el, digitsBefore, n ? money(n) : ''))
 }
 
 /** Type a repair BILL and get the $/sf. A straight divide — no multiplier in
@@ -688,7 +931,7 @@ function typeRehab(col, e) {
   const el = e.target
   const digitsBefore = (el.value.slice(0, el.selectionStart).match(/\d/g) || []).length
   const n = parseMoney(el.value)
-  if (sqft.value) s[col].rehabPsf = n / sqft.value
+  if (sqft.value) S()[col].rehabPsf = n / sqft.value
   nextTick(() => putCaret(el, digitsBefore, n ? money(n) : ''))
 }
 
@@ -711,19 +954,21 @@ async function save() {
       lead: props.lead,
       scenarios: JSON.stringify(
         visible.value.map((i) => {
-          const x = s[i]
+          const x = S()[i]
           return {
+            kind: kind.value,
             arv: x.arv,
             pct: x.pct,
-            mult: multOf(i),
-            rehabPsf: x.rehabPsf,
             fee: x.fee,
+            ...(kind.value === 'cash'
+              ? { mult: multOf(i), rehabPsf: x.rehabPsf }
+              : {}),
             ...run(i),
           }
         }),
       ),
       comps: JSON.stringify(
-        (props.comps || []).map((c) => ({
+        tableComps.value.map((c) => ({
           name: c.name,
           address: c.address,
           price: c.price,
@@ -944,11 +1189,19 @@ input.empty {
 /* The winning column keeps its number on the same right edge as the loser's —
    the badge grows leftward — or the two offers stop being comparable at a
    glance, which is the one thing this row exists for. */
-.out.offer {
+.out.offer,
+.offer-in {
   display: flex;
   align-items: baseline;
   justify-content: flex-end;
   gap: 6px;
+  min-width: 0;
+}
+.offer-in input.offer {
+  font-weight: 650;
+}
+input.offer.bad {
+  color: var(--ink-red-3);
 }
 .gap {
   font-size: 11px;
@@ -1009,6 +1262,14 @@ input.empty {
   color: var(--ink-gray-9);
   font-weight: 600;
   box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
+}
+.kind {
+  width: auto;
+  flex: none;
+}
+.kind button {
+  flex: none;
+  padding: 0 10px;
 }
 
 /* A derived row can carry the figure it derived from. Same shape as the offer
