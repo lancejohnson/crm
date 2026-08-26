@@ -102,7 +102,7 @@ DEFAULT_WITHIN_DAYS = 365
 #: opens the same house. A failed/partial lookup gets a short retry window.
 DETAIL_CACHE_SECONDS = 30 * 24 * 60 * 60
 DETAIL_RETRY_SECONDS = 60 * 60
-DETAIL_CACHE_VERSION = 2  # v2 carries sale_history
+DETAIL_CACHE_VERSION = 3  # v3 retries thin Zillow galleries via Realtor
 
 #: Per-lead, TEAM-WIDE record of which comps a human hid or picked. Not per-user:
 #: a junk comp is junk for everyone, and "the comps we used" is a deal artifact
@@ -684,6 +684,26 @@ def _detail_cache_key(comp):
 	return f"crm:comp-detail:v{DETAIL_CACHE_VERSION}:{comp}"
 
 
+def _detail_address(row, details=None):
+	"""Street + city/state/zip the Realtor photos lookup can resolve."""
+	parts = []
+	if details:
+		parts = [
+			details.get("address"),
+			details.get("city"),
+			details.get("state"),
+			details.get("zip"),
+		]
+	if not any(parts):
+		parts = [
+			row.get("address"),
+			row.get("city"),
+			row.get("state"),
+			row.get("zip"),
+		]
+	return " ".join(str(p).strip() for p in parts if p and str(p).strip())
+
+
 def _shape_detail(row, zpid=None):
 	"""Fetch and normalize one property only after a person explicitly opens it.
 
@@ -706,6 +726,17 @@ def _shape_detail(row, zpid=None):
 	photos = zillow_api.photo_urls(photo_raw)
 	if details and details.get("cover_photo") and not photos:
 		photos = [details["cover_photo"]]
+	# Off-market Zillow galleries often have a single leftover frame. Realtor
+	# listing photos stay up longer; one extra call, only when Zillow is thin,
+	# never for the tray. Absent an Apivex key this is a no-op.
+	photo_source = "zillow" if photos else ""
+	if len(photos) <= 1:
+		from crm.api import apivex
+
+		realtor = apivex.realtor_photo_urls(_detail_address(row, details))
+		if len(realtor) > len(photos):
+			photos = realtor
+			photo_source = "realtor"
 
 	comp = dict(row)
 	for key in ("listed_date", "removed_date"):
@@ -716,7 +747,8 @@ def _shape_detail(row, zpid=None):
 		"comp": comp,
 		"details": details,
 		"photos": photos,
-		"photos_available": photo_raw is not None,
+		"photos_available": len(photos) > 0,
+		"photo_source": photo_source,
 		"message": "" if details else _("Zillow details are unavailable for this property."),
 	}
 
@@ -760,9 +792,10 @@ def get_comp_details(lead, comp):
 
 	result = _shape_detail(row)
 	result["cached"] = False
-	# A complete photo response is stable property data. A quota/outage partial is
-	# useful now but should retry soon rather than hiding photos for a month.
-	ttl = DETAIL_CACHE_SECONDS if result.get("available") and result.get("photos_available") else DETAIL_RETRY_SECONDS
+	# A full gallery is stable. One leftover Zillow frame (or a failed Realtor
+	# fallback) is not — retry soon rather than freezing a thin gallery for a month.
+	full = result.get("available") and len(result.get("photos") or []) > 1
+	ttl = DETAIL_CACHE_SECONDS if full else DETAIL_RETRY_SECONDS
 	frappe.cache().set_value(key, result, expires_in_sec=ttl)
 	# Do not read the cache again in this request: Frappe memoizes cache misses in
 	# `frappe.local.cache`, and an expiring set does not replace that local miss.
@@ -892,11 +925,8 @@ def get_subject_details(lead):
 	)
 	result = _shape_detail(row, zpid=zpid or None)
 	result["cached"] = False
-	ttl = (
-		DETAIL_CACHE_SECONDS
-		if result.get("available") and result.get("photos_available")
-		else DETAIL_RETRY_SECONDS
-	)
+	full = result.get("available") and len(result.get("photos") or []) > 1
+	ttl = DETAIL_CACHE_SECONDS if full else DETAIL_RETRY_SECONDS
 	frappe.cache().set_value(key, result, expires_in_sec=ttl)
 	return result
 

@@ -520,6 +520,12 @@ duplicating. Work substantial features in a worktree of your own.
       coverage on four real prod leads, for **zero** extra API calls. The
       alternative, `/property?address=` per comp, is one BILLED call each — 200
       comps would be 200 calls per open, on a key the ISTL ZIP job already leans on.
+    - **Realtor fills a thin Zillow gallery** (`crm/api/apivex.py`). Off-market
+      solds often come back with one leftover Zillow frame. Opening the gallery
+      then asks Apivex `/realtor/property/photos` by address and hotlinks
+      `ap.rdcpix.com`. Tray stays on Zillow `imgSrc`. Key: site_config
+      `apivex_api_key` (Apivex Plus). Cache v3 retries ≤1 photo rather than
+      freezing a thin gallery for 30 days.
     - `_merge_one` also stamps the photo/zpid onto a matched ISTL pin, because a
       photo is not "newer" data — it is data the pooled index never had — so it
       rides along on ANY match instead of waiting for a price to change. Comps with
