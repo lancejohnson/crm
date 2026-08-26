@@ -815,7 +815,11 @@ def get_today_board(
 			"CRM Lead",
 			filters={"name": ["in", lead_names]},
 			fields=["name", "lead_name", "status", "lead_owner", "mobile_no", "phone", "email",
-			        "property_address", "property_city", "property_state", "property_zip"],
+			        "property_address", "property_city", "property_state", "property_zip"]
+		        + [
+			        f for f in ("zillow_zpid", "zillow_fetched_at")
+			        if frappe.db.has_column("CRM Lead", f)
+		        ],
 		)
 	}
 	calls = frappe.db.sql(
@@ -911,6 +915,9 @@ def get_today_board(
 		r["mobile_no"] = l.get("mobile_no") or l.get("phone")
 		r["email"] = l.get("email")
 		r["address"] = _address(l)
+		# Cheap: these are already on the lead. A miss is only flagged after we have
+		# actually asked Zillow — never on a card nobody has opened comps for.
+		r["zillow_unresolved"] = bool(l.get("zillow_fetched_at")) and not l.get("zillow_zpid")
 		r["calls_today"] = made.get(r.lead, 0)
 		r["call_number"] = int(r.get("call_number") or 1)
 		r["total_calls"] = int(

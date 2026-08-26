@@ -518,9 +518,12 @@ def _cached(doc):
 		hit = json.loads(doc.get("zillow_facts"))
 	except Exception:
 		return None
-	# A remembered negative is `{}` and must stay a cheap negative — re-fetching it
-	# for a missing key would re-bill every unresolvable address on every open.
-	if hit and any(k not in hit for k in REQUIRED_FACT_KEYS):
+	# A remembered negative is `{}` (maybe with `_queried_address`) and must stay
+	# cheap. Only a REAL hit missing a later-added key is stale — treating a miss
+	# as stale would re-bill every unresolvable address on every open.
+	if isinstance(hit, dict) and hit.get("zpid") and any(
+		k not in hit for k in REQUIRED_FACT_KEYS
+	):
 		return None
 	return hit
 
@@ -528,13 +531,20 @@ def _cached(doc):
 def _store(doc, facts):
 	if not _has_cache():
 		return
+	payload = dict(facts or {})
+	try:
+		from crm.api.comps import _full_address
+
+		payload["_queried_address"] = _full_address(doc)
+	except Exception:
+		pass
 	try:
 		frappe.db.set_value(
 			"CRM Lead", doc.name,
 			{
-				"zillow_facts": json.dumps(facts) if facts else "",
+				"zillow_facts": json.dumps(payload),
 				"zillow_fetched_at": frappe.utils.now(),
-				"zillow_zpid": str((facts or {}).get("zpid") or ""),
+				"zillow_zpid": str(payload.get("zpid") or ""),
 			},
 			# A cached lookup is not a human edit; same rule as the geocode cache.
 			update_modified=False,
@@ -547,7 +557,9 @@ def facts_for_lead(doc, force=False):
 	"""Normalized Zillow facts for a lead, cached. Returns None when unavailable.
 
 	`doc` is a CRM Lead document. Safe to call on every comps-map open: past the
-	first fetch this is a JSON parse off a column.
+	first fetch this is a JSON parse off a column. A miss is `{}` (plus the
+	address we asked about), never None, once we have tried — so the UI can tell
+	"Zillow does not know this house" from "we have not asked yet".
 	"""
 	if not force:
 		hit = _cached(doc)
@@ -559,19 +571,47 @@ def facts_for_lead(doc, force=False):
 	from crm.api.comps import _full_address
 
 	raw = _fetch(_full_address(doc))
-	facts = _normalize(raw) if raw else None
+	facts = _normalize(raw) if raw else {}
 	# Cache negatives too, so an address Zillow cannot resolve is not re-fetched
 	# (and re-billed) on every single modal open.
-	_store(doc, facts or {})
+	_store(doc, facts)
 	return facts
+
+
+def _clear_location_caches(lead):
+	"""Drop the geo + BatchData answers so a new address is looked up fresh."""
+	updates = {}
+	if frappe.db.has_column("CRM Lead", "property_lat"):
+		updates["property_lat"] = None
+		updates["property_lng"] = None
+	if frappe.db.has_column("CRM Lead", "batchdata_comps"):
+		updates["batchdata_comps"] = ""
+	if frappe.db.has_column("CRM Lead", "batchdata_comps_fetched_at"):
+		updates["batchdata_comps_fetched_at"] = None
+	if updates:
+		frappe.db.set_value("CRM Lead", lead, updates, update_modified=False)
 
 
 @frappe.whitelist()
 def refresh_lead_facts(lead):
-	"""Force a re-fetch for one lead (whitelisted so a button can offer it)."""
-	from crm.api.comps import _guard
+	"""Force a re-fetch for one lead (whitelisted so a button can offer it).
+
+	Clears the geocode and BatchData caches first: the button exists because the
+	address just changed, and leaving those in place would re-center the map on
+	the old parcel and skip the sale fallback for a miss we no longer mean.
+	"""
+	from crm.api.comps import _full_address, _guard
 
 	_guard()
+	if not frappe.db.exists("CRM Lead", lead):
+		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)
+	_clear_location_caches(lead)
 	doc = frappe.get_doc("CRM Lead", lead)
-	facts = facts_for_lead(doc, force=True)
-	return {"ok": bool(facts), "facts": facts}
+	facts = facts_for_lead(doc, force=True) or {}
+	return {
+		"ok": True,
+		"matched": bool(facts.get("zpid")),
+		"zpid": str(facts.get("zpid") or ""),
+		"address": _full_address(doc),
+		"queried_address": facts.get("_queried_address") or _full_address(doc),
+	}

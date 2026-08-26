@@ -326,17 +326,15 @@ duplicating. Work substantial features in a worktree of your own.
     map and get nothing, the one outcome the ladder in `_preset_tiers` exists to
     avoid. When the pooled index holds *nothing at all*, no amount of loosening
     helps.
-  - **NOT gated on non-disclosure states, and that was checked.** The original
-    theory was "Texas comps lack sale prices". False: all **67,679** CRM Comp
-    rows carry a price, **TX included at 100%**, and TX has our *best* coverage
-    (~168 comps/lead vs ~26 for MN). Four TX leads returned 200 / 107 / 13 / 158
-    comps, all priced. None of the eight empty leads are in a non-disclosure
-    state. The real trigger is **zero coverage**, which is geography-agnostic.
-  - **Trigger is deliberately `not out`** — the *unfiltered* radius result — not
-    the filtered one. A tight preset matching nothing must never spend money;
-    that is the ladder's job, not the wallet's.
-  - **Cost: $0.03/row, `take=10` → $0.30 per empty lead**, verified by
-    wallet-balance deltas, not by reading a price list. Uses the dedicated
+  - **Fires when Zillow RecentlySold has no priced sales** — Louisiana and the
+    other ND states. ISTL last-asks used to suppress it (`istl_has_comps`); those
+    are last LISTs, so a NOLA map could show 944 pins and **0 Sold**. Only a
+    priced `zillow::` sold skips the spend. Pin-refreshed ISTL rows keep their
+    ISTL name and do not count. Zillow for-sale listings still do not count.
+  - **Trigger is still `not out` for the empty-map case** — a tight preset
+    matching nothing must never spend money; that is the ladder's job.
+  - **Cost: $0.03/row, `take=5` → $0.15 per lead**, verified by wallet-balance
+    deltas. Cached, so each lead is paid once. Uses the dedicated
     `batchdata_comps_api_key` (Basic Property Data + Comparable Properties only).
     **Do NOT point it at the general BatchData key** — that carries all 13
     datasets and bills **$0.64/row**, 21x more, for fields this never reads.
@@ -1236,6 +1234,12 @@ duplicating. Work substantial features in a worktree of your own.
     The message icon opens the standard Send Text modal with
     the cursor already in the composer; Today adds **Skip / Send / Send & finish**
     so the card can be judged without returning to the board.
+  - **Zillow address miss is said out loud** — if `/property` cannot resolve the
+    lead, Today shows an amber “ask the seller” banner (and a card flag once we
+    have asked). Saving a new address reveals **Rerun comps**, which clears the
+    geocode + BatchData caches and force-refetches. Auto-refetching a miss would
+    re-bill it. `ZillowAddressMatch.vue` + `zillow.refresh_lead_facts` +
+    `comps.zillow_match` + `today_board.zillow_unresolved`.
   - **The Today lead modal is now a qualify + comp + work surface**, without
     replacing the real Activity feed it already mounted. The left rail reuses
     `FirstCallReadCard` (Motivation × Price 2×2, saved onto the CRM Lead), and the

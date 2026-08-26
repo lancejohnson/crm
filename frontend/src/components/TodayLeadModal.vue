@@ -44,6 +44,15 @@
           </div>
           <Button variant="ghost" icon="x" class="shrink-0" @click="show = false" />
         </div>
+        <ZillowAddressMatch
+          v-if="item?.lead && zillowMatch"
+          class="mx-5 mt-2 sm:mx-6"
+          :lead="item.lead"
+          :address="item.address"
+          :match="zillowMatch"
+          @saved="onAddressSaved"
+          @reran="onCompsReran"
+        />
 
         <div class="flex min-h-0 flex-1 flex-col md:flex-row">
           <!-- Collapsed on the comps pane: the map wants every pixel it can get,
@@ -176,11 +185,13 @@
                    from pageMode so map+tray share the pane when it is wide enough;
                    when it stacks, this host scrolls. -->
               <CompsView
-                :key="item.lead"
+                :key="compsKey"
                 :lead="item.lead"
                 :address="item.address"
                 page-mode
                 :fill="false"
+                hide-address-match
+                @zillow-match="onZillowMatch"
               />
             </div>
           </div>
@@ -201,6 +212,7 @@
 import Activities from '@/components/Activities/Activities.vue'
 import CompsView from '@/components/CompsView.vue'
 import FirstCallReadCard from '@/components/FirstCallReadCard.vue'
+import ZillowAddressMatch from '@/components/ZillowAddressMatch.vue'
 import { callHref, formatPhone } from '@/utils/phoneFormat'
 import { Badge, Button, Dialog, FeatherIcon, call } from 'frappe-ui'
 import { computed, ref, watch } from 'vue'
@@ -209,7 +221,7 @@ import { useRouter } from 'vue-router'
 const props = defineProps({
   item: { type: Object, default: null },
 })
-const emit = defineEmits(['openAddress'])
+const emit = defineEmits(['openAddress', 'addressUpdated'])
 
 const show = defineModel({ type: Boolean })
 const router = useRouter()
@@ -225,6 +237,11 @@ const panes = computed(() => [
   { value: 'comps', label: __('Comps') },
 ])
 const compsOpened = ref(false)
+const compsGeneration = ref(0)
+const compsKey = computed(() => `${props.item?.lead || ''}:${compsGeneration.value}`)
+const compsMatch = ref(null)
+const leadDoc = ref(null)
+const zillowMatch = computed(() => compsMatch.value || matchFromLead(leadDoc.value))
 // The rail follows the PANE rather than being remembered: comps wants the room,
 // activity does not. A manual toggle wins until the pane changes again, so a rep
 // who wants the 2×2 while comping can have it without it sticking for every lead.
@@ -233,15 +250,33 @@ watch(pane, (v) => {
   if (v === 'comps') compsOpened.value = true
   sidebarOpen.value = v !== 'comps'
 })
-const leadDoc = ref(null)
 const leadLoading = ref(false)
 const leadCache = new Map()
 let leadRequestToken = 0
+
+function matchFromLead(doc) {
+  if (!doc?.zillow_fetched_at && !doc?.zillow_zpid) return null
+  let queried = ''
+  if (doc.zillow_facts) {
+    try {
+      queried = JSON.parse(doc.zillow_facts)?._queried_address || ''
+    } catch {
+      queried = ''
+    }
+  }
+  return {
+    tried: true,
+    matched: Boolean(doc.zillow_zpid),
+    zpid: doc.zillow_zpid || '',
+    queried_address: queried,
+  }
+}
 
 watch(
   () => props.item?.lead,
   (lead) => {
     tabIndex.value = 0
+    compsMatch.value = null
     // Never render the previous lead's answers against the new lead id while its
     // document is loading — a click in that window would save the wrong state.
     leadDoc.value = leadCache.get(lead) || null
@@ -274,6 +309,32 @@ async function loadLead(force = false) {
   } finally {
     if (token === leadRequestToken) leadLoading.value = false
   }
+}
+
+function onZillowMatch(match) {
+  compsMatch.value = match || null
+}
+
+function onAddressSaved(address) {
+  emit('addressUpdated', { lead: props.item?.lead, address })
+}
+
+function onCompsReran(res) {
+  compsMatch.value = {
+    tried: true,
+    matched: Boolean(res?.matched),
+    zpid: res?.zpid || '',
+    queried_address: res?.queried_address || res?.address || '',
+  }
+  compsGeneration.value += 1
+  compsOpened.value = true
+  pane.value = 'comps'
+  loadLead(true)
+  emit('addressUpdated', {
+    lead: props.item?.lead,
+    address: res?.address || props.item?.address,
+    zillow_unresolved: !res?.matched,
+  })
 }
 
 function openFullLead() {

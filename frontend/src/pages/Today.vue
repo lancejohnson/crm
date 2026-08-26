@@ -217,6 +217,12 @@
                 {{ item.address }}
               </button>
               <div v-else class="mt-0.5 text-xs text-ink-gray-5">—</div>
+              <div
+                v-if="item.zillow_unresolved"
+                class="mt-0.5 text-xs font-medium text-ink-amber-3"
+              >
+                {{ __('Address not on Zillow — ask the seller') }}
+              </div>
               <div v-if="item.mobile_no" class="mt-0.5 flex items-center gap-1.5">
                 <a
                   :href="callHref(item.mobile_no)"
@@ -367,6 +373,7 @@
     v-model="showLeadModal"
     :item="selectedItem"
     @open-address="openAddress"
+    @address-updated="onLeadAddressUpdated"
   />
   <LostReasonModal
     v-if="showLostReasonModal"
@@ -855,6 +862,21 @@ function openAddress(address) {
   if (!address) return
   selectedAddress.value = address
   showPropertyLinkModal.value = true
+}
+
+function onLeadAddressUpdated({ lead, address, zillow_unresolved } = {}) {
+  if (!lead) return
+  const patch = {}
+  if (address != null) patch.address = address
+  if (zillow_unresolved != null) patch.zillow_unresolved = zillow_unresolved
+  for (const col of columns.value) {
+    for (const item of col.items || []) {
+      if (item.lead === lead) Object.assign(item, patch)
+    }
+  }
+  if (selectedItem.value?.lead === lead) {
+    selectedItem.value = { ...selectedItem.value, ...patch }
+  }
 }
 
 // Tick a task straight off the card, in either direction. Reopening matters as

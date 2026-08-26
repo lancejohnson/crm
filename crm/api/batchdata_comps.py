@@ -11,27 +11,17 @@ It covers most of the book, but not all of it: sampling the 45 most recent leads
 Glade Valley NC, Avondale AZ, Newnan GA, Warsaw MO. Those reps open the map and
 get nothing at all, which is the one outcome `comps.py` set out to avoid.
 
-This module fills exactly that hole and nothing else. It is a FALLBACK, not a
-second opinion: if the local index returned anything, we do not spend money here.
-
-Deliberately NOT gated on non-disclosure states
------------------------------------------------
-The original ask was "use this where pricing doesn't show up", on the theory that
-Texas comps lack sale prices. That was checked and is false: all 67,679 CRM Comp
-rows carry a price, TX included at 100%, and TX has our BEST coverage (~168 comps
-per lead vs ~26 for MN). Four TX leads returned 200 / 107 / 13 / 158 comps, all
-priced. The real gap is **zero coverage**, and it is geography-agnostic — none of
-the eight empty leads above are in a non-disclosure state. So the trigger is
-"the local index gave us nothing", not "which state is this".
+It also fills the non-disclosure hole: Zillow RecentlySold in LA (and the other
+ND states) returns solds with `price: null`, which `_shape_search` drops, so the
+map can be full of ISTL last-asks and still have **zero Sold pins**. ISTL asks
+do not suppress this path — they are not sales.
 
 What it costs
 -------------
 Billing is PER ROW RETURNED at the sum of the datasets enabled on the token. The
 `comps` token (Basic Property Data + Comparable Properties) measured at
-**$0.03/row**, verified by wallet-balance deltas. At `take=10` that is **$0.30**
-per lead that would otherwise show an empty map. ~18% of leads x ~417/mo, if every
-one were opened, is ~$22/mo — and the cache below means each lead is paid for once,
-ever.
+**$0.03/row**, verified by wallet-balance deltas. `take=5` is **$0.15** per lead
+that has no priced Zillow solds. Cached, so each lead is paid for once.
 
 The sale-date window is applied SERVER-SIDE (`sale.lastSaleDate.minDate/maxDate`),
 so we only pay for rows already inside it rather than buying 25 and discarding the
@@ -60,12 +50,10 @@ API_BASE = "https://api.batchdata.com/api/v1"
 #: datasets and bills $0.64/row, 21x more, for data this feature never reads.
 CONF_KEY = "batchdata_comps_api_key"
 
-#: Lance's call: "pull the most similar five-ten". Ten is the top of that range
-#: and still only $0.30. take=25 was tried (better median $/sf on one Brooklyn
-#: lead) and then capped back — we are billed per row returned, so 25 is $0.75
-#: on a fallback that already only fires when ISTL and Zillow solds both failed.
-#: KEEP still ranks down to 6 for the map; take is only how many we BUY.
-DEFAULT_TAKE = 10
+#: Billed per row returned. This now fires on every lead whose Zillow solds have
+#: no prices (ND states), not only empty maps, so five is the spend dial — $0.15
+#: rather than $0.30. take=25 was tried once and capped back.
+DEFAULT_TAKE = 5
 
 #: Hard ceiling on how far a "comp" may be. `compAddress` has NO radius control
 #: and has been observed matching out to ~3mi, so this is enforced by us or not at
@@ -73,8 +61,9 @@ DEFAULT_TAKE = 10
 #: across town.
 MAX_MILES = 2.0
 
-#: How many survive ranking and reach the map.
-KEEP = 6
+#: How many survive ranking and reach the map. Matches take so we do not buy a
+#: row and then throw it away.
+KEEP = 5
 
 #: Two years, not one. Measured on a real San Antonio subject: a 12-month window
 #: left 3 usable comps and read ~4% low, while 2 years gave 9-11 and converged.

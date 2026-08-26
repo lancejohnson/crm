@@ -253,6 +253,14 @@
           </div>
         </div>
 
+        <ZillowAddressMatch
+          v-if="!hideAddressMatch && lead && zillowMatch"
+          :lead="lead"
+          :address="data?.address || address"
+          :match="zillowMatch"
+          @saved="onAddressSaved"
+          @reran="onAddressReran"
+        />
         <!-- The preset had to loosen, or nothing matched at all. Either way the
              user is told outright rather than left to wonder why a "similar"
              map is full of houses that are nothing like the subject. -->
@@ -484,6 +492,7 @@ import CompTrayCard from '@/components/CompTrayCard.vue'
 import CompSubjectCard from '@/components/CompSubjectCard.vue'
 import CompHelpKey from '@/components/CompHelpKey.vue'
 import CompOfferCalc from '@/components/CompOfferCalc.vue'
+import ZillowAddressMatch from '@/components/ZillowAddressMatch.vue'
 import FilterIcon from '@/components/Icons/FilterIcon.vue'
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
 
@@ -499,11 +508,14 @@ const props = defineProps({
   // Offer the neighbourhood layer (groundwork-geo). Opt-in for the same reason
   // `fill` is: the comps page is a comps page.
   neighborhood: { type: Boolean, default: false },
+  // Today already mounts the same banner above the panes, so the map does not
+  // repeat it. The comps page leaves this off.
+  hideAddressMatch: { type: Boolean, default: false },
 })
 // This used to be a modal driven by `defineModel()`. It is now a full page, so
 // "open" is simply always true -- which keeps every existing `show.value` guard,
 // watcher and keyboard-shortcut gate working exactly as before.
-const emit = defineEmits(['subject', 'picked'])
+const emit = defineEmits(['subject', 'picked', 'zillowMatch'])
 const show = ref(true)
 
 // Only consulted in `fill` mode. Starts closed: the preset ladder has already
@@ -1136,6 +1148,15 @@ function setCardRef(name, el) {
 const emptyMessage = computed(
   () => data.value?.message || __('No comps found nearby.'),
 )
+const zillowMatch = computed(() => data.value?.zillow_match || null)
+
+function onAddressSaved(address) {
+  if (data.value) data.value.address = address
+}
+
+async function onAddressReran() {
+  await load({ explicit: userTouched.value })
+}
 const presetLabel = computed(() =>
   userTouched.value ? '' : data.value?.preset?.label || '',
 )
@@ -1171,13 +1192,18 @@ const notice = computed(() => {
   if (d.fallback?.used && (d.fallback.count ?? 0) > 0) {
     return {
       tone: 'info',
-      text: __(
-        'We hold no comps here — showing {0} recorded sales from BatchData ({1}).',
-        [d.fallback.count, d.fallback.basis || __('last 2 years')],
-      ),
+      text: d.fallback.had_pins
+        ? __('Added {0} recorded sales from BatchData ({1}).', [
+            d.fallback.count,
+            d.fallback.basis || __('last 2 years'),
+          ])
+        : __(
+            'We hold no comps here — showing {0} recorded sales from BatchData ({1}).',
+            [d.fallback.count, d.fallback.basis || __('last 2 years')],
+          ),
     }
   }
-  if (d.fallback?.used && (d.fallback.count ?? 0) === 0) {
+  if (d.fallback?.used && (d.fallback.count ?? 0) === 0 && !d.fallback.had_pins) {
     return {
       tone: 'warning',
       text: __('No comps here, and no recorded sales nearby either.'),
@@ -2192,6 +2218,7 @@ async function load({ explicit = userTouched.value } = {}) {
       }
       data.value = await call('crm.api.comps.get_lead_comps', payload)
       emit('subject', data.value?.subject || null)
+      emit('zillowMatch', data.value?.zillow_match || null)
       syncDraft(data.value?.filters)
       // Auto-widen only on the suggested path. A rep who picked ½ mile and got
       // three houses meant three houses; walking out from under them is the same

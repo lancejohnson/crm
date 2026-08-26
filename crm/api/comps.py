@@ -397,7 +397,9 @@ def _subject_facts(doc):
 	facts["rent_zestimate"] = (zillow or {}).get("rent_zestimate") or None
 	facts["lot_size"] = (zillow or {}).get("lot_size") or None
 	facts["zpid"] = (zillow or {}).get("zpid") or None
-	facts["has_zillow"] = bool(zillow)
+	# A cached miss is `{}` (plus `_queried_address`) and must not read as a hit.
+	facts["has_zillow"] = bool(facts["zpid"])
+	facts["zillow_queried_address"] = (zillow or {}).get("_queried_address") or ""
 	# May be "" here: leads cached before `cover_photo` was carried have no key.
 	# `get_lead_comps` fills the gap from the area search's self-match afterwards,
 	# so neither path spends a request on a picture.
@@ -931,6 +933,31 @@ def get_subject_details(lead):
 	return result
 
 
+def _zillow_match(doc, subject=None):
+	"""Did Zillow resolve this lead's address? The UI uses this to ask the rep.
+
+	`tried` is True once we have asked (a fetch stamp, or a zpid). A Census hit
+	with no Zillow zpid is the 310 Asbury case: the street exists, the house does
+	not, and the setter needs to hear that out loud.
+	"""
+	zpid = str((subject or {}).get("zpid") or doc.get("zillow_zpid") or "")
+	queried = (subject or {}).get("zillow_queried_address") or ""
+	if not queried and doc.get("zillow_facts"):
+		try:
+			blob = json.loads(doc.get("zillow_facts") or "")
+		except Exception:
+			blob = {}
+		if isinstance(blob, dict):
+			queried = blob.get("_queried_address") or ""
+	tried = bool(zpid) or bool(doc.get("zillow_fetched_at"))
+	return {
+		"matched": bool(zpid),
+		"tried": tried,
+		"zpid": zpid,
+		"queried_address": queried,
+	}
+
+
 @frappe.whitelist()
 def get_lead_comps(lead, radius_mi=None, limit=None, filters=None, auto=0, include_hidden=0):
 	"""Comps near a lead, nearest first, with the subject's real position.
@@ -980,6 +1007,7 @@ def get_lead_comps(lead, radius_mi=None, limit=None, filters=None, auto=0, inclu
 		# below. Present as [] so the client can render it without a guard.
 		"discarded": [],
 		"available": _available(),
+		"zillow_match": _zillow_match(doc, subject),
 	}
 	if not base["available"]:
 		base["message"] = _("Comps have not been imported yet.")
@@ -1082,23 +1110,27 @@ def get_lead_comps(lead, radius_mi=None, limit=None, filters=None, auto=0, inclu
 
 	out.sort(key=lambda r: r["distance_mi"])
 
-	# BatchData only when BOTH sources failed to produce a priced sale:
-	#   no ISTL pins in radius, AND Zillow RecentlySold came back with no prices
-	#   (non-disclosure). Zillow for-sale listings do not count — an ask is not
-	#   a sale. ISTL last-asks DO count: if the pool has anything, we do not spend.
-	istl = [r for r in out if r.get("source") == "istl"]
+	# BatchData when Zillow RecentlySold produced no priced sales (Louisiana and
+	# the other non-disclosure states). Zillow for-sale listings do not count —
+	# an ask is not a sale. ISTL last-asks also do not count: they are last LISTs,
+	# labelled off-market, and treating them as solds is how LA maps went yellow
+	# without a single Sold pin. Pin-refreshed ISTL rows keep their ISTL name even
+	# after `source` flips to zillow, so only `zillow::` solds are real search hits.
 	zillow_solds = [
 		r for r in out
 		if r.get("price")
-		and r.get("source") == "zillow"
-		and str(r.get("status") or "").lower() != "active"
+		and str(r.get("name") or "").startswith("zillow::")
+		and r.get("listing_state") == "sold"
 	]
-	if istl:
-		base["fallback"] = {"source": "batchdata", "used": False, "reason": "istl_has_comps"}
-	elif zillow_solds:
-		base["fallback"] = {"source": "batchdata", "used": False, "reason": "zillow_has_prices"}
+	had_pins = bool(out)
+	if zillow_solds:
+		base["fallback"] = {
+			"source": "batchdata", "used": False,
+			"reason": "zillow_has_prices", "had_pins": had_pins,
+		}
 	else:
 		base["fallback"] = _batchdata_fallback(doc, base, merge_into=out)
+		base["fallback"]["had_pins"] = had_pins
 		out.sort(key=lambda r: r["distance_mi"])
 
 	base["total_in_radius"] = len(out)
