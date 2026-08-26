@@ -124,6 +124,17 @@
               {{ __('Parcels') }}
             </label>
 
+            <!-- Street View overlays the map (subject, or the last pin clicked).
+                 Same checkbox idiom as Details / Parcels. Off by default — the
+                 map is the working surface; this is a look. -->
+            <label
+              class="flex cursor-pointer select-none items-center gap-1.5 whitespace-nowrap text-xs text-ink-gray-7"
+              :title="streetViewTitle"
+            >
+              <FormControl type="checkbox" size="sm" v-model="showStreet" />
+              {{ __('Street') }}
+            </label>
+
             <!-- In `fill` mode ONLY, the filter card folds away behind this.
                  Filters are deliberately always visible on the comps page (they
                  are the point of the tool, and a rep should not have to find a
@@ -317,7 +328,7 @@
                harmless; now that `wide` flips on resize, re-patching the map
                element destroys the map. -->
           <div
-            class="overflow-hidden rounded-lg border border-outline-gray-2 bg-surface-gray-1"
+            class="relative overflow-hidden rounded-lg border border-outline-gray-2 bg-surface-gray-1"
             :class="
               wide
                 ? 'h-full min-h-0 flex-1'
@@ -327,6 +338,33 @@
             "
           >
             <div ref="mapEl" class="size-full" />
+            <div
+              v-if="showStreet"
+              class="absolute inset-0 z-[1100] bg-surface-gray-1"
+            >
+              <iframe
+                v-if="streetViewSrc"
+                :src="streetViewSrc"
+                class="size-full border-0"
+                referrerpolicy="origin"
+                allowfullscreen
+                loading="eager"
+                title="Street View"
+                @load="onStreetViewLoad"
+              />
+              <div
+                v-if="streetViewPoint?.label"
+                class="pointer-events-none absolute left-2 top-2 z-10 max-w-[80%] truncate rounded bg-black/60 px-2 py-0.5 text-xs text-white"
+              >
+                {{ streetViewPoint.label }}
+              </div>
+              <div
+                v-if="streetViewMsg"
+                class="pointer-events-none absolute inset-0 flex items-center justify-center bg-surface-gray-1/80 px-4 text-center text-sm text-ink-gray-6"
+              >
+                {{ streetViewMsg }}
+              </div>
+            </div>
           </div>
 
           <!-- Sized in px, not rem: this app's root font-size is 20px, so a
@@ -364,6 +402,7 @@
                 :subject="data.subject"
                 :address="data?.address || address"
                 @open="openSubjectDetail"
+                @street="openStreetView(null)"
               />
 
               <CompTrayCard
@@ -378,6 +417,7 @@
                 @open="openCompDetail"
                 @use="toggleUse"
                 @discard="setCompState($event, 'hidden')"
+                @street="openStreetView"
               />
 
               <!-- Discards live at the BOTTOM of the same tray, not behind a
@@ -442,6 +482,7 @@
           <span class="text-ink-gray-4">
             {{ __('Click a pin to use or hide it') }} ·
             <b>D</b> {{ __('details') }} · <b>P</b> {{ __('parcels') }} ·
+            <b>S</b> {{ __('street') }} ·
             <b>U</b> {{ __('use') }} · <b>H</b> {{ __('hide') }}
           </span>
         </div>
@@ -457,6 +498,7 @@
     :subject="data?.subject || null"
     :subject-mode="subjectDetail"
     @use="toggleUse"
+    @street="openStreetView(subjectDetail ? null : detailComp?.name)"
   />
 </template>
 
@@ -495,6 +537,7 @@ import CompOfferCalc from '@/components/CompOfferCalc.vue'
 import ZillowAddressMatch from '@/components/ZillowAddressMatch.vue'
 import FilterIcon from '@/components/Icons/FilterIcon.vue'
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
+import { streetViewEmbedUrl } from '@/utils/streetView'
 
 const props = defineProps({
   lead: { type: String, required: true },
@@ -555,6 +598,16 @@ watch(showParcels, (v) => {
   if (v) bindParcels()
   else unbindParcels()
 })
+
+// Street View is a look at one house, not the working surface. Off by default
+// and remembered like Parcels. The iframe is created only while this is on —
+// a cold rural panorama can take 20–30s, so the overlay says Loading, never
+// "could not load", until the load event or a 30s timer.
+const showStreet = ref(localStorage.getItem('compsShowStreet') === '1')
+watch(showStreet, (v) => localStorage.setItem('compsShowStreet', v ? '1' : '0'))
+const streetViewSrc = ref('')
+const streetViewMsg = ref('')
+let streetViewTimer = null
 let parcelLayer = null
 let parcelMoveHandler = null
 let parcelTimer = null
@@ -1093,6 +1146,63 @@ function scrollSubjectIntoView() {
 }
 
 const comps = computed(() => data.value?.comps || [])
+
+const streetViewPoint = computed(() => {
+  const name = focusedComp.value
+  if (name) {
+    const c = comps.value.find((x) => x.name === name)
+    if (c?.lat != null && c?.lng != null) {
+      return { lat: c.lat, lng: c.lng, label: c.address || '' }
+    }
+  }
+  const s = data.value?.subject
+  if (s?.lat != null && s?.lng != null) {
+    return { lat: s.lat, lng: s.lng, label: data.value?.address || props.address || '' }
+  }
+  return null
+})
+
+const streetViewTitle = computed(() => {
+  if (!streetViewPoint.value) return __('Street View needs a mapped address')
+  return __('Street View of the subject, or the last pin you clicked') + ' (S)'
+})
+
+function onStreetViewLoad() {
+  if (streetViewTimer) {
+    clearTimeout(streetViewTimer)
+    streetViewTimer = null
+  }
+  streetViewMsg.value = ''
+}
+
+function syncStreetView() {
+  if (streetViewTimer) {
+    clearTimeout(streetViewTimer)
+    streetViewTimer = null
+  }
+  if (!showStreet.value) {
+    streetViewSrc.value = ''
+    streetViewMsg.value = ''
+    return
+  }
+  const pt = streetViewPoint.value
+  const src = pt ? streetViewEmbedUrl(pt.lat, pt.lng) : ''
+  if (!src) {
+    streetViewSrc.value = ''
+    streetViewMsg.value = __('No coordinates for Street View yet.')
+    return
+  }
+  if (streetViewSrc.value === src) return
+  streetViewSrc.value = src
+  streetViewMsg.value = __('Loading…')
+  streetViewTimer = setTimeout(() => {
+    if (streetViewMsg.value === __('Loading…')) {
+      streetViewMsg.value = __('Still loading — or no Street View at this address.')
+    }
+  }, 30000)
+}
+
+watch([showStreet, streetViewPoint], syncStreetView)
 
 // Counted off what is ON THE MAP, not off the server's tally of what it found:
 // the legend describes the pins in front of the rep, and a number that survives
@@ -1779,6 +1889,13 @@ function subjectPopupHtml(s) {
       font:600 11px/1 ui-sans-serif,system-ui;padding:7px 8px;border-radius:6px;
       border:1px solid #e5e3de;background:#fff;color:${SUBJECT}">${__('Photos & details')}</button>`,
   )
+  if (s.lat != null && s.lng != null) {
+    rows.push(
+      `<button data-subject-street="1" style="width:100%;cursor:pointer;margin-top:6px;
+        font:600 11px/1 ui-sans-serif,system-ui;padding:7px 8px;border-radius:6px;
+        border:1px solid #e5e3de;background:#fff;color:#161614">${__('Street View')}</button>`,
+    )
+  }
 
   const sources = Object.values(s.source || {})
   if (sources.length) {
@@ -1960,6 +2077,12 @@ function onPopupClick(e) {
     openSubjectDetail()
     return
   }
+  const subjectStreet = e.target?.closest?.('[data-subject-street]')
+  if (subjectStreet) {
+    e.preventDefault()
+    openStreetView(null)
+    return
+  }
   const use = e.target?.closest?.('[data-comp-use]')
   if (use) {
     e.preventDefault()
@@ -2004,9 +2127,17 @@ function onPopupClick(e) {
 function openCompDetail(name) {
   const comp = comps.value.find((c) => c.name === name)
   if (!comp) return
+  focusedComp.value = name
   subjectDetail.value = false
   detailComp.value = comp
   showCompDetail.value = true
+}
+
+/** Point Street View at this house and show it. null = the subject. */
+function openStreetView(name) {
+  focusedComp.value = name || null
+  showCompDetail.value = false
+  showStreet.value = true
 }
 
 /**
@@ -2021,10 +2152,13 @@ function openCompDetail(name) {
 function openSubjectDetail() {
   const s = data.value?.subject
   if (!s) return
+  focusedComp.value = null
   subjectDetail.value = true
   detailComp.value = {
     name: `subject::${props.lead}`,
     address: data.value?.address || props.address || '',
+    lat: s.lat,
+    lng: s.lng,
     bedrooms: s.beds_exact ? s.beds : null,
     bathrooms: s.baths_exact ? s.baths : null,
     square_footage: s.sqft_exact ? s.sqft : null,
@@ -2410,6 +2544,7 @@ useKeyboardShortcuts({
   shortcuts: [
     { keys: ['d', 'D'], action: () => (showDetail.value = !showDetail.value) },
     { keys: ['p', 'P'], action: () => (showParcels.value = !showParcels.value) },
+    { keys: ['s', 'S'], action: () => (showStreet.value = !showStreet.value) },
     // Only where the calculator exists, so `c` stays free elsewhere.
     { keys: ['c', 'C'], action: () => props.pageMode && (calcOpen.value = !calcOpen.value) },
     // Only where the layer is offered, so `n` stays free on the comps page.
@@ -2442,6 +2577,10 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (streetViewTimer) {
+    clearTimeout(streetViewTimer)
+    streetViewTimer = null
+  }
   rootObserver?.disconnect()
   sizeObserver?.disconnect()
   sizeObserver = null

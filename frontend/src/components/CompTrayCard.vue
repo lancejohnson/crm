@@ -202,6 +202,14 @@
       >
         <FeatherIcon name="x" class="size-3.5" />
       </button>
+      <button
+        v-if="comp.lat != null && comp.lng != null"
+        class="rounded bg-surface-white/80 px-1.5 py-1 text-ink-gray-6 shadow-sm ring-1 ring-outline-gray-2 transition hover:bg-surface-white hover:text-ink-gray-9"
+        :title="__('Street View')"
+        @click.stop="$emit('street', comp.name)"
+      >
+        <FeatherIcon name="navigation" class="size-3.5" />
+      </button>
     </div>
   </div>
 </template>
@@ -237,7 +245,7 @@ const props = defineProps({
   // The resolved subject facts from `get_lead_comps`, for the +/- comparison.
   subject: { type: Object, default: null },
 })
-defineEmits(['hover', 'open', 'use', 'discard', 'undiscard'])
+defineEmits(['hover', 'open', 'use', 'discard', 'undiscard', 'street'])
 
 // Shared with the map pills and the legend, so a card and its pin can never
 // disagree about what "sold" looks like. Passed the whole comp, not just the

@@ -52,6 +52,12 @@
               :label="comp?.selected ? __('Remove from table') : __('Add as comp')"
               @click="$emit('use', comp.name)"
             />
+            <Button
+              v-if="hasStreetView"
+              variant="subtle"
+              :label="__('Street View')"
+              @click="$emit('street')"
+            />
             <Button variant="ghost" icon="x" @click="show = false" />
           </div>
         </div>
@@ -195,7 +201,7 @@ import { zillowUrl } from '@/utils/propertyLinks'
 import { Badge, Button, Dialog, FeatherIcon, call } from 'frappe-ui'
 import { computed, ref, watch } from 'vue'
 
-defineEmits(['use'])
+defineEmits(['use', 'street'])
 
 const props = defineProps({
   lead: { type: String, required: true },
@@ -219,6 +225,16 @@ let requestToken = 0
 const details = computed(() => response.value?.details || null)
 const photos = computed(() => response.value?.photos || [])
 const fit = computed(() => compFit(props.comp, props.subject))
+const streetPoint = computed(() => {
+  if (props.subjectMode) {
+    const s = props.subject
+    if (s?.lat != null && s?.lng != null) return s
+  }
+  const c = props.comp
+  if (c?.lat != null && c?.lng != null) return c
+  return null
+})
+const hasStreetView = computed(() => !!streetPoint.value)
 
 // Status, in the same four-state grammar as the pills and the tray cards.
 const state = computed(() => compState(props.comp))

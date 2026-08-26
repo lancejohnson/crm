@@ -1,10 +1,17 @@
 <template>
   <Dialog
     v-model="show"
-    :options="{ size: '5xl', title: item?.lead_name || __('Lead details') }"
+    :options="{ size: '7xl', title: item?.lead_name || __('Lead details') }"
   >
     <template #body>
-      <div class="flex h-[88vh] max-h-[88vh] flex-col overflow-hidden bg-surface-modal">
+      <!-- Nearly the whole window, and it grows with the browser. Dialog's
+           own sizes stop at max-w-7xl (1280px) with my-8 chrome, which left a
+           laptop looking at a column. :has() on the teleported panel is what
+           actually claims the leftover space; the id is the hook. -->
+      <div
+        id="today-lead-modal"
+        class="flex h-[calc(100vh-1rem)] max-h-[calc(100vh-1rem)] flex-col overflow-hidden bg-surface-modal"
+      >
         <!-- One dense line. The header used to spend ~90px on a name and two
              badges, while the phone number and address — the two things a rep
              acts on — sat in a rail that is now collapsed on the comps pane.
@@ -352,3 +359,16 @@ function openCompsPage() {
   else router.push({ name: 'Comps', params: { leadId: props.item.lead } })
 }
 </script>
+
+<!-- Unscoped: Dialog teleports to <body>, so a scoped rule never reaches it. -->
+<style>
+.dialog-overlay:has(#today-lead-modal) > div {
+  padding: 0.5rem !important;
+}
+.dialog-content:has(#today-lead-modal) {
+  max-width: calc(100vw - 1rem) !important;
+  width: calc(100vw - 1rem);
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+</style>

@@ -500,6 +500,14 @@ duplicating. Work substantial features in a worktree of your own.
     `localStorage['compsShowParcels']`. Uses `crm.api.geo.get_parcels` (bbox, the
     same endpoint the desk already had). A fetch that loses a race with toggle-off
     or a map rebuild does not redraw.
+  - **Street View toggle** (`S` / a checkbox next to Parcels) overlays the Maps
+    Embed panorama on the map. Same key as the lead-desk mockup (`streetView.js`,
+    project `claude-code-486305`, referrer-restricted). `location=` is lat,lng
+    only; iframe uses `referrerpolicy="origin"`. Subject by default, last clicked
+    pin otherwise. Off by default (`localStorage['compsShowStreet']`). A cold
+    rural load says "Loading…", never "could not load", for 30s. Per-comp: the
+    compass on a tray card, Street View in the photo modal, or the subject-pin
+    popup all call `openStreetView` (closes the gallery so the overlay is visible).
     - **Year rides on the TOP line beside the price** — a width decision, not a
       cosmetic one. A pill is as wide as its widest line and the facts line was
       it; moving the four year digits up beside the short price shortens the line

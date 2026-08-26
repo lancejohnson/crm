@@ -35,6 +35,14 @@
       >
         {{ __('This property') }}
       </span>
+      <button
+        v-if="subject?.lat != null && subject?.lng != null"
+        class="absolute right-2 top-2 z-30 rounded bg-surface-white/80 px-1.5 py-1 text-ink-gray-6 shadow-sm ring-1 ring-outline-gray-2 transition hover:bg-surface-white hover:text-ink-gray-9"
+        :title="__('Street View')"
+        @click.stop="$emit('street')"
+      >
+        <FeatherIcon name="navigation" class="size-3.5" />
+      </button>
     </div>
 
     <div class="px-3 py-2">
@@ -73,7 +81,7 @@ const props = defineProps({
   subject: { type: Object, default: null },
   address: { type: String, default: '' },
 })
-defineEmits(['open'])
+defineEmits(['open', 'street'])
 
 const SUBJECT = COMP_COLORS.subject.bg
 const broken = ref(false)
