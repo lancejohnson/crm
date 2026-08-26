@@ -105,7 +105,23 @@
         @input="typeMoney(col, 'arv', $event)"
       />
 
-      <span class="lab">{{ kind === 'novation' ? __('− %') : __('% of ARV') }}</span>
+      <span class="lab">
+        {{ kind === 'novation' ? __('− %') : __('% of ARV') }}
+        <button
+          v-if="kind === 'novation'"
+          type="button"
+          class="why"
+          tabindex="-1"
+          :aria-label="NOVATION_PCT_WHY"
+        >
+          ?
+          <span class="why-tip">
+            <b>6%</b> {{ __('Realtors') }}<br />
+            <b>2%</b> {{ __('closing costs') }}<br />
+            <b>2%</b> {{ __('minor repairs') }}
+          </span>
+        </button>
+      </span>
       <label v-for="col in visible" :key="'pct' + col" class="pct">
         <input
           :ref="(el) => setField(1, col, el)"
@@ -434,6 +450,11 @@ const DEFAULT_PSF = 30
 const DEFAULT_FEE = 25000
 const DEFAULT_NOVATION_FEE = 40000
 const DEFAULT_NOVATION_PCT = 0.1
+const NOVATION_PCT_WHY = [
+  __('6% Realtors'),
+  __('2% closing costs'),
+  __('2% minor repairs'),
+].join(' · ')
 
 function fresh(k, f) {
   if (k === 'novation') {
@@ -454,7 +475,9 @@ function emptyBook(k) {
     s: [fresh(k), fresh(k)],
     cols: 1,
     notes: '',
-    comps: null,
+    // Cash follows the map until the rep edits the table. Novation starts
+    // empty — switching kinds must not copy the other notebook's comps.
+    comps: k === 'cash' ? null : [],
   }
 }
 
@@ -508,21 +531,26 @@ function cloneComps(list) {
   return (list || []).map((c) => ({ ...c }))
 }
 
-function ensureComps(k) {
-  if (books[k].comps) return
-  if (!props.comps?.length) return
-  books[k].comps = cloneComps(props.comps)
+function compKey(c) {
+  return c?.name || c?.address || ''
+}
+
+function compKeys(list) {
+  return (list || []).map(compKey).filter(Boolean).sort().join('\n')
 }
 
 function removeComp(name) {
   const b = books[kind.value]
   if (!b.comps) b.comps = cloneComps(props.comps)
-  b.comps = b.comps.filter((c) => (c.name || c.address) !== name)
+  b.comps = b.comps.filter((c) => compKey(c) !== name)
 }
 
-const tableComps = computed(
-  () => books[kind.value].comps || props.comps || [],
-)
+const tableComps = computed(() => {
+  const own = books[kind.value].comps
+  // Cash may still follow the map (null). Novation never does.
+  if (own == null) return kind.value === 'cash' ? props.comps || [] : []
+  return own
+})
 
 const storageKey = computed(() => `compsCalc:${props.lead}`)
 
@@ -566,6 +594,14 @@ function resetBooks() {
 }
 
 let hydrating = false
+const seenMap = new Set()
+function rememberMap(list) {
+  seenMap.clear()
+  for (const c of list || []) {
+    const key = compKey(c)
+    if (key) seenMap.add(key)
+  }
+}
 
 function loadSaved() {
   hydrating = true
@@ -581,6 +617,12 @@ function loadSaved() {
       loadBook('cash', stored.cash)
       loadBook('novation', stored.novation)
       if (stored.kind === 'novation') kind.value = 'novation'
+      // An earlier build copied the cash/map list onto novation at switch.
+      // If the two lists are the same names, novation never got its own picks.
+      const cashList = stored.cash?.comps ?? props.comps
+      if (compKeys(books.novation.comps) && compKeys(books.novation.comps) === compKeys(cashList)) {
+        books.novation.comps = []
+      }
     } else if (stored && Array.isArray(stored.s)) {
       // Pre-split draft: one notebook. Drop it into whichever kind it was.
       const k = stored.kind === 'novation' ? 'novation' : 'cash'
@@ -602,10 +644,13 @@ function loadSaved() {
       books[k].cols = Math.min(2, Math.max(1, seed.scenarios.length))
       if (typeof seed.notes === 'string') books[k].notes = seed.notes
       if (Array.isArray(seed.comps)) books[k].comps = cloneComps(seed.comps)
-      else if (props.comps?.length) books[k].comps = cloneComps(props.comps)
+      else if (k === 'cash' && props.comps?.length) {
+        books[k].comps = cloneComps(props.comps)
+      }
     }
   } finally {
     hydrating = false
+    rememberMap(props.comps)
   }
 }
 
@@ -642,27 +687,33 @@ watch(kind, persist)
 watch(
   () => props.comps,
   (list) => {
-    const k = kind.value
-    if (!books[k].comps) {
-      if (list?.length) books[k].comps = cloneComps(list)
-      return
+    const added = (list || []).filter((c) => {
+      const key = compKey(c)
+      return key && !seenMap.has(key)
+    })
+    rememberMap(list)
+    if (hydrating) return
+    // Only pins the rep picks WHILE on this kind join its table. Switching
+    // must not dump the other notebook's (or the map's) list in.
+    const b = books[kind.value]
+    if (!b.comps) {
+      if (kind.value === 'novation') b.comps = []
+      else return
     }
-    const have = new Set(books[k].comps.map((c) => c.name || c.address))
-    for (const c of list || []) {
-      const key = c.name || c.address
-      if (key && !have.has(key)) {
-        books[k].comps.push({ ...c })
+    const have = new Set(b.comps.map(compKey))
+    for (const c of added) {
+      const key = compKey(c)
+      if (!have.has(key)) {
+        b.comps.push({ ...c })
         have.add(key)
       }
     }
   },
   { deep: true },
 )
-
 function setKind(next) {
   if (kind.value === next) return
   kind.value = next
-  ensureComps(next)
   menuFor.value = -1
   custom[0] = false
   custom[1] = false
@@ -1135,11 +1186,58 @@ function onKeys(e) {
   text-align: right;
 }
 .lab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   color: var(--ink-gray-5);
 }
 .lab i {
   font-style: normal;
   color: var(--ink-gray-4);
+}
+.why {
+  position: relative;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--outline-gray-2);
+  border-radius: 99px;
+  background: none;
+  padding: 0;
+  font: 10px/14px inherit;
+  color: var(--ink-gray-5);
+  cursor: help;
+}
+.why:hover,
+.why:focus {
+  color: var(--ink-gray-8);
+  border-color: var(--ink-gray-5);
+}
+.why-tip {
+  display: none;
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  top: 18px;
+  width: max-content;
+  padding: 6px 8px;
+  border: 1px solid var(--outline-gray-2);
+  border-radius: 6px;
+  background: var(--surface-white);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 13%);
+  color: var(--ink-gray-7);
+  font: 12px/1.4 inherit;
+  font-weight: 400;
+  text-align: left;
+  white-space: nowrap;
+}
+.why:hover .why-tip,
+.why:focus .why-tip {
+  display: block;
+}
+.why-tip b {
+  font-weight: 650;
+  color: var(--ink-gray-9);
 }
 .lab.offer,
 .out.offer {

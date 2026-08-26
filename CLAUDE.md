@@ -682,7 +682,9 @@ duplicating. Work substantial features in a worktree of your own.
       does not imply a single deduction once the percentage is editable.
     - **Cash or novation**, cash by default. Two independent notebooks — switching
       does not rewrite the other kind's numbers or its comps, and a save writes
-      only the kind on screen. Novation is **Current value − 10% − fee ($40k
+      only the kind on screen. Novation's table starts empty and only takes pins
+      picked while that kind is on; cash still follows the map until edited. The
+      10% has a hover `?` (6% Realtors / 2% closing / 2% minor repairs). Novation is **Current value − 10% − fee ($40k
       default)**; no repairs, because we list the house as-is. Current value
       soft-fills from that kind's comps-table average, same suggested-ARV cash
       uses. Every figure is editable (After % / Offer back-solve value / fee).
