@@ -1421,7 +1421,14 @@ def get_today_lead_snapshot(lead):
 
 
 @frappe.whitelist()
-def set_today_lead_status(item, status, lost_reason=None, lost_notes=None):
+def set_today_lead_status(
+	item,
+	status,
+	lost_reason=None,
+	lost_notes=None,
+	custom_refundable=None,
+	custom_refund_status=None,
+):
 	"""Change the CRM Lead status from a Today card.
 
 	Save the full Lead document (rather than using ``db.set_value``) so status
@@ -1443,6 +1450,10 @@ def set_today_lead_status(item, status, lost_reason=None, lost_notes=None):
 		lead.lost_reason = lost_reason
 	if lost_notes is not None:
 		lead.lost_notes = lost_notes
+	if custom_refundable is not None and lead.meta.has_field("custom_refundable"):
+		lead.custom_refundable = 1 if custom_refundable else 0
+	if custom_refund_status is not None and lead.meta.has_field("custom_refund_status"):
+		lead.custom_refund_status = custom_refund_status
 	lead.save()
 
 	# Lead hooks may add newly-due work asynchronously; publish immediately too

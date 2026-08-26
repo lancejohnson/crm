@@ -256,6 +256,12 @@ doc_events = {
 	"CRM Property Tax Pull": {
 		"after_insert": ["crm.api.tax_info.on_tax_pull_insert"],
 	},
+	# 10 outgoing ISTL calls in 21 days with no connect → refund nudge.
+	# See crm/api/istl_refund_nudge.py.
+	"CRM Call Log": {
+		"after_insert": ["crm.api.istl_refund_nudge.on_call_log_change"],
+		"on_update": ["crm.api.istl_refund_nudge.on_call_log_change"],
+	},
 	# CRM Esign Agreement is a custom doctype (ops repo). The create-agreement-draft
 	# + documenso-webhook server scripts can't publish_realtime or stamp time in
 	# the sandbox, so the live refresh (crm_esign event) + last_event_at stamping

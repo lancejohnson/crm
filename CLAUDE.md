@@ -28,6 +28,13 @@ duplicating. Work substantial features in a worktree of your own.
 
 ## Our changes vs upstream (keep this list current)
 
+- **Refunds board** — sidebar **Refunds** (`/refunds`) is a kanban of
+  `custom_refundable=1` leads (To Request / Requested / Waiting on us /
+  Waiting on them / Complete). Marking Dead does not queue a refund; the
+  Refundable checkbox does. ISTL 10-calls-in-21-days with no connect nudges
+  the owner (`crm/api/istl_refund_nudge.py`). Fields: ops
+  `setup_refundable_field.py`.
+
 - **Multiple phones per lead + Quo call backfill** — a lead can hold as many
   numbers as the rep types in. `mobile_no` stays the primary (Call / Text /
   Today / kanban); extras live in `CRM Lead.extra_phones` (JSON list of

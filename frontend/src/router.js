@@ -147,6 +147,11 @@ const routes = [
     props: true,
   },
   {
+    path: '/refunds',
+    name: 'Refunds',
+    component: () => import('@/pages/Refunds.vue'),
+  },
+  {
     path: '/sequences',
     name: 'Sequences',
     component: () => import('@/pages/Sequences.vue'),

@@ -15,14 +15,48 @@
     v-if="title == 'Activity' && isLostLead"
     class="mx-3 mt-3 flex items-center justify-between gap-2 rounded-lg border border-outline-red-1 bg-surface-red-1 px-4 py-2 sm:mx-10"
   >
-    <div class="text-base text-ink-red-3">
-      <span class="font-medium">{{ __(doc.status) }}</span>
-      <template v-if="doc.lost_reason"> &middot; {{ doc.lost_reason }}</template>
-      <span v-if="doc.lost_notes" class="text-ink-gray-7">
-        — {{ doc.lost_notes }}
-      </span>
+    <div class="flex min-w-0 flex-col gap-1 text-base text-ink-red-3">
+      <div>
+        <span class="font-medium">{{ __(doc.status) }}</span>
+        <template v-if="doc.lost_reason"> &middot; {{ doc.lost_reason }}</template>
+        <span v-if="doc.lost_notes" class="text-ink-gray-7">
+          — {{ doc.lost_notes }}
+        </span>
+      </div>
+      <div
+        v-if="isRefundPoolLead"
+        class="flex flex-wrap items-center gap-4 text-ink-gray-7"
+      >
+        <FormControl
+          type="checkbox"
+          :label="__('Refundable')"
+          :modelValue="!!doc.custom_refundable"
+          @update:modelValue="(v) => toggleLeadFlag('custom_refundable', v)"
+        />
+        <FormControl
+          type="checkbox"
+          :label="__('Refund requested')"
+          :modelValue="!!doc.custom_refund_requested"
+          @update:modelValue="(v) => toggleLeadFlag('custom_refund_requested', v)"
+        />
+      </div>
     </div>
     <Button :label="__('Edit')" @click="showLostReasonModal = true" />
+  </div>
+  <div
+    v-if="title == 'Activity' && istlNudge.data?.show"
+    class="mx-3 mt-3 flex items-center justify-between gap-2 rounded-lg border border-outline-amber-2 bg-surface-amber-1 px-4 py-2 text-base text-ink-amber-3 sm:mx-10"
+  >
+    <div>
+      <span class="font-medium">{{ __('Ask iSpeedToLead for a refund') }}</span>
+      <span class="text-ink-gray-7"> — {{ istlNudge.data.message }}</span>
+    </div>
+    <Button
+      v-if="isRefundPoolLead || isLostLead"
+      variant="solid"
+      :label="__('Mark refundable')"
+      @click="markRefundable"
+    />
   </div>
   <LostReasonModal
     v-if="showLostReasonModal"
@@ -825,6 +859,50 @@ const isLostLead = computed(
     doc.value.status &&
     getLeadStatus(doc.value.status)?.type == 'Lost',
 )
+const isRefundPoolLead = computed(
+  () =>
+    props.doctype == 'CRM Lead' &&
+    !!doc.value.status &&
+    !!getLeadStatus(doc.value.status)?.custom_refund_pool,
+)
+
+const istlNudge = createResource({
+  url: 'crm.api.istl_refund_nudge.get_nudge',
+  makeParams: () => ({ lead: props.docname }),
+  auto: false,
+})
+
+watch(
+  () => [props.doctype, props.docname],
+  ([doctype, name]) => {
+    if (doctype === 'CRM Lead' && name) istlNudge.reload()
+  },
+  { immediate: true },
+)
+
+function toggleLeadFlag(fieldname, value) {
+  if (!_document.doc) return
+  _document.doc[fieldname] = value ? 1 : 0
+  if (fieldname === 'custom_refundable' && value) {
+    _document.doc.custom_refund_status =
+      _document.doc.custom_refund_status || 'To Request'
+  }
+  if (fieldname === 'custom_refund_requested') {
+    _document.doc.custom_refund_requested_on = value
+      ? dayjs().format('YYYY-MM-DD HH:mm:ss')
+      : null
+    if (value && !_document.doc.custom_refund_status) {
+      _document.doc.custom_refund_status = 'Requested'
+    }
+  }
+  _document.save.submit(null, {
+    onSuccess: () => istlNudge.reload(),
+  })
+}
+
+function markRefundable() {
+  toggleLeadFlag('custom_refundable', true)
+}
 
 // Color a status value (e.g. in "changed Status from New to Called No Answer")
 // with that status's own color, matching how statuses appear elsewhere.

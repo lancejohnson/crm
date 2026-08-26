@@ -12,6 +12,7 @@ import LucideHeadphones from '~icons/lucide/headphones'
 import LucideColumns3 from '~icons/lucide/columns-3'
 import LucideUsersRound from '~icons/lucide/users-round'
 import LucideListChecks from '~icons/lucide/list-checks'
+import LucideCircleDollarSign from '~icons/lucide/circle-dollar-sign'
 
 // Read the logged-in user from the session cookie directly (no store import — the
 // session store imports the router, which imports this module → circular).
@@ -29,6 +30,7 @@ export const sidebarLinks = [
   { label: 'Today', icon: LucideListChecks, to: 'Today' },
   { label: 'Dashboard', icon: LucideLayoutDashboard, to: 'Dashboard' },
   { label: 'Leads', icon: LeadsIcon, to: 'Leads' },
+  { label: 'Refunds', icon: LucideCircleDollarSign, to: 'Refunds' },
   { label: 'Deals', icon: DealsIcon, to: 'Deals' },
   { label: 'Dispo', icon: LucideColumns3, to: 'Dispo' },
   { label: 'Buyers', icon: LucideUsersRound, to: 'Buyers' },
