@@ -423,7 +423,7 @@
             {{ __('Pending ({0})', [pendingCount]) }}
           </span>
           <span class="text-ink-gray-5">{{ __('Fainter = older sale') }}</span>
-          <span class="text-ink-gray-5">{{ __('Date = when it sold · Nd = days it sat') }}</span>
+          <CompHelpKey />
           <span v-if="data?.selected_count" class="flex items-center gap-1.5">
             <span
               class="size-2.5 rounded-full ring-2 ring-offset-1"
@@ -482,6 +482,7 @@ import { COMP_COLORS, compColor, compState, finiteDays, isPending } from '@/util
 import CompDetailModal from '@/components/CompDetailModal.vue'
 import CompTrayCard from '@/components/CompTrayCard.vue'
 import CompSubjectCard from '@/components/CompSubjectCard.vue'
+import CompHelpKey from '@/components/CompHelpKey.vue'
 import CompOfferCalc from '@/components/CompOfferCalc.vue'
 import FilterIcon from '@/components/Icons/FilterIcon.vue'
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
