@@ -223,6 +223,7 @@ import {
   compStateLabel,
   daysToSell,
   finiteDays,
+  formatLotSize,
   isActiveStatus,
   loadCompPhotos,
   streetAddress,
@@ -324,6 +325,8 @@ const facts = computed(() => {
   if (c.bedrooms) bits.push(__('{0} bd', [c.bedrooms]))
   if (c.bathrooms) bits.push(__('{0} ba', [c.bathrooms]))
   if (c.square_footage) bits.push(Number(c.square_footage).toLocaleString() + ' ' + __('sqft'))
+  const lot = formatLotSize(c.lot_size, { compact: true })
+  if (lot) bits.push(lot)
   if (c.year_built) bits.push(__('built {0}', [c.year_built]))
   return bits.join(' · ') || __('No details')
 })

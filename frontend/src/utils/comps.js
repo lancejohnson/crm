@@ -202,6 +202,23 @@ export function compFit(comp, subject) {
   }
 }
 
+export function formatLotSize(value, { compact = false } = {}) {
+  // Zillow's string ("4,530 sqft", "0.25 acres") is already the right claim;
+  // compact just shortens it so the tray facts line can carry it next to living
+  // area without looking like a second square-footage number.
+  if (value == null || value === '') return ''
+  const raw = String(value).trim()
+  if (!raw) return ''
+  const lower = raw.toLowerCase().replace(/,/g, '')
+  const n = parseFloat(lower)
+  if (!Number.isFinite(n) || n <= 0) return raw
+  if (/\bacres?\b|\bac\b/.test(lower)) {
+    return compact ? `${n} ac` : `${n} ${n === 1 ? 'acre' : 'acres'}`
+  }
+  const sqft = Math.round(n).toLocaleString()
+  return compact ? `${sqft} lot` : `${sqft} sqft`
+}
+
 export function compFacts(comp) {
   return [
     number(comp?.bedrooms) ? `${formatDecimal(comp.bedrooms)} bd` : '',
@@ -209,6 +226,7 @@ export function compFacts(comp) {
     number(comp?.square_footage)
       ? `${Math.round(Number(comp.square_footage)).toLocaleString()} sf`
       : '',
+    formatLotSize(comp?.lot_size, { compact: true }),
     number(comp?.year_built) ? String(Math.round(Number(comp.year_built))) : '',
   ].filter(Boolean)
 }
@@ -218,6 +236,7 @@ export function subjectFacts(subject) {
     number(subject?.beds) ? `${formatDecimal(subject.beds)} bd` : '',
     number(subject?.baths) ? `${formatDecimal(subject.baths)} ba` : '',
     number(subject?.sqft) ? `${Math.round(Number(subject.sqft)).toLocaleString()} sf` : '',
+    formatLotSize(subject?.lot_size, { compact: true }),
     number(subject?.year_built) ? String(Math.round(Number(subject.year_built))) : '',
   ].filter(Boolean)
 }

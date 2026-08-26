@@ -282,6 +282,7 @@ def _shape_search(prop, kind):
 		# fills it later in attach_sale_history. Read it here anyway so a row that
 		# happens to carry yearBuilt isn't stripped for nothing.
 		"year_built": zillow_api._num(prop.get("yearBuilt")),
+		"lot_size": zillow_api.lot_size_label(prop),
 		"property_type": zillow_api.HOME_TYPES.get(home) or (home.title().replace("_", " ") or None),
 		"source": "zillow",
 		"zpid": str(zpid),
@@ -609,7 +610,7 @@ def _apply_facts(existing, incoming):
 	whenever it was already set, so a merge that updated the SALE left the
 	wrong living area on the pin.
 	"""
-	for key in ("square_footage", "bedrooms", "bathrooms", "year_built"):
+	for key in ("square_footage", "bedrooms", "bathrooms", "year_built", "lot_size"):
 		val = incoming.get(key)
 		if val:
 			existing[key] = val
@@ -753,6 +754,9 @@ def refresh_pins(rows, cap=PIN_REFRESH_CAP):
 		if facts.get("year_built"):
 			row["year_built"] = facts["year_built"]
 			changed = True
+		if facts.get("lot_size"):
+			row["lot_size"] = facts["lot_size"]
+			changed = True
 		if changed:
 			row["recency_days"] = _comps()._recency_days(row, today)
 			updated += 1
@@ -803,6 +807,7 @@ def attach_sale_history(rows, today=None):
 					"bedrooms": facts.get("beds"),
 					"bathrooms": facts.get("baths"),
 					"year_built": facts.get("year_built"),
+					"lot_size": facts.get("lot_size"),
 				},
 			)
 		# Parsed HERE, from the raw events, on every read. The cache holds Zillow's

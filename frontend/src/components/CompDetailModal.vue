@@ -254,6 +254,14 @@ const facts = computed(() => {
     { label: __('Beds'), value: decimal(d.beds || c.bedrooms) },
     { label: __('Baths'), value: decimal(d.baths || c.bathrooms) },
     { label: __('Living area'), value: area(d.sqft || c.square_footage) },
+    {
+      label: __('Lot size'),
+      value:
+        d.lot_size ||
+        c.lot_size ||
+        (props.subjectMode && props.subject?.lot_size) ||
+        '—',
+    },
     { label: __('Year built'), value: whole(d.year_built || c.year_built) },
     { label: __('Property type'), value: d.property_type || c.property_type || '—' },
     // "0.0 mi from itself" is not a fact about the subject.
@@ -265,7 +273,6 @@ const facts = computed(() => {
             value: c.distance_mi ? `${Number(c.distance_mi).toFixed(1)} mi` : '—',
           },
         ]),
-    { label: __('Lot size'), value: d.lot_size || '—' },
     { label: __('Zestimate'), value: formatCompMoney(d.zestimate) },
   ]
 })

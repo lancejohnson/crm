@@ -118,6 +118,41 @@ def _num(v):
 		return None
 
 
+def lot_size_label(src, reso=None):
+	"""A display string for lot size, from a /search row or a /property blob.
+
+	resoFacts.lotSize is the one we want when it is there ("4,530 sqft"). Search
+	rows often skip it and only carry lotAreaValue + lotAreaUnit; without this
+	fallback the tray had nothing to print even though Zillow had already told us.
+	"""
+	if not isinstance(src, dict):
+		src = {}
+	if reso is None:
+		reso = src.get("resoFacts") if isinstance(src.get("resoFacts"), dict) else {}
+	for bag in (reso or {}, src):
+		raw = bag.get("lotSize") or bag.get("lot_size")
+		if isinstance(raw, str) and raw.strip():
+			return raw.strip()
+	val = _num(
+		(reso or {}).get("lotAreaValue")
+		or (reso or {}).get("lotSizeValue")
+		or src.get("lotAreaValue")
+		or src.get("lotSizeValue")
+	)
+	if not val or val <= 0:
+		return None
+	unit = str(
+		(reso or {}).get("lotAreaUnit")
+		or src.get("lotAreaUnit")
+		or src.get("lotSizeUnit")
+		or "sqft"
+	).lower()
+	if "acre" in unit:
+		n = int(val) if float(val) == int(val) else round(val, 2)
+		return f"{n} acre" if n == 1 else f"{n} acres"
+	return f"{int(round(val)):,} sqft"
+
+
 def _has_cache() -> bool:
 	return all(frappe.db.has_column("CRM Lead", f) for f in CACHE_FIELDS)
 
@@ -400,7 +435,7 @@ def _normalize(raw):
 		"sqft": _num(raw.get("livingArea") or raw.get("livingAreaValue")),
 		"year_built": _num(raw.get("yearBuilt")),
 		"property_type": HOME_TYPES.get(home_type) or (home_type.title().replace("_", " ") or None),
-		"lot_size": reso.get("lotSize") or None,
+		"lot_size": lot_size_label(raw, reso),
 		"lat": _num(raw.get("latitude")),
 		"lng": _num(raw.get("longitude")),
 		"zestimate": _num(raw.get("zestimate")),
@@ -452,7 +487,7 @@ def normalize_detail(raw):
 		"sqft": _num(raw.get("livingArea") or raw.get("livingAreaValue")),
 		"year_built": _num(raw.get("yearBuilt")),
 		"property_type": HOME_TYPES.get(home_type) or (home_type.title().replace("_", " ") or None),
-		"lot_size": reso.get("lotSize") or None,
+		"lot_size": lot_size_label(raw, reso),
 		"home_status": raw.get("homeStatus"),
 		"asking_price": _num(raw.get("price")) if status in asking_statuses else None,
 		"zestimate": _num(raw.get("zestimate")),

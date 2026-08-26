@@ -2028,6 +2028,7 @@ function openSubjectDetail() {
     bedrooms: s.beds_exact ? s.beds : null,
     bathrooms: s.baths_exact ? s.baths : null,
     square_footage: s.sqft_exact ? s.sqft : null,
+    lot_size: s.lot_size || null,
     year_built: s.year_built,
     property_type: s.property_type,
     price: s.last_sale?.price || null,

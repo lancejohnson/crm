@@ -67,7 +67,7 @@
  */
 import { FeatherIcon } from 'frappe-ui'
 import { computed, ref } from 'vue'
-import { COMP_COLORS } from '@/utils/comps'
+import { COMP_COLORS, formatLotSize } from '@/utils/comps'
 
 const props = defineProps({
   subject: { type: Object, default: null },
@@ -88,6 +88,8 @@ const facts = computed(() => {
   if (s.beds_label) bits.push(__('{0} bd', [s.beds_label]))
   if (s.baths_label) bits.push(__('{0} ba', [s.baths_label]))
   if (s.sqft_label) bits.push(__('{0} sqft', [s.sqft_label]))
+  const lot = formatLotSize(s.lot_size, { compact: true })
+  if (lot) bits.push(lot)
   // Year was missing here while every comp card beneath it showed one, so the
   // one row you compare the others against was the row you could not compare on
   // age. "built" spelled out, matching the comp cards exactly.

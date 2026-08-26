@@ -286,7 +286,7 @@
         __('{0} would offer {1}', [altFormula.label, money(altOffer)])
       }}<template v-if="altOffer !== run(0).offer">
         —
-        <b :class="altOffer > run(0).offer ? 'up' : 'down'">
+        <b :class="altOffer > run(0).offer ? 'more' : 'less'">
           {{ money(Math.abs(altOffer - run(0).offer)) }}
           {{ altOffer > run(0).offer ? __('more') : __('less') }}
         </b>
@@ -1301,11 +1301,14 @@ input.empty {
 input.offer.bad {
   color: var(--ink-red-3);
 }
+/* A higher offer is a problem, not a win — green read as "good" and the
+   whole point of showing the other formula is that paying more is the thing
+   to notice. Same red as a zero/negative offer. */
 .gap {
   font-size: 11px;
   font-weight: 600;
-  color: var(--ink-green-3);
-  background: var(--surface-green-1);
+  color: var(--ink-red-3);
+  background: var(--surface-red-1);
   border-radius: 4px;
   padding: 1px 4px;
   white-space: nowrap;
@@ -1318,10 +1321,10 @@ input.offer.bad {
 .alt b {
   font-weight: 600;
 }
-.alt .up {
-  color: var(--ink-green-3);
+.alt .more {
+  color: var(--ink-red-3);
 }
-.alt .down {
+.alt .less {
   color: var(--ink-gray-7);
 }
 
