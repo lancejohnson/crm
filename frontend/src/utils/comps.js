@@ -144,6 +144,33 @@ export function finiteDays(value) {
   return Number.isFinite(n) && n >= 0 ? n : null
 }
 
+/** Date-only `YYYY-MM-DD` as local midnight, or null. */
+export function ymdDate(value) {
+  if (!value) return null
+  const m = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!m) return null
+  const d = new Date(+m[1], +m[2] - 1, +m[3])
+  return Number.isFinite(d.getTime()) ? d : null
+}
+
+/**
+ * How long a sold comp sat on the market.
+ *
+ * Prefer the listing-chain number (price cuts included). When Zillow's
+ * `/property` miss leaves `sale_history` empty — 768 King Sword on lead 01103
+ * — still compute from listed_date → removed_date, which the row already has.
+ */
+export function daysToSell(comp) {
+  const fromHistory = finiteDays(comp?.sale_history?.days_to_sell)
+  if (fromHistory != null) return fromHistory
+  const listed = ymdDate(comp?.listed_date)
+  const sold = ymdDate(comp?.removed_date)
+  if (listed && sold && sold >= listed) {
+    return Math.round((sold - listed) / 86400000)
+  }
+  return null
+}
+
 function present(value) {
   return value !== null && value !== undefined && value !== ''
 }

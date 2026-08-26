@@ -221,6 +221,7 @@ import {
   compColor,
   compState,
   compStateLabel,
+  daysToSell,
   finiteDays,
   isActiveStatus,
   loadCompPhotos,
@@ -403,7 +404,7 @@ const timing = computed(() => {
 
 /** Days from the first listing of the run that ended in the sale. null if unknown. */
 function soldInDays(c) {
-  const n = finiteDays(c?.sale_history?.days_to_sell)
+  const n = daysToSell(c)
   return n == null ? null : Math.round(n)
 }
 

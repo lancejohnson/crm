@@ -478,7 +478,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { zillowUrl } from '@/utils/propertyLinks'
-import { COMP_COLORS, compColor, compState, finiteDays, isPending } from '@/utils/comps'
+import { COMP_COLORS, compColor, compState, daysToSell, finiteDays, isPending } from '@/utils/comps'
 import CompDetailModal from '@/components/CompDetailModal.vue'
 import CompTrayCard from '@/components/CompTrayCard.vue'
 import CompSubjectCard from '@/components/CompSubjectCard.vue'
@@ -1290,7 +1290,7 @@ function priceShort(p) {
  * used to paint "0d" here whenever the listing chain was missing.
  */
 function soldInShort(c) {
-  const n = finiteDays(c?.sale_history?.days_to_sell)
+  const n = daysToSell(c)
   return n == null ? '' : `${Math.round(n)}d`
 }
 
@@ -1384,7 +1384,7 @@ function pillBits(c) {
  */
 function pillFacts(c) {
   const { year, line2 } = pillBits(c)
-  const took = finiteDays(c?.sale_history?.days_to_sell)
+  const took = daysToSell(c)
   const f = c?.sale_history?.flip
   const soldOn = soldOnShort(c.removed_date)
   const listed = listingDays(c)
