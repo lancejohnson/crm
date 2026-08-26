@@ -58,6 +58,36 @@
       @click="markRefundable"
     />
   </div>
+  <div
+    v-if="title == 'Activity' && refundDraft.reply"
+    class="mx-3 mt-3 flex flex-col gap-2 rounded-lg border border-outline-gray-2 bg-surface-gray-1 px-4 py-3 sm:mx-10"
+  >
+    <div class="flex items-start justify-between gap-3">
+      <div class="min-w-0">
+        <div class="font-medium text-ink-gray-9">
+          {{ __('Pi drafted a reply') }}
+          <span
+            v-if="refundDraft.confidence != null"
+            class="ml-1 text-sm font-normal text-ink-gray-5"
+          >
+            {{ Math.round(Number(refundDraft.confidence) * 100) }}%
+          </span>
+        </div>
+        <div v-if="refundDraft.summary" class="text-sm text-ink-gray-5">
+          {{ refundDraft.summary }}
+        </div>
+      </div>
+      <Button
+        variant="solid"
+        :label="__('Send')"
+        :loading="sendingDraft"
+        @click="sendRefundDraft"
+      />
+    </div>
+    <pre
+      class="whitespace-pre-wrap rounded-md bg-surface-white p-3 text-sm text-ink-gray-8"
+    >{{ refundDraft.reply }}</pre>
+  </div>
   <LostReasonModal
     v-if="showLostReasonModal"
     v-model="showLostReasonModal"
@@ -809,7 +839,7 @@ import { usersStore } from '@/stores/users'
 import { whatsappEnabled, smsEnabled } from '@/composables/settings'
 import { useDocument } from '@/data/document'
 import { useTelemetry } from 'frappe-ui/frappe'
-import { Button, Tooltip, createResource, toast, dayjs } from 'frappe-ui'
+import { Button, Tooltip, createResource, toast, dayjs, call } from 'frappe-ui'
 import { useElementVisibility } from '@vueuse/core'
 import {
   ref,
@@ -902,6 +932,32 @@ function toggleLeadFlag(fieldname, value) {
 
 function markRefundable() {
   toggleLeadFlag('custom_refundable', true)
+}
+
+const sendingDraft = ref(false)
+const refundDraft = computed(() => {
+  const raw = doc.value.custom_refund_draft_json
+  if (!raw) return {}
+  try {
+    return typeof raw === 'string' ? JSON.parse(raw) : raw
+  } catch {
+    return {}
+  }
+})
+
+async function sendRefundDraft() {
+  if (sendingDraft.value || !props.docname) return
+  sendingDraft.value = true
+  try {
+    await call('crm.api.refunds.send_draft', { lead: props.docname })
+    toast.success(__('Reply sent'))
+    if (_document.doc) _document.doc.custom_refund_draft_json = ''
+    _document.reload?.()
+  } catch (e) {
+    toast.error(e.messages?.[0] || __('Could not send draft'))
+  } finally {
+    sendingDraft.value = false
+  }
 }
 
 // Color a status value (e.g. in "changed Status from New to Called No Answer")
