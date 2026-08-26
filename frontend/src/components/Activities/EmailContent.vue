@@ -2,7 +2,7 @@
   <iframe
     ref="iframeRef"
     :srcdoc="htmlContent"
-    class="prose-f block h-10 max-h-[500px] w-full"
+    class="prose-f block min-h-[80px] max-h-[500px] w-full"
   />
 </template>
 
@@ -229,16 +229,24 @@ const htmlContent = `
 watch(iframeRef, (iframe) => {
   if (iframe) {
     iframe.onload = () => {
-      const emailContent =
-        iframe.contentWindow.document.querySelector('.email-content')
-      let parent = emailContent.closest('html')
+      const doc = iframe.contentWindow.document
+      const emailContent = doc.querySelector('.email-content')
+      let parent = emailContent?.closest('html') || doc.documentElement
 
       let theme = document.documentElement.getAttribute('data-theme')
       parent.setAttribute('data-theme', theme)
 
-      iframe.style.height = parent.offsetHeight + 1 + 'px'
+      iframe.style.height =
+        Math.max(
+          parent.scrollHeight || 0,
+          doc.body?.scrollHeight || 0,
+          emailContent?.scrollHeight || 0,
+          80,
+        ) +
+        1 +
+        'px'
 
-      let replyCollapsers = emailContent.querySelectorAll('.replyCollapser')
+      let replyCollapsers = emailContent?.querySelectorAll('.replyCollapser') || []
       if (replyCollapsers.length) {
         replyCollapsers.forEach((replyCollapser) => {
           replyCollapser.addEventListener('change', () => {
