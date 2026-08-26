@@ -278,7 +278,10 @@ def _shape_search(prop, kind):
 		"bedrooms": zillow_api._num(prop.get("bedrooms")),
 		"bathrooms": zillow_api._num(prop.get("bathrooms")),
 		"square_footage": zillow_api._num(prop.get("livingArea")),
-		"year_built": None,
+		# Search usually omits this (the card doesn't show a year). `/property`
+		# fills it later in attach_sale_history. Read it here anyway so a row that
+		# happens to carry yearBuilt isn't stripped for nothing.
+		"year_built": zillow_api._num(prop.get("yearBuilt")),
 		"property_type": zillow_api.HOME_TYPES.get(home) or (home.title().replace("_", " ") or None),
 		"source": "zillow",
 		"zpid": str(zpid),
@@ -787,6 +790,21 @@ def attach_sale_history(rows, today=None):
 	for row in rows:
 		info["checked"] += 1
 		facts = facts_by_address.get(row["address"])
+		# Year/beds/baths/sqft live on this same `/property` payload. Search almost
+		# never carries yearBuilt, so dropping them here is how a board of
+		# Zillow-origin pins rendered with no year even though we had already paid
+		# for it. Measured on a live board: 0 of 50 Broken Arrow comps had a year;
+		# the subject, from the same endpoint, had 2005.
+		if facts:
+			_apply_facts(
+				row,
+				{
+					"square_footage": facts.get("sqft"),
+					"bedrooms": facts.get("beds"),
+					"bathrooms": facts.get("baths"),
+					"year_built": facts.get("year_built"),
+				},
+			)
 		# Parsed HERE, from the raw events, on every read. The cache holds Zillow's
 		# priceHistory, not our reading of it, so a parser fix costs nothing and the
 		# ages inside are always computed against today rather than against whenever
@@ -813,7 +831,15 @@ def attach_sale_history(rows, today=None):
 		last = row["sale_history"].get("last_sale") or {}
 		if last.get("date") and not row.get("removed_date") and row.get("status") != "Active":
 			row["removed_date"] = last["date"]
-			row["recency_days"] = _comps()._recency_days(row, today)
+		# Pending / listed often arrive from /search with daysOnZillow = -1 (unknown),
+		# which we drop, so the pill had no DOM. The listing chain we just paid for
+		# has the real clock -- fill the gap, never overwrite a number search already
+		# gave us.
+		if history.get("first_listed") and not row.get("listed_date"):
+			row["listed_date"] = history["first_listed"]
+		if history.get("days_on_market") is not None and row.get("days_on_market") is None:
+			row["days_on_market"] = int(history["days_on_market"])
+		row["recency_days"] = _comps()._recency_days(row, today)
 	return info
 
 

@@ -130,6 +130,20 @@ function number(value) {
   return Number.isFinite(n) && n > 0 ? n : null
 }
 
+/**
+ * A day-count that is actually a number, or null.
+ *
+ * GOTCHA — `Number(null) === 0`. Sold comps whose listing chain we don't have
+ * carry `days_to_sell: null`, and feeding that to `Number` painted "0d" /
+ * "took 0d to sell" on most of the board (measured: 21 of 50 on one lead,
+ * 64 of 211 across six). Check nullish BEFORE coercing.
+ */
+export function finiteDays(value) {
+  if (value == null || value === '') return null
+  const n = Number(value)
+  return Number.isFinite(n) && n >= 0 ? n : null
+}
+
 function present(value) {
   return value !== null && value !== undefined && value !== ''
 }

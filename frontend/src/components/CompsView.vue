@@ -423,6 +423,7 @@
             {{ __('Pending ({0})', [pendingCount]) }}
           </span>
           <span class="text-ink-gray-5">{{ __('Fainter = older sale') }}</span>
+          <span class="text-ink-gray-5">{{ __('Date = when it sold · Nd = days it sat') }}</span>
           <span v-if="data?.selected_count" class="flex items-center gap-1.5">
             <span
               class="size-2.5 rounded-full ring-2 ring-offset-1"
@@ -477,7 +478,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { zillowUrl } from '@/utils/propertyLinks'
-import { COMP_COLORS, compColor, compState, isPending } from '@/utils/comps'
+import { COMP_COLORS, compColor, compState, finiteDays, isPending } from '@/utils/comps'
 import CompDetailModal from '@/components/CompDetailModal.vue'
 import CompTrayCard from '@/components/CompTrayCard.vue'
 import CompSubjectCard from '@/components/CompSubjectCard.vue'
@@ -1283,14 +1284,31 @@ function priceShort(p) {
 /**
  * How long it took to sell, for the pill's bottom-right slot. '' when unknown.
  *
- * Deliberately UNLABELLED and positional: the top line's right end already means
- * "how long since this pin's news", so the second line's right end is the only
- * other time slot on the pill and can only mean the other number. Spelling out
- * "77d to sell" costs ~40px on a 90px pill to say what position already says.
+ * A duration, against the calendar date on the top-right of a sold pin — two
+ * different kinds of number, so they don't need labels. `Number(null) === 0`
+ * used to paint "0d" here whenever the listing chain was missing.
  */
 function soldInShort(c) {
-  const n = Number(c?.sale_history?.days_to_sell)
-  return Number.isFinite(n) && n >= 0 ? `${Math.round(n)}d` : ''
+  const n = finiteDays(c?.sale_history?.days_to_sell)
+  return n == null ? '' : `${Math.round(n)}d`
+}
+
+/** `Jul 17` — date-only, local, no year. The year lives in the tooltip. */
+function soldOnShort(v) {
+  if (!v) return ''
+  const m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!m) return ''
+  const d = new Date(+m[1], +m[2] - 1, +m[3])
+  if (!Number.isFinite(d.getTime())) return ''
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function listingDays(c) {
+  return (
+    finiteDays(c?.recency_days) ??
+    finiteDays(c?.days_on_market) ??
+    finiteDays(c?.sale_history?.days_on_market)
+  )
 }
 
 /**
@@ -1352,7 +1370,7 @@ function pillBits(c) {
   const bb = c.bedrooms || c.bathrooms ? `${c.bedrooms || '?'}/${c.bathrooms || '?'}` : ''
   const sf = c.square_footage ? `${Number(c.square_footage).toLocaleString()}sf` : ''
   return {
-    year: c.year_built ? String(c.year_built) : '',
+    year: Number(c.year_built) > 0 ? String(Math.round(Number(c.year_built))) : '',
     line2: [bb, sf].filter(Boolean).join(' · '),
   }
 }
@@ -1360,18 +1378,21 @@ function pillBits(c) {
 /**
  * Everything a detailed pill says, for the title tooltip / measurement.
  *
- * The two positional numbers get spelled out in WORDS here, which is the whole
- * reason position is affordable on the pill itself: hovering is how you resolve
- * "what does that bare 77d mean" without the pill having to carry the answer.
+ * Tooltip restates the two times in words, because the pill itself cannot
+ * afford the labels.
  */
 function pillFacts(c) {
   const { year, line2 } = pillBits(c)
-  const sold = soldInShort(c)
+  const took = finiteDays(c?.sale_history?.days_to_sell)
   const f = c?.sale_history?.flip
+  const soldOn = soldOnShort(c.removed_date)
+  const listed = listingDays(c)
   return [
     line2,
     year,
-    sold ? __('took {0} to sell', [sold]) : '',
+    soldOn ? __('sold {0}', [soldOn]) : '',
+    took != null ? __('took {0}d to sell', [Math.round(took)]) : '',
+    isActive(c.status) && listed != null ? __('listed {0}d', [Math.round(listed)]) : '',
     f
       ? f.kind === 'relist'
         ? __('possible flip — bought {0} ago for {1}, now asking {2}% more', [
@@ -1496,7 +1517,6 @@ function subjectIcon(s) {
 
 function pillIcon(c) {
   const active = isActive(c.status)
-  const pending = isPending(c)
   const opacity = pillOpacity(stalenessDays(c))
   const pal = compColor(c)
   // The fade means ONE thing: how old the SALE is. An active listing is current
@@ -1549,14 +1569,13 @@ function pillIcon(c) {
   // 200 real comps, this costs 82 -> 90px average, where putting it on line 2
   // would have cost 113px and undone the whole point of the two-line layout.
   //
-  // The age reads differently by status and the PILL COLOUR is what says which:
-  // amber (still listed) → how long it has sat unsold; slate (off-market) → how
-  // long since it left. Same rule the popup spells out in words.
-  // A pending pill trades its age for the word. "Pending" is the whole point of
-  // the pin -- an agreed price -- and days-on-market is the least interesting
-  // number on a house that is already spoken for, so it takes the same slot
-  // rather than making the pill wider.
-  const age = pending ? __('Pending') : agoShort(c.recency_days)
+  // Sold: the calendar date it closed (`Jul 17`), so it cannot be read as the
+  // duration on the line below. Listed AND pending: days on market. Pending used
+  // to spend this slot on the word; the violet fill already says that, and the
+  // missing number was the complaint.
+  const age = isActive(c.status)
+    ? agoShort(listingDays(c))
+    : soldOnShort(c.removed_date) || agoShort(c.recency_days)
   // The OTHER time number. `age` says how long since the news; this says how long
   // the house took to sell, from the first listing of the run that ended in the
   // sale (price cuts included -- a seller who cut twice sat there the whole time).
@@ -1764,8 +1783,8 @@ function subjectPopupHtml(s) {
  * where there is room and the sentence reads better.
  */
 function agoShort(days) {
-  const d = Number(days)
-  if (!Number.isFinite(d) || d < 0) return ''
+  const d = finiteDays(days)
+  if (d == null) return ''
   if (d < 31) return `${Math.round(d)}d`
   if (d < 365) return `${Math.round(d / 30.44)}mo`
   const y = d / 365.25

@@ -221,6 +221,7 @@ import {
   compColor,
   compState,
   compStateLabel,
+  finiteDays,
   isActiveStatus,
   loadCompPhotos,
   streetAddress,
@@ -402,8 +403,8 @@ const timing = computed(() => {
 
 /** Days from the first listing of the run that ended in the sale. null if unknown. */
 function soldInDays(c) {
-  const n = Number(c?.sale_history?.days_to_sell)
-  return Number.isFinite(n) && n >= 0 ? Math.round(n) : null
+  const n = finiteDays(c?.sale_history?.days_to_sell)
+  return n == null ? null : Math.round(n)
 }
 
 /**
@@ -434,8 +435,9 @@ const flipBadge = computed(() => {
  * "listed -1 days" is the kind of thing a rep screenshots.
  */
 function daysOnMarket(c) {
-  const n = Number(c?.days_on_market)
-  return Number.isFinite(n) && n > 0 ? Math.round(n) : null
+  const n =
+    finiteDays(c?.days_on_market) ?? finiteDays(c?.sale_history?.days_on_market)
+  return n && n > 0 ? Math.round(n) : null
 }
 
 /**

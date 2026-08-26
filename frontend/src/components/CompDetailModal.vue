@@ -190,7 +190,7 @@
 </template>
 
 <script setup>
-import { compColor, compFit, compState, compStateLabel, formatCompMoney } from '@/utils/comps'
+import { compColor, compFit, compState, compStateLabel, finiteDays, formatCompMoney } from '@/utils/comps'
 import { zillowUrl } from '@/utils/propertyLinks'
 import { Badge, Button, Dialog, FeatherIcon, call } from 'frappe-ui'
 import { computed, ref, watch } from 'vue'
@@ -290,8 +290,8 @@ const timeline = computed(() => {
   // still running. Price cuts ride with it because "sold in 169 days after 3 cuts"
   // and "sold in 169 days at the asking price" are opposite stories about a price.
   const sh = props.comp?.sale_history
-  const took = Number(sh?.days_to_sell)
-  if (Number.isFinite(took) && took >= 0) {
+  const took = finiteDays(sh?.days_to_sell)
+  if (took != null) {
     const cuts = Number(sh?.price_cuts) || 0
     rows.push({
       label: __('Took to sell'),
