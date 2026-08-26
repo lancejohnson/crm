@@ -84,9 +84,9 @@
         @click="sendRefundDraft"
       />
     </div>
-    <pre
-      class="whitespace-pre-wrap rounded-md bg-surface-white p-3 text-sm text-ink-gray-8"
-    >{{ refundDraft.reply }}</pre>
+    <div
+      class="whitespace-pre-wrap rounded-md border border-outline-gray-2 bg-surface-white p-4 text-base leading-6 text-ink-gray-8"
+    >{{ refundDraft.reply }}</div>
   </div>
   <LostReasonModal
     v-if="showLostReasonModal"

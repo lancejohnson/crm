@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import html as htmlmod
+import re
 
 import frappe
 from frappe import _
@@ -33,6 +34,9 @@ def send_draft(lead: str):
 		frappe.throw(_("There is no draft to send."))
 
 	to = draft.get("reply_to") or "support@ispeedtoleadhelp.zendesk.com"
+	bracket = re.search(r"<([^>]+)>" , to)
+	if bracket:
+		to = bracket.group(1)
 	subject = draft.get("subject") or "Re: Lead Refund"
 	if not subject.lower().startswith("re:"):
 		subject = "Re: " + subject
@@ -48,16 +52,16 @@ def send_draft(lead: str):
 		sender="lance.johnson@groundworkpro.com",
 		recipients=to,
 		send_email=1,
-		sent_or_received="Sent",
 	)
 
+	# make() already writes on the lead; saving the in-memory doc 409s.
+	updates = {"custom_refund_draft_json": ""}
 	if doc.meta.has_field("custom_refund_status"):
-		doc.custom_refund_status = "Waiting on them"
+		updates["custom_refund_status"] = "Waiting on them"
 	if doc.meta.has_field("custom_refund_requested"):
-		doc.custom_refund_requested = 1
-	doc.custom_refund_draft_json = ""
-	doc.save(ignore_permissions=True)
-	return {"ok": True, "status": doc.get("custom_refund_status")}
+		updates["custom_refund_requested"] = 1
+	frappe.db.set_value("CRM Lead", doc.name, updates, update_modified=False)
+	return {"ok": True, "status": updates.get("custom_refund_status")}
 
 
 @frappe.whitelist()
