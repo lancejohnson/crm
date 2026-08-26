@@ -217,6 +217,7 @@ def get_lead_activities(name: str):
 		"sla",
 		"first_response_time",
 		"first_responded_on",
+		"custom_refund_draft_json",
 	]
 
 	doc = frappe.db.get_values("CRM Lead", name, ["creation", "owner"])[0]
