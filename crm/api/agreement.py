@@ -331,6 +331,7 @@ def create_docuseal_agreement(
 			"Governing State": _state_abbr(leaddoc.get("property_state")),
 			"Signer Name": buyer_name,
 			# standard defaults
+			"Agreement Date": frappe.utils.nowdate(),
 			"Earnest Money": "100",
 			"Due Diligence Days": "30",
 			"Occupancy": _OCCUPANCY_DEFAULT,
