@@ -22,6 +22,7 @@ export function useKeyboardShortcuts(options) {
     ignoreTyping = true,
     target = typeof window !== 'undefined' ? window : null,
     skipWhenDialogOpen = true,
+    capture = false,
   } = options || {}
 
   function isTypingEvent(e) {
@@ -66,13 +67,13 @@ export function useKeyboardShortcuts(options) {
   }
 
   onMounted(() => {
-    target?.addEventListener('keydown', handler)
+    target?.addEventListener('keydown', handler, capture)
   })
   onBeforeUnmount(() => {
-    target?.removeEventListener('keydown', handler)
+    target?.removeEventListener('keydown', handler, capture)
   })
 
   return {
-    stop: () => target?.removeEventListener('keydown', handler),
+    stop: () => target?.removeEventListener('keydown', handler, capture),
   }
 }

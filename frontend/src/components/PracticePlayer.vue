@@ -5,11 +5,9 @@
   >
     <template #body-content>
       <div
-        ref="panelEl"
-        tabindex="0"
+        tabindex="-1"
         class="flex max-h-[min(88vh,52rem)] flex-col gap-3 outline-none"
         data-practice-player
-        @keydown="onPanelKey"
       >
         <div
           ref="stageEl"
@@ -195,6 +193,7 @@
 </template>
 
 <script setup>
+import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
 import { globalStore } from '@/stores/global'
 import { Button, Dialog, FeatherIcon, call, createResource, toast } from 'frappe-ui'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -212,7 +211,6 @@ const show = defineModel({ type: Boolean, default: false })
 const { $socket } = globalStore()
 const videoEl = ref(null)
 const stageEl = ref(null)
-const panelEl = ref(null)
 const composerEl = ref(null)
 const duration = ref(0)
 const currentTime = ref(0)
@@ -434,61 +432,34 @@ async function toggleFullscreen() {
     toast.error(__('Could not enter fullscreen'))
   }
 }
-function onEsc(e) {
-  if (!fsEl()) return
-  e.stopPropagation()
-  e.preventDefault()
-  toggleFullscreen()
-}
-
 function onEvent(data) {
   if (data?.attempt === props.attempt && data?.property === props.property) {
     reactions.reload()
   }
 }
 
-function onPanelKey(e) {
-  const t = e.target
-  const tag = t?.tagName
-  if (tag === 'INPUT' || tag === 'TEXTAREA' || t?.isContentEditable) return
-  e.stopPropagation()
-  if (t?.closest?.('video')) return
-  const k = e.key
-  if (k === 'Escape') {
-    onEsc(e)
-    return
-  }
-  if (k === ' ' || k === 'k' || k === 'K') {
-    e.preventDefault()
-    playPause()
-    return
-  }
-  if (k === 'ArrowLeft') {
-    e.preventDefault()
-    skip(-5)
-    return
-  }
-  if (k === 'ArrowRight') {
-    e.preventDefault()
-    skip(5)
-    return
-  }
-  if (k === 'c' || k === 'C') {
-    e.preventDefault()
-    startComment()
-    return
-  }
-  if (k === 'f' || k === 'F') {
-    e.preventDefault()
-    toggleFullscreen()
-  }
-}
+useKeyboardShortcuts({
+  skipWhenDialogOpen: false,
+  capture: true,
+  shortcuts: [
+    { keys: [' ', 'k', 'K'], action: playPause, stopPropagation: true },
+    { keys: 'ArrowLeft', action: () => skip(-5), stopPropagation: true },
+    { keys: 'ArrowRight', action: () => skip(5), stopPropagation: true },
+    { keys: ['c', 'C'], action: startComment, stopPropagation: true },
+    { keys: ['f', 'F'], action: toggleFullscreen, stopPropagation: true },
+    {
+      keys: 'Escape',
+      guard: () => !!fsEl(),
+      action: () => toggleFullscreen(),
+      stopPropagation: true,
+    },
+  ],
+})
 
 onMounted(() => {
   $socket?.on('crm_practice_reaction', onEvent)
   document.addEventListener('fullscreenchange', syncFs)
   document.addEventListener('webkitfullscreenchange', syncFs)
-  nextTick(() => panelEl.value?.focus())
 })
 onBeforeUnmount(() => {
   $socket?.off('crm_practice_reaction', onEvent)
