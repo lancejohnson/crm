@@ -4,8 +4,11 @@
     :options="{ size: '4xl', title: comp?.address || __('Comparable property') }"
   >
     <template #body>
-      <div class="flex h-[82vh] max-h-[82vh] flex-col overflow-hidden bg-surface-modal">
-        <div class="flex items-start justify-between gap-4 border-b px-5 py-4 sm:px-6">
+      <div
+        id="comp-detail-modal"
+        class="flex h-[calc(100dvh-0.5rem)] max-h-[calc(100dvh-0.5rem)] flex-col overflow-hidden bg-surface-modal sm:h-[82vh] sm:max-h-[82vh]"
+      >
+        <div class="flex items-start justify-between gap-3 border-b px-4 py-3 sm:gap-4 sm:px-6 sm:py-4">
           <div class="min-w-0">
             <div class="mb-1 flex flex-wrap items-center gap-2">
               <Badge
@@ -48,12 +51,14 @@
                  add-as-comp button rather than one that would corrupt the calc. -->
             <Button
               v-if="!subjectMode"
+              class="hidden sm:inline-flex"
               :variant="comp?.selected ? 'subtle' : 'solid'"
               :label="comp?.selected ? __('Remove from table') : __('Add as comp')"
               @click="$emit('use', comp.name)"
             />
             <Button
               v-if="hasStreetView"
+              class="hidden sm:inline-flex"
               variant="subtle"
               :label="__('Street View')"
               @click="$emit('street')"
@@ -64,7 +69,7 @@
 
         <div class="grid min-h-0 flex-1 md:grid-cols-[minmax(0,1.55fr)_minmax(18rem,0.85fr)]">
           <div class="flex min-h-0 flex-col border-b bg-surface-gray-2 md:border-b-0 md:border-r">
-            <div class="relative flex min-h-[16rem] flex-1 items-center justify-center overflow-hidden bg-black/90">
+            <div class="relative flex min-h-[12rem] flex-1 items-center justify-center overflow-hidden bg-black/90 sm:min-h-[16rem]">
               <img
                 v-if="photos.length"
                 :src="photos[photoIndex]"
@@ -189,6 +194,25 @@
               </button>
             </div>
           </aside>
+        </div>
+        <!-- Phone: the header only has room for ✕. These three are the actions
+             a rep actually takes from this screen. -->
+        <div class="flex shrink-0 gap-2 border-t px-4 py-3 sm:hidden">
+          <Button class="flex-1" :label="__('Close')" @click="show = false" />
+          <Button
+            v-if="hasStreetView"
+            class="flex-1"
+            variant="subtle"
+            :label="__('Street View')"
+            @click="$emit('street')"
+          />
+          <Button
+            v-if="!subjectMode"
+            class="flex-1"
+            :variant="comp?.selected ? 'subtle' : 'solid'"
+            :label="comp?.selected ? __('Remove') : __('Add as comp')"
+            @click="$emit('use', comp.name)"
+          />
         </div>
       </div>
     </template>
@@ -413,3 +437,26 @@ function dateOnly(value) {
   return new Date(y, m - 1, d).toLocaleDateString()
 }
 </script>
+
+<!-- Unscoped: Dialog teleports to <body>. On a phone this is a full-screen
+     gallery, not a 4xl card with desktop padding. -->
+<style>
+.dialog-overlay:has(#comp-detail-modal) > div {
+  padding: 0.25rem !important;
+}
+.dialog-content:has(#comp-detail-modal) {
+  max-width: calc(100vw - 0.5rem) !important;
+  width: calc(100vw - 0.5rem);
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+@media (min-width: 640px) {
+  .dialog-overlay:has(#comp-detail-modal) > div {
+    padding: 2rem !important;
+  }
+  .dialog-content:has(#comp-detail-modal) {
+    max-width: 56rem !important;
+    width: auto;
+  }
+}
+</style>

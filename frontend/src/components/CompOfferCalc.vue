@@ -9,7 +9,7 @@
   <div class="wrap">
   <div
     class="calc"
-    :style="{ width: cols === 2 ? '30rem' : '21rem' }"
+    :style="{ width: '100%', maxWidth: cols === 2 ? '30rem' : '21rem' }"
     @keydown="onKeys"
   >
     <div class="head">

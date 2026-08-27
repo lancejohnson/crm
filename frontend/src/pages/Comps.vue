@@ -25,7 +25,7 @@
        including the legend, with no way to reach it. The map keeps its real
        height either way; this just means the remainder is scrollable rather
        than gone. Same trade the lead desk already makes. -->
-  <div class="flex flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-5">
+  <div class="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-3 sm:px-5 sm:py-4">
     <CompsView v-if="leadId" :lead="leadId" :address="address" page-mode />
   </div>
 </template>

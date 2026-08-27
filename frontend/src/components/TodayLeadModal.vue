@@ -62,13 +62,11 @@
         />
 
         <div class="flex min-h-0 flex-1 flex-col md:flex-row">
-          <!-- Collapsed on the comps pane: the map wants every pixel it can get,
-               and what the rail holds (email, why-today, the 2×2) is not what a
-               rep reads while comping. Phone and address moved to the header, so
-               nothing actionable goes with it. The tab-bar toggle brings it back. -->
+          <!-- Desktop rail. On a phone the 2×2 lives in the Activity pane
+               (below) so it does not steal 42vh from the map or the timeline. -->
           <aside
             v-if="sidebarOpen"
-            class="max-h-[42vh] shrink-0 overflow-y-auto border-b p-4 md:max-h-none md:w-72 md:border-b-0 md:border-r sm:p-5"
+            class="hidden shrink-0 overflow-y-auto border-r p-5 md:block md:w-72"
           >
             <div v-if="item?.email" class="flex flex-col gap-2 text-sm text-ink-gray-6">
               <a
@@ -122,10 +120,10 @@
                lead page's ACTUAL surface — calls, texts, to-dos and realtime
                behave exactly as they do there. -->
           <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface-white">
-            <div class="flex shrink-0 items-center gap-4 border-b px-5 sm:px-6">
+            <div class="flex shrink-0 items-center gap-4 border-b px-4 sm:px-6">
               <Button
                 variant="ghost"
-                class="-ml-2 shrink-0"
+                class="-ml-2 hidden shrink-0 md:inline-flex"
                 :title="sidebarOpen ? __('Hide lead panel') : __('Show lead panel')"
                 @click="sidebarOpen = !sidebarOpen"
               >
@@ -167,6 +165,30 @@
               v-show="pane === 'activity'"
               class="flex min-h-0 flex-1 flex-col overflow-hidden"
             >
+              <div class="shrink-0 border-b px-4 py-3 md:hidden">
+                <div
+                  v-if="item?.reason"
+                  class="mb-3 rounded-lg border border-outline-gray-1 bg-surface-gray-1 px-3 py-2 text-sm text-ink-gray-6"
+                >
+                  <div class="mb-0.5 text-xs font-medium text-ink-gray-8">
+                    {{ __('Why today') }}
+                  </div>
+                  {{ item.reason }}
+                </div>
+                <FirstCallReadCard
+                  v-if="leadDoc && item?.lead"
+                  :lead="item.lead"
+                  :motivated="leadDoc.first_call_motivated"
+                  :on-price="leadDoc.first_call_on_price"
+                  :set-by="leadDoc.first_call_by"
+                  :set-at="leadDoc.first_call_at"
+                  @saved="loadLead(true)"
+                />
+                <div
+                  v-else-if="leadLoading"
+                  class="h-40 animate-pulse rounded-lg bg-surface-gray-2"
+                />
+              </div>
               <Activities
                 v-if="show && item?.lead"
                 :key="item.lead"
@@ -185,18 +207,13 @@
             <div
               v-if="compsOpened && show && item?.lead"
               v-show="pane === 'comps'"
-              class="flex min-h-0 flex-1 flex-col overflow-y-auto p-3 sm:p-4"
+              class="flex min-h-0 flex-1 flex-col overflow-hidden p-2 sm:p-4"
             >
-              <!-- page-mode: same surface as /leads/:id/comps — CompOfferCalc,
-                   Zillow pin colours, photo tray, underwriting. fillHeight follows
-                   from pageMode so map+tray share the pane when it is wide enough;
-                   when it stacks, this host scrolls. -->
               <CompsView
                 :key="compsKey"
                 :lead="item.lead"
                 :address="item.address"
                 page-mode
-                :fill="false"
                 hide-address-match
                 @zillow-match="onZillowMatch"
               />
@@ -204,7 +221,7 @@
           </div>
         </div>
 
-        <div class="flex justify-end gap-2 border-t px-5 py-3 sm:px-6">
+        <div class="hidden justify-end gap-2 border-t px-5 py-3 sm:flex sm:px-6">
           <Button :label="__('Close')" @click="show = false" />
           <Button variant="solid" :label="__('Open full lead')" @click="openFullLead">
             <template #suffix><FeatherIcon name="arrow-up-right" class="size-4" /></template>

@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Comps A · Tap a pill</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared.css" />
+<script src="shared.js"></script>
+</head>
+<body>
+<div class="stage">
+  <div class="cap">
+    <b>A · Photo-first detail</b>
+    Tap a pill (or the subject) for photos, thumbs, facts, history, description,
+    Zillow, Add as comp. Street on the map is the subject; Street View in the
+    detail closes it and pans to that house — same as desktop.
+    <span class="pick">TAP A PILL</span>
+  </div>
+  <div class="phone">
+    <div class="screen">
+      <div class="notch"><span class="time">9:41</span><span class="sig">●●●●</span></div>
+      <div class="topbar">
+        <button class="ico">←</button>
+        <div class="addr">
+          <div class="a">1842 N Talbott St</div>
+          <div class="m">12 comps · similar · 0.5 mi</div>
+        </div>
+        <button class="chip" id="streetBtn">Street</button>
+        <button class="chip" id="filtBtn">Filters</button>
+        <button class="chip">0.5 mi ▾</button>
+      </div>
+      <div class="calc" id="calc">
+        <div class="chead">
+          <div class="seg"><button class="on">Cash</button><button>Novation</button></div>
+          <div class="offer">$96,920</div>
+          <div class="sub">2× · 2 used</div>
+          <button class="chip ghost" id="calcToggle">Hide</button>
+        </div>
+        <div class="body">
+          <span class="lab">Formula</span>
+          <div class="seg"><button class="on">2× repairs</button><button>Classic</button></div>
+          <span class="lab">ARV</span><div class="val"><input value="210,000"></div>
+          <span class="lab">Condition</span><div class="val" style="font-weight:500">Kitchen &amp; baths · $34k</div>
+          <span class="lab">Fee</span><div class="val"><input value="25,000"></div>
+          <span class="lab offerlab">Offer</span><div class="big">96,920</div>
+        </div>
+      </div>
+      <div class="filters hide" id="filters">
+        <div class="grid">
+          <label class="fctl"><span>Status</span><select><option>Sold + listed</option></select></label>
+          <label class="fctl"><span>Sold within</span><select><option>12 months</option></select></label>
+          <label class="fctl"><span>Beds</span><input value="1 – 3"></label>
+          <label class="fctl"><span>Sqft</span><input value="840 – 1,400"></label>
+        </div>
+        <div class="actions"><button class="chip on" id="filtDone">Done</button></div>
+      </div>
+      <div class="map" id="map">
+        <div class="park"></div><div class="river"></div>
+        <div class="pill subject" data-i="s" style="left:48%;top:46%"><div class="p">Subject 1910</div><div class="f">2/1 · 1,118sf</div></div>
+        <div class="pill sold" data-i="0" style="left:62%;top:38%"><div class="p">$189k</div><div class="f">3/2 · 1,420</div></div>
+        <div class="pill sold" data-i="1" style="left:36%;top:58%"><div class="p">$165k</div><div class="f">2/1 · 1,090</div></div>
+        <div class="pill active" data-i="2" style="left:70%;top:62%"><div class="p">$199k</div><div class="f">3/2 · 1,510</div></div>
+        <div class="pill pending" data-i="3" style="left:28%;top:34%"><div class="p">$175k</div><div class="f">2/2 · 1,204</div></div>
+        <div class="pill sold faint" data-i="4" style="left:55%;top:72%"><div class="p">$142k</div><div class="f">2/1 · 980</div></div>
+        <div class="street hide" id="street">
+          <div class="lbl" id="streetLbl">1842 N Talbott St</div>
+          <button class="exit" id="streetExit">Close Street</button>
+          <div class="sky"><div class="house"></div></div>
+        </div>
+      </div>
+      <div class="leg"><span class="dot s"></span>Sold <span class="dot a"></span>Ask <span class="dot p"></span>Pending · tap a pill</div>
+      <div class="homeind"></div>
+
+      <div class="detail hide" id="detail">
+        <div class="notch" style="background:#111;color:#fff"><span class="time">9:41</span><span class="sig">●●●●</span></div>
+        <div class="hero tall" id="hero">
+          <button class="navp l" id="prev">‹</button>
+          <button class="navp r" id="next">›</button>
+          <div class="count" id="count">1 / 6</div>
+        </div>
+        <div class="thumbs" id="thumbs"></div>
+        <div class="body">
+          <div class="row" style="gap:6px;margin-bottom:6px">
+            <span class="st sold" id="st" style="position:static">Sold</span>
+            <span class="badge" id="fitBadge">4/5 fit</span>
+          </div>
+          <div class="row" style="align-items:flex-start">
+            <div class="grow">
+              <div class="pr" id="price" style="font-size:22px">$189,000</div>
+              <div class="m" id="priceLbl" style="color:var(--t2)">Last known list price</div>
+            </div>
+            <a class="zillow" id="zillow" href="https://www.zillow.com/homes/1910-N-Talbott-St-Indianapolis-IN_rb/" target="_blank" rel="noopener">Zillow ↗</a>
+          </div>
+          <div class="a" id="addr" style="margin-top:6px">1910 N Talbott St</div>
+          <div class="m" id="meta" style="color:var(--t2)">Indianapolis, IN 46202 · 0.1 mi</div>
+          <div class="kv" id="facts"></div>
+          <div class="sec" id="fitSec">
+            <h3>Similarity to the subject</h3>
+            <div class="fit" id="fit"></div>
+          </div>
+          <div class="sec">
+            <h3>Property history</h3>
+            <div class="kv" id="hist" style="grid-template-columns:7rem 1fr"></div>
+          </div>
+          <div class="sec">
+            <h3>About this property</h3>
+            <p id="desc"></p>
+          </div>
+        </div>
+        <div class="foot">
+          <button class="chip grow" style="height:40px;justify-content:center" id="close">Close</button>
+          <button class="chip grow" style="height:40px;justify-content:center" id="svFromDetail">Street View</button>
+          <button class="chip on grow" style="height:40px;justify-content:center" id="useBtn">Add as comp</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+const SUBJECT = {
+  subject:true, kind:'subject', st:'This property', price:'$97,000', priceLbl:'Last sold · Dec 6, 2010',
+  addr:'1842 N Talbott St', meta:'Indianapolis, IN 46202',
+  z:'https://www.zillow.com/homes/1842-N-Talbott-St-Indianapolis-IN_rb/',
+  facts:[['Beds','2'],['Baths','1'],['Living area','1,118 sf'],['Lot size','5,227 sf'],['Year built','1910'],['Property type','Single family'],['Zestimate','$168,000']],
+  fit:null,
+  hist:[['Last sold','$97,000 · Dec 6, 2010'],['Source','Public Record']],
+  desc:'Brick 2/1 on a 5,200 sf lot. Seller says original kitchen, roof ~8 years, unfinished attic. Zillow has this as 1,118 sf built 1910.',
+  ph:['#3a6ea5','#4a7ab0','#2f5a8a','#5a88bc'],
+};
+const COMPS = [
+  {kind:'sold', st:'Sold', price:'$189,000', priceLbl:'Last known list price', addr:'1910 N Talbott St', meta:'Indianapolis, IN 46202 · 0.1 mi',
+    z:'https://www.zillow.com/homes/1910-N-Talbott-St-Indianapolis-IN_rb/',
+    facts:[['Beds','3 · +1'],['Baths','2 · +1'],['Living area','1,420 sf · +302'],['Lot size','4,791 sf'],['Year built','1912'],['Property type','Single family'],['Distance','0.1 mi'],['Zestimate','$194,000']],
+    fit:[['Type',1],['Beds',0],['Baths',0],['Size',1],['Age',1]],
+    hist:[['Last sold','$189,000 · Jul 31, 2026'],['Listed','May 15, 2026'],['Went off market','Jul 31, 2026'],['Took to sell','77 days · 1 price cut']],
+    desc:'Renovated 3/2 one block north. New kitchen and baths, original wood floors refinished. Sold after 77 days on market.',
+    ph:['#c4b39a','#b7a888','#d2c4a8','#9e8f78','#cfc3b0','#bba98c']},
+  {kind:'sold', st:'Sold', price:'$165,000', priceLbl:'Last known list price', addr:'1776 N New Jersey', meta:'Indianapolis, IN 46202 · 0.2 mi',
+    z:'https://www.zillow.com/homes/1776-N-New-Jersey-Indianapolis-IN_rb/',
+    facts:[['Beds','2'],['Baths','1'],['Living area','1,090 sf · −28'],['Lot size','3,920 sf'],['Year built','1908'],['Property type','Single family'],['Distance','0.2 mi'],['Zestimate','$171,000']],
+    fit:[['Type',1],['Beds',1],['Baths',1],['Size',1],['Age',1]],
+    hist:[['Last sold','$165,000 · Jun 12, 2026'],['Listed','Apr 2, 2026'],['Took to sell','71 days']],
+    desc:'Similar 2/1, slightly smaller. Cosmetic updates only. Best shape match on the board.',
+    ph:['#b7c4b0','#9bb09a','#c5d1c0']},
+  {kind:'active', st:'For sale', price:'$199,900', priceLbl:'Current Zillow ask', addr:'1924 N Alabama St', meta:'Indianapolis, IN 46202 · 0.3 mi',
+    z:'https://www.zillow.com/homes/1924-N-Alabama-St-Indianapolis-IN_rb/',
+    facts:[['Beds','3 · +1'],['Baths','2 · +1'],['Living area','1,510 sf · +392'],['Lot size','5,100 sf'],['Year built','1922'],['Property type','Single family'],['Distance','0.3 mi'],['Zestimate','$201,000']],
+    fit:[['Type',1],['Beds',0],['Baths',0],['Size',0],['Age',1]],
+    hist:[['Listed','Mar 30, 2026'],['Time on market','50 days']],
+    desc:'Live listing, 50 days on market. Bigger and more updated than the subject — an ask, not a sale.',
+    ph:['#c9b8c2','#b39aac','#d4c6ce','#a88aa0']},
+  {kind:'pending', st:'Pending', price:'$175,000', priceLbl:'Agreed price · under contract', addr:'412 E 19th St', meta:'Indianapolis, IN 46202 · 0.3 mi',
+    z:'https://www.zillow.com/homes/412-E-19th-St-Indianapolis-IN_rb/',
+    facts:[['Beds','2'],['Baths','2 · +1'],['Living area','1,204 sf · +86'],['Lot size','4,400 sf'],['Year built','1915'],['Property type','Single family'],['Distance','0.3 mi'],['Zestimate','$178,000']],
+    fit:[['Type',1],['Beds',1],['Baths',0],['Size',1],['Age',1]],
+    hist:[['Listed','Jun 1, 2026'],['Went pending','Aug 12, 2026']],
+    desc:'Under contract. Agreed price is the strongest read on the board right now.',
+    ph:['#b9c2d4','#9eacc4']},
+  {kind:'sold', st:'Sold', price:'$142,000', priceLbl:'Last known list price', addr:'1701 N Pennsylvania', meta:'Indianapolis, IN 46202 · 0.4 mi',
+    z:'https://www.zillow.com/homes/1701-N-Pennsylvania-Indianapolis-IN_rb/',
+    facts:[['Beds','2'],['Baths','1'],['Living area','980 sf · −138'],['Lot size','3,200 sf'],['Year built','1904'],['Property type','Single family'],['Distance','0.4 mi'],['Zestimate','$155,000']],
+    fit:[['Type',1],['Beds',1],['Baths',1],['Size',0],['Age',1]],
+    hist:[['Last sold','$142,000 · Sep 2025'],['Took to sell','112 days · 2 price cuts']],
+    desc:'Smaller and older. Sold after two cuts — a floor, not a comp to price off.',
+    ph:['#d2c4a8','#c0b090']},
+];
+let i=0, p=0, cur=COMPS[0];
+const detail=document.getElementById('detail'), hero=document.getElementById('hero');
+const street=document.getElementById('street'), streetBtn=document.getElementById('streetBtn');
+function kv(el, rows, cols){
+  if(cols) el.style.gridTemplateColumns = cols;
+  el.innerHTML = rows.map(([l,v])=>`<div><div class="fl">${l}</div><b>${v}</b></div>`).join('');
+}
+function paint(){
+  const c=cur;
+  hero.style.background = `linear-gradient(180deg,transparent 50%,rgba(0,0,0,.35)), ${c.ph[p]}`;
+  document.getElementById('count').textContent = `${p+1} / ${c.ph.length}`;
+  const st=document.getElementById('st');
+  st.className='st '+c.kind; st.style.position='static'; st.textContent=c.st;
+  document.getElementById('fitBadge').classList.toggle('hide', !c.fit);
+  if(c.fit) document.getElementById('fitBadge').textContent = c.fit.filter(x=>x[1]).length + '/' + c.fit.length + ' fit';
+  document.getElementById('price').textContent=c.price;
+  document.getElementById('priceLbl').textContent=c.priceLbl;
+  document.getElementById('addr').textContent=c.addr;
+  document.getElementById('meta').textContent=c.meta;
+  document.getElementById('zillow').href=c.z;
+  kv(document.getElementById('facts'), c.facts, '1fr 1fr');
+  const fitSec=document.getElementById('fitSec');
+  fitSec.classList.toggle('hide', !c.fit);
+  if(c.fit) document.getElementById('fit').innerHTML=c.fit.map(([l,y])=>`<i class="${y?'y':'n'}">${y?'✓':'△'} ${l}</i>`).join('');
+  kv(document.getElementById('hist'), c.hist, '7.2rem 1fr');
+  document.getElementById('desc').textContent=c.desc;
+  document.getElementById('thumbs').innerHTML=c.ph.map((col,n)=>`<i data-n="${n}" class="${n===p?'on':''}" style="background:${col}"></i>`).join('');
+  document.getElementById('useBtn').classList.toggle('hide', !!c.subject);
+  document.querySelectorAll('.pill').forEach(x=>x.classList.toggle('on', String(x.dataset.i)===(c.subject?'s':String(i))));
+}
+function openDetail(c, idx){ cur=c; i=idx; p=0; detail.classList.remove('hide'); paint(); }
+function showStreet(label){
+  street.classList.remove('hide');
+  streetBtn.classList.add('on');
+  document.getElementById('streetLbl').textContent=label;
+}
+function hideStreet(){
+  street.classList.add('hide');
+  streetBtn.classList.remove('on');
+}
+document.getElementById('map').addEventListener('click', e=>{
+  if(e.target.closest('#street')) return;
+  const el=e.target.closest('.pill'); if(!el) return;
+  if(el.dataset.i==='s') openDetail(SUBJECT, 's');
+  else openDetail(COMPS[+el.dataset.i], +el.dataset.i);
+});
+document.getElementById('thumbs').addEventListener('click', e=>{ const t=e.target.closest('i'); if(!t) return; p=+t.dataset.n; paint(); });
+document.getElementById('close').onclick=()=>detail.classList.add('hide');
+document.getElementById('prev').onclick=()=>{ p=(p+cur.ph.length-1)%cur.ph.length; paint(); };
+document.getElementById('next').onclick=()=>{ p=(p+1)%cur.ph.length; paint(); };
+streetBtn.onclick=()=>{ if(street.classList.contains('hide')) showStreet('1842 N Talbott St'); else hideStreet(); };
+document.getElementById('streetExit').onclick=hideStreet;
+document.getElementById('svFromDetail').onclick=()=>{ detail.classList.add('hide'); showStreet(cur.addr); };
+const calc=document.getElementById('calc'), tog=document.getElementById('calcToggle');
+tog.onclick=()=>{ calc.classList.toggle('closed'); tog.textContent=calc.classList.contains('closed')?'Open':'Hide'; };
+const filt=document.getElementById('filters');
+document.getElementById('filtBtn').onclick=()=>filt.classList.toggle('hide');
+document.getElementById('filtDone').onclick=()=>filt.classList.add('hide');
+</script>
+</body>
+</html>

@@ -6,7 +6,11 @@
        is a fragment and Vue does NOT inherit a `class` from its host. The height
        has to be decided here, from the props, or the map/tray split has no bound
        to scroll inside and grows to ~8,000px. -->
-  <div ref="rootEl" class="flex flex-col gap-2" :class="fillHeight && wide ? 'min-h-0 flex-1' : ''">
+  <div
+    ref="rootEl"
+    class="flex flex-col gap-2"
+    :class="fillHeight || !wide ? 'min-h-0 flex-1' : ''"
+  >
   <!-- The calculator folds away, and that is a HEIGHT decision. Measured on the
        comps page at a 919px window: the calc is 358px and the map+tray got 342px
        -- the tool was smaller than the form sitting on top of it. Collapsing it
@@ -316,7 +320,11 @@
           class="flex min-h-0 gap-3"
           :class="[
             wide ? 'flex-row' : 'flex-col',
-            wide ? (fillHeight ? 'min-h-[32rem] flex-1' : 'h-[34rem]') : '',
+            wide
+              ? fillHeight
+                ? 'min-h-[32rem] flex-1'
+                : 'h-[34rem]'
+              : 'min-h-[16rem] flex-1',
           ]"
         >
           <!-- GOTCHA — the sizing classes live on this WRAPPER, never on the
@@ -329,13 +337,7 @@
                element destroys the map. -->
           <div
             class="relative overflow-hidden rounded-lg border border-outline-gray-2 bg-surface-gray-1"
-            :class="
-              wide
-                ? 'h-full min-h-0 flex-1'
-                : pageMode
-                  ? 'h-[32rem] sm:h-[38rem]'
-                  : 'h-[26rem] sm:h-[30rem]'
-            "
+            :class="wide ? 'h-full min-h-0 flex-1' : 'min-h-0 flex-1'"
           >
             <div ref="mapEl" class="size-full" />
             <div
@@ -354,10 +356,17 @@
               />
               <div
                 v-if="streetViewPoint?.label"
-                class="pointer-events-none absolute left-2 top-2 z-10 max-w-[80%] truncate rounded bg-black/60 px-2 py-0.5 text-xs text-white"
+                class="pointer-events-none absolute left-2 top-2 z-10 max-w-[70%] truncate rounded bg-black/60 px-2 py-0.5 text-xs text-white"
               >
                 {{ streetViewPoint.label }}
               </div>
+              <button
+                type="button"
+                class="absolute right-2 top-2 z-10 rounded bg-white/95 px-2 py-1 text-xs font-medium text-ink-gray-8 shadow-sm"
+                @click="showStreet = false"
+              >
+                {{ __('Close Street') }}
+              </button>
               <div
                 v-if="streetViewMsg"
                 class="pointer-events-none absolute inset-0 flex items-center justify-center bg-surface-gray-1/80 px-4 text-center text-sm text-ink-gray-6"
@@ -376,10 +385,12 @@
                map would grow the row to the full comp list -- which is what the
                Today modal (which passes neither `fill` nor `page-mode`) would
                otherwise do. -->
+          <!-- No tray on a phone: a 28rem list under the map scrolls the map
+               away, and tapping a pin already opens the photo/detail modal —
+               that is the inspect surface. Desktop keeps the rail. -->
           <aside
-            v-if="comps.length || discarded.length"
-            class="flex shrink-0 flex-col overflow-hidden rounded-lg border border-outline-gray-2"
-            :class="wide ? 'h-full min-h-0 w-[330px]' : 'h-[28rem] w-full'"
+            v-if="wide && (comps.length || discarded.length)"
+            class="flex h-full min-h-0 w-[330px] shrink-0 flex-col overflow-hidden rounded-lg border border-outline-gray-2"
           >
             <div
               class="flex shrink-0 items-center justify-between gap-2 border-b border-outline-gray-2 bg-surface-gray-1 px-3 py-2"
@@ -480,10 +491,17 @@
             {{ __('{0} used as comps', [data.selected_count]) }}
           </span>
           <span class="text-ink-gray-4">
-            {{ __('Click a pin to use or hide it') }} ·
-            <b>D</b> {{ __('details') }} · <b>P</b> {{ __('parcels') }} ·
-            <b>S</b> {{ __('street') }} ·
-            <b>U</b> {{ __('use') }} · <b>H</b> {{ __('hide') }}
+            {{
+              wide
+                ? __('Click a pin to use or hide it')
+                : __('Tap a pin for photos and details')
+            }}
+            <template v-if="wide">
+              ·
+              <b>D</b> {{ __('details') }} · <b>P</b> {{ __('parcels') }} ·
+              <b>S</b> {{ __('street') }} ·
+              <b>U</b> {{ __('use') }} · <b>H</b> {{ __('hide') }}
+            </template>
           </span>
         </div>
   </div>
@@ -1215,10 +1233,10 @@ const pendingCount = computed(() => comps.value.filter((c) => isPending(c)).leng
 const discarded = computed(() => data.value?.discarded || [])
 const showDiscarded = ref(false)
 
-// `fill` sizes map+tray to the container. `pageMode` is the calculator. The
-// comps PAGE passes pageMode and wants fillHeight; the Today modal passes
-// pageMode with `:fill="false"` so the calc sits above a 24rem map and the
-// pane scrolls instead of crushing the map to ~140px.
+// `fill` sizes the map to the container. `pageMode` is the calculator. The
+// comps PAGE passes pageMode and wants fillHeight. Today used to pass
+// `:fill="false"` because a stacked tray under the map crushed it; the tray
+// is gone on narrow, so both hosts fill and the map takes the leftover.
 const fillHeight = computed(
   () => props.fill === true || (props.pageMode && props.fill !== false),
 )
@@ -1935,14 +1953,11 @@ function agoShort(days) {
   return `${y < 2 ? y.toFixed(1) : Math.round(y)}y`
 }
 
-// NOTE the comps pin has no Leaflet popup. `popupHtml` used to build one, but
-// gw (698523dd, "Comps: cash-offer calc, hover add/remove, stop the map jump")
-// made a pin click call `openCompDetail()` instead, and left the 147-line
-// builder behind uncalled. Rolldown tree-shook it, so it silently vanished from
-// the bundle -- which is exactly how it cost an afternoon: edits to it compiled
-// clean, shipped nothing, and could not be found in the output. Everything a pin
-// used to say now lives in CompDetailModal (click) and CompTrayCard (the rail).
-// `subjectPopupHtml` below IS still live -- the SUBJECT pin does use a popup.
+// NOTE neither pin has a Leaflet popup. Comp pins open CompDetailModal on click
+// (since 698523dd). The subject pin used to bind `subjectPopupHtml`; that extra
+// tap sat in front of the same gallery on a phone, so it now opens the modal
+// too. `subjectPopupHtml` is still called from the popup-click delegate in case
+// a leftover popup is open, but nothing binds one.
 
 function render() {
   if (!mapEl.value) return
@@ -2038,9 +2053,10 @@ function render() {
     // coordinate it claims to mark — and its hit area sat off it too, on the one
     // pin that is expected to be clicked for the subject's details.
     icon: subjectIcon(s),
-  })
-    .addTo(map)
-    .bindPopup(subjectPopupHtml(s), { maxWidth: 300 })
+  }).addTo(map)
+  // Same as a comp pin: tap opens the photo/detail modal. The old Leaflet popup
+  // sat in front of that gallery and on a phone was an extra tap for no gain.
+  subjectMarker.on('click', () => openSubjectDetail())
 
   // Hovering the subject pin scrolls its card -- and so its photo -- into view in
   // the tray, exactly as hovering a comp pin already did. The subject was the one

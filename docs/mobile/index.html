@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mobile comps + Today · mockups</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{--t1:#18181a;--t2:#5c5d64;--br:#e4e4ea}
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 Inter,-apple-system,system-ui,sans-serif;color:var(--t1);background:#ececf1}
+  header{padding:28px 32px 8px;max-width:1280px;margin:0 auto}
+  header h1{margin:0 0 6px;font-size:20px;letter-spacing:-.02em}
+  header p{margin:0;color:var(--t2);max-width:720px}
+  .note{margin-top:10px;font-size:12.5px;color:#7a7b82}
+  section{padding:18px 32px 8px;max-width:1280px;margin:0 auto}
+  section h2{margin:0 0 4px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#8a8b92}
+  .row{display:flex;gap:22px;flex-wrap:wrap;padding:12px 32px 28px;max-width:1280px;margin:0 auto}
+  .col{width:210px}
+  .frame{width:390px;height:844px;transform:scale(.538);transform-origin:top left;border:0;border-radius:36px;background:#000}
+  .clip{width:210px;height:454px;overflow:hidden;border-radius:20px;box-shadow:0 18px 40px -18px rgba(0,0,0,.45)}
+  .meta{margin-top:10px}
+  .meta b{display:block;font-size:13.5px}
+  .meta span{display:block;font-size:12px;color:var(--t2);margin-top:2px}
+  a.open{display:inline-block;margin-top:6px;font-size:12px;font-weight:600;color:#2563c9;text-decoration:none}
+  .rec{display:inline-block;margin-top:6px;font-size:10px;font-weight:700;letter-spacing:.04em;
+    background:#18181a;color:#fff;padding:2px 6px;border-radius:4px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Mobile comps + Today</h1>
+  <p>Six interactive 390×844 phones. Calculator is above the map on every comps surface.
+     Nothing overlays the map — filters, photos, and the calc all live in the column.</p>
+  <p class="note">What’s broken now: the map stacks above a 28rem tray so photos scroll the map away;
+     page-mode filters wrap to ~8 rows; Today is a 7xl Dialog with a 42vh sidebar and a Close footer.</p>
+</header>
+
+<section><h2>Comps map</h2></section>
+<div class="row">
+  <div class="col">
+    <div class="clip"><iframe class="frame" src="comps-a.html" tabindex="-1"></iframe></div>
+    <div class="meta">
+      <b>A · Photo-first detail</b>
+      <span>No strip. Tap a pill → full-screen photos, thumbnail row, facts, Add as comp.</span>
+      <span class="rec">Recommended</span>
+      <a class="open" href="comps-a.html">Open full size →</a>
+    </div>
+  </div>
+  <div class="col">
+    <div class="clip"><iframe class="frame" src="comps-b.html" tabindex="-1"></iframe></div>
+    <div class="meta">
+      <b>B · Current modal, stacked</b>
+      <span>Today’s CompDetailModal at 390px: title, photo, facts, Add as comp.</span>
+      <a class="open" href="comps-b.html">Open full size →</a>
+    </div>
+  </div>
+  <div class="col">
+    <div class="clip"><iframe class="frame" src="comps-c.html" tabindex="-1"></iframe></div>
+    <div class="meta">
+      <b>C · Gallery with thumbs</b>
+      <span>Tap a pill → main photo + thumbnail strip, then facts.</span>
+      <a class="open" href="comps-c.html">Open full size →</a>
+    </div>
+  </div>
+</div>
+
+<section><h2>Today</h2></section>
+<div class="row">
+  <div class="col">
+    <div class="clip"><iframe class="frame" src="today-a.html" tabindex="-1"></iframe></div>
+    <div class="meta">
+      <b>A · Info, grid, activity</b>
+      <span>Header + 2×2 on Activity. Toggle to Comps (calc + map). Tap a pill.</span>
+      <span class="rec">Pairs with comps A</span>
+      <a class="open" href="today-a.html">Open full size →</a>
+    </div>
+  </div>
+  <div class="col">
+    <div class="clip"><iframe class="frame" src="today-b.html" tabindex="-1"></iframe></div>
+    <div class="meta">
+      <b>B · Grid stays up</b>
+      <span>2×2 stays under the header on both tabs. Map is smaller.</span>
+      <a class="open" href="today-b.html">Open full size →</a>
+    </div>
+  </div>
+  <div class="col">
+    <div class="clip"><iframe class="frame" src="today-c.html" tabindex="-1"></iframe></div>
+    <div class="meta">
+      <b>C · Comps tab first</b>
+      <span>Same as A, opens on Comps. Grid lives on Activity.</span>
+      <a class="open" href="today-c.html">Open full size →</a>
+    </div>
+  </div>
+</div>
+</body>
+</html>
