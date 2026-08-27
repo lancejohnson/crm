@@ -582,10 +582,12 @@ def save_set(
 	active = 0 if str(is_active) in ("0", "false", "False") else 1
 	if name:
 		doc = _get_set(name)
-		doc.title = title
-		doc.time_limit_min = limit
-		doc.notes = notes or ""
-		doc.is_active = active
+		# `Document.title` can be a read-only helper off `title_field`; set() is
+		# what actually dirties the column so Save persists the new name.
+		doc.set("title", title)
+		doc.set("time_limit_min", limit)
+		doc.set("notes", notes or "")
+		doc.set("is_active", active)
 		doc.save(ignore_permissions=True)
 	else:
 		doc = frappe.get_doc(
@@ -791,8 +793,11 @@ def add_random_properties(
 
 @frappe.whitelist()
 def remove_property(name: str) -> dict:
+	"""Drop a house from the set. Refused once anyone has started a run."""
 	_need()
-	_get_prop(name)
+	prop = _get_prop(name)
+	if frappe.db.exists(ATTEMPT, {"practice_set": prop.practice_set}):
+		frappe.throw(_("A run has already started — houses can't be removed from this set."))
 	frappe.delete_doc(PROP, name, ignore_permissions=True, force=True)
 	return {"ok": True}
 
@@ -1412,11 +1417,13 @@ def save_offer(
 	subject_sqft=None,
 	notes: str = "",
 ) -> dict:
-	"""Store the calc on the attempt. Never writes a Comment on the real lead."""
+	"""Store the calc on the attempt. Never writes a Comment on the real lead.
+
+	The owner can still save after they submit — fixing a number on review is
+	a real move, and locking the calc at Submit made the button a lie.
+	"""
 	_need()
 	att = _maybe_expire(_get_attempt(attempt, write=True))
-	if att.status != "In Progress":
-		frappe.throw(_("This practice run is finished."))
 	prop = _get_prop(property)
 	if prop.practice_set != att.practice_set:
 		frappe.throw(_("That property is not in this set."))

@@ -247,7 +247,15 @@ const cache = new Map()
 let requestToken = 0
 
 const details = computed(() => response.value?.details || null)
-const photos = computed(() => response.value?.photos || [])
+const photos = computed(() => {
+  const list = response.value?.photos || []
+  if (list.length) return list
+  const cover =
+    (props.subjectMode && props.subject?.cover_photo) ||
+    details.value?.cover_photo ||
+    ''
+  return cover ? [cover] : []
+})
 const fit = computed(() => compFit(props.comp, props.subject))
 const streetPoint = computed(() => {
   if (props.subjectMode) {

@@ -404,6 +404,11 @@ def _subject_facts(doc):
 	# `get_lead_comps` fills the gap from the area search's self-match afterwards,
 	# so neither path spends a request on a picture.
 	facts["cover_photo"] = (zillow or {}).get("cover_photo") or ""
+	# Rooftop, when Zillow has one. Census geocode is street-interpolated; the
+	# pair is what lets Street View stand on the street and look at the house.
+	zlat, zlng = _num((zillow or {}).get("lat")), _num((zillow or {}).get("lng"))
+	facts["zillow_lat"] = zlat
+	facts["zillow_lng"] = zlng
 
 	# What it last asked, and when it left the market. Deliberately NOT called a
 	# sale price: this inventory carries the last LIST price, and going off-market
@@ -947,6 +952,12 @@ def get_subject_details(lead):
 		}
 	)
 	result = _shape_detail(row, zpid=zpid or None)
+	cover = facts.get("cover_photo") or ""
+	photos = list(result.get("photos") or [])
+	if cover and cover not in photos:
+		photos = [cover] + photos
+		result["photos"] = photos
+		result["photos_available"] = bool(photos)
 	result["cached"] = False
 	full = result.get("available") and len(result.get("photos") or []) > 1
 	ttl = DETAIL_CACHE_SECONDS if full else DETAIL_RETRY_SECONDS

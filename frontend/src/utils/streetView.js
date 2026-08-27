@@ -10,12 +10,24 @@
  */
 const MAPS_EMBED_KEY = 'AIzaSyBAIpb09ornAPq4nWMhCQqsuk46AjrErFo'
 
-export function streetViewEmbedUrl(lat, lng) {
+export function bearingDeg(lat1, lng1, lat2, lng2) {
+  const toRad = (d) => (Number(d) * Math.PI) / 180
+  const φ1 = toRad(lat1)
+  const φ2 = toRad(lat2)
+  const Δλ = toRad(Number(lng2) - Number(lng1))
+  const y = Math.sin(Δλ) * Math.cos(φ2)
+  const x =
+    Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ)
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360
+}
+
+export function streetViewEmbedUrl(lat, lng, heading = 0) {
   if (lat == null || lng == null || Number.isNaN(Number(lat)) || Number.isNaN(Number(lng))) {
     return ''
   }
+  const h = Number.isFinite(Number(heading)) ? Number(heading) : 0
   return (
     `https://www.google.com/maps/embed/v1/streetview?key=${MAPS_EMBED_KEY}` +
-    `&location=${Number(lat)},${Number(lng)}&heading=0&pitch=0&fov=90`
+    `&location=${Number(lat)},${Number(lng)}&heading=${h}&pitch=10&fov=80`
   )
 }

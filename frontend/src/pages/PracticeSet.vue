@@ -4,7 +4,7 @@
       <Breadcrumbs
         :items="[
           { label: __('Practice'), route: { name: 'Practice' } },
-          { label: set.title || setId },
+          { label: form.title || set.title || setId },
         ]"
       />
     </template>
@@ -123,7 +123,12 @@
               :disabled="i === properties.length - 1"
               @click="move(i, 1)"
             />
-            <Button variant="ghost" icon="x" @click="removeProp(p)" />
+            <Button
+              v-if="!hasRuns"
+              variant="ghost"
+              icon="x"
+              @click="removeProp(p)"
+            />
           </template>
         </li>
       </ol>
@@ -423,6 +428,7 @@ const canManage = computed(() => set.value.can_manage)
 const canDelete = computed(() => set.value.can_delete)
 const properties = computed(() => set.value.properties || [])
 const attempts = computed(() => results.data?.attempts || [])
+const hasRuns = computed(() => attempts.value.length > 0)
 const canViewLog = computed(() => results.data?.can_view_log)
 const logRows = computed(() => viewLog.data?.rows || [])
 const resumeLabel = computed(() =>
@@ -590,14 +596,20 @@ async function move(i, dir) {
 
 async function persistMeta() {
   if (!canManage.value) return
-  await call('crm.api.practice.save_set', {
+  const res = await call('crm.api.practice.save_set', {
     name: props.setId,
     title: form.title,
     time_limit_min: Number(form.time_limit_min) || 0,
     notes: form.notes,
     is_active: form.is_active ? 1 : 0,
   })
-  await detail.reload()
+  if (res) {
+    detail.setData?.(res)
+    form.title = res.title || form.title
+    form.time_limit_min = res.time_limit_min ?? form.time_limit_min
+    form.notes = res.notes ?? form.notes
+    form.is_active = !!res.is_active
+  }
 }
 
 async function saveMeta() {

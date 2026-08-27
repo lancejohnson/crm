@@ -23,7 +23,7 @@
        it would be deciding for the rep. The choice is remembered per user, like
        Details and Parcels, so folding it once is enough. -->
   <template v-if="pageMode && !compsFocusMap">
-    <div v-if="!calcOpen" class="flex items-center justify-between gap-2">
+    <div v-show="!calcOpen" class="flex items-center justify-between gap-2">
       <button
         class="flex items-center gap-1.5 rounded-md border border-outline-gray-2 bg-surface-gray-1 px-2.5 py-1 text-xs font-medium text-ink-gray-7 hover:bg-surface-gray-2"
         :title="__('Show the offer calculator') + ' (C)'"
@@ -38,7 +38,7 @@
         </span>
       </button>
     </div>
-    <div v-else class="relative">
+    <div v-show="calcOpen" class="relative">
       <button
         class="absolute right-1 top-1 z-10 flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-ink-gray-5 hover:bg-surface-gray-2 hover:text-ink-gray-8"
         :title="__('Hide the calculator and give the map its height') + ' (C)'"
@@ -48,6 +48,7 @@
         {{ __('Hide') }}
       </button>
       <CompOfferCalc
+        ref="calcRef"
         :lead="lead"
         :subject="data?.subject || null"
         :address="data?.address || address"
@@ -606,7 +607,7 @@ import {
   compsViewCount,
   toggleCompsFocusMap,
 } from '@/composables/compsLayout'
-import { streetViewEmbedUrl } from '@/utils/streetView'
+import { bearingDeg, streetViewEmbedUrl } from '@/utils/streetView'
 
 const props = defineProps({
   lead: { type: String, required: true },
@@ -1237,14 +1238,34 @@ const streetViewPoint = computed(() => {
   if (name) {
     const c = comps.value.find((x) => x.name === name)
     if (c?.lat != null && c?.lng != null) {
-      return { lat: c.lat, lng: c.lng, label: c.address || '' }
+      return { lat: c.lat, lng: c.lng, heading: 0, label: c.address || '' }
     }
   }
   const s = data.value?.subject
-  if (s?.lat != null && s?.lng != null) {
-    return { lat: s.lat, lng: s.lng, label: data.value?.address || props.address || '' }
+  if (s?.lat == null || s?.lng == null) return null
+  const zlat = s.zillow_lat
+  const zlng = s.zillow_lng
+  let lat = s.lat
+  let lng = s.lng
+  let heading = 0
+  if (
+    zlat != null &&
+    zlng != null &&
+    (Math.abs(zlat - s.lat) > 0.00005 || Math.abs(zlng - s.lng) > 0.00005)
+  ) {
+    // Census point is on the street; Zillow is the rooftop. Stand on the
+    // street and look at the house, or Street View faces north from the lot.
+    heading = bearingDeg(s.lat, s.lng, zlat, zlng)
+  } else if (zlat != null && zlng != null) {
+    lat = zlat
+    lng = zlng
   }
-  return null
+  return {
+    lat,
+    lng,
+    heading,
+    label: data.value?.address || props.address || '',
+  }
 })
 
 const streetViewTitle = computed(() => {
@@ -1271,7 +1292,7 @@ function syncStreetView() {
     return
   }
   const pt = streetViewPoint.value
-  const src = pt ? streetViewEmbedUrl(pt.lat, pt.lng) : ''
+  const src = pt ? streetViewEmbedUrl(pt.lat, pt.lng, pt.heading) : ''
   if (!src) {
     streetViewSrc.value = ''
     streetViewMsg.value = __('No coordinates for Street View yet.')
@@ -1323,6 +1344,7 @@ const fillHeight = computed(
  */
 const SPLIT_MIN_WIDTH = 700
 const rootEl = ref(null)
+const calcRef = ref(null)
 // Guess from the viewport so a phone does not paint one frame of desktop
 // layout (tray + open calc) while ResizeObserver catches up — and so a
 // background-tab open, where RO does not fire, is still compact.
@@ -2759,6 +2781,10 @@ function scrollHost(el) {
  * Observing the element means every show, hide and window resize fixes itself
  * and no host has to remember to tell us it revealed the map.
  */
+defineExpose({
+  saveCalcs: () => calcRef.value?.save?.() || Promise.resolve(),
+})
+
 function observeMapSize() {
   if (!mapEl.value || typeof ResizeObserver === 'undefined') return
   sizeObserver = new ResizeObserver(() => {

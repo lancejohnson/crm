@@ -94,6 +94,7 @@
         @blur="persistCondition(current.name)"
       />
       <CompsView
+        ref="compsRef"
         :key="current.name"
         :lead="current.source_lead"
         :address="current.property_address"
@@ -297,10 +298,17 @@ function select(i) {
   currentIndex.value = i
 }
 
+const compsRef = ref(null)
+
 async function doneCurrent() {
   if (!current.value) return
   marking.value = true
   try {
+    try {
+      await compsRef.value?.saveCalcs?.()
+    } catch {
+      /* calc save is best-effort — still mark the house done */
+    }
     const res = await call('crm.api.practice.mark_property_done', {
       attempt: props.attemptId,
       property: current.value.name,

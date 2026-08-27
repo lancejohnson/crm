@@ -21,13 +21,13 @@
               ref="videoEl"
               class="w-full bg-black"
               :class="isFullscreen ? 'h-full object-contain' : 'max-h-[min(48vh,32rem)]'"
+              controls
               autoplay
               playsinline
               preload="auto"
               :src="src"
-              @click="playPause"
-              @loadeddata="onLoaded"
               @loadedmetadata="onMeta"
+              @durationchange="onMeta"
               @timeupdate="onTime"
               @play="isPaused = false"
               @pause="isPaused = true"
@@ -47,16 +47,6 @@
             class="flex flex-col gap-1.5 px-2 py-2"
             :class="isFullscreen ? 'bg-black/80' : 'bg-surface-modal'"
           >
-            <div
-              ref="scrubEl"
-              class="relative h-2 cursor-pointer rounded-full bg-surface-gray-3"
-              @pointerdown="onScrubDown"
-            >
-              <div
-                class="absolute inset-y-0 left-0 rounded-full bg-red-600"
-                :style="{ width: pos(currentTime) }"
-              />
-            </div>
             <div v-if="list.length" class="relative h-5">
               <button
                 v-for="r in list"
@@ -82,32 +72,6 @@
               </button>
             </div>
             <div class="flex flex-wrap items-center gap-1.5">
-              <Button
-                variant="subtle"
-                :icon="isPaused ? PlayIcon : PauseIcon"
-                :title="__('Play/pause (Space)')"
-                @click="playPause"
-              />
-              <span
-                class="shrink-0 tabular-nums text-xs"
-                :class="isFullscreen ? 'text-ink-white' : 'text-ink-gray-7'"
-              >
-                {{ fmt(currentTime) }} / {{ fmt(duration) }}
-              </span>
-              <Dropdown :options="speedOptions">
-                <Button
-                  variant="ghost"
-                  :label="`${playbackSpeed}×`"
-                  :title="__('Speed ([ ] )')"
-                />
-              </Dropdown>
-              <Button
-                variant="ghost"
-                :icon="isFullscreen ? MinimizeIcon : MaximizeIcon"
-                :title="__('Fullscreen (F)')"
-                @click="toggleFullscreen"
-              />
-              <div class="mx-1 h-4 w-px bg-outline-gray-2" />
               <button
                 v-for="e in EMOJIS"
                 :key="e"
@@ -129,7 +93,7 @@
         </div>
 
         <p class="text-[11px] text-ink-gray-5">
-          {{ __('Space play · ← → 5s · [ ] speed · C comment · F full · Esc close') }}
+          {{ __('C comments at this moment · Esc close') }}
         </p>
 
         <div
@@ -214,19 +178,12 @@
 </template>
 
 <script setup>
-import MaximizeIcon from '@/components/Icons/MaximizeIcon.vue'
-import MinimizeIcon from '@/components/Icons/MinimizeIcon.vue'
-import PauseIcon from '@/components/Icons/PauseIcon.vue'
-import PlayIcon from '@/components/Icons/PlayIcon.vue'
-import Dropdown from '@/components/frappe-ui/Dropdown.vue'
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
 import { globalStore } from '@/stores/global'
 import { Button, Dialog, FeatherIcon, call, createResource, toast } from 'frappe-ui'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 const EMOJIS = ['👍', '👏', '❤️', '🔥', '😂', '😮']
-const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]
-const SPEED_KEY = 'practicePlayerSpeed'
 
 const props = defineProps({
   attempt: { type: String, required: true },
@@ -239,7 +196,6 @@ const show = defineModel({ type: Boolean, default: false })
 const { $socket } = globalStore()
 const videoEl = ref(null)
 const stageEl = ref(null)
-const scrubEl = ref(null)
 const composerEl = ref(null)
 const duration = ref(0)
 const currentTime = ref(0)
@@ -251,10 +207,10 @@ const draftTime = ref(0)
 const saving = ref(false)
 const selected = ref('')
 const bursts = ref([])
-const playbackSpeed = ref(readSpeed())
 let burstId = 0
 let lastT = 0
 let skipBurstUntil = 0
+let durationFixed = false
 
 const reactions = createResource({
   url: 'crm.api.practice.get_recording_reactions',
@@ -264,19 +220,12 @@ const reactions = createResource({
 })
 const list = computed(() => reactions.data || [])
 const textComments = computed(() => list.value.filter((r) => r.content))
-const speedOptions = SPEEDS.map((s) => ({
-  label: s === 1 ? __('Normal') : `${s}×`,
-  onClick: () => setSpeed(s),
-}))
 
-function readSpeed() {
-  const n = Number(localStorage.getItem(SPEED_KEY))
-  return SPEEDS.includes(n) ? n : 1
-}
 function fmt(t) {
-  t = Math.max(0, Number(t) || 0)
-  const m = Math.floor(t / 60)
-  const s = Math.floor(t % 60)
+  const n = Number(t)
+  if (!Number.isFinite(n) || n < 0) return '0:00'
+  const m = Math.floor(n / 60)
+  const s = Math.floor(n % 60)
   return `${m}:${String(s).padStart(2, '0')}`
 }
 function initialOf(name) {
@@ -297,13 +246,34 @@ function nowTime() {
   return videoEl.value?.currentTime || 0
 }
 
-function onLoaded(e) {
-  applyRate()
-  e.target.play?.().catch(() => {})
+function mediaDuration(v) {
+  const d = v?.duration
+  return Number.isFinite(d) && d > 0 ? d : 0
 }
 function onMeta() {
-  duration.value = videoEl.value?.duration || 0
-  applyRate()
+  const v = videoEl.value
+  if (!v) return
+  const d = mediaDuration(v)
+  if (d) {
+    duration.value = d
+    return
+  }
+  // MediaRecorder webm often reports Infinity until you seek past the end.
+  if (durationFixed) return
+  durationFixed = true
+  const onUpdate = () => {
+    const next = mediaDuration(v)
+    if (!next) return
+    v.removeEventListener('timeupdate', onUpdate)
+    duration.value = next
+    if (v.currentTime > 1e6) v.currentTime = 0
+  }
+  v.addEventListener('timeupdate', onUpdate)
+  try {
+    v.currentTime = 1e101
+  } catch {
+    /* ignore */
+  }
 }
 function onTime() {
   const t = videoEl.value?.currentTime || 0
@@ -338,54 +308,14 @@ function burst(emoji) {
   }, 1400)
 }
 
-function applyRate() {
-  if (videoEl.value) videoEl.value.playbackRate = playbackSpeed.value
-}
-function setSpeed(s) {
-  playbackSpeed.value = s
-  localStorage.setItem(SPEED_KEY, String(s))
-  applyRate()
-}
-function bumpSpeed(dir) {
-  const i = SPEEDS.indexOf(playbackSpeed.value)
-  const next = SPEEDS[Math.max(0, Math.min(SPEEDS.length - 1, (i < 0 ? 2 : i) + dir))]
-  setSpeed(next)
-}
-
-function playPause() {
-  const v = videoEl.value
-  if (!v) return
-  if (v.paused) v.play().catch(() => {})
-  else v.pause()
-}
 function seek(t) {
   const v = videoEl.value
   if (!v) return
-  const d = duration.value || v.duration || 0
-  v.currentTime = Math.max(0, Math.min(Number(t) || 0, d || Number(t) || 0))
+  const d = duration.value || mediaDuration(v) || 0
+  const target = Number(t) || 0
+  v.currentTime = d ? Math.max(0, Math.min(target, d)) : Math.max(0, target)
   currentTime.value = v.currentTime
   lastT = v.currentTime
-}
-function skip(sec) {
-  seek(nowTime() + sec)
-}
-
-function onScrubDown(e) {
-  scrubTo(e)
-  const move = (ev) => scrubTo(ev)
-  const up = () => {
-    window.removeEventListener('pointermove', move)
-    window.removeEventListener('pointerup', up)
-  }
-  window.addEventListener('pointermove', move)
-  window.addEventListener('pointerup', up)
-}
-function scrubTo(e) {
-  const el = scrubEl.value
-  if (!el || !duration.value) return
-  const rect = el.getBoundingClientRect()
-  const x = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
-  seek(x * duration.value)
 }
 
 function select(r) {
@@ -495,21 +425,7 @@ useKeyboardShortcuts({
   active: () => show.value,
   skipWhenDialogOpen: false,
   shortcuts: [
-    { match: (e) => e.code === 'Space' || e.key === 'k' || e.key === 'K', action: playPause },
-    { keys: ['ArrowLeft'], action: () => skip(-5) },
-    { keys: ['ArrowRight'], action: () => skip(5) },
-    { keys: ['j', 'J'], action: () => skip(-10) },
-    { keys: ['l', 'L'], action: () => skip(10) },
-    { keys: ['[', ',', '-'], action: () => bumpSpeed(-1) },
-    { keys: [']', '.', '=', '+'], action: () => bumpSpeed(1) },
     { keys: ['c', 'C'], action: startComment },
-    { keys: ['f', 'F'], action: toggleFullscreen },
-    { keys: ['Home'], action: () => seek(0) },
-    { keys: ['End'], action: () => seek(duration.value) },
-    {
-      match: (e) => e.key >= '0' && e.key <= '9',
-      action: (e) => seek(((Number(e.key) || 0) / 10) * (duration.value || 0)),
-    },
   ],
 })
 
@@ -532,6 +448,8 @@ watch(
   () => {
     selected.value = ''
     composing.value = false
+    durationFixed = false
+    duration.value = 0
     reactions.reload()
   },
 )

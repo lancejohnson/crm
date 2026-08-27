@@ -74,7 +74,7 @@
  * memory test. Blue and heavier-bordered so it never reads as one of them.
  */
 import { FeatherIcon } from 'frappe-ui'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { COMP_COLORS, formatLotSize } from '@/utils/comps'
 
 const props = defineProps({
@@ -87,6 +87,9 @@ const SUBJECT = COMP_COLORS.subject.bg
 const broken = ref(false)
 
 const photo = computed(() => props.subject?.cover_photo || '')
+watch(photo, () => {
+  broken.value = false
+})
 
 const facts = computed(() => {
   const s = props.subject || {}

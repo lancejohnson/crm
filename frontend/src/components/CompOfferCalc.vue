@@ -1012,7 +1012,7 @@ function psfText(n) {
 }
 
 async function save() {
-  if (!canSave.value) return
+  if (!canSave.value) return false
   saving.value = true
   try {
     const payload = {
@@ -1059,12 +1059,16 @@ async function save() {
       toast.success(__('Saved to the activity timeline'))
     }
     emit('saved')
+    return true
   } catch (e) {
     toast.error(e.messages?.[0] || __('Could not save the calc.'))
+    return false
   } finally {
     saving.value = false
   }
 }
+
+defineExpose({ save, canSave })
 
 function onKeys(e) {
   if (e.key === 'Escape' && menuFor.value >= 0) {
