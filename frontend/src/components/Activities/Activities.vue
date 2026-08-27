@@ -58,36 +58,6 @@
       @click="markRefundable"
     />
   </div>
-  <div
-    v-if="title == 'Activity' && refundDraft.reply"
-    class="mx-3 mt-3 flex flex-col gap-2 rounded-lg border border-outline-gray-2 bg-surface-gray-1 px-4 py-3 sm:mx-10"
-  >
-    <div class="flex items-start justify-between gap-3">
-      <div class="min-w-0">
-        <div class="font-medium text-ink-gray-9">
-          {{ __('Pi drafted a reply') }}
-          <span
-            v-if="refundDraft.confidence != null"
-            class="ml-1 text-sm font-normal text-ink-gray-5"
-          >
-            {{ Math.round(Number(refundDraft.confidence) * 100) }}%
-          </span>
-        </div>
-        <div v-if="refundDraft.summary" class="text-sm text-ink-gray-5">
-          {{ refundDraft.summary }}
-        </div>
-      </div>
-      <Button
-        variant="solid"
-        :label="__('Send')"
-        :loading="sendingDraft"
-        @click="sendRefundDraft"
-      />
-    </div>
-    <div
-      class="whitespace-pre-wrap rounded-md border border-outline-gray-2 bg-surface-white p-4 text-base leading-6 text-ink-gray-8"
-    >{{ refundDraft.reply }}</div>
-  </div>
   <LostReasonModal
     v-if="showLostReasonModal"
     v-model="showLostReasonModal"
@@ -222,6 +192,9 @@
             <CallArea class="mb-4" :activity="call" />
           </div>
         </div>
+      </div>
+      <div v-else-if="title == 'Emails'" class="px-3 pb-4 sm:px-10">
+        <EmailThread v-if="emailMessages.length" :messages="emailMessages" />
       </div>
       <div
         v-else-if="title == 'Attachments'"
@@ -831,6 +804,7 @@ import CommunicationArea from '@/components/CommunicationArea.vue'
 import WhatsappTemplateSelectorModal from '@/components/Modals/WhatsappTemplateSelectorModal.vue'
 import AllModals from '@/components/Activities/AllModals.vue'
 import LostReasonModal from '@/components/Modals/LostReasonModal.vue'
+import EmailThread from '@/components/Activities/EmailThread.vue'
 import { statusesStore } from '@/stores/statuses'
 import FilesUploader from '@/components/FilesUploader/FilesUploader.vue'
 import { timeAgo, formatDate, startCase, formatNumber } from '@/utils'
@@ -934,7 +908,6 @@ function markRefundable() {
   toggleLeadFlag('custom_refundable', true)
 }
 
-const sendingDraft = ref(false)
 const refundDraft = computed(() => {
   const raw = doc.value.custom_refund_draft_json
   if (!raw) return {}
@@ -945,20 +918,15 @@ const refundDraft = computed(() => {
   }
 })
 
-async function sendRefundDraft() {
-  if (sendingDraft.value || !props.docname) return
-  sendingDraft.value = true
-  try {
-    await call('crm.api.refunds.send_draft', { lead: props.docname })
-    toast.success(__('Reply sent'))
-    if (_document.doc) _document.doc.custom_refund_draft_json = ''
-    _document.reload?.()
-  } catch (e) {
-    toast.error(e.messages?.[0] || __('Could not send draft'))
-  } finally {
-    sendingDraft.value = false
-  }
-}
+const emailMessages = computed(() => {
+  const list = (all_activities.data?.versions || []).filter(
+    (a) => a.activity_type === 'communication',
+  )
+  return [...list].sort(
+    (a, b) => new Date(a.creation) - new Date(b.creation),
+  )
+})
+
 
 // Color a status value (e.g. in "changed Status from New to Called No Answer")
 // with that status's own color, matching how statuses appear elsewhere.
@@ -1473,6 +1441,28 @@ const emptyTextIcon = computed(() => {
 const emailBox = ref(null)
 const whatsappBox = ref(null)
 const smsBox = ref(null)
+
+const draftLoadedFor = ref('')
+watch(
+  () => [refundDraft.value?.reply, props.docname, emailBox.value],
+  () => {
+    const d = refundDraft.value
+    if (!d?.reply || props.doctype !== 'CRM Lead') return
+    if (!emailBox.value?.loadDraft) return
+    if (draftLoadedFor.value === props.docname) return
+    draftLoadedFor.value = props.docname
+    changeTabTo('emails')
+    nextTick(() => {
+      const last = emailMessages.value[emailMessages.value.length - 1]
+      emailBox.value.loadDraft({
+        to: d.reply_to,
+        subject: d.subject,
+        body: d.reply,
+        quoteHtml: last?.data?.content || '',
+      })
+    })
+  },
+)
 
 watch([reload, reload_email], ([reload_value, reload_email_value]) => {
   if (reload_value || reload_email_value) {

@@ -91,7 +91,7 @@ import { usersStore } from '@/stores/users'
 import { useStorage } from '@vueuse/core'
 import { useOnboarding, useTelemetry } from 'frappe-ui/frappe'
 import { call, createResource, toast } from 'frappe-ui'
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, nextTick } from 'vue'
 
 const props = defineProps({
   doctype: { type: String, default: 'CRM Lead' },
@@ -196,6 +196,10 @@ async function sendMail() {
   let subject = newEmailEditor.value.subject
   let cc = newEmailEditor.value.ccEmails || []
   let bcc = newEmailEditor.value.bccEmails || []
+  const refundDraft = Boolean(doc.value.custom_refund_draft_json)
+  if (refundDraft) {
+    fromEmail = 'lance.johnson@groundworkpro.com'
+  }
 
   if (attachments.value.length) {
     capture('email_attachments_added')
@@ -213,6 +217,17 @@ async function sendMail() {
     sender: fromEmail,
     sender_full_name: getUser()?.full_name || undefined,
   })
+  if (refundDraft) {
+    await call('frappe.client.set_value', {
+      doctype: 'CRM Lead',
+      name: doc.value.name,
+      fieldname: {
+        custom_refund_draft_json: '',
+        custom_refund_status: 'Waiting on them',
+      },
+    })
+    doc.value.custom_refund_draft_json = ''
+  }
 }
 
 async function sendComment() {
@@ -297,9 +312,37 @@ function toggleCommentBox() {
   showCommentBox.value = !showCommentBox.value
 }
 
+function loadDraft({ to, subject: subj, body, quoteHtml }) {
+  showCommentBox.value = false
+  showEmailBox.value = true
+  nextTick(() => {
+    const ed = newEmailEditor.value
+    if (!ed) return
+    const addr = (String(to || '').match(/<([^>]+)>/) || [null, to])[1] || to
+    ed.toEmails = addr ? [addr] : []
+    ed.subject = subj?.toLowerCase().startsWith('re:') ? subj : `Re: ${subj || ''}`
+    const esc = (s) =>
+      String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+    const reply = (body || '')
+      .split('\n')
+      .map((line) => `<p>${line ? esc(line) : '<br>'}</p>`)
+      .join('')
+    const quoted = quoteHtml
+      ? `<p class="reply-to-content"></p><blockquote>${quoteHtml}</blockquote>`
+      : ''
+    const html = reply + quoted
+    newEmail.value = html
+    ed.editor?.commands.setContent(html)
+  })
+}
+
 defineExpose({
   show: showEmailBox,
   showComment: showCommentBox,
   editor: newEmailEditor,
+  loadDraft,
 })
 </script>
