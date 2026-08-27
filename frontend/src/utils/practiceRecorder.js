@@ -81,23 +81,22 @@ export function resumePracticeRecording() {
 }
 
 export async function startPracticeRecording() {
-  await abandonPracticeRecording()
+  // getDisplayMedia MUST be the first await — Chrome drops the click's user
+  // gesture after any yield, and then the picker never appears.
+  mime = TYPES.find((t) => MediaRecorder.isTypeSupported(t))
+  // Bare { video: true } on purpose. Extra constraints (preferCurrentTab,
+  // width/height/fps) throw on some Chromes and the picker never shows.
+  // Pick "This tab" in the browser sheet.
+  const display = await navigator.mediaDevices.getDisplayMedia({
+    video: true,
+    audio: false,
+  })
+  stopTracks()
   captureOn = true
   queue = []
   seq = 0
   attemptId = ''
   propertyId = ''
-  mime = TYPES.find((t) => MediaRecorder.isTypeSupported(t))
-  const display = await navigator.mediaDevices.getDisplayMedia({
-    video: {
-      frameRate: { ideal: 5, max: 8 },
-      width: { ideal: 960, max: 960 },
-      height: { ideal: 540, max: 540 },
-    },
-    audio: false,
-    preferCurrentTab: true,
-    selfBrowserSurface: 'include',
-  })
   let mic
   try {
     mic = await navigator.mediaDevices.getUserMedia({
@@ -142,7 +141,7 @@ export async function beginPropertyRecording(property) {
       pump()
     }
   }
-  recorder.start(4000)
+  recorder.start(1000)
   emit()
   return prev
 }
@@ -224,6 +223,7 @@ async function pump() {
       form.append('file', blob, `chunk-${n}.webm`)
       const res = await fetch('/api/method/crm.api.practice.upload_recording_chunk', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: window.csrf_token ? { 'X-Frappe-CSRF-Token': window.csrf_token } : {},
         body: form,
       })
@@ -245,6 +245,7 @@ async function finish() {
   form.append('property', propertyId)
   const res = await fetch('/api/method/crm.api.practice.finish_recording', {
     method: 'POST',
+    credentials: 'same-origin',
     headers: window.csrf_token ? { 'X-Frappe-CSRF-Token': window.csrf_token } : {},
     body: form,
   })

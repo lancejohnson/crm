@@ -301,6 +301,7 @@ import { useRouter } from 'vue-router'
 import {
   abandonPracticeRecording,
   canPracticeRecord,
+  beginPropertyRecording,
   setPracticeAttempt,
   startPracticeRecording,
 } from '@/utils/practiceRecorder'
@@ -496,14 +497,22 @@ async function start() {
       try {
         await startPracticeRecording()
         recording = true
-      } catch {
-        toast.error(__('Could not start the recording — continuing without it.'))
+      } catch (e) {
+        toast.error(
+          e?.message
+            ? __('Could not start recording: {0}', [e.message])
+            : __('Could not start the recording — pick this tab and allow the mic.'),
+        )
       }
     }
     const res = await call('crm.api.practice.start_attempt', {
       practice_set: props.setId,
     })
-    if (recording) setPracticeAttempt(res.name)
+    if (recording) {
+      setPracticeAttempt(res.name)
+      const first = res.properties?.[0]?.name
+      if (first) await beginPropertyRecording(first)
+    }
     router.push({
       name: 'PracticeRun',
       params: { setId: props.setId, attemptId: res.name },

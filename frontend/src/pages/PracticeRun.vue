@@ -69,13 +69,13 @@
       <button
         v-for="(p, i) in properties"
         :key="p.name"
-        class="shrink-0 rounded px-2 py-1 text-xs"
+        class="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ink-gray-4"
         :class="chipClass(p, i)"
         :title="p.property_address"
         @click="select(i)"
       >
-        {{ i + 1 }}. {{ street(p.property_address) }}
-        <span v-if="houseElapsed(p)" class="ml-1 tabular-nums text-ink-gray-5">
+        <span>{{ i + 1 }}. {{ street(p.property_address) }}</span>
+        <span v-if="houseElapsed(p)" class="tabular-nums opacity-70">
           {{ fmtDuration(houseElapsed(p)) }}
         </span>
       </button>
@@ -210,7 +210,7 @@ function street(addr) {
 }
 
 function chipClass(p, i) {
-  if (i === currentIndex.value) return 'bg-ink-gray-8 text-white'
+  if (i === currentIndex.value) return 'bg-gray-900 text-white'
   if (p.done_at) return 'bg-green-100 text-green-800'
   if (p.opened_at) return 'bg-surface-gray-2 text-ink-gray-8'
   return 'text-ink-gray-6 hover:bg-surface-gray-1'
@@ -280,10 +280,11 @@ watch(
       toast.error(e.messages?.[0] || __('Could not open that property.'))
     }
     if (attempt.value.paused || !isPracticeRecording()) return
+    if (hasPracticeRecorder() && !prev) return
     uploading.value = true
     try {
-      const prev = await beginPropertyRecording(name)
-      applyRecording(prev)
+      const ended = await beginPropertyRecording(name)
+      applyRecording(ended)
     } catch {
       toast.error(__('Could not save the recording for the last property.'))
     } finally {
