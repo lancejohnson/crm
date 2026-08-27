@@ -417,6 +417,10 @@ const props = defineProps({
   // Phone: no picked-comps spreadsheet. The map is the list; tapping a pin
   // opens the gallery. Same component as desktop so the numbers cannot drift.
   compact: { type: Boolean, default: false },
+  // Practice run: save onto the attempt, and keep the draft off the real lead's
+  // localStorage key so a practice calc cannot leak onto a live deal.
+  practiceAttempt: { type: String, default: '' },
+  practiceProperty: { type: String, default: '' },
 })
 
 // Matches OfferRail.vue's rail so the two surfaces cannot name the same
@@ -558,7 +562,11 @@ const tableComps = computed(() => {
   return own
 })
 
-const storageKey = computed(() => `compsCalc:${props.lead}`)
+const storageKey = computed(() =>
+  props.practiceAttempt && props.practiceProperty
+    ? `practiceCalc:${props.practiceAttempt}:${props.practiceProperty}`
+    : `compsCalc:${props.lead}`,
+)
 
 function applyScene(k, i, row) {
   const base = fresh(k)
@@ -686,7 +694,7 @@ function persist() {
   }
 }
 
-watch(storageKey, loadSaved, { immediate: true })
+watch([storageKey, () => props.seed], loadSaved, { immediate: true })
 watch(books, persist, { deep: true })
 watch(kind, persist)
 
@@ -1007,8 +1015,7 @@ async function save() {
   if (!canSave.value) return
   saving.value = true
   try {
-    await call('crm.api.cash_offer.save_cash_offer', {
-      lead: props.lead,
+    const payload = {
       scenarios: JSON.stringify(
         visible.value.map((i) => {
           const x = S()[i]
@@ -1036,8 +1043,21 @@ async function save() {
       ),
       subject_sqft: sqft.value,
       notes: notes.value,
-    })
-    toast.success(__('Saved to the activity timeline'))
+    }
+    if (props.practiceAttempt && props.practiceProperty) {
+      await call('crm.api.practice.save_offer', {
+        attempt: props.practiceAttempt,
+        property: props.practiceProperty,
+        ...payload,
+      })
+      toast.success(__('Saved to this practice run'))
+    } else {
+      await call('crm.api.cash_offer.save_cash_offer', {
+        lead: props.lead,
+        ...payload,
+      })
+      toast.success(__('Saved to the activity timeline'))
+    }
     emit('saved')
   } catch (e) {
     toast.error(e.messages?.[0] || __('Could not save the calc.'))

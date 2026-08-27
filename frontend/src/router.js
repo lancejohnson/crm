@@ -152,6 +152,23 @@ const routes = [
     component: () => import('@/pages/Refunds.vue'),
   },
   {
+    path: '/practice',
+    name: 'Practice',
+    component: () => import('@/pages/Practice.vue'),
+  },
+  {
+    path: '/practice/:setId',
+    name: 'PracticeSet',
+    component: () => import('@/pages/PracticeSet.vue'),
+    props: true,
+  },
+  {
+    path: '/practice/:setId/run/:attemptId',
+    name: 'PracticeRun',
+    component: () => import('@/pages/PracticeRun.vue'),
+    props: true,
+  },
+  {
     path: '/sequences',
     name: 'Sequences',
     component: () => import('@/pages/Sequences.vue'),

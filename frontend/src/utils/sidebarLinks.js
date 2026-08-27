@@ -13,6 +13,7 @@ import LucideColumns3 from '~icons/lucide/columns-3'
 import LucideUsersRound from '~icons/lucide/users-round'
 import LucideListChecks from '~icons/lucide/list-checks'
 import LucideCircleDollarSign from '~icons/lucide/circle-dollar-sign'
+import LucideTarget from '~icons/lucide/target'
 
 // Read the logged-in user from the session cookie directly (no store import — the
 // session store imports the router, which imports this module → circular).
@@ -28,6 +29,7 @@ export const sidebarLinks = [
   // first thing the setters open each morning and the surface the 5am standup
   // DM describes.
   { label: 'Today', icon: LucideListChecks, to: 'Today' },
+  { label: 'Practice', icon: LucideTarget, to: 'Practice' },
   { label: 'Dashboard', icon: LucideLayoutDashboard, to: 'Dashboard' },
   { label: 'Leads', icon: LeadsIcon, to: 'Leads' },
   { label: 'Refunds', icon: LucideCircleDollarSign, to: 'Refunds' },

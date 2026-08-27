@@ -28,6 +28,18 @@ duplicating. Work substantial features in a worktree of your own.
 
 ## Our changes vs upstream (keep this list current)
 
+- **Practice comps** — sidebar **Practice** (`/practice`). A manager builds a
+  set of properties (picked from real leads) with an optional time limit — e.g.
+  10 houses in 30 minutes. Each setter runs the set on the **same comps map**
+  as a live lead; hides / picks / the offer calc write to **their attempt**,
+  never to `CRM Lead.comps_hidden` / `comps_selected` or the timeline. Times
+  are recorded for the whole run and per house. Doctypes: ops
+  `setup_practice.py`. App: `crm/api/practice.py` +
+  `pages/Practice.vue` / `PracticeSet.vue` / `PracticeRun.vue`. CompsView and
+  CompOfferCalc take optional `practiceAttempt` / `practiceProperty` to redirect
+  writes. Underwriting is off in practice (that creates a real Drive sheet).
+  Guarded on the doctypes existing, so the app deploys before the ops script.
+
 - **Refunds board** — sidebar **Refunds** (`/refunds`) is a kanban of
   `custom_refundable=1` leads (To Request / Requested / Waiting on us /
   Waiting on them / Complete). Marking Dead does not queue a refund; the

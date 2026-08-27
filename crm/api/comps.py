@@ -637,6 +637,27 @@ def _comp_state(doc):
 	return set(_load_list(doc, HIDDEN_FIELD)), set(_load_list(doc, SELECTED_FIELD))
 
 
+def _parse_state_override(state):
+	"""Optional hidden/selected override. None = use the lead's own lists.
+
+	Practice passes a dict (even empty) so a trainee starts from a virgin map
+	and their picks never touch the real lead. A missing/blank argument keeps
+	every existing caller on the team-wide lists.
+	"""
+	if state in (None, ""):
+		return None
+	if isinstance(state, str):
+		try:
+			state = json.loads(state)
+		except Exception:
+			frappe.throw(_("Invalid comp state."))
+	if not isinstance(state, dict):
+		frappe.throw(_("Invalid comp state."))
+	hidden = {str(x) for x in (state.get("hidden") or [])}
+	selected = {str(x) for x in (state.get("selected") or [])}
+	return hidden, selected
+
+
 @frappe.whitelist()
 def set_comp_state(lead, comp, state):
 	"""Mark one comp as `selected`, `hidden`, or `none` for this lead.
@@ -959,7 +980,9 @@ def _zillow_match(doc, subject=None):
 
 
 @frappe.whitelist()
-def get_lead_comps(lead, radius_mi=None, limit=None, filters=None, auto=0, include_hidden=0):
+def get_lead_comps(
+	lead, radius_mi=None, limit=None, filters=None, auto=0, include_hidden=0, state=None
+):
 	"""Comps near a lead, nearest first, with the subject's real position.
 
 	The bounding box is a cheap indexed pre-filter; haversine then trims the
@@ -1041,7 +1064,8 @@ def get_lead_comps(lead, radius_mi=None, limit=None, filters=None, auto=0, inclu
 
 	today = frappe.utils.today()
 	self_key = (subject or {}).get("self_comp_key")
-	hidden, selected = _comp_state(doc)
+	override = _parse_state_override(state)
+	hidden, selected = override if override is not None else _comp_state(doc)
 	base["selected"] = sorted(selected)
 	base["hidden"] = sorted(hidden)
 	base["state_supported"] = _state_supported()

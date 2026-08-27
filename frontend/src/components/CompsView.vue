@@ -53,6 +53,9 @@
         :address="data?.address || address"
         :comps="selectedComps"
         :compact="!wide"
+        :practice-attempt="practiceAttempt"
+        :practice-property="practiceProperty"
+        :seed="practiceSeed"
         @remove="setCompState($event, 'none')"
         @open="openCompDetail"
       />
@@ -97,7 +100,7 @@
      selected, and the label carries the count so "up to 4" is visible
      before the click rather than as an error after it. -->
 <Button
-  v-if="pageMode"
+  v-if="pageMode && !practiceAttempt"
   :label="underwritingLabel"
   :variant="selectedNames.length ? 'solid' : 'subtle'"
   :disabled="!selectedNames.length || creatingSheet"
@@ -577,6 +580,10 @@ const props = defineProps({
   // Today already mounts the same banner above the panes, so the map does not
   // repeat it. The comps page leaves this off.
   hideAddressMatch: { type: Boolean, default: false },
+  // Practice run: same map, but hides/picks/offers write to the attempt, not
+  // the real lead. Underwriting is off — that creates a real Drive sheet.
+  practiceAttempt: { type: String, default: '' },
+  practiceProperty: { type: String, default: '' },
 })
 // This used to be a modal driven by `defineModel()`. It is now a full page, so
 // "open" is simply always true -- which keeps every existing `show.value` guard,
@@ -2344,15 +2351,29 @@ function applyCompState(name, state) {
  * tore Leaflet down and put it back — that's the jump. The server write is
  * fire-and-forget against local state; a failure reloads to undo.
  */
+const practiceSeed = computed(() => data.value?.offer || null)
+const isPractice = computed(() => Boolean(props.practiceAttempt && props.practiceProperty))
+
 async function setCompState(comp, state) {
   if (!props.lead || !comp) return
+  if (data.value?.practice_locked) {
+    toast.error(__('This practice run is finished.'))
+    return
+  }
   applyCompState(comp, state)
   try {
-    const res = await call('crm.api.comps.set_comp_state', {
-      lead: props.lead,
-      comp,
-      state,
-    })
+    const res = isPractice.value
+      ? await call('crm.api.practice.set_comp_state', {
+          attempt: props.practiceAttempt,
+          property: props.practiceProperty,
+          comp,
+          state,
+        })
+      : await call('crm.api.comps.set_comp_state', {
+          lead: props.lead,
+          comp,
+          state,
+        })
     if (res?.ok === false) {
       toast.error(__('Comp selection is not set up on this site yet.'))
       await load()
@@ -2380,14 +2401,23 @@ async function load({ explicit = userTouched.value } = {}) {
     // Loop, not recurse: a `return load()` still runs this try's `finally`,
     // which would flip `loading` off while the inner call is in flight.
     for (;;) {
-      const payload = { lead: props.lead, radius_mi: radius.value, include_hidden: 1 }
+      const payload = { radius_mi: radius.value, include_hidden: 1 }
       if (explicit) {
         payload.filters = JSON.stringify(currentFilters())
         payload.auto = 0
       } else {
         payload.auto = 1
       }
-      data.value = await call('crm.api.comps.get_lead_comps', payload)
+      data.value = isPractice.value
+        ? await call('crm.api.practice.get_comps', {
+            ...payload,
+            attempt: props.practiceAttempt,
+            property: props.practiceProperty,
+          })
+        : await call('crm.api.comps.get_lead_comps', {
+            ...payload,
+            lead: props.lead,
+          })
       emit('subject', data.value?.subject || null)
       emit('zillowMatch', data.value?.zillow_match || null)
       syncDraft(data.value?.filters)
