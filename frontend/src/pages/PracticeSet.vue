@@ -59,7 +59,7 @@
     </p>
     <p class="mt-2 text-sm text-ink-gray-5">
       {{ __('{0} {1}', [properties.length, properties.length === 1 ? __('property') : __('properties')]) }}
-      <template v-if="set.time_limit_min"> · {{ __('{0} min', [set.time_limit_min]) }}</template>
+      <template v-if="shownLimit"> · {{ __('{0} min', [shownLimit]) }}</template>
     </p>
 
     <div class="mt-5 max-w-3xl">
@@ -356,6 +356,9 @@ const logRows = computed(() => viewLog.data?.rows || [])
 const resumeLabel = computed(() =>
   set.value.my_attempt?.status === 'In Progress' ? __('Resume') : __('Start'),
 )
+const shownLimit = computed(
+  () => Number(canManage.value ? form.time_limit_min : set.value.time_limit_min) || 0,
+)
 
 function fmtDuration(sec) {
   sec = Math.max(0, Math.floor(Number(sec) || 0))
@@ -470,18 +473,23 @@ async function move(i, dir) {
   }
 }
 
+async function persistMeta() {
+  if (!canManage.value) return
+  await call('crm.api.practice.save_set', {
+    name: props.setId,
+    title: form.title,
+    time_limit_min: Number(form.time_limit_min) || 0,
+    notes: form.notes,
+    is_active: form.is_active ? 1 : 0,
+  })
+  await detail.reload()
+}
+
 async function saveMeta() {
   saving.value = true
   try {
-    await call('crm.api.practice.save_set', {
-      name: props.setId,
-      title: form.title,
-      time_limit_min: Number(form.time_limit_min) || 0,
-      notes: form.notes,
-      is_active: form.is_active ? 1 : 0,
-    })
+    await persistMeta()
     toast.success(__('Saved'))
-    await detail.reload()
   } catch (e) {
     toast.error(e.messages?.[0] || __('Could not save.'))
   } finally {
@@ -503,6 +511,15 @@ async function start() {
             ? __('Could not start recording: {0}', [e.message])
             : __('Could not start the recording — pick this tab and allow the mic.'),
         )
+      }
+    }
+    if (canManage.value) {
+      try {
+        await persistMeta()
+      } catch (e) {
+        if (recording) await abandonPracticeRecording()
+        toast.error(e.messages?.[0] || __('Could not save the set.'))
+        return
       }
     }
     const res = await call('crm.api.practice.start_attempt', {
