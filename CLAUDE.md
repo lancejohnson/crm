@@ -30,7 +30,7 @@ duplicating. Work substantial features in a worktree of your own.
 
 - **Practice comps** — sidebar **Practice** (`/practice`). A manager builds a
   set of properties (picked from real leads) with an optional time limit — e.g.
-  10 houses in 30 minutes. Each setter runs the set on the **same comps map**
+  10 houses in 30 minutes. Each acq rep runs the set on the **same comps map**
   as a live lead; hides / picks / the offer calc write to **their attempt**,
   never to `CRM Lead.comps_hidden` / `comps_selected` or the timeline. Times
   are recorded for the whole run and per house. Optional **screen + mic**

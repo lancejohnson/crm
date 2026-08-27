@@ -3,7 +3,7 @@
 
 """Practice comps — the same map as a real lead, sandboxed per person.
 
-The setters price deals on the comps page. This is that page, pointed at a
+Acq reps price deals on the comps page. This is that page, pointed at a
 set of properties Lance picked, with two differences that are the whole point:
 
   * each person's hides / picks / offer calc live on THEIR attempt, never on
@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import re
 from typing import Any
 
@@ -595,11 +596,7 @@ def search_leads(q: str = "") -> list[dict]:
 	)
 
 
-@frappe.whitelist()
-def add_property(practice_set: str, lead: str) -> dict:
-	_need()
-	_assert_manager()
-	_get_set(practice_set)
+def _insert_property(practice_set: str, lead: str, sort_order: int) -> dict:
 	if not frappe.db.exists("CRM Lead", lead):
 		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)
 	if frappe.db.exists(PROP, {"practice_set": practice_set, "source_lead": lead}):
@@ -620,7 +617,6 @@ def add_property(practice_set: str, lead: str) -> dict:
 	address = (src.property_address or "").strip()
 	if not address:
 		frappe.throw(_("That lead has no property address to comp."))
-	n = frappe.db.count(PROP, {"practice_set": practice_set})
 	fields = {
 		"doctype": PROP,
 		"practice_set": practice_set,
@@ -630,7 +626,7 @@ def add_property(practice_set: str, lead: str) -> dict:
 		"property_city": src.property_city or "",
 		"property_state": src.property_state or "",
 		"property_zip": src.property_zip or "",
-		"sort_order": (n + 1) * 10,
+		"sort_order": sort_order,
 	}
 	if frappe.db.has_column("CRM Lead", "property_lat"):
 		latlng = frappe.db.get_value(
@@ -651,6 +647,105 @@ def add_property(practice_set: str, lead: str) -> dict:
 		"property_zip": doc.property_zip,
 		"sort_order": doc.sort_order,
 	}
+
+
+@frappe.whitelist()
+def add_property(practice_set: str, lead: str) -> dict:
+	_need()
+	_assert_manager()
+	_get_set(practice_set)
+	n = frappe.db.count(PROP, {"practice_set": practice_set})
+	return _insert_property(practice_set, lead, (n + 1) * 10)
+
+
+def _split_needles(raw) -> list[str]:
+	if not raw:
+		return []
+	if isinstance(raw, list):
+		parts = raw
+	else:
+		parts = re.split(r"[,\n;]+", str(raw))
+	return [p.strip() for p in parts if str(p).strip()]
+
+
+def _area_hit(value: str, needles: list[str], *, zip_mode: bool = False) -> bool:
+	if not needles:
+		return True
+	val = (value or "").strip()
+	if zip_mode:
+		digits = re.sub(r"\D", "", val)[:5]
+		return any(re.sub(r"\D", "", n)[:5] == digits for n in needles if digits)
+	low = val.lower()
+	return any(n.lower() in low or low == n.lower() for n in needles)
+
+
+@frappe.whitelist()
+def add_random_properties(
+	practice_set: str,
+	count: int | str = 5,
+	states: str = "",
+	cities: str = "",
+	counties: str = "",
+	zips: str = "",
+) -> dict:
+	"""Fill a set with N random addressed leads. Optional area filters.
+
+	Values inside one field are OR (OH or IN). Filled fields AND together
+	(Ohio AND Columbus). County is has_column-guarded.
+	"""
+	_need()
+	_assert_manager()
+	_get_set(practice_set)
+	try:
+		wanted = max(0, min(50, int(count or 0)))
+	except (TypeError, ValueError):
+		wanted = 0
+	if wanted <= 0:
+		return {"added": 0, "wanted": 0, "properties": []}
+	state_n = _split_needles(states)
+	city_n = _split_needles(cities)
+	county_n = _split_needles(counties)
+	zip_n = _split_needles(zips)
+	taken = [
+		n for n in frappe.get_all(
+			PROP, filters={"practice_set": practice_set}, pluck="source_lead"
+		) if n
+	]
+	filters = [["property_address", "is", "set"]]
+	if taken:
+		filters.append(["name", "not in", taken])
+	fields = ["name", "property_city", "property_state", "property_zip"]
+	has_county = frappe.db.has_column("CRM Lead", "property_county")
+	if has_county:
+		fields.append("property_county")
+	rows = frappe.get_all(
+		"CRM Lead",
+		filters=filters,
+		fields=fields,
+		limit_page_length=5000,
+	)
+	pool = []
+	for row in rows:
+		if not _area_hit(row.property_state, state_n):
+			continue
+		if not _area_hit(row.property_city, city_n):
+			continue
+		if not _area_hit(row.property_zip, zip_n, zip_mode=True):
+			continue
+		if county_n and has_county and not _area_hit(row.get("property_county") or "", county_n):
+			continue
+		pool.append(row.name)
+	matched = len(pool)
+	if len(pool) > wanted:
+		pool = random.sample(pool, wanted)
+	n = frappe.db.count(PROP, {"practice_set": practice_set})
+	added = []
+	for i, lead in enumerate(pool):
+		try:
+			added.append(_insert_property(practice_set, lead, (n + i + 1) * 10))
+		except Exception:
+			continue
+	return {"added": len(added), "wanted": wanted, "matched": matched, "properties": added}
 
 
 @frappe.whitelist()

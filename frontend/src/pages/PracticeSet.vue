@@ -51,7 +51,7 @@
       />
       <label class="flex items-center gap-2 text-sm text-ink-gray-7">
         <FormControl type="checkbox" v-model="form.is_active" />
-        {{ __('Active — setters can take this set') }}
+        {{ __('Active — acq reps can take this set') }}
       </label>
     </div>
     <p v-else-if="set.notes" class="mt-3 max-w-2xl text-sm text-ink-gray-5">
@@ -66,14 +66,36 @@
       <div class="mb-2 flex items-center justify-between">
         <h2 class="text-base font-medium text-ink-gray-8">{{ __('Properties') }}</h2>
       </div>
-      <div v-if="canManage" class="mb-3">
-        <Autocomplete
-          :key="addKey"
-          :options="leadOptions"
-          :placeholder="__('Add a lead by name or address…')"
-          @update:query="onLeadQuery"
-          @update:modelValue="addLead"
-        />
+      <div v-if="canManage" class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-end">
+        <div class="min-w-0 flex-1">
+          <Autocomplete
+            :key="addKey"
+            :options="leadOptions"
+            :placeholder="__('Add a specific lead by name or address…')"
+            @update:query="onLeadQuery"
+            @update:modelValue="addLead"
+          />
+        </div>
+        <div class="flex items-end gap-2">
+          <FormControl
+            v-model="randomCount"
+            type="number"
+            :label="__('Random')"
+            class="w-20"
+          />
+          <Button
+            :label="__('Add random')"
+            :loading="addingRandom"
+            :disabled="!Number(randomCount)"
+            @click="addRandom"
+          />
+        </div>
+      </div>
+      <div v-if="canManage" class="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <FormControl v-model="area.states" type="text" :label="__('States')" :placeholder="__('OH, IN')" />
+        <FormControl v-model="area.cities" type="text" :label="__('Cities')" :placeholder="__('Columbus')" />
+        <FormControl v-model="area.counties" type="text" :label="__('Counties')" :placeholder="__('Franklin')" />
+        <FormControl v-model="area.zips" type="text" :label="__('ZIPs')" :placeholder="__('43215')" />
       </div>
       <div v-if="!properties.length" class="text-sm text-ink-gray-5">
         {{ canManage ? __('Add leads to build the test.') : __('Nothing in this set yet.') }}
@@ -293,6 +315,9 @@ const openRow = ref('')
 const playing = ref('')
 const leadOptions = ref([])
 const addKey = ref(0)
+const randomCount = ref(5)
+const area = reactive({ states: '', cities: '', counties: '', zips: '' })
+const addingRandom = ref(false)
 const wantRecord = ref(false)
 const canRecord = computed(() => canPracticeRecord())
 const form = reactive({ title: '', time_limit_min: 0, notes: '', is_active: true })
@@ -390,6 +415,32 @@ async function addLead(opt) {
     await detail.reload()
   } catch (e) {
     toast.error(e.messages?.[0] || __('Could not add that lead.'))
+  }
+}
+
+async function addRandom() {
+  const n = Number(randomCount.value) || 0
+  if (n <= 0) return
+  addingRandom.value = true
+  try {
+    const res = await call('crm.api.practice.add_random_properties', {
+      practice_set: props.setId,
+      count: n,
+      states: area.states,
+      cities: area.cities,
+      counties: area.counties,
+      zips: area.zips,
+    })
+    await detail.reload()
+    if (res?.added < n) {
+      toast.warning(__('Only found {0} of {1} new leads with an address.', [res.added, n]))
+    } else {
+      toast.success(__('Added {0} leads.', [res.added]))
+    }
+  } catch (e) {
+    toast.error(e.messages?.[0] || __('Could not add random leads.'))
+  } finally {
+    addingRandom.value = false
   }
 }
 

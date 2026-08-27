@@ -9,7 +9,8 @@
         variant="solid"
         :label="__('New set')"
         iconLeft="plus"
-        @click="openCreate"
+        :loading="creating"
+        @click="createSet"
       />
     </template>
   </LayoutHeader>
@@ -68,34 +69,11 @@
         class="mt-2"
         variant="solid"
         :label="__('Create a set')"
-        @click="openCreate"
-      />
-    </div>
-  </div>
-
-  <Dialog v-model="showCreate" :options="{ title: __('New practice set') }">
-    <template #body-content>
-      <div class="flex flex-col gap-3">
-        <FormControl v-model="draft.title" type="text" :label="__('Name')" :placeholder="__('Week-1 comps test')" />
-        <FormControl
-          v-model="draft.time_limit_min"
-          type="number"
-          :label="__('Time limit (minutes)')"
-          :placeholder="__('30 — leave 0 for untimed')"
-        />
-        <FormControl v-model="draft.notes" type="textarea" :label="__('Notes')" />
-      </div>
-    </template>
-    <template #actions>
-      <Button
-        class="w-full"
-        variant="solid"
-        :label="__('Create')"
         :loading="creating"
         @click="createSet"
       />
-    </template>
-  </Dialog>
+    </div>
+  </div>
 </template>
 
 <script setup>
@@ -104,19 +82,15 @@ import {
   Badge,
   Breadcrumbs,
   Button,
-  Dialog,
-  FormControl,
   call,
   createResource,
   toast,
 } from 'frappe-ui'
-import { computed, reactive, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
-const showCreate = ref(false)
 const creating = ref(false)
-const draft = reactive({ title: '', time_limit_min: 30, notes: '' })
 
 const list = createResource({
   url: 'crm.api.practice.list_sets',
@@ -141,23 +115,14 @@ function lastLabel(att) {
   return __('Last run {0}', [fmtDuration(att.elapsed_seconds)])
 }
 
-function openCreate() {
-  draft.title = ''
-  draft.time_limit_min = 30
-  draft.notes = ''
-  showCreate.value = true
-}
-
 async function createSet() {
   creating.value = true
   try {
     const res = await call('crm.api.practice.save_set', {
-      title: draft.title,
-      time_limit_min: Number(draft.time_limit_min) || 0,
-      notes: draft.notes,
+      title: __('New set'),
+      time_limit_min: 30,
       is_active: 1,
     })
-    showCreate.value = false
     router.push({ name: 'PracticeSet', params: { setId: res.name } })
   } catch (e) {
     toast.error(e.messages?.[0] || __('Could not create the set.'))
