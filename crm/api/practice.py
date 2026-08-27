@@ -42,6 +42,9 @@ ATTEMPT = "CRM Practice Attempt"
 SALES_ROLES = ("System Manager", "Sales Manager", "Sales User")
 MANAGER_ROLES = ("System Manager", "Sales Manager")
 STATUSES = ("In Progress", "Submitted", "Timed Out")
+META = "_run"
+LANCE_USER = "lance.johnson@groundworkpro.com"
+VIEW_LOG = "CRM Practice View Log"
 
 #: nginx `client_max_body_size` is 50m, so chunks stay well under that. The
 #: whole take is capped because a forgotten recorder should not fill the disk.
@@ -162,6 +165,28 @@ def _user_label(user: str) -> str:
 	return frappe.db.get_value("User", user, "full_name") or user
 
 
+def _log_view(*, kind: str, practice_set: str, attempt: str = "", subject_user: str = "") -> None:
+	"""Lance-only audit. Never throws — a view log must not block the page."""
+	if not frappe.db.exists("DocType", VIEW_LOG):
+		return
+	if kind == "attempt" and subject_user == frappe.session.user:
+		return
+	try:
+		frappe.get_doc(
+			{
+				"doctype": VIEW_LOG,
+				"viewer": frappe.session.user,
+				"kind": kind,
+				"practice_set": practice_set,
+				"attempt": attempt or None,
+				"subject_user": subject_user or None,
+				"viewed_at": _now(),
+			}
+		).insert(ignore_permissions=True)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Practice view log failed")
+
+
 def _set_title(name: str) -> str:
 	return frappe.db.get_value(SET, name, "title") or name
 
@@ -186,10 +211,14 @@ def _get_attempt(name: str, *, write: bool = False):
 	if not frappe.db.exists(ATTEMPT, name):
 		frappe.throw(_("Practice attempt {0} does not exist.").format(name), frappe.DoesNotExistError)
 	doc = frappe.get_doc(ATTEMPT, name)
-	if write and doc.user != frappe.session.user:
+	mine = doc.user == frappe.session.user
+	if write and not mine:
 		frappe.throw(_("Not your practice run."), frappe.PermissionError)
-	if not write and doc.user != frappe.session.user and not _is_manager():
-		frappe.throw(_("Not permitted."), frappe.PermissionError)
+	if not write and not mine:
+		# Others may review a finished run (picks, condition, video). An
+		# in-progress one stays private unless you're a manager.
+		if doc.status == "In Progress" and not _is_manager():
+			frappe.throw(_("Not permitted."), frappe.PermissionError)
 	return doc
 
 
@@ -216,7 +245,20 @@ def _elapsed(att) -> int:
 	end = get_datetime(att.finished_at) if att.finished_at else _now()
 	if not start:
 		return 0
-	return max(0, int(time_diff_in_seconds(end, start)))
+	wall = max(0, int(time_diff_in_seconds(end, start)))
+	return max(0, wall - _paused_seconds(att, end))
+
+
+def _paused_seconds(att, now=None) -> int:
+	meta = _meta(_results(att))
+	total = int(meta.get("paused_seconds") or 0)
+	started = meta.get("pause_started_at")
+	if started:
+		try:
+			total += max(0, int(time_diff_in_seconds(now or _now(), get_datetime(started))))
+		except Exception:
+			pass
+	return total
 
 
 def _remaining(att) -> int | None:
@@ -224,6 +266,69 @@ def _remaining(att) -> int | None:
 	if limit <= 0:
 		return None
 	return max(0, limit - _elapsed(att))
+
+
+def _is_paused(results: dict) -> bool:
+	return bool(_meta(results).get("pause_started_at"))
+
+
+def _meta(results: dict) -> dict:
+	m = results.get(META)
+	if not isinstance(m, dict):
+		m = {"paused_seconds": 0, "pause_started_at": None, "current_property": ""}
+		results[META] = m
+	m.setdefault("paused_seconds", 0)
+	return m
+
+
+def _iter_slots(results: dict):
+	for key, slot in results.items():
+		if key == META or not isinstance(slot, dict):
+			continue
+		yield key, slot
+
+
+def _close_segment(slot: dict, now) -> None:
+	started = slot.get("segment_started_at")
+	if not started:
+		return
+	try:
+		add = max(0, int(time_diff_in_seconds(now, get_datetime(started))))
+	except Exception:
+		add = 0
+	slot["elapsed_seconds"] = int(slot.get("elapsed_seconds") or 0) + add
+	slot["segment_started_at"] = None
+
+
+def _open_segment(slot: dict, now) -> None:
+	if slot.get("segment_started_at"):
+		return
+	slot["segment_started_at"] = str(now)
+	if not slot.get("opened_at"):
+		slot["opened_at"] = str(now)
+
+
+def _live_elapsed(slot: dict, now, paused: bool) -> int:
+	base = int(slot.get("elapsed_seconds") or 0)
+	if paused or not slot.get("segment_started_at"):
+		return base
+	try:
+		return base + max(0, int(time_diff_in_seconds(now, get_datetime(slot["segment_started_at"]))))
+	except Exception:
+		return base
+
+
+def _offer_amount(slot: dict):
+	off = slot.get("offer") if isinstance(slot.get("offer"), dict) else None
+	if not off:
+		return None
+	scenes = off.get("scenarios") or []
+	if scenes and isinstance(scenes[0], dict) and scenes[0].get("offer") is not None:
+		try:
+			return int(round(float(scenes[0]["offer"])))
+		except (TypeError, ValueError):
+			return None
+	return None
 
 
 def _results(att) -> dict:
@@ -250,17 +355,21 @@ def _submit(att, *, timed_out: bool = False) -> None:
 		return
 	now = _now()
 	results = _results(att)
-	for slot in results.values():
-		if not isinstance(slot, dict):
-			continue
+	meta = _meta(results)
+	if meta.get("pause_started_at"):
+		try:
+			meta["paused_seconds"] = int(meta.get("paused_seconds") or 0) + max(
+				0, int(time_diff_in_seconds(now, get_datetime(meta["pause_started_at"])))
+			)
+		except Exception:
+			pass
+		meta["pause_started_at"] = None
+	for _key, slot in _iter_slots(results):
+		_close_segment(slot, now)
+		elapsed = int(slot.get("elapsed_seconds") or 0)
 		if slot.get("opened_at") and not slot.get("done_at"):
 			slot["done_at"] = str(now)
-			try:
-				slot["duration_seconds"] = max(
-					0, int(time_diff_in_seconds(now, get_datetime(slot["opened_at"])))
-				)
-			except Exception:
-				slot["duration_seconds"] = slot.get("duration_seconds") or 0
+		slot["duration_seconds"] = elapsed or slot.get("duration_seconds") or 0
 	frappe.db.set_value(
 		ATTEMPT,
 		att.name,
@@ -287,12 +396,15 @@ def _maybe_expire(att):
 
 def _shape_attempt(att, properties: list[dict] | None = None) -> dict:
 	results = _results(att)
+	now = _now()
+	paused = _is_paused(results)
 	props = properties if properties is not None else _properties(att.practice_set)
 	out_props = []
 	for p in props:
 		slot = results.get(p.name) or {}
 		if not isinstance(slot, dict):
 			slot = {}
+		live = _live_elapsed(slot, now, paused)
 		out_props.append(
 			{
 				**{k: p.get(k) for k in (
@@ -301,11 +413,14 @@ def _shape_attempt(att, properties: list[dict] | None = None) -> dict:
 				)},
 				"opened_at": slot.get("opened_at") or "",
 				"done_at": slot.get("done_at") or "",
-				"duration_seconds": slot.get("duration_seconds"),
+				"duration_seconds": slot.get("duration_seconds") if slot.get("done_at") else live,
+				"elapsed_seconds": live,
 				"selected_count": len(slot.get("selected") or []),
 				"hidden_count": len(slot.get("hidden") or []),
 				"has_offer": bool(slot.get("offer")),
+				"offer": _offer_amount(slot),
 				"recording_url": slot.get("recording_url") or "",
+				"condition": slot.get("condition") or "",
 			}
 		)
 	return {
@@ -320,6 +435,8 @@ def _shape_attempt(att, properties: list[dict] | None = None) -> dict:
 		"time_limit_min": int(att.time_limit_min or 0),
 		"elapsed_seconds": _elapsed(att),
 		"remaining_seconds": _remaining(att),
+		"paused": paused,
+		"mine": att.user == frappe.session.user,
 		"recording_url": _recording_url(att),
 		"properties": out_props,
 	}
@@ -393,6 +510,7 @@ def get_set(name: str) -> dict:
 	doc = _get_set(name)
 	if not int(doc.is_active or 0) and not _is_manager():
 		frappe.throw(_("This practice set is not active."))
+	_log_view(kind="set", practice_set=name, subject_user=doc.owner)
 	out = _shape_set(doc, with_properties=True)
 	out["can_manage"] = _is_manager()
 	out["available"] = True
@@ -605,13 +723,22 @@ def start_attempt(practice_set: str) -> dict:
 @frappe.whitelist()
 def get_attempt(name: str) -> dict:
 	_need()
-	att = _maybe_expire(_get_attempt(name))
+	att = _get_attempt(name)
+	if att.user != frappe.session.user:
+		_log_view(
+			kind="attempt",
+			practice_set=att.practice_set,
+			attempt=att.name,
+			subject_user=att.user,
+		)
+	elif att.status == "In Progress":
+		att = _maybe_expire(_get_attempt(name, write=True))
 	return {"available": True, "can_manage": _is_manager(), **_shape_attempt(att)}
 
 
 @frappe.whitelist()
 def touch_property(attempt: str, property: str) -> dict:
-	"""Start the per-house clock the first time this property is opened."""
+	"""Start this house's clock; close the previous house's segment."""
 	_need()
 	att = _maybe_expire(_get_attempt(attempt, write=True))
 	if att.status != "In Progress":
@@ -619,11 +746,64 @@ def touch_property(attempt: str, property: str) -> dict:
 	prop = _get_prop(property)
 	if prop.practice_set != att.practice_set:
 		frappe.throw(_("That property is not in this set."))
+	now = _now()
 	results = _results(att)
+	meta = _meta(results)
+	paused = _is_paused(results)
+	for key, other in _iter_slots(results):
+		if key != property:
+			_close_segment(other, now)
 	slot = _slot(results, property)
-	if not slot.get("opened_at"):
-		slot["opened_at"] = str(_now())
-		_write_results(att, results)
+	if not paused:
+		_open_segment(slot, now)
+	elif not slot.get("opened_at"):
+		slot["opened_at"] = str(now)
+	meta["current_property"] = property
+	_write_results(att, results)
+	return {"available": True, **_shape_attempt(att)}
+
+
+@frappe.whitelist()
+def pause_attempt(attempt: str) -> dict:
+	"""Freeze the clocks and (on the client) the recorder."""
+	_need()
+	att = _maybe_expire(_get_attempt(attempt, write=True))
+	if att.status != "In Progress":
+		return {"available": True, **_shape_attempt(att)}
+	now = _now()
+	results = _results(att)
+	meta = _meta(results)
+	if meta.get("pause_started_at"):
+		return {"available": True, **_shape_attempt(att)}
+	for _key, slot in _iter_slots(results):
+		_close_segment(slot, now)
+	meta["pause_started_at"] = str(now)
+	_write_results(att, results)
+	return {"available": True, **_shape_attempt(att)}
+
+
+@frappe.whitelist()
+def resume_attempt(attempt: str) -> dict:
+	_need()
+	att = _maybe_expire(_get_attempt(attempt, write=True))
+	if att.status != "In Progress":
+		return {"available": True, **_shape_attempt(att)}
+	now = _now()
+	results = _results(att)
+	meta = _meta(results)
+	started = meta.get("pause_started_at")
+	if started:
+		try:
+			meta["paused_seconds"] = int(meta.get("paused_seconds") or 0) + max(
+				0, int(time_diff_in_seconds(now, get_datetime(started)))
+			)
+		except Exception:
+			pass
+		meta["pause_started_at"] = None
+	cur = meta.get("current_property")
+	if cur and results.get(cur):
+		_open_segment(_slot(results, cur), now)
+	_write_results(att, results)
 	return {"available": True, **_shape_attempt(att)}
 
 
@@ -639,17 +819,35 @@ def mark_property_done(attempt: str, property: str) -> dict:
 	now = _now()
 	results = _results(att)
 	slot = _slot(results, property)
+	_close_segment(slot, now)
 	if not slot.get("opened_at"):
 		slot["opened_at"] = str(now)
 	if not slot.get("done_at"):
 		slot["done_at"] = str(now)
-		try:
-			slot["duration_seconds"] = max(
-				0, int(time_diff_in_seconds(now, get_datetime(slot["opened_at"])))
-			)
-		except Exception:
-			slot["duration_seconds"] = 0
+		slot["duration_seconds"] = int(slot.get("elapsed_seconds") or 0)
 		_write_results(att, results)
+	return {"available": True, **_shape_attempt(att)}
+
+
+@frappe.whitelist()
+def save_condition(attempt: str, property: str, text: str = "") -> dict:
+	"""Condition notes for this house. Lives on the attempt, never the real lead."""
+	_need()
+	att = _maybe_expire(_get_attempt(attempt, write=True))
+	if att.status != "In Progress":
+		frappe.throw(_("This practice run is finished."))
+	prop = _get_prop(property)
+	if prop.practice_set != att.practice_set:
+		frappe.throw(_("That property is not in this set."))
+	note = (text or "").strip()
+	if len(note) > 4000:
+		note = note[:4000]
+	results = _results(att)
+	slot = _slot(results, property)
+	if not slot.get("opened_at"):
+		slot["opened_at"] = str(_now())
+	slot["condition"] = note
+	_write_results(att, results)
 	return {"available": True, **_shape_attempt(att)}
 
 
@@ -665,12 +863,10 @@ def submit_attempt(attempt: str) -> dict:
 
 @frappe.whitelist()
 def list_results(practice_set: str) -> dict:
-	"""Everyone's runs on this set (managers) or just yours."""
+	"""Submitted runs for everyone; in-progress stays private to the owner."""
 	_need()
 	_get_set(practice_set)
 	filters: dict[str, Any] = {"practice_set": practice_set}
-	if not _is_manager():
-		filters["user"] = frappe.session.user
 	fields = [
 		"name", "user", "status", "started_at", "finished_at",
 		"time_limit_min", "results",
@@ -687,7 +883,10 @@ def list_results(practice_set: str) -> dict:
 	props = _properties(practice_set)
 	n_props = len(props)
 	out = []
+	me = frappe.session.user
 	for r in rows:
+		if r.status == "In Progress" and r.user != me and not _is_manager():
+			continue
 		att = frappe._dict(r)
 		# _shape_attempt expects .practice_set
 		att.practice_set = practice_set
@@ -699,7 +898,7 @@ def list_results(practice_set: str) -> dict:
 				**{k: shaped[k] for k in (
 					"name", "user", "user_name", "status", "started_at",
 					"finished_at", "time_limit_min", "elapsed_seconds",
-					"remaining_seconds", "recording_url",
+					"remaining_seconds", "recording_url", "paused", "mine",
 				)},
 				"done": done,
 				"opened": opened,
@@ -710,8 +909,49 @@ def list_results(practice_set: str) -> dict:
 	return {
 		"available": True,
 		"can_manage": _is_manager(),
+		"can_view_log": frappe.session.user == LANCE_USER,
 		"attempts": out,
 	}
+
+
+@frappe.whitelist()
+def list_view_log(practice_set: str = "") -> dict:
+	"""Who opened whose work. Lance only."""
+	_need()
+	if frappe.session.user != LANCE_USER:
+		frappe.throw(_("Not permitted."), frappe.PermissionError)
+	if not frappe.db.exists("DocType", VIEW_LOG):
+		return {"available": False, "rows": []}
+	filters = {}
+	if practice_set:
+		filters["practice_set"] = practice_set
+	rows = frappe.get_all(
+		VIEW_LOG,
+		filters=filters,
+		fields=[
+			"name", "viewer", "kind", "practice_set", "attempt",
+			"subject_user", "viewed_at",
+		],
+		order_by="viewed_at desc",
+		limit_page_length=200,
+	)
+	out = []
+	for r in rows:
+		out.append(
+			{
+				"name": r.name,
+				"viewer": r.viewer,
+				"viewer_name": _user_label(r.viewer),
+				"kind": r.kind,
+				"practice_set": r.practice_set,
+				"set_title": _set_title(r.practice_set) if r.practice_set else "",
+				"attempt": r.attempt or "",
+				"subject_user": r.subject_user or "",
+				"subject_name": _user_label(r.subject_user) if r.subject_user else "",
+				"viewed_at": _dt(r.viewed_at),
+			}
+		)
+	return {"available": True, "rows": out}
 
 
 # ---------------------------------------------------------------------------------
@@ -805,17 +1045,22 @@ def get_comps(
 ) -> dict:
 	"""The real comps map for this property, with THIS run's hides/picks."""
 	_need()
-	att = _maybe_expire(_get_attempt(attempt, write=True))
+	att = _get_attempt(attempt)
+	mine = att.user == frappe.session.user
+	if mine and att.status == "In Progress":
+		att = _maybe_expire(_get_attempt(attempt, write=True))
 	prop = _get_prop(property)
 	if prop.practice_set != att.practice_set:
 		frappe.throw(_("That property is not in this set."))
 	if not prop.source_lead or not frappe.db.exists("CRM Lead", prop.source_lead):
 		frappe.throw(_("The source lead for this property is gone."))
 	results = _results(att)
-	slot = _slot(results, property)
-	if att.status == "In Progress" and not slot.get("opened_at"):
-		slot["opened_at"] = str(_now())
-		_write_results(att, results)
+	slot = results.get(property) if isinstance(results.get(property), dict) else {}
+	if mine and att.status == "In Progress":
+		slot = _slot(results, property)
+		if not slot.get("opened_at"):
+			slot["opened_at"] = str(_now())
+			_write_results(att, results)
 	data = get_lead_comps(
 		prop.source_lead,
 		radius_mi=radius_mi,
@@ -826,7 +1071,7 @@ def get_comps(
 		state={"hidden": slot.get("hidden") or [], "selected": slot.get("selected") or []},
 	)
 	data["practice"] = True
-	data["practice_locked"] = att.status != "In Progress"
+	data["practice_locked"] = (not mine) or att.status != "In Progress"
 	data["offer"] = slot.get("offer")
 	data["source_lead"] = prop.source_lead
 	return data

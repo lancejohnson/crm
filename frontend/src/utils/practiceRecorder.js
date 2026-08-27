@@ -50,6 +50,36 @@ export function isPracticeRecording() {
   return captureOn && streams.length > 0
 }
 
+export function isPracticeRecorderPaused() {
+  return recorder?.state === 'paused'
+}
+
+export function hasPracticeRecorder() {
+  return !!recorder && recorder.state !== 'inactive'
+}
+
+export function pausePracticeRecording() {
+  if (recorder?.state === 'recording') {
+    try {
+      recorder.pause()
+    } catch {
+      /* ignore */
+    }
+    emit()
+  }
+}
+
+export function resumePracticeRecording() {
+  if (recorder?.state === 'paused') {
+    try {
+      recorder.resume()
+    } catch {
+      /* ignore */
+    }
+    emit()
+  }
+}
+
 export async function startPracticeRecording() {
   await abandonPracticeRecording()
   captureOn = true

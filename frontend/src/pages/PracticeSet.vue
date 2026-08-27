@@ -143,6 +143,10 @@
                 {{ a.done }}/{{ a.property_count }}
               </td>
               <td class="py-2 text-xs text-ink-gray-5">
+                <button class="hover:underline" @click.stop="openRun(a)">
+                  {{ a.mine && a.status === 'In Progress' ? __('Resume') : __('Open') }}
+                </button>
+                <span class="mx-1 text-ink-gray-4">·</span>
                 {{ openRow === a.name ? __('Hide') : __('Details') }}
               </td>
             </tr>
@@ -158,15 +162,15 @@
                       {{ p.property_address }}
                     </span>
                     <span class="shrink-0 tabular-nums text-ink-gray-5">
-                      <template v-if="p.duration_seconds != null">
-                        {{ fmtDuration(p.duration_seconds) }}
+                      <template v-if="p.elapsed_seconds || p.duration_seconds != null">
+                        {{ fmtDuration(p.elapsed_seconds || p.duration_seconds) }}
                       </template>
                       <template v-else-if="p.opened_at">{{ __('open') }}</template>
                       <template v-else>—</template>
                       <template v-if="p.selected_count">
                         · {{ __('{0} picked', [p.selected_count]) }}
                       </template>
-                      <template v-if="p.has_offer"> · {{ __('offer saved') }}</template>
+                      <template v-if="p.offer != null"> · ${{ Number(p.offer).toLocaleString() }}</template>
                       <button
                         v-if="p.recording_url"
                         class="ml-2 font-medium text-red-600 hover:underline"
@@ -175,6 +179,12 @@
                         {{ playing === playKey(a, p) ? __('Hide') : __('Play') }}
                       </button>
                     </span>
+                  </div>
+                  <div
+                    v-if="p.condition"
+                    class="mt-0.5 text-xs text-ink-gray-6"
+                  >
+                    {{ p.condition }}
                   </div>
                   <video
                     v-if="playing === playKey(a, p)"
@@ -189,6 +199,40 @@
               </td>
             </tr>
           </template>
+        </tbody>
+      </table>
+    </div>
+
+    <div v-if="canViewLog" class="mt-8 max-w-4xl">
+      <h2 class="mb-2 text-base font-medium text-ink-gray-8">{{ __('Who looked') }}</h2>
+      <div v-if="!logRows.length" class="text-sm text-ink-gray-5">
+        {{ __('No views logged yet.') }}
+      </div>
+      <table v-else class="w-full text-left text-sm">
+        <thead class="text-xs text-ink-gray-5">
+          <tr>
+            <th class="py-1.5 pr-3 font-medium">{{ __('When') }}</th>
+            <th class="py-1.5 pr-3 font-medium">{{ __('Who') }}</th>
+            <th class="py-1.5 pr-3 font-medium">{{ __('Looked at') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="row in logRows"
+            :key="row.name"
+            class="border-t border-outline-gray-1"
+          >
+            <td class="py-1.5 pr-3 tabular-nums text-ink-gray-6">{{ prettyWhen(row.viewed_at) }}</td>
+            <td class="py-1.5 pr-3 text-ink-gray-8">{{ row.viewer_name }}</td>
+            <td class="py-1.5 text-ink-gray-6">
+              <template v-if="row.kind === 'attempt'">
+                {{ row.subject_name || row.subject_user }}'s run
+              </template>
+              <template v-else>
+                {{ __('this set') }}
+              </template>
+            </td>
+          </tr>
         </tbody>
       </table>
     </div>
@@ -264,16 +308,25 @@ const detail = createResource({
     form.is_active = !!d.is_active
   },
 })
+const viewLog = createResource({
+  url: 'crm.api.practice.list_view_log',
+  makeParams: () => ({ practice_set: props.setId }),
+})
 const results = createResource({
   url: 'crm.api.practice.list_results',
   makeParams: () => ({ practice_set: props.setId }),
   auto: true,
+  onSuccess(d) {
+    if (d?.can_view_log) viewLog.reload()
+  },
 })
 
 const set = computed(() => detail.data || {})
 const canManage = computed(() => set.value.can_manage)
 const properties = computed(() => set.value.properties || [])
 const attempts = computed(() => results.data?.attempts || [])
+const canViewLog = computed(() => results.data?.can_view_log)
+const logRows = computed(() => viewLog.data?.rows || [])
 const resumeLabel = computed(() =>
   set.value.my_attempt?.status === 'In Progress' ? __('Resume') : __('Start'),
 )
@@ -292,6 +345,21 @@ function toggleRow(name) {
 
 function playKey(a, p) {
   return `${a.name}:${p.name}`
+}
+
+function openRun(a) {
+  if (a.status === 'In Progress' && a.mine === false) return
+  router.push({
+    name: 'PracticeRun',
+    params: { setId: props.setId, attemptId: a.name },
+  })
+}
+
+function prettyWhen(raw) {
+  if (!raw) return ''
+  const d = new Date(String(raw).replace(' ', 'T'))
+  if (Number.isNaN(d.getTime())) return String(raw)
+  return d.toLocaleString()
 }
 
 const searchLeads = useDebounceFn(async (q) => {

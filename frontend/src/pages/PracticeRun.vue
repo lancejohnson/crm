@@ -21,32 +21,47 @@
       >
         {{ timerLabel }}
       </span>
-      <span v-if="attempt.status !== 'In Progress'" class="text-xs text-ink-gray-5">
-        {{ attempt.status }}
+      <span
+        v-if="current && attempt.status === 'In Progress'"
+        class="tabular-nums text-sm text-ink-gray-6"
+      >
+        {{ __('this house') }} {{ fmtDuration(houseElapsed(current)) }}
+      </span>
+      <span v-if="attempt.paused" class="text-xs font-medium text-amber-700">
+        {{ __('Paused') }}
+      </span>
+      <span v-else-if="attempt.status !== 'In Progress'" class="text-xs text-ink-gray-5">
+        {{ reviewLabel }}
       </span>
       <span
         v-if="recording || uploading"
         class="flex items-center gap-1 text-xs font-medium text-red-600"
       >
         <span class="size-1.5 rounded-full bg-red-600" />
-        {{ uploading ? __('Saving recording…') : __('REC') }}
+        {{ uploading ? __('Saving recording…') : attempt.paused ? __('REC paused') : __('REC') }}
       </span>
       <div class="ml-auto flex items-center gap-2">
         <Button
-          v-if="attempt.status === 'In Progress'"
+          v-if="attempt.status === 'In Progress' && attempt.mine"
+          :label="attempt.paused ? __('Resume') : __('Pause')"
+          :loading="pausing"
+          @click="togglePause"
+        />
+        <Button
+          v-if="attempt.status === 'In Progress' && attempt.mine"
           :label="__('Done with this one')"
           :disabled="!current"
           :loading="marking"
           @click="doneCurrent"
         />
         <Button
-          v-if="attempt.status === 'In Progress'"
+          v-if="attempt.status === 'In Progress' && attempt.mine"
           variant="solid"
           :label="__('Submit set')"
           :loading="submitting || uploading"
           @click="() => submit()"
         />
-        <Button v-else :label="__('Back to set')" @click="leave" />
+        <Button v-if="attempt.status !== 'In Progress' || !attempt.mine" :label="__('Back to set')" @click="leave" />
       </div>
     </div>
 
@@ -60,6 +75,9 @@
         @click="select(i)"
       >
         {{ i + 1 }}. {{ street(p.property_address) }}
+        <span v-if="houseElapsed(p)" class="ml-1 tabular-nums text-ink-gray-5">
+          {{ fmtDuration(houseElapsed(p)) }}
+        </span>
       </button>
     </div>
 
@@ -67,6 +85,14 @@
       v-if="current"
       class="flex min-h-0 flex-1 flex-col overflow-hidden px-3 py-3 sm:px-5 sm:py-4"
     >
+      <textarea
+        v-model="condition"
+        rows="2"
+        class="form-input mb-2 w-full shrink-0 resize-y text-sm"
+        :placeholder="__('Condition — roof, kitchen, foundation…')"
+        :disabled="attempt.status !== 'In Progress' || attempt.mine === false"
+        @blur="persistCondition(current.name)"
+      />
       <CompsView
         :key="current.name"
         :lead="current.source_lead"
@@ -88,7 +114,10 @@ import { useRouter } from 'vue-router'
 import { sidebarCollapsedOverride } from '@/composables/settings'
 import {
   beginPropertyRecording,
+  hasPracticeRecorder,
   isPracticeRecording,
+  pausePracticeRecording,
+  resumePracticeRecording,
   setPracticeAttempt,
   stopPracticeRecording,
   watchPracticeRecording,
@@ -106,6 +135,8 @@ const remaining = ref(null)
 const elapsed = ref(0)
 const recording = ref(false)
 const uploading = ref(false)
+const pausing = ref(false)
+const condition = ref('')
 let tick = null
 let fetchedAt = 0
 let flushed = false
@@ -113,7 +144,7 @@ let unwatchRec = null
 
 onMounted(() => {
   sidebarCollapsedOverride.value = true
-  setPracticeAttempt(props.attemptId)
+  if (attempt.value.mine !== false) setPracticeAttempt(props.attemptId)
   recording.value = isPracticeRecording()
   unwatchRec = watchPracticeRecording((on) => {
     recording.value = on
@@ -137,10 +168,28 @@ const attempt = computed(() => run.data || {})
 const properties = computed(() => attempt.value.properties || [])
 const current = computed(() => properties.value[currentIndex.value] || null)
 
+const reviewLabel = computed(() => {
+  if (attempt.value.mine) return attempt.value.status
+  return __("{0}'s run", [attempt.value.user_name || __('Teammate')])
+})
+
 const timerLabel = computed(() => {
   if (remaining.value == null) return fmtDuration(elapsed.value)
   return fmtDuration(remaining.value)
 })
+
+function houseElapsed(p) {
+  if (!p) return 0
+  let s = Number(p.elapsed_seconds || p.duration_seconds || 0)
+  if (
+    attempt.value.status === 'In Progress' &&
+    !attempt.value.paused &&
+    p.name === current.value?.name
+  ) {
+    s += Math.max(0, (Date.now() - fetchedAt) / 1000)
+  }
+  return s
+}
 const timerClass = computed(() => {
   if (attempt.value.status !== 'In Progress') return 'text-ink-gray-5'
   if (remaining.value == null) return 'text-ink-gray-8'
@@ -179,6 +228,11 @@ function syncClock(d) {
 function onTick() {
   const d = attempt.value
   if (!d?.started_at) return
+  if (d.paused) {
+    remaining.value = d.remaining_seconds ?? null
+    elapsed.value = d.elapsed_seconds || 0
+    return
+  }
   const waited = (Date.now() - fetchedAt) / 1000
   if (d.remaining_seconds == null) {
     remaining.value = null
@@ -206,8 +260,11 @@ watch(
 
 watch(
   () => current.value?.name,
-  async (name) => {
-    if (!name || attempt.value.status !== 'In Progress') return
+  async (name, prev) => {
+    if (prev) await persistCondition(prev)
+    condition.value =
+      properties.value.find((p) => p.name === name)?.condition || ''
+    if (!name || attempt.value.status !== 'In Progress' || attempt.value.mine === false) return
     try {
       const res = await call('crm.api.practice.touch_property', {
         attempt: props.attemptId,
@@ -215,10 +272,14 @@ watch(
       })
       run.data = { ...run.data, ...res }
       syncClock(res)
+      if (!condition.value) {
+        condition.value =
+          res.properties?.find((p) => p.name === name)?.condition || ''
+      }
     } catch (e) {
       toast.error(e.messages?.[0] || __('Could not open that property.'))
     }
-    if (!isPracticeRecording()) return
+    if (attempt.value.paused || !isPracticeRecording()) return
     uploading.value = true
     try {
       const prev = await beginPropertyRecording(name)
@@ -255,6 +316,50 @@ async function doneCurrent() {
   }
 }
 
+async function persistCondition(propertyName) {
+  if (!propertyName || attempt.value.status !== 'In Progress') return
+  const text = condition.value
+  const existing =
+    properties.value.find((p) => p.name === propertyName)?.condition || ''
+  if ((text || '') === existing) return
+  try {
+    const res = await call('crm.api.practice.save_condition', {
+      attempt: props.attemptId,
+      property: propertyName,
+      text,
+    })
+    run.data = { ...run.data, ...res }
+    syncClock(res)
+  } catch (e) {
+    toast.error(e.messages?.[0] || __('Could not save condition.'))
+  }
+}
+
+async function togglePause() {
+  if (attempt.value.status !== 'In Progress' || !attempt.value.mine) return
+  pausing.value = true
+  try {
+    if (current.value) await persistCondition(current.value.name)
+    const res = attempt.value.paused
+      ? await call('crm.api.practice.resume_attempt', { attempt: props.attemptId })
+      : await call('crm.api.practice.pause_attempt', { attempt: props.attemptId })
+    run.data = { ...run.data, ...res }
+    syncClock(res)
+    if (res.paused) {
+      pausePracticeRecording()
+    } else {
+      resumePracticeRecording()
+      if (isPracticeRecording() && current.value && !hasPracticeRecorder()) {
+        await beginPropertyRecording(current.value.name)
+      }
+    }
+  } catch (e) {
+    toast.error(e.messages?.[0] || __('Could not pause.'))
+  } finally {
+    pausing.value = false
+  }
+}
+
 function applyRecording(res) {
   if (!res?.url || !res?.property || !run.data?.properties) return
   run.data = {
@@ -283,6 +388,7 @@ async function flushRecording() {
 async function submit(timedOut = false) {
   submitting.value = true
   try {
+    if (current.value) await persistCondition(current.value.name)
     await flushRecording()
     const res = await call('crm.api.practice.submit_attempt', {
       attempt: props.attemptId,
@@ -299,6 +405,7 @@ async function submit(timedOut = false) {
 }
 
 async function leave() {
+  if (current.value) await persistCondition(current.value.name)
   await flushRecording()
   router.push({ name: 'PracticeSet', params: { setId: props.setId } })
 }
