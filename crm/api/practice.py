@@ -33,7 +33,7 @@ from typing import Any
 
 import frappe
 from frappe import _
-from frappe.utils import flt, get_datetime, now_datetime, time_diff_in_seconds
+from frappe.utils import flt, get_datetime, get_fullname, now_datetime, time_diff_in_seconds
 
 from crm.api.comps import _guard, get_lead_comps
 
@@ -52,6 +52,10 @@ VIEW_LOG = "CRM Practice View Log"
 MAX_CHUNK_BYTES = 8 * 1024 * 1024
 MAX_RECORDING_BYTES = 400 * 1024 * 1024
 _ATTEMPT_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+# Timestamped emoji/comments on a recording (Frappe Comment, no extra doctype).
+_REACTION_V = 1
+_MAX_REACTIONS = 200
+_MAX_REACTION_TEXT = 500
 
 
 def _available() -> bool:
@@ -323,17 +327,59 @@ def _live_elapsed(slot: dict, now, paused: bool) -> int:
 		return base
 
 
-def _offer_amount(slot: dict):
+def _int_or_none(val):
+	if val is None or val == "":
+		return None
+	try:
+		return int(round(float(val)))
+	except (TypeError, ValueError):
+		return None
+
+
+def _formula_label(sc: dict) -> str:
+	kind = sc.get("kind") or "cash"
+	pct = sc.get("pct")
+	pct_s = ""
+	if pct not in (None, ""):
+		try:
+			pct_s = f" · {int(round(float(pct) * 100))}%"
+		except (TypeError, ValueError):
+			pct_s = ""
+	if kind == "novation":
+		return f"Novation{pct_s}"
+	mult = 2 if int(_int_or_none(sc.get("mult")) or 1) == 2 else 1
+	name = "2× repairs" if mult == 2 else "Classic"
+	return f"{name}{pct_s}"
+
+
+def _offer_calcs(slot: dict) -> list:
+	"""ARV / repairs / offer / formula for every saved scene on this house."""
 	off = slot.get("offer") if isinstance(slot.get("offer"), dict) else None
 	if not off:
-		return None
-	scenes = off.get("scenarios") or []
-	if scenes and isinstance(scenes[0], dict) and scenes[0].get("offer") is not None:
-		try:
-			return int(round(float(scenes[0]["offer"])))
-		except (TypeError, ValueError):
-			return None
-	return None
+		return []
+	out = []
+	for sc in off.get("scenarios") or []:
+		if not isinstance(sc, dict):
+			continue
+		kind = sc.get("kind") or off.get("kind") or "cash"
+		if kind != "novation":
+			kind = "cash"
+		row = {
+			"kind": kind,
+			"arv": _int_or_none(sc.get("arv")),
+			"repairs": None if kind == "novation" else _int_or_none(sc.get("repairs")),
+			"offer": _int_or_none(sc.get("offer")),
+			"formula": _formula_label({**sc, "kind": kind}),
+		}
+		if row["arv"] is None and row["offer"] is None:
+			continue
+		out.append(row)
+	return out
+
+
+def _offer_amount(slot: dict):
+	calcs = _offer_calcs(slot)
+	return calcs[0]["offer"] if calcs else None
 
 
 def _results(att) -> dict:
@@ -424,6 +470,7 @@ def _shape_attempt(att, properties: list[dict] | None = None) -> dict:
 				"hidden_count": len(slot.get("hidden") or []),
 				"has_offer": bool(slot.get("offer")),
 				"offer": _offer_amount(slot),
+				"calcs": _offer_calcs(slot),
 				"recording_url": slot.get("recording_url") or "",
 				"condition": slot.get("condition") or "",
 			}
@@ -1133,6 +1180,150 @@ def finish_recording(attempt: str, property: str) -> dict:
 	slot["recording_url"] = file_url
 	_write_results(att, results)
 	return {"ok": True, "url": file_url, "property": prop.name}
+
+
+# ---------------------------------------------------------------------------------
+# Recording reactions (Loom-style emoji + comments at a timestamp)
+# ---------------------------------------------------------------------------------
+def _parse_reaction_content(raw) -> dict | None:
+	text = (raw or "").strip()
+	if not text:
+		return None
+	if "<" in text:
+		i, j = text.find("{"), text.rfind("}")
+		if i < 0 or j <= i:
+			return None
+		text = text[i : j + 1]
+	try:
+		data = json.loads(text)
+	except Exception:
+		return None
+	if not isinstance(data, dict) or data.get("v") != _REACTION_V:
+		return None
+	return data
+
+
+def _reaction_row(doc, data: dict, mine: str) -> dict:
+	author = doc.comment_email or doc.owner
+	return {
+		"name": doc.name,
+		"at_time": flt(data.get("at_time")),
+		"emoji": (data.get("emoji") or "").strip(),
+		"content": (data.get("text") or "").strip(),
+		"author": author,
+		"author_name": get_fullname(author) if author else "",
+		"creation": str(doc.creation),
+		"mine": author == mine,
+	}
+
+
+def _publish_reaction(attempt: str, property: str) -> None:
+	frappe.publish_realtime(
+		"crm_practice_reaction",
+		{"attempt": attempt, "property": property},
+		after_commit=True,
+	)
+
+
+@frappe.whitelist()
+def get_recording_reactions(attempt: str, property: str) -> list:
+	"""Timestamped emoji + comments on this house's take, oldest moment first."""
+	_need()
+	att = _get_attempt(attempt, write=False)
+	prop = _get_prop(property)
+	if prop.practice_set != att.practice_set:
+		frappe.throw(_("That property is not in this set."))
+	rows = frappe.get_all(
+		"Comment",
+		filters={
+			"reference_doctype": ATTEMPT,
+			"reference_name": att.name,
+			"comment_type": "Comment",
+		},
+		fields=["name", "content", "owner", "comment_email", "creation"],
+		order_by="creation asc",
+		limit_page_length=_MAX_REACTIONS,
+	)
+	mine = frappe.session.user
+	out = []
+	for r in rows:
+		data = _parse_reaction_content(r.content)
+		if not data or data.get("property") != prop.name:
+			continue
+		out.append(_reaction_row(frappe._dict(r), data, mine))
+	out.sort(key=lambda x: (x["at_time"], x["creation"]))
+	return out
+
+
+@frappe.whitelist()
+def add_recording_reaction(
+	attempt: str,
+	property: str,
+	at_time=None,
+	emoji: str = "",
+	content: str = "",
+) -> dict:
+	"""Drop an emoji or a comment at `at_time` seconds. Anyone who can watch can react."""
+	_need()
+	att = _get_attempt(attempt, write=False)
+	prop = _get_prop(property)
+	if prop.practice_set != att.practice_set:
+		frappe.throw(_("That property is not in this set."))
+	emoji = (emoji or "").strip()
+	text = (content or "").strip()
+	if emoji and (len(emoji) > 16 or "<" in emoji or "\n" in emoji):
+		frappe.throw(_("Invalid reaction."))
+	if text:
+		text = text[:_MAX_REACTION_TEXT]
+	if not emoji and not text:
+		frappe.throw(_("Add an emoji or a comment."))
+	existing = get_recording_reactions(att.name, prop.name)
+	if len(existing) >= _MAX_REACTIONS:
+		frappe.throw(_("Too many reactions on this recording."))
+	payload = {
+		"v": _REACTION_V,
+		"property": prop.name,
+		"at_time": max(0.0, flt(at_time)),
+		"emoji": emoji,
+		"text": text,
+	}
+	doc = frappe.get_doc(
+		{
+			"doctype": "Comment",
+			"comment_type": "Comment",
+			"reference_doctype": ATTEMPT,
+			"reference_name": att.name,
+			"content": _dump(payload),
+			"comment_email": frappe.session.user,
+			"comment_by": get_fullname(frappe.session.user),
+		}
+	)
+	doc.flags.skip_mention_notification = True
+	doc.insert(ignore_permissions=True)
+	_publish_reaction(att.name, prop.name)
+	return _reaction_row(doc, payload, frappe.session.user)
+
+
+@frappe.whitelist()
+def delete_recording_reaction(name: str) -> dict:
+	"""Delete your own reaction, or any if you're a manager."""
+	_need()
+	if not frappe.db.exists("Comment", name):
+		frappe.throw(_("Reaction not found."), frappe.DoesNotExistError)
+	doc = frappe.get_doc("Comment", name)
+	data = _parse_reaction_content(doc.content)
+	if not data or doc.reference_doctype != ATTEMPT:
+		frappe.throw(_("Reaction not found."), frappe.DoesNotExistError)
+	author = doc.comment_email or doc.owner
+	if author != frappe.session.user and not _is_manager():
+		frappe.throw(_("You can only delete your own reactions."), frappe.PermissionError)
+	# Confirm the viewer can still see this take.
+	_get_attempt(doc.reference_name, write=False)
+	attempt = doc.reference_name
+	prop = data.get("property") or ""
+	doc.delete(ignore_permissions=True)
+	_publish_reaction(attempt, prop)
+	return {"deleted": name}
 
 
 # ---------------------------------------------------------------------------------

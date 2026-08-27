@@ -196,9 +196,9 @@
                       <button
                         v-if="p.recording_url"
                         class="ml-2 font-medium text-red-600 hover:underline"
-                        @click.stop="playing = playing === playKey(a, p) ? '' : playKey(a, p)"
+                        @click.stop="openPlayer(a, p)"
                       >
-                        {{ playing === playKey(a, p) ? __('Hide') : __('Play') }}
+                        {{ __('Play') }}
                       </button>
                     </span>
                   </div>
@@ -208,23 +208,113 @@
                   >
                     {{ p.condition }}
                   </div>
-                  <video
-                    v-if="playing === playKey(a, p)"
-                    class="mt-1 aspect-video w-full max-w-xl bg-black"
-                    controls
-                    autoplay
-                    playsinline
-                    preload="auto"
-                    :src="streamUrl(a, p)"
-                    @click.stop
-                    @loadeddata="(e) => e.target.play?.().catch(() => {})"
-                  />
                 </div>
               </td>
             </tr>
           </template>
         </tbody>
       </table>
+    </div>
+
+    <div v-if="comparePeople.length" class="mt-8 max-w-4xl">
+      <h2 class="mb-2 text-base font-medium text-ink-gray-8">{{ __('Summary') }}</h2>
+      <div
+        v-for="p in comparePeople"
+        :key="p.attempt"
+        class="mb-5"
+      >
+        <div class="mb-1 text-sm font-medium text-ink-gray-8">{{ p.user }}</div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-sm">
+            <thead class="text-xs text-ink-gray-5">
+              <tr>
+                <th class="py-1 pr-3 font-medium">{{ __('House') }}</th>
+                <th class="py-1 pr-3 font-medium">{{ __('ARV') }}</th>
+                <th class="py-1 pr-3 font-medium">{{ __('Repair') }}</th>
+                <th class="py-1 pr-3 font-medium">{{ __('Offer') }}</th>
+                <th class="py-1 font-medium">{{ __('Formula') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template v-for="h in p.rows" :key="h.name">
+                <tr
+                  v-if="!h.calcs.length"
+                  class="border-t border-outline-gray-1"
+                >
+                  <td class="py-1.5 pr-3 text-ink-gray-7">{{ h.address }}</td>
+                  <td colspan="4" class="py-1.5 text-ink-gray-4">—</td>
+                </tr>
+                <tr
+                  v-for="(c, i) in h.calcs"
+                  :key="h.name + ':' + i"
+                  class="border-t border-outline-gray-1"
+                >
+                  <td class="min-w-0 py-1.5 pr-3 text-ink-gray-7">
+                    {{ i === 0 ? h.address : '' }}
+                  </td>
+                  <td class="py-1.5 pr-3 tabular-nums text-ink-gray-8">{{ money(c.arv) }}</td>
+                  <td class="py-1.5 pr-3 tabular-nums text-ink-gray-8">{{ money(c.repairs) }}</td>
+                  <td class="py-1.5 pr-3 tabular-nums font-medium text-ink-gray-8">{{ money(c.offer) }}</td>
+                  <td class="py-1.5 text-ink-gray-6">{{ c.formula }}</td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="compareHouses.length" class="mt-8 max-w-4xl">
+      <h2 class="mb-2 text-base font-medium text-ink-gray-8">{{ __('By house') }}</h2>
+      <div
+        v-for="h in compareHouses"
+        :key="h.name"
+        class="mb-5"
+      >
+        <div class="mb-1 flex items-baseline gap-2 text-sm">
+          <span class="font-medium text-ink-gray-8">{{ h.address }}</span>
+          <span v-if="h.spread" class="text-xs text-ink-gray-5">
+            {{ __('offer spread {0}', [money(h.spread)]) }}
+          </span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-sm">
+            <thead class="text-xs text-ink-gray-5">
+              <tr>
+                <th class="py-1 pr-3 font-medium">{{ __('Who') }}</th>
+                <th class="py-1 pr-3 font-medium">{{ __('ARV') }}</th>
+                <th class="py-1 pr-3 font-medium">{{ __('Repair') }}</th>
+                <th class="py-1 pr-3 font-medium">{{ __('Offer') }}</th>
+                <th class="py-1 font-medium">{{ __('Formula') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template v-for="r in h.rows" :key="r.attempt">
+                <tr
+                  v-if="!r.calcs.length"
+                  class="border-t border-outline-gray-1"
+                >
+                  <td class="py-1.5 pr-3 text-ink-gray-8">{{ r.user }}</td>
+                  <td colspan="4" class="py-1.5 text-ink-gray-4">—</td>
+                </tr>
+                <tr
+                  v-for="(c, i) in r.calcs"
+                  :key="r.attempt + ':' + i"
+                  class="border-t border-outline-gray-1"
+                >
+                  <td class="py-1.5 pr-3 text-ink-gray-8">
+                    {{ i === 0 ? r.user : '' }}
+                  </td>
+                  <td class="py-1.5 pr-3 tabular-nums text-ink-gray-8">{{ money(c.arv) }}</td>
+                  <td class="py-1.5 pr-3 tabular-nums text-ink-gray-8">{{ money(c.repairs) }}</td>
+                  <td class="py-1.5 pr-3 tabular-nums font-medium text-ink-gray-8">{{ money(c.offer) }}</td>
+                  <td class="py-1.5 text-ink-gray-6">{{ c.formula }}</td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
 
     <div v-if="canViewLog" class="mt-8 max-w-4xl">
@@ -266,6 +356,15 @@
     </div>
   </div>
 
+  <PracticePlayer
+    v-if="showPlayer"
+    v-model="showPlayer"
+    :attempt="player.attempt"
+    :property="player.property"
+    :src="player.src"
+    :title="player.title"
+  />
+
   <Dialog v-model="confirmDelete" :options="{ title: __('Delete this set?') }">
     <template #body-content>
       <div class="text-sm text-ink-gray-7">
@@ -287,6 +386,7 @@
 
 <script setup>
 import LayoutHeader from '@/components/LayoutHeader.vue'
+import PracticePlayer from '@/components/PracticePlayer.vue'
 import Autocomplete from '@/components/frappe-ui/Autocomplete.vue'
 import {
   Breadcrumbs,
@@ -315,7 +415,8 @@ const starting = ref(false)
 const deleting = ref(false)
 const confirmDelete = ref(false)
 const openRow = ref('')
-const playing = ref('')
+const showPlayer = ref(false)
+const player = ref({ attempt: '', property: '', src: '', title: '' })
 const leadOptions = ref([])
 const addKey = ref(0)
 const randomCount = ref(5)
@@ -362,6 +463,61 @@ const resumeLabel = computed(() =>
 const shownLimit = computed(
   () => Number(canManage.value ? form.time_limit_min : set.value.time_limit_min) || 0,
 )
+const compareHouses = computed(() => {
+  const runs = attempts.value || []
+  const houses = properties.value || []
+  return houses
+    .map((h) => {
+      const rows = runs.map((a) => {
+        const p = (a.properties || []).find((x) => x.name === h.name)
+        return {
+          user: a.user_name,
+          attempt: a.name,
+          calcs: p?.calcs || [],
+        }
+      })
+      const offers = rows.flatMap((r) =>
+        r.calcs.map((c) => c.offer).filter((n) => n != null),
+      )
+      const spread =
+        offers.length >= 2 ? Math.max(...offers) - Math.min(...offers) : 0
+      return {
+        name: h.name,
+        address: h.property_address,
+        rows,
+        spread,
+        priced: rows.some((r) => r.calcs.length),
+      }
+    })
+    .filter((h) => h.priced)
+})
+const comparePeople = computed(() => {
+  const runs = attempts.value || []
+  const houses = properties.value || []
+  return runs
+    .map((a) => {
+      const rows = houses.map((h) => {
+        const p = (a.properties || []).find((x) => x.name === h.name)
+        return {
+          name: h.name,
+          address: h.property_address,
+          calcs: p?.calcs || [],
+        }
+      })
+      return {
+        user: a.user_name,
+        attempt: a.name,
+        rows,
+        priced: rows.some((r) => r.calcs.length),
+      }
+    })
+    .filter((p) => p.priced)
+})
+
+function money(n) {
+  if (n == null || n === '') return '—'
+  return '$' + Number(n).toLocaleString()
+}
 
 function fmtDuration(sec) {
   sec = Math.max(0, Math.floor(Number(sec) || 0))
@@ -372,16 +528,21 @@ function fmtDuration(sec) {
 
 function toggleRow(name) {
   openRow.value = openRow.value === name ? '' : name
-  if (openRow.value !== name) playing.value = ''
-}
-
-function playKey(a, p) {
-  return `${a.name}:${p.name}`
 }
 
 function streamUrl(a, p) {
   const q = new URLSearchParams({ attempt: a.name, property: p.name })
   return `/api/method/crm.api.practice.stream_recording?${q}`
+}
+
+function openPlayer(a, p) {
+  player.value = {
+    attempt: a.name,
+    property: p.name,
+    src: streamUrl(a, p),
+    title: `${a.user_name} · ${p.property_address}`,
+  }
+  showPlayer.value = true
 }
 
 function openRun(a) {

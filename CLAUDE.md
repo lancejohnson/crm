@@ -34,11 +34,16 @@ duplicating. Work substantial features in a worktree of your own.
   comps map** as a live lead; hides / picks / the offer calc write to **their
   attempt**, never to `CRM Lead.comps_hidden` / `comps_selected` or the timeline.
   Times and recordings are team-visible on submitted runs (in-progress stays
-  private). Optional **screen + mic** on Start (`practiceRecorder.js`): Chrome
+  private). **Summary** on the set page lists each person's ARV / repair / offer /
+  formula across the whole set; **By house** pivots the same numbers for a
+  side-by-side compare. Optional **screen + mic** on Start (`practiceRecorder.js`): Chrome
   is asked for **this tab** (`preferCurrentTab` + `selfBrowserSurface: include`);
   chunks upload as they arrive so a 30-minute take never hits nginx's 50m body
   limit; playback is `stream_recording` (private File URLs 403 in `<video>`).
-  Delete-set is still manager-only. Doctypes: ops `setup_practice.py`. App:
+  Play opens a modal player (`PracticePlayer.vue`) with speed, fullscreen, a
+  comments thread, and Loom-style timestamped emoji + comments (Space play,
+  ←/→ skip, [ ] speed, C comment, F full). Stored as `Comment` rows on the
+  attempt so a reviewer can react without writing the runner's results. Delete-set is still manager-only. Doctypes: ops `setup_practice.py`. App:
   `crm/api/practice.py` + `pages/Practice.vue` / `PracticeSet.vue` /
   `PracticeRun.vue`. CompsView and CompOfferCalc take optional `practiceAttempt`
   / `practiceProperty` to redirect writes. Underwriting is off in practice (that
