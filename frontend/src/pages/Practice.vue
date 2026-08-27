@@ -24,35 +24,37 @@
       {{ __('Practice is not set up on this site yet.') }}
     </div>
 
-    <div
-      v-else-if="sets.length"
-      class="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3"
-    >
+    <div v-else-if="sets.length" class="mt-4">
+      <div class="flex border-b border-outline-gray-1 py-1.5 text-xs font-medium text-ink-gray-5">
+        <span class="min-w-0 flex-1">{{ __('Set') }}</span>
+        <span class="w-28 shrink-0">{{ __('Properties') }}</span>
+        <span class="w-24 shrink-0">{{ __('Time') }}</span>
+        <span class="w-44 shrink-0">{{ __('Last run') }}</span>
+      </div>
       <button
         v-for="s in sets"
         :key="s.name"
-        class="flex flex-col gap-2 rounded-lg border border-outline-gray-1 bg-surface-white px-4 py-3 text-left shadow-sm hover:bg-surface-gray-1"
+        class="flex w-full items-center border-b border-outline-gray-1 py-2.5 text-left text-sm hover:bg-surface-gray-1"
         @click="$router.push({ name: 'PracticeSet', params: { setId: s.name } })"
       >
-        <div class="flex items-start justify-between gap-2">
-          <div class="truncate font-medium text-ink-gray-9">{{ s.title }}</div>
+        <span class="flex min-w-0 flex-1 items-center gap-2 truncate font-medium text-ink-gray-9">
+          {{ s.title }}
           <Badge
             v-if="!s.is_active"
             :label="__('Paused')"
             variant="subtle"
             theme="gray"
           />
-        </div>
-        <div class="text-sm text-ink-gray-5">
-          {{ __('{0} {1}', [s.property_count, s.property_count === 1 ? __('property') : __('properties')]) }}
-          <template v-if="s.time_limit_min">
-            · {{ __('{0} min', [s.time_limit_min]) }}
-          </template>
-          <template v-else> · {{ __('Untimed') }}</template>
-        </div>
-        <div v-if="s.my_attempt" class="text-xs text-ink-gray-5">
-          {{ lastLabel(s.my_attempt) }}
-        </div>
+        </span>
+        <span class="w-28 shrink-0 text-ink-gray-6">
+          {{ s.property_count }}
+        </span>
+        <span class="w-24 shrink-0 text-ink-gray-6">
+          {{ s.time_limit_min ? __('{0} min', [s.time_limit_min]) : __('Untimed') }}
+        </span>
+        <span class="w-44 shrink-0 text-ink-gray-5">
+          {{ s.my_attempt ? lastLabel(s.my_attempt) : '—' }}
+        </span>
       </button>
     </div>
 
