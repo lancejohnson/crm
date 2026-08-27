@@ -325,12 +325,28 @@ def _call_events(people, number_users, start, end):
 	return unattributed
 
 
-def _text_events(people, start, end):
+def _text_events(people, start, end, number_users=None):
+	"""Human-sent outbound texts, attributed by the LINE they went out on.
+
+	`sent_by` is NOT reliable for a text sent from the OpenPhone app: the webhook
+	resolves Quo's `userId`, which comes back as the workspace OWNER rather than
+	the person who typed the message. Measured over the full history: 309 texts
+	were credited to Lance that went out on German's (187) and Exe's (122) lines,
+	and there were zero mismatches in the other direction. Every CRM-sent
+	(`Manual`) and sequence text agrees with the line owner, so the line is right
+	in all 649 verifiable cases and wrong in none.
+
+	This is the same shape as the inbound-call `userId` trap: Quo's idea of "who"
+	is the account, not the human. `sent_by` survives only as a fallback for a
+	shared line that belongs to nobody (the Backup Number), where it is the only
+	signal available.
+	"""
 	if not frappe.db.exists("DocType", "Quo Message"):
 		return 0, False
 	meta = frappe.get_meta("Quo Message")
 	has_sender = meta.has_field("sent_by")
 	has_source = meta.has_field("activity_source")
+	line_users = {_digits(number): user for number, user in (number_users or {}).items()}
 	fields = ["owner", "from", "message_date"]
 	if has_sender:
 		fields.append("sent_by")
@@ -349,7 +365,9 @@ def _text_events(people, start, end):
 		# A sequence step is real outreach but nobody *did* it — never credit a rep.
 		if has_source and row.get("activity_source") == "Sequence":
 			continue
-		user = row.get("sent_by") if has_sender else None
+		user = line_users.get(_digits(row.get("from")))
+		if not user and has_sender:
+			user = row.get("sent_by")
 		if not user and row.owner in people:
 			user = row.owner
 		if not _event(people, user, "text", row.message_date):
@@ -458,7 +476,9 @@ def get_activity_progress(for_date=None):
 
 	unattributed = defaultdict(int)
 	unattributed["calls"] = _call_events(people, number_users, start, end)
-	unattributed["texts"], exact_text_attribution = _text_events(people, start, end)
+	unattributed["texts"], exact_text_attribution = _text_events(
+		people, start, end, number_users
+	)
 	unattributed["cards"], board, board_leads = _today_cards(people, day)
 	unattributed["tasks"] = _task_events(people, start, end, board_leads)
 

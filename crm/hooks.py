@@ -404,6 +404,12 @@ scheduler_events = {
 		# so the working hours live in one readable place instead of three cron
 		# expressions. Also needs `sync_jobs` on prod before it will ever fire.
 		"*/30 9-17 * * 1-5": ["crm.api.today_pulse.send_today_pulse"],
+		# End-of-day outreach report for the whole team, posted to the Acq channel
+		# at 7:30am CENTRAL covering the PREVIOUS business day — so lead statuses
+		# read "as of this morning" and the day it describes is finished. Same
+		# SITE-timezone rule as the two jobs above, and it likewise needs
+		# `sync_jobs` on prod before it will ever fire.
+		"30 7 * * 1-5": ["crm.api.daily_outreach.send_daily_outreach"],
 	},
 }
 
