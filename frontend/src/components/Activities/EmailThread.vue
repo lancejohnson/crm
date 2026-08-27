@@ -72,7 +72,7 @@ function isOpen(i) {
 
 function toggle(i) {
   const next = new Set(open.value)
-  if (next.has(i) && i !== ordered.value.length - 1) next.delete(i)
+  if (next.has(i)) next.delete(i)
   else next.add(i)
   open.value = next
 }

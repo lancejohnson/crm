@@ -207,7 +207,7 @@
       </div>
       <template v-else>
         <template
-          v-for="(activity, i) in activities"
+          v-for="(activity, i) in feedItems"
           :key="activity.name"
         >
           <div
@@ -234,7 +234,7 @@
             v-if="['Activity', 'Emails', 'Comments'].includes(title)"
             class="z-0 relative flex justify-center before:absolute before:left-[50%] before:-z-[1] before:top-0 before:border-l before:border-outline-gray-modals"
             :class="[
-              i != activities.length - 1 ? 'before:h-full' : 'before:h-4',
+              i != feedItems.length - 1 ? 'before:h-full' : 'before:h-4',
             ]"
           >
             <div
@@ -244,7 +244,13 @@
             </div>
           </div>
           <div
-            v-if="activity.activity_type == 'communication'"
+            v-if="activity.activity_type == 'email_thread'"
+            class="pb-5 mt-px"
+          >
+            <EmailThread :messages="activity.messages" />
+          </div>
+          <div
+            v-else-if="activity.activity_type == 'communication'"
             class="pb-5 mt-px"
           >
             <EmailArea :activity="activity" :emailBox="emailBox" />
@@ -1151,6 +1157,10 @@ function railProps(activity) {
       type: t,
     }
   if (t == 'communication') return { user: activity.data?.sender, type: t }
+  if (t == 'email_thread') {
+    const last = activity.messages?.[0]
+    return { user: last?.data?.sender, type: 'communication' }
+  }
   if (t == 'task') return { user: activity.task?.assigned_to, type: t }
   if (t == 'tax_pull') return { user: activity.pull?.pulled_by, type: t }
   if (t == 'agreement') return { user: activity.agreement?.owner, type: t }
@@ -1163,8 +1173,10 @@ function railProps(activity) {
 // group by calendar day and let each row carry just a clock time
 function isNewDay(i) {
   if (i == 0) return true
+  const list =
+    title.value === 'Activity' ? feedItems.value : activities.value
   const day = (a) => dayjs(a.creation).format('YYYY-MM-DD')
-  return day(activities.value[i]) != day(activities.value[i - 1])
+  return day(list[i]) != day(list[i - 1])
 }
 
 function dayLabel(date) {
@@ -1325,6 +1337,30 @@ const activities = computed(() => {
   // their own chat resources and keep chat's oldest-at-top convention, where the
   // newest message belongs at the bottom next to the composer.
   return sortByCreation(_activities).reverse()
+})
+
+const feedItems = computed(() => {
+  const list = activities.value || []
+  if (title.value !== 'Activity') return list
+  const out = []
+  for (const a of list) {
+    if (a.activity_type === 'communication') {
+      const last = out[out.length - 1]
+      if (last?.activity_type === 'email_thread') {
+        last.messages.push(a)
+        continue
+      }
+      out.push({
+        activity_type: 'email_thread',
+        name: 'thread-' + a.name,
+        creation: a.creation,
+        messages: [a],
+      })
+    } else {
+      out.push(a)
+    }
+  }
+  return out
 })
 
 function sortByCreation(list) {
