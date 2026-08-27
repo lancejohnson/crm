@@ -94,6 +94,11 @@ import {
   activeDetailPanel,
   showSettings,
 } from '@/composables/settings'
+import {
+  compsFocusMap,
+  compsViewCount,
+  toggleCompsFocusMap,
+} from '@/composables/compsLayout'
 import { getSettings } from '@/stores/settings'
 import { createResource, FeatherIcon, LoadingIndicator } from 'frappe-ui'
 import { useDebounceFn } from '@vueuse/core'
@@ -154,6 +159,16 @@ const actionCommands = computed(() => [
     keywords: 'collapse expand sidebar record details',
     run: () => activeDetailPanel.value?.toggle(),
     disabled: () => !activeDetailPanel.value,
+  },
+  {
+    type: 'command',
+    key: 'act:comps-full-map',
+    label: compsFocusMap.value ? __('Show comps list') : __('Full map'),
+    meta: 'F',
+    group: __('Actions'),
+    keywords: 'comps collapse tray calculator offer list properties fullscreen map',
+    run: () => toggleCompsFocusMap(),
+    disabled: () => compsViewCount.value === 0,
   },
   {
     type: 'command',

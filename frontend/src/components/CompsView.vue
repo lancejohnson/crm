@@ -22,7 +22,7 @@
        Open by default, because it is the thing you do WITH the comps and hiding
        it would be deciding for the rep. The choice is remembered per user, like
        Details and Parcels, so folding it once is enough. -->
-  <template v-if="pageMode">
+  <template v-if="pageMode && !compsFocusMap">
     <div v-if="!calcOpen" class="flex items-center justify-between gap-2">
       <button
         class="flex items-center gap-1.5 rounded-md border border-outline-gray-2 bg-surface-gray-1 px-2.5 py-1 text-xs font-medium text-ink-gray-7 hover:bg-surface-gray-2"
@@ -145,6 +145,22 @@
               <FormControl type="checkbox" size="sm" v-model="showStreet" />
               {{ __('Street') }}
             </label>
+
+            <!-- Hide the tray + calculator so the map takes the page. The
+                 two are one toggle on purpose: collapsing only the list still
+                 leaves the calc sitting on 358px of map. -->
+            <Button
+              v-if="pageMode || wide"
+              :label="compsFocusMap ? __('Show list') : __('Full map')"
+              :variant="compsFocusMap ? 'subtle' : 'ghost'"
+              :title="
+                (compsFocusMap
+                  ? __('Show the property list and offer calculator')
+                  : __('Hide the list and calculator so the map fills the page')) +
+                ' (F)'
+              "
+              @click="toggleCompsFocusMap"
+            />
 
             <!-- In `fill` mode ONLY, the filter card folds away behind this.
                  Filters are deliberately always visible on the comps page (they
@@ -348,14 +364,39 @@
             :class="wide ? 'h-full min-h-0 flex-1' : 'min-h-0 flex-1'"
           >
             <div ref="mapEl" class="size-full" />
+            <!-- Street View chrome lives ABOVE the iframe, never over it.
+                 Google's embed already has an address chip, fullscreen,
+                 zoom, compass and legal bar — our Close / label used to
+                 paint on top of those. A slim bar takes ~28px from the
+                 panorama and leaves every native control clickable. -->
             <div
               v-if="showStreet"
-              class="absolute inset-0 z-[1100] bg-surface-gray-1"
+              class="absolute inset-0 z-[1100] flex flex-col bg-surface-gray-1"
             >
+              <div
+                class="flex shrink-0 items-center gap-2 border-b border-outline-gray-2 bg-surface-white px-2 py-1"
+              >
+                <span class="min-w-0 flex-1 truncate text-xs text-ink-gray-7">
+                  {{ streetViewPoint?.label || __('Street View') }}
+                </span>
+                <span
+                  v-if="streetViewMsg"
+                  class="shrink-0 text-xs text-ink-gray-5"
+                >
+                  {{ streetViewMsg }}
+                </span>
+                <button
+                  type="button"
+                  class="shrink-0 rounded bg-surface-gray-2 px-2 py-0.5 text-xs font-medium text-ink-gray-8 hover:bg-surface-gray-3"
+                  @click="showStreet = false"
+                >
+                  {{ __('Close Street') }}
+                </button>
+              </div>
               <iframe
                 v-if="streetViewSrc"
                 :src="streetViewSrc"
-                class="size-full border-0"
+                class="min-h-0 w-full flex-1 border-0"
                 referrerpolicy="origin"
                 allowfullscreen
                 loading="eager"
@@ -363,21 +404,8 @@
                 @load="onStreetViewLoad"
               />
               <div
-                v-if="streetViewPoint?.label"
-                class="pointer-events-none absolute left-2 top-2 z-10 max-w-[70%] truncate rounded bg-black/60 px-2 py-0.5 text-xs text-white"
-              >
-                {{ streetViewPoint.label }}
-              </div>
-              <button
-                type="button"
-                class="absolute right-2 top-2 z-10 rounded bg-white/95 px-2 py-1 text-xs font-medium text-ink-gray-8 shadow-sm"
-                @click="showStreet = false"
-              >
-                {{ __('Close Street') }}
-              </button>
-              <div
-                v-if="streetViewMsg"
-                class="pointer-events-none absolute inset-0 flex items-center justify-center bg-surface-gray-1/80 px-4 text-center text-sm text-ink-gray-6"
+                v-else-if="streetViewMsg"
+                class="flex min-h-0 flex-1 items-center justify-center px-4 text-center text-sm text-ink-gray-6"
               >
                 {{ streetViewMsg }}
               </div>
@@ -397,7 +425,7 @@
                away, and tapping a pin already opens the photo/detail modal —
                that is the inspect surface. Desktop keeps the rail. -->
           <aside
-            v-if="wide && (comps.length || discarded.length)"
+            v-if="wide && !compsFocusMap && (comps.length || discarded.length)"
             class="flex h-full min-h-0 w-[330px] shrink-0 flex-col overflow-hidden rounded-lg border border-outline-gray-2"
           >
             <div
@@ -406,7 +434,17 @@
               <span class="text-sm font-medium text-ink-gray-8">
                 {{ __('{0} properties', [comps.length]) }}
               </span>
-              <span class="text-xs text-ink-gray-5">{{ __('Nearest first') }}</span>
+              <div class="flex items-center gap-1">
+                <span class="text-xs text-ink-gray-5">{{ __('Nearest first') }}</span>
+                <button
+                  type="button"
+                  class="rounded p-0.5 text-ink-gray-5 hover:bg-surface-gray-2 hover:text-ink-gray-8"
+                  :title="__('Hide the list and calculator so the map fills the page') + ' (F)'"
+                  @click="toggleCompsFocusMap"
+                >
+                  <FeatherIcon name="chevron-right" class="size-4" />
+                </button>
+              </div>
             </div>
 
             <!-- Marked so each card can find the box it scrolls inside and use
@@ -507,7 +545,7 @@
             <template v-if="wide">
               ·
               <b>D</b> {{ __('details') }} · <b>P</b> {{ __('parcels') }} ·
-              <b>S</b> {{ __('street') }} ·
+              <b>S</b> {{ __('street') }} · <b>F</b> {{ __('full map') }} ·
               <b>U</b> {{ __('use') }} · <b>H</b> {{ __('hide') }}
             </template>
           </span>
@@ -563,6 +601,11 @@ import CompOfferCalc from '@/components/CompOfferCalc.vue'
 import ZillowAddressMatch from '@/components/ZillowAddressMatch.vue'
 import FilterIcon from '@/components/Icons/FilterIcon.vue'
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
+import {
+  compsFocusMap,
+  compsViewCount,
+  toggleCompsFocusMap,
+} from '@/composables/compsLayout'
 import { streetViewEmbedUrl } from '@/utils/streetView'
 
 const props = defineProps({
@@ -1027,6 +1070,8 @@ const calcOpen = computed({
     nextTick(() => map && map.invalidateSize())
   },
 })
+
+watch(compsFocusMap, () => nextTick(() => map && map.invalidateSize()))
 
 // Whether pills carry beds/baths/sqft/year, or collapse to the bare price.
 // Persisted per user like dispoView / activityScope — it is a view preference,
@@ -2611,8 +2656,18 @@ useKeyboardShortcuts({
     { keys: ['d', 'D'], action: () => (showDetail.value = !showDetail.value) },
     { keys: ['p', 'P'], action: () => (showParcels.value = !showParcels.value) },
     { keys: ['s', 'S'], action: () => (showStreet.value = !showStreet.value) },
+    // Hide tray + calculator together. `C` still folds only the calc.
+    { keys: ['f', 'F'], action: () => toggleCompsFocusMap() },
     // Only where the calculator exists, so `c` stays free elsewhere.
-    { keys: ['c', 'C'], action: () => props.pageMode && (calcOpen.value = !calcOpen.value) },
+    // No-op in full-map: the calc is not on screen, and flipping the pref
+    // behind the overlay would surprise on the way back out.
+    {
+      keys: ['c', 'C'],
+      action: () =>
+        props.pageMode &&
+        !compsFocusMap.value &&
+        (calcOpen.value = !calcOpen.value),
+    },
     // Only where the layer is offered, so `n` stays free on the comps page.
     { keys: ['n', 'N'], action: () => props.neighborhood && toggleHood() },
     {
@@ -2626,6 +2681,7 @@ useKeyboardShortcuts({
 // If this ever mounts with `show` already true (a v-if host, or a hot reload),
 // the watcher above never fires and the map would sit empty claiming "no comps".
 onMounted(() => {
+  compsViewCount.value += 1
   if (rootEl.value) {
     rootObserver = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect?.width || 0
@@ -2643,6 +2699,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  compsViewCount.value = Math.max(0, compsViewCount.value - 1)
   if (streetViewTimer) {
     clearTimeout(streetViewTimer)
     streetViewTimer = null
