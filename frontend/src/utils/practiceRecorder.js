@@ -6,14 +6,20 @@
  * same mix — no second permission prompt when they move to the next one.
  *
  * Chunks upload as they arrive so a take never becomes one POST past nginx's
- * 50 MB body limit. Bitrate is speech-over-a-map: ~160 kbps video + 48 kbps
- * mic ≈ 5 MB for a 3-minute house, ~45 MB if they sit on one for 30 minutes.
+ * 50 MB body limit. Loom-ish talking-over-a-map: ~1.6 Mbps video + 128 kbps
+ * mic. 160 kbps dropped frames so the picture lagged the voice. Cap 15 fps so
+ * VP8 can keep up. 30 min ≈ 360 MB, under MAX_RECORDING_BYTES.
  */
 const TYPES = [
   'video/webm;codecs=vp8,opus',
   'video/webm;codecs=vp9,opus',
   'video/webm',
 ]
+const VIDEO = {
+  frameRate: { ideal: 15, max: 24 },
+  width: { max: 1920 },
+  height: { max: 1080 },
+}
 
 let mime = ''
 let mixed = null
@@ -89,7 +95,7 @@ export async function startPracticeRecording() {
   let display
   try {
     display = await navigator.mediaDevices.getDisplayMedia({
-      video: true,
+      video: VIDEO,
       audio: false,
       preferCurrentTab: true,
       selfBrowserSurface: 'include',
@@ -97,7 +103,7 @@ export async function startPracticeRecording() {
   } catch (e) {
     if (e?.name === 'NotAllowedError') throw e
     display = await navigator.mediaDevices.getDisplayMedia({
-      video: true,
+      video: VIDEO,
       audio: false,
     })
   }
@@ -110,7 +116,11 @@ export async function startPracticeRecording() {
   let mic
   try {
     mic = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true },
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
     })
   } catch (e) {
     display.getTracks().forEach((t) => t.stop())
@@ -118,6 +128,14 @@ export async function startPracticeRecording() {
     throw e
   }
   streams = [display, mic]
+  const vTrack = display.getVideoTracks()[0]
+  if (vTrack) {
+    try {
+      vTrack.contentHint = 'motion'
+    } catch {
+      /* ignore */
+    }
+  }
   mixed = new MediaStream([
     ...display.getVideoTracks(),
     ...mic.getAudioTracks(),
@@ -142,8 +160,8 @@ export async function beginPropertyRecording(property) {
   propertyId = property
   recorder = new MediaRecorder(mixed, {
     mimeType: mime || undefined,
-    videoBitsPerSecond: 160_000,
-    audioBitsPerSecond: 48_000,
+    videoBitsPerSecond: 1_600_000,
+    audioBitsPerSecond: 128_000,
   })
   recorder.ondataavailable = (e) => {
     if (e.data?.size) {

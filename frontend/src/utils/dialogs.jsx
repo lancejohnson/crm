@@ -4,7 +4,13 @@ import { reactive, ref } from 'vue'
 let dialogs = ref([])
 
 export function isDialogOpen() {
-  return dialogs.value.some((d) => d.show)
+  if (dialogs.value.some((d) => d.show)) return true
+  if (typeof document === 'undefined') return false
+  // frappe-ui Dialog (reka) is not registered in `dialogs` — PracticePlayer,
+  // CompDetailModal, etc. still need CRM shortcuts (D/P/S/F, [ ]) to stand down.
+  return !!document.querySelector(
+    '[role="dialog"][data-state="open"], [role="dialog"]:not([aria-hidden="true"])',
+  )
 }
 
 export let Dialogs = {

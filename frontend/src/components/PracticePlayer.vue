@@ -92,9 +92,23 @@
           </div>
         </div>
 
-        <p class="text-[11px] text-ink-gray-5">
-          {{ __('C comments at this moment · Esc close') }}
-        </p>
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-gray-5">
+          <span class="inline-flex items-center gap-1">
+            <kbd class="kbd">Space</kbd> {{ __('play') }}
+          </span>
+          <span class="inline-flex items-center gap-1">
+            <kbd class="kbd">←</kbd><kbd class="kbd">→</kbd> {{ __('5s') }}
+          </span>
+          <span class="inline-flex items-center gap-1">
+            <kbd class="kbd">C</kbd> {{ __('comment') }}
+          </span>
+          <span class="inline-flex items-center gap-1">
+            <kbd class="kbd">F</kbd> {{ __('full') }}
+          </span>
+          <span class="inline-flex items-center gap-1">
+            <kbd class="kbd">Esc</kbd> {{ __('close') }}
+          </span>
+        </div>
 
         <div
           v-if="composing"
@@ -178,7 +192,6 @@
 </template>
 
 <script setup>
-import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
 import { globalStore } from '@/stores/global'
 import { Button, Dialog, FeatherIcon, call, createResource, toast } from 'frappe-ui'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -308,6 +321,15 @@ function burst(emoji) {
   }, 1400)
 }
 
+function playPause() {
+  const v = videoEl.value
+  if (!v) return
+  if (v.paused) v.play().catch(() => {})
+  else v.pause()
+}
+function skip(sec) {
+  seek(nowTime() + sec)
+}
 function seek(t) {
   const v = videoEl.value
   if (!v) return
@@ -421,23 +443,53 @@ function onEvent(data) {
   }
 }
 
-useKeyboardShortcuts({
-  active: () => show.value,
-  skipWhenDialogOpen: false,
-  shortcuts: [
-    { keys: ['c', 'C'], action: startComment },
-  ],
-})
+function trapKeys(e) {
+  if (!show.value) return
+  const t = e.target
+  const tag = t?.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || t?.isContentEditable) return
+  // Capture on window so CRM shortcuts ([ ] sidebar, comps D/P/S/F, Cmd-K)
+  // never see the event while this modal is up.
+  e.stopImmediatePropagation()
+  const k = e.key
+  if (k === 'Escape') return
+  if (k === ' ' || k === 'k' || k === 'K') {
+    e.preventDefault()
+    playPause()
+    return
+  }
+  if (k === 'ArrowLeft') {
+    e.preventDefault()
+    skip(-5)
+    return
+  }
+  if (k === 'ArrowRight') {
+    e.preventDefault()
+    skip(5)
+    return
+  }
+  if (k === 'c' || k === 'C') {
+    e.preventDefault()
+    startComment()
+    return
+  }
+  if (k === 'f' || k === 'F') {
+    e.preventDefault()
+    toggleFullscreen()
+  }
+}
 
 onMounted(() => {
   $socket?.on('crm_practice_reaction', onEvent)
   document.addEventListener('fullscreenchange', syncFs)
   document.addEventListener('webkitfullscreenchange', syncFs)
+  window.addEventListener('keydown', trapKeys, true)
 })
 onBeforeUnmount(() => {
   $socket?.off('crm_practice_reaction', onEvent)
   document.removeEventListener('fullscreenchange', syncFs)
   document.removeEventListener('webkitfullscreenchange', syncFs)
+  window.removeEventListener('keydown', trapKeys, true)
   if (fsEl()) {
     const exit = document.exitFullscreen || document.webkitExitFullscreen
     exit?.call(document)
@@ -456,6 +508,22 @@ watch(
 </script>
 
 <style scoped>
+.kbd {
+  display: inline-flex;
+  min-width: 1.35rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  border-radius: 4px;
+  border: 1px solid var(--outline-gray-2);
+  background: var(--surface-gray-1);
+  box-shadow: 0 1px 0 var(--outline-gray-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+  color: var(--ink-gray-7);
+}
 .practice-burst {
   animation: practice-burst 1.4s ease-out forwards;
 }

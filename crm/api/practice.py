@@ -29,6 +29,8 @@ import json
 import os
 import random
 import re
+import shutil
+import subprocess
 from typing import Any
 
 import frappe
@@ -127,6 +129,70 @@ def _dest_path(attempt: str, property: str) -> str:
 		"private", "files",
 		f"practice-{_safe_id(attempt)}-{_safe_id(property)}.webm",
 	)
+
+
+def _ensure_seekable(path: str) -> str:
+	"""MediaRecorder webm has no cues, so <video> cannot scrub. ffmpeg -c copy
+	rewrites timestamps; a sidecar marks it done so we do not pay twice."""
+	if not path or not os.path.exists(path):
+		return path
+	marker = path + ".seekable"
+	if os.path.exists(marker):
+		return path
+	ffmpeg = shutil.which("ffmpeg")
+	if not ffmpeg:
+		return path
+	tmp = path + ".tmp.webm"
+	try:
+		subprocess.run(
+			[
+				ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+				"-fflags", "+genpts", "-i", path, "-c", "copy", tmp,
+			],
+			check=True,
+			timeout=180,
+		)
+		if os.path.getsize(tmp) > 0:
+			os.replace(tmp, path)
+			open(marker, "wb").close()
+	except Exception:
+		try:
+			os.remove(tmp)
+		except OSError:
+			pass
+	return path
+
+
+def remux_attempt_recordings(attempt: str) -> None:
+	"""Background: make every house take on this run seekable. Not on the play path."""
+	if not frappe.db.exists(ATTEMPT, attempt):
+		return
+	att = frappe.get_doc(ATTEMPT, attempt)
+	for key, slot in _iter_slots(_results(att)):
+		if not (slot.get("recording_url") or "").strip():
+			continue
+		_ensure_seekable(_dest_path(att.name, key))
+
+
+def _enqueue_remux(attempt: str) -> None:
+	try:
+		frappe.enqueue(
+			"crm.api.practice.remux_attempt_recordings",
+			attempt=attempt,
+			queue="long",
+			job_id=f"practice-remux-{attempt}",
+			deduplicate=True,
+			enqueue_after_commit=True,
+		)
+	except TypeError:
+		frappe.enqueue(
+			"crm.api.practice.remux_attempt_recordings",
+			attempt=attempt,
+			queue="long",
+			enqueue_after_commit=True,
+		)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Practice remux enqueue failed")
 
 
 def _recording_url(att) -> str:
@@ -433,6 +499,7 @@ def _submit(att, *, timed_out: bool = False) -> None:
 	att.status = "Timed Out" if timed_out else "Submitted"
 	att.finished_at = now
 	att.results = _dump(results)
+	_enqueue_remux(att.name)
 
 
 def _maybe_expire(att):

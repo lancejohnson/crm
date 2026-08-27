@@ -75,6 +75,13 @@ RUN cd ${APP}/frontend \
 # by hand INSIDE a running container would silently use vite 5. Build images,
 # don't build in containers (which is the entire point of this Dockerfile).
 FROM ${BASE_IMAGE}
+# MediaRecorder webm has no cues; playback cannot scrub until ffmpeg rewrites
+# timestamps. Cached forever (this layer sits above crm/ and GIT_REV).
+USER root
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg \
+ && rm -rf /var/lib/apt/lists/*
+USER frappe
 ARG APP=/home/frappe/frappe-bench/apps/crm
 COPY --from=builder --chown=frappe:frappe ${APP}/crm/public/frontend ${APP}/crm/public/frontend
 COPY --from=builder --chown=frappe:frappe ${APP}/crm/www/crm.html ${APP}/crm/www/crm.html
