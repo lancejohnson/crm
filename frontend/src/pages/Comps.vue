@@ -13,19 +13,11 @@
     </template>
   </LayoutHeader>
 
-  <!-- The map and the tray each scroll internally, so this page normally does
-       not scroll at all -- that is what gives the tray a bounded height to
-       scroll inside.
-
-       `overflow-y-auto` rather than `hidden` is the floor under that, not a
-       change of plan. The map now claims a minimum height instead of accepting
-       whatever the calculator leaves it, and on a short window the two together
-       can exceed the viewport: measured at 899px with the calculator open, the
-       content came to 1,030px and `hidden` silently ATE the bottom 174px --
-       including the legend, with no way to reach it. The map keeps its real
-       height either way; this just means the remainder is scrollable rather
-       than gone. Same trade the lead desk already makes. -->
-  <div class="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-3 sm:px-5 sm:py-4">
+  <!-- Bounded height, always. CompsView owns scrolling: compact (phone) is
+       overflow-hidden with a flex map; wide is overflow-y-auto so a tall calc
+       cannot clip the legend. Hosts that scroll of their own (the old comps
+       page) made the phone paint a desktop form with a thumbnail map. -->
+  <div class="flex min-h-0 flex-1 flex-col overflow-hidden px-3 py-3 sm:px-5 sm:py-4">
     <CompsView v-if="leadId" :lead="leadId" :address="address" page-mode />
   </div>
 </template>

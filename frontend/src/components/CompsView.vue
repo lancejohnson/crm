@@ -9,7 +9,10 @@
   <div
     ref="rootEl"
     class="flex flex-col gap-2"
-    :class="fillHeight || !wide ? 'min-h-0 flex-1' : ''"
+    :class="[
+      fillHeight || !wide ? 'min-h-0 flex-1' : '',
+      wide ? 'overflow-y-auto' : 'overflow-hidden',
+    ]"
   >
   <!-- The calculator folds away, and that is a HEIGHT decision. Measured on the
        comps page at a 919px window: the calc is 358px and the map+tray got 342px
@@ -49,6 +52,7 @@
         :subject="data?.subject || null"
         :address="data?.address || address"
         :comps="selectedComps"
+        :compact="!wide"
         @remove="setCompState($event, 'none')"
         @open="openCompDetail"
       />
@@ -337,6 +341,7 @@
                element destroys the map. -->
           <div
             class="relative overflow-hidden rounded-lg border border-outline-gray-2 bg-surface-gray-1"
+            :data-compact="wide ? null : '1'"
             :class="wide ? 'h-full min-h-0 flex-1' : 'min-h-0 flex-1'"
           >
             <div ref="mapEl" class="size-full" />
@@ -995,15 +1000,25 @@ const userTouched = ref(false)
 let syncing = false
 let applyTimer = null
 
-// Whether the cash-offer calculator is showing. Persisted per user, like the
-// pill details and the parcels layer -- and defaulting OPEN, because it is the
-// point of having picked the comps and nobody asked for it to disappear.
-const calcOpen = ref(localStorage.getItem('compsCalcOpen') !== '0')
-watch(calcOpen, () => {
-  localStorage.setItem('compsCalcOpen', calcOpen.value ? '1' : '0')
-  // The map sizes itself, so hand it the height back in the same frame the calc
-  // leaves rather than waiting for the ResizeObserver to notice.
-  nextTick(() => map && map.invalidateSize())
+// Calculator open-state is TWO prefs: desktop defaults open, a phone defaults
+// closed so the map is the page. Sharing one key meant folding it on a phone
+// closed it on the laptop, and opening it on the laptop made the phone land
+// on a form with a thumbnail map — which is what "the comps page is nothing
+// like Today" was.
+const calcOpenDesktop = ref(localStorage.getItem('compsCalcOpen') !== '0')
+const calcOpenNarrow = ref(localStorage.getItem('compsCalcOpenNarrow') === '1')
+const calcOpen = computed({
+  get: () => (wide.value ? calcOpenDesktop.value : calcOpenNarrow.value),
+  set: (v) => {
+    if (wide.value) {
+      calcOpenDesktop.value = v
+      localStorage.setItem('compsCalcOpen', v ? '1' : '0')
+    } else {
+      calcOpenNarrow.value = v
+      localStorage.setItem('compsCalcOpenNarrow', v ? '1' : '0')
+    }
+    nextTick(() => map && map.invalidateSize())
+  },
 })
 
 // Whether pills carry beds/baths/sqft/year, or collapse to the bare price.
@@ -1256,7 +1271,12 @@ const fillHeight = computed(
  */
 const SPLIT_MIN_WIDTH = 700
 const rootEl = ref(null)
-const wide = ref(true)
+// Guess from the viewport so a phone does not paint one frame of desktop
+// layout (tray + open calc) while ResizeObserver catches up — and so a
+// background-tab open, where RO does not fire, is still compact.
+const wide = ref(
+  typeof window === 'undefined' ? true : window.innerWidth >= SPLIT_MIN_WIDTH,
+)
 let rootObserver = null
 
 // Narrow means stacked, and a stacked filter card is a full screen of controls
@@ -2677,6 +2697,11 @@ function observeMapSize() {
 }
 .comps-price-pill:hover .comps-pill-x {
   display: block;
+}
+/* Touch sticks :hover, so the add/remove chip sat on every pill you had
+   tapped. Compact (phone) inspects via the detail modal, not the chip. */
+[data-compact='1'] .comps-pill-x {
+  display: none !important;
 }
 
 /* Number boxes are sized in px (this app's rem is 20px, so w-12 is 60px and

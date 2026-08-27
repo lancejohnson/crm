@@ -9,7 +9,10 @@
   <div class="wrap">
   <div
     class="calc"
-    :style="{ width: '100%', maxWidth: cols === 2 ? '30rem' : '21rem' }"
+    :style="{
+      width: '100%',
+      maxWidth: compact ? 'none' : cols === 2 ? '30rem' : '21rem',
+    }"
     @keydown="onKeys"
   >
     <div class="head">
@@ -300,7 +303,7 @@
     />
   </div>
 
-    <table v-if="subjectRow || rows.length" class="tbl">
+    <table v-if="!compact && (subjectRow || rows.length)" class="tbl">
       <thead>
         <tr>
           <th>{{ __('Address') }}</th>
@@ -411,6 +414,9 @@ const props = defineProps({
   // truth for the columns (not localStorage) so "Tweak calcs" opens on
   // the numbers that were actually saved, not a later draft.
   seed: { type: Object, default: null },
+  // Phone: no picked-comps spreadsheet. The map is the list; tapping a pin
+  // opens the gallery. Same component as desktop so the numbers cannot drift.
+  compact: { type: Boolean, default: false },
 })
 
 // Matches OfferRail.vue's rail so the two surfaces cannot name the same
