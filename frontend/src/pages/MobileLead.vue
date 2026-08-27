@@ -50,11 +50,9 @@
         v-if="document.actions?.length"
         :actions="document.actions"
       />
-      <Button
-        :label="__('Convert')"
-        variant="solid"
-        @click="showConvertToDealModal = true"
-      />
+      <Dropdown :options="moreActions" placement="bottom-end">
+        <Button :tooltip="__('More actions')" icon="more-horizontal" />
+      </Dropdown>
     </div>
   </div>
   <div v-if="doc.name" class="flex h-full overflow-hidden">
@@ -199,6 +197,11 @@
                   :icon="CommentIcon"
                   @click="detailModals?.sendText()"
                 />
+                <Button
+                  :tooltip="__('View comps')"
+                  icon="map-pin"
+                  @click="openComps()"
+                />
               </div>
             </div>
           </div>
@@ -221,16 +224,6 @@
             :setBy="doc.first_call_by"
             :setAt="doc.first_call_at"
             @saved="document.reload()"
-          />
-          <!-- Mobile has no "More" menu (the header row is Call + Text only), so
-               comps need their own entry point here in Details or they are simply
-               unreachable on a phone. -->
-          <Button
-            v-if="doc.property_address"
-            class="w-full"
-            :label="__('View comps')"
-            icon-left="map-pin"
-            @click="openComps()"
           />
           <PhotosCard :lead="leadId" @open="showPhotoGallery = true" />
           <TaxInfoCard :lead="leadId" @fetch="detailModals?.fetchTaxInfo()" />
@@ -265,6 +258,7 @@
         </div>
         <Activities
           v-else
+          ref="activities"
           v-model:reload="reload"
           v-model:tabIndex="tabIndex"
           doctype="CRM Lead"
@@ -281,10 +275,11 @@
     :errorTitle="errorTitle"
     :errorMessage="errorMessage"
   />
-  <ConvertToDealModal
-    v-if="showConvertToDealModal"
-    v-model="showConvertToDealModal"
-    :lead="doc"
+  <FilesUploader
+    v-model="showFilesUploader"
+    doctype="CRM Lead"
+    :docname="leadId"
+    @after="afterAttach"
   />
   <DeleteLinkedDocModal
     v-if="showDeleteLinkedDocModal"
@@ -339,7 +334,7 @@ import TaxInfoCard from '@/components/TaxInfoCard.vue'
 import AgreementsCard from '@/components/AgreementsCard.vue'
 import UnderwritingCard from '@/components/UnderwritingCard.vue'
 import InvestorLiftCard from '@/components/InvestorLiftCard.vue'
-import { setupCustomizations, isTranslatable, ddExpiration, parseColor } from '@/utils'
+import { setupCustomizations, isTranslatable, ddExpiration, parseColor, openWebsite } from '@/utils'
 import { getView } from '@/utils/view'
 import { callHref, formatPhone } from '@/utils/phoneFormat'
 import { listLeadPhones, primaryLeadPhone } from '@/utils/leadPhones'
@@ -364,7 +359,8 @@ import {
 } from 'frappe-ui'
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import ConvertToDealModal from '@/components/Modals/ConvertToDealModal.vue'
+import FilesUploader from '@/components/FilesUploader/FilesUploader.vue'
+import { mapsUrl, zillowUrl } from '@/utils/propertyLinks'
 
 const { brand } = getSettings()
 const { $dialog, $socket } = globalStore()
@@ -385,7 +381,14 @@ const showDeleteLinkedDocModal = ref(false)
 // the sidebar cards, so the gallery modal is mounted here too — see Lead.vue.
 const showPhotoGallery = ref(false)
 // Same as desktop: comps is a page, opened in a new tab.
+const activities = ref(null)
+const showFilesUploader = ref(false)
+
 function openComps() {
+  if (!doc.value.property_address) {
+    toast.error(__('Set a property address to see comps'))
+    return
+  }
   const url = `/crm/leads/${props.leadId}/comps`
   // NOT window.open(url, '_blank', 'noopener'): passing `noopener` makes the
   // call return null BY SPEC, so a blocked popup and a successful one are
@@ -710,8 +713,123 @@ function deleteLead() {
   showDeleteLinkedDocModal.value = true
 }
 
-// Convert to Deal
-const showConvertToDealModal = ref(false)
+function afterAttach() {
+  const i = tabs.value.findIndex((t) => t.name === 'Attachments')
+  if (i >= 0) tabIndex.value = i
+}
+
+function openEmailBox() {
+  const i = tabs.value.findIndex((t) => t.name === 'Emails')
+  if (i >= 0) tabIndex.value = i
+  nextTick(() => {
+    if (activities.value?.emailBox) activities.value.emailBox.show = true
+  })
+}
+
+function openResearchTabs() {
+  const address = doc.value.property_address
+  if (!address) {
+    toast.error(__('Set a property address to open research tabs'))
+    return
+  }
+  const zUrl = zillowUrl(address)
+  window.open(zUrl, '_blank', 'noopener')
+  window.open(zUrl, '_blank', 'noopener')
+  window.open(mapsUrl(address), '_blank', 'noopener')
+}
+
+const moreActions = computed(() => {
+  const d = doc.value
+  const items = []
+  if (d?.import_hidden) {
+    items.push({
+      label: __('Add to main board'),
+      icon: 'eye',
+      onClick: async () => {
+        await call('crm.api.lead_import.unhide_leads', {
+          leads: JSON.stringify([d.name]),
+        })
+        toast.success(__('Added to the main board'))
+        document.reload()
+      },
+    })
+  }
+  items.push({
+    label: __('View comps'),
+    icon: 'map-pin',
+    onClick: openComps,
+  })
+  items.push({
+    label: __('Open Research tabs'),
+    icon: 'external-link',
+    onClick: openResearchTabs,
+  })
+  items.push({
+    label: __('View on Zillow'),
+    icon: 'home',
+    onClick: () =>
+      d.property_address
+        ? window.open(zillowUrl(d.property_address), '_blank', 'noopener')
+        : toast.error(__('Set a property address to view on Zillow')),
+  })
+  items.push({
+    label: __('Send an Email'),
+    icon: 'mail',
+    onClick: () =>
+      d.email
+        ? openEmailBox()
+        : toast.error(__('Please set an email address to send emails')),
+  })
+  items.push({
+    label: __('Go to Website'),
+    icon: 'link',
+    onClick: () =>
+      d.website
+        ? openWebsite(d.website)
+        : toast.error(__('Please set a website to visit')),
+  })
+  items.push({
+    label: __('Attach a File'),
+    icon: 'paperclip',
+    onClick: () => {
+      showFilesUploader.value = true
+    },
+  })
+  items.push({
+    label: __('Fetch Tax Info ($0.10)'),
+    icon: 'dollar-sign',
+    onClick: () =>
+      d.property_address
+        ? detailModals.value?.fetchTaxInfo()
+        : toast.error(__('Set a property address to fetch tax info')),
+  })
+  items.push({
+    label: __('Create Agreement'),
+    icon: 'file-text',
+    onClick: () =>
+      d.property_address
+        ? detailModals.value?.createAgreement()
+        : toast.error(__('Set a property address to create an agreement')),
+  })
+  items.push({
+    label: __('Create Underwriting Sheet'),
+    icon: 'grid',
+    onClick: () =>
+      d.property_address
+        ? detailModals.value?.createUnderwriting()
+        : toast.error(
+            __('Set a property address to create an underwriting sheet'),
+          ),
+  })
+  items.push({
+    label: __('Photos'),
+    icon: 'image',
+    onClick: () => {
+      showPhotoGallery.value = true
+    },
+  })
+  return items
+})
 
 function statusLabel(status) {
   if (isTranslatable('CRM Lead Status')) return __(status)
