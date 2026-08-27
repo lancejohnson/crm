@@ -36,6 +36,7 @@ from typing import Any
 import frappe
 from frappe import _
 from frappe.utils import flt, get_datetime, get_fullname, now_datetime, time_diff_in_seconds
+from werkzeug.utils import send_file
 
 from crm.api.comps import _guard, get_lead_comps
 
@@ -164,14 +165,21 @@ def _ensure_seekable(path: str) -> str:
 
 
 def remux_attempt_recordings(attempt: str) -> None:
-	"""Background: make every house take on this run seekable. Not on the play path."""
-	if not frappe.db.exists(ATTEMPT, attempt):
+	"""Make every take for this run seekable. Globs files so a missing
+	recording_url stamp cannot skip a house."""
+	safe = _safe_id(attempt)
+	folder = frappe.get_site_path("private", "files")
+	prefix = f"practice-{safe}-"
+	try:
+		names = os.listdir(folder)
+	except OSError:
 		return
-	att = frappe.get_doc(ATTEMPT, attempt)
-	for key, slot in _iter_slots(_results(att)):
-		if not (slot.get("recording_url") or "").strip():
+	for name in names:
+		if not name.startswith(prefix) or not name.endswith(".webm"):
 			continue
-		_ensure_seekable(_dest_path(att.name, key))
+		if ".tmp." in name or name.endswith(".part"):
+			continue
+		_ensure_seekable(os.path.join(folder, name))
 
 
 def _enqueue_remux(attempt: str) -> None:
@@ -1198,22 +1206,27 @@ def upload_recording_chunk(attempt: str, property: str, seq: int | str = 0) -> d
 
 @frappe.whitelist()
 def stream_recording(attempt: str, property: str):
-	"""Inline the house's webm so <video> can play it (private files 403 in the tag)."""
+	"""Inline the house's webm so <video> can play it (private files 403 in the tag).
+
+	Must honour Range. Dumping the whole file as 200 with no Accept-Ranges makes
+	Chrome treat it as a live stream — play works, scrub snaps back — even after
+	ffmpeg has written duration + cues into the bytes."""
 	_need()
 	att = _get_attempt(attempt, write=False)
 	prop = _get_prop(property)
 	if prop.practice_set != att.practice_set:
 		frappe.throw(_("That property is not in this set."))
-	path = _dest_path(att.name, prop.name)
+	path = _ensure_seekable(_dest_path(att.name, prop.name))
 	if not os.path.exists(path) or os.path.getsize(path) == 0:
 		frappe.throw(_("No recording."), frappe.DoesNotExistError)
-	with open(path, "rb") as fh:
-		content = fh.read()
-	frappe.local.response.filename = os.path.basename(path)
-	frappe.local.response.filecontent = content
-	frappe.local.response.type = "download"
-	frappe.local.response.display_content_as = "inline"
-	frappe.local.response.content_type = "video/webm"
+	return send_file(
+		path,
+		environ=frappe.local.request.environ,
+		mimetype="video/webm",
+		conditional=True,
+		as_attachment=False,
+		download_name=os.path.basename(path),
+	)
 
 
 @frappe.whitelist()

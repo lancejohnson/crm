@@ -5,8 +5,11 @@
   >
     <template #body-content>
       <div
-        class="flex max-h-[min(88vh,52rem)] flex-col gap-3"
-        @keydown.escape.capture="onEsc"
+        ref="panelEl"
+        tabindex="0"
+        class="flex max-h-[min(88vh,52rem)] flex-col gap-3 outline-none"
+        data-practice-player
+        @keydown="onPanelKey"
       >
         <div
           ref="stageEl"
@@ -209,6 +212,7 @@ const show = defineModel({ type: Boolean, default: false })
 const { $socket } = globalStore()
 const videoEl = ref(null)
 const stageEl = ref(null)
+const panelEl = ref(null)
 const composerEl = ref(null)
 const duration = ref(0)
 const currentTime = ref(0)
@@ -443,16 +447,17 @@ function onEvent(data) {
   }
 }
 
-function trapKeys(e) {
-  if (!show.value) return
+function onPanelKey(e) {
   const t = e.target
   const tag = t?.tagName
   if (tag === 'INPUT' || tag === 'TEXTAREA' || t?.isContentEditable) return
-  // Capture on window so CRM shortcuts ([ ] sidebar, comps D/P/S/F, Cmd-K)
-  // never see the event while this modal is up.
-  e.stopImmediatePropagation()
+  e.stopPropagation()
+  if (t?.closest?.('video')) return
   const k = e.key
-  if (k === 'Escape') return
+  if (k === 'Escape') {
+    onEsc(e)
+    return
+  }
   if (k === ' ' || k === 'k' || k === 'K') {
     e.preventDefault()
     playPause()
@@ -483,13 +488,12 @@ onMounted(() => {
   $socket?.on('crm_practice_reaction', onEvent)
   document.addEventListener('fullscreenchange', syncFs)
   document.addEventListener('webkitfullscreenchange', syncFs)
-  window.addEventListener('keydown', trapKeys, true)
+  nextTick(() => panelEl.value?.focus())
 })
 onBeforeUnmount(() => {
   $socket?.off('crm_practice_reaction', onEvent)
   document.removeEventListener('fullscreenchange', syncFs)
   document.removeEventListener('webkitfullscreenchange', syncFs)
-  window.removeEventListener('keydown', trapKeys, true)
   if (fsEl()) {
     const exit = document.exitFullscreen || document.webkitExitFullscreen
     exit?.call(document)

@@ -8,9 +8,9 @@ export function isDialogOpen() {
   if (typeof document === 'undefined') return false
   // frappe-ui Dialog (reka) is not registered in `dialogs` — PracticePlayer,
   // CompDetailModal, etc. still need CRM shortcuts (D/P/S/F, [ ]) to stand down.
-  return !!document.querySelector(
-    '[role="dialog"][data-state="open"], [role="dialog"]:not([aria-hidden="true"])',
-  )
+  return !!(document.querySelector('[data-practice-player]') ||
+    document.querySelector('[role="dialog"][data-state="open"]') ||
+    document.querySelector('[role="dialog"]:not([aria-hidden="true"])'))
 }
 
 export let Dialogs = {
