@@ -213,9 +213,11 @@
                     class="mt-1 aspect-video w-full max-w-xl bg-black"
                     controls
                     autoplay
-                    preload="metadata"
-                    :src="p.recording_url"
+                    playsinline
+                    preload="auto"
+                    :src="streamUrl(a, p)"
                     @click.stop
+                    @loadeddata="(e) => e.target.play?.().catch(() => {})"
                   />
                 </div>
               </td>
@@ -374,6 +376,11 @@ function toggleRow(name) {
 
 function playKey(a, p) {
   return `${a.name}:${p.name}`
+}
+
+function streamUrl(a, p) {
+  const q = new URLSearchParams({ attempt: a.name, property: p.name })
+  return `/api/method/crm.api.practice.stream_recording?${q}`
 }
 
 function openRun(a) {

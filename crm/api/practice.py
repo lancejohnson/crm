@@ -1088,6 +1088,26 @@ def upload_recording_chunk(attempt: str, property: str, seq: int | str = 0) -> d
 
 
 @frappe.whitelist()
+def stream_recording(attempt: str, property: str):
+	"""Inline the house's webm so <video> can play it (private files 403 in the tag)."""
+	_need()
+	att = _get_attempt(attempt, write=False)
+	prop = _get_prop(property)
+	if prop.practice_set != att.practice_set:
+		frappe.throw(_("That property is not in this set."))
+	path = _dest_path(att.name, prop.name)
+	if not os.path.exists(path) or os.path.getsize(path) == 0:
+		frappe.throw(_("No recording."), frappe.DoesNotExistError)
+	with open(path, "rb") as fh:
+		content = fh.read()
+	frappe.local.response.filename = os.path.basename(path)
+	frappe.local.response.filecontent = content
+	frappe.local.response.type = "download"
+	frappe.local.response.display_content_as = "inline"
+	frappe.local.response.content_type = "video/webm"
+
+
+@frappe.whitelist()
 def finish_recording(attempt: str, property: str) -> dict:
 	"""Turn this house's chunks into a private File and stamp it on the slot."""
 	_need()
