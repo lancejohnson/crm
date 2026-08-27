@@ -61,25 +61,27 @@
           :loading="submitting || uploading"
           @click="() => submit()"
         />
-        <Button v-if="attempt.status !== 'In Progress' || !attempt.mine" :label="__('Back to set')" @click="leave" />
+        <Button :label="__('Exit')" @click="leave" />
       </div>
     </div>
 
-    <div class="flex shrink-0 gap-1 overflow-x-auto border-b border-outline-gray-1 px-3 py-1.5 sm:px-4">
-      <button
-        v-for="(p, i) in properties"
-        :key="p.name"
-        class="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ink-gray-4"
-        :class="chipClass(p, i)"
-        :title="p.property_address"
-        @click="select(i)"
-      >
-        <span>{{ i + 1 }}. {{ street(p.property_address) }}</span>
-        <span v-if="houseElapsed(p)" class="tabular-nums opacity-70">
-          {{ fmtDuration(houseElapsed(p)) }}
-        </span>
-      </button>
-    </div>
+    <div class="flex min-h-0 flex-1">
+      <nav class="flex w-52 shrink-0 flex-col overflow-y-auto border-r border-outline-gray-1 py-1">
+        <button
+          v-for="(p, i) in properties"
+          :key="p.name"
+          class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm outline-none focus-visible:bg-surface-gray-2"
+          :class="rowClass(p, i)"
+          :title="p.property_address"
+          @click="select(i)"
+        >
+          <span class="w-4 shrink-0 tabular-nums text-xs text-ink-gray-5">{{ i + 1 }}</span>
+          <span class="min-w-0 flex-1 truncate">{{ street(p.property_address) }}</span>
+          <span v-if="houseElapsed(p)" class="shrink-0 tabular-nums text-xs opacity-70">
+            {{ fmtDuration(houseElapsed(p)) }}
+          </span>
+        </button>
+      </nav>
 
     <div
       v-if="current"
@@ -102,6 +104,7 @@
         page-mode
         hide-address-match
       />
+    </div>
     </div>
   </div>
 </template>
@@ -209,10 +212,10 @@ function street(addr) {
   return String(addr || '').split(',')[0].trim() || __('Property')
 }
 
-function chipClass(p, i) {
-  if (i === currentIndex.value) return 'bg-gray-900 text-white'
-  if (p.done_at) return 'bg-green-100 text-green-800'
-  if (p.opened_at) return 'bg-surface-gray-2 text-ink-gray-8'
+function rowClass(p, i) {
+  if (i === currentIndex.value) return 'bg-surface-gray-3 font-medium text-ink-gray-9'
+  if (p.done_at) return 'text-green-800 hover:bg-surface-gray-1'
+  if (p.opened_at) return 'text-ink-gray-8 hover:bg-surface-gray-1'
   return 'text-ink-gray-6 hover:bg-surface-gray-1'
 }
 
