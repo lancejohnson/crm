@@ -28,20 +28,22 @@ duplicating. Work substantial features in a worktree of your own.
 
 ## Our changes vs upstream (keep this list current)
 
-- **Practice comps** — sidebar **Practice** (`/practice`). A manager builds a
-  set of properties (picked from real leads) with an optional time limit — e.g.
-  10 houses in 30 minutes. Each acq rep runs the set on the **same comps map**
-  as a live lead; hides / picks / the offer calc write to **their attempt**,
-  never to `CRM Lead.comps_hidden` / `comps_selected` or the timeline. Times
-  are recorded for the whole run and per house. Optional **screen + mic**
-  on Start (`practiceRecorder.js`): chunks upload as they arrive so a 30-minute
-  take never hits nginx's 50m body limit; the file is a private File on the
-  attempt, playable from the Times table. Doctypes: ops
-  `setup_practice.py`. App: `crm/api/practice.py` +
-  `pages/Practice.vue` / `PracticeSet.vue` / `PracticeRun.vue`. CompsView and
-  CompOfferCalc take optional `practiceAttempt` / `practiceProperty` to redirect
-  writes. Underwriting is off in practice (that creates a real Drive sheet).
-  Guarded on the doctypes existing, so the app deploys before the ops script.
+- **Practice comps** — sidebar **Practice** (`/practice`). Any sales user can
+  build a set of properties (picked from real leads) with an optional time
+  limit — e.g. 10 houses in 30 minutes. Each acq rep runs the set on the **same
+  comps map** as a live lead; hides / picks / the offer calc write to **their
+  attempt**, never to `CRM Lead.comps_hidden` / `comps_selected` or the timeline.
+  Times and recordings are team-visible on submitted runs (in-progress stays
+  private). Optional **screen + mic** on Start (`practiceRecorder.js`): Chrome
+  is asked for **this tab** (`preferCurrentTab` + `selfBrowserSurface: include`);
+  chunks upload as they arrive so a 30-minute take never hits nginx's 50m body
+  limit; playback is `stream_recording` (private File URLs 403 in `<video>`).
+  Delete-set is still manager-only. Doctypes: ops `setup_practice.py`. App:
+  `crm/api/practice.py` + `pages/Practice.vue` / `PracticeSet.vue` /
+  `PracticeRun.vue`. CompsView and CompOfferCalc take optional `practiceAttempt`
+  / `practiceProperty` to redirect writes. Underwriting is off in practice (that
+  creates a real Drive sheet). Guarded on the doctypes existing, so the app
+  deploys before the ops script.
 
 - **Refunds board** — sidebar **Refunds** (`/refunds`) is a kanban of
   `custom_refundable=1` leads (To Request / Requested / Waiting on us /

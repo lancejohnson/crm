@@ -261,7 +261,7 @@
       </table>
     </div>
 
-    <div v-if="canManage" class="mt-10">
+    <div v-if="canDelete" class="mt-10">
       <Button theme="red" variant="subtle" :label="__('Delete set')" @click="confirmDelete = true" />
     </div>
   </div>
@@ -351,6 +351,7 @@ const results = createResource({
 
 const set = computed(() => detail.data || {})
 const canManage = computed(() => set.value.can_manage)
+const canDelete = computed(() => set.value.can_delete)
 const properties = computed(() => set.value.properties || [])
 const attempts = computed(() => results.data?.attempts || [])
 const canViewLog = computed(() => results.data?.can_view_log)
@@ -513,11 +514,13 @@ async function start() {
         await startPracticeRecording()
         recording = true
       } catch (e) {
-        toast.error(
-          e?.message
-            ? __('Could not start recording: {0}', [e.message])
-            : __('Could not start the recording — pick this tab and allow the mic.'),
-        )
+        if (e?.name !== 'NotAllowedError' && e?.name !== 'AbortError') {
+          toast.error(
+            e?.message
+              ? __('Could not start recording: {0}', [e.message])
+              : __('Could not start the recording — pick this tab and allow the mic.'),
+          )
+        }
       }
     }
     if (canManage.value) {

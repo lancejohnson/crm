@@ -68,7 +68,11 @@ def _is_manager() -> bool:
 
 def _assert_manager() -> None:
 	if not _is_manager():
-		frappe.throw(_("Only a manager can edit practice sets."), frappe.PermissionError)
+		frappe.throw(_("Only a manager can delete practice sets."), frappe.PermissionError)
+
+
+def _flags() -> dict:
+	return {"can_manage": True, "can_delete": _is_manager()}
 
 
 def _need() -> None:
@@ -485,22 +489,18 @@ def _shape_set(doc, *, with_properties: bool = False) -> dict:
 # ---------------------------------------------------------------------------------
 @frappe.whitelist()
 def list_sets() -> dict:
-	"""Active sets for everyone; managers also see paused ones."""
+	"""Every set, for every sales user."""
 	_guard()
 	if not _available():
-		return {"available": False, "can_manage": _is_manager(), "sets": []}
-	filters: dict[str, Any] = {}
-	if not _is_manager():
-		filters["is_active"] = 1
+		return {"available": False, **_flags(), "sets": []}
 	rows = frappe.get_all(
 		SET,
-		filters=filters,
 		fields=["name", "title", "time_limit_min", "notes", "is_active", "owner", "modified"],
 		order_by="modified desc",
 	)
 	return {
 		"available": True,
-		"can_manage": _is_manager(),
+		**_flags(),
 		"sets": [_shape_set(frappe._dict(r)) for r in rows],
 	}
 
@@ -509,11 +509,9 @@ def list_sets() -> dict:
 def get_set(name: str) -> dict:
 	_need()
 	doc = _get_set(name)
-	if not int(doc.is_active or 0) and not _is_manager():
-		frappe.throw(_("This practice set is not active."))
 	_log_view(kind="set", practice_set=name, subject_user=doc.owner)
 	out = _shape_set(doc, with_properties=True)
-	out["can_manage"] = _is_manager()
+	out.update(_flags())
 	out["available"] = True
 	return out
 
@@ -527,7 +525,6 @@ def save_set(
 	is_active: int | str = 1,
 ) -> dict:
 	_need()
-	_assert_manager()
 	title = (title or "").strip()
 	if not title:
 		frappe.throw(_("Give the set a name."))
@@ -554,7 +551,7 @@ def save_set(
 			}
 		)
 		doc.insert(ignore_permissions=True)
-	return _shape_set(doc, with_properties=True) | {"can_manage": True, "available": True}
+	return _shape_set(doc, with_properties=True) | {"available": True, **_flags()}
 
 
 @frappe.whitelist()
@@ -575,7 +572,6 @@ def delete_set(name: str) -> dict:
 def search_leads(q: str = "") -> list[dict]:
 	"""Leads with an address, for adding to a set."""
 	_need()
-	_assert_manager()
 	q = (q or "").strip()
 	filters = [["property_address", "is", "set"]]
 	or_filters = None
@@ -652,7 +648,6 @@ def _insert_property(practice_set: str, lead: str, sort_order: int) -> dict:
 @frappe.whitelist()
 def add_property(practice_set: str, lead: str) -> dict:
 	_need()
-	_assert_manager()
 	_get_set(practice_set)
 	n = frappe.db.count(PROP, {"practice_set": practice_set})
 	return _insert_property(practice_set, lead, (n + 1) * 10)
@@ -694,7 +689,6 @@ def add_random_properties(
 	(Ohio AND Columbus). County is has_column-guarded.
 	"""
 	_need()
-	_assert_manager()
 	_get_set(practice_set)
 	try:
 		wanted = max(0, min(50, int(count or 0)))
@@ -751,7 +745,6 @@ def add_random_properties(
 @frappe.whitelist()
 def remove_property(name: str) -> dict:
 	_need()
-	_assert_manager()
 	_get_prop(name)
 	frappe.delete_doc(PROP, name, ignore_permissions=True, force=True)
 	return {"ok": True}
@@ -760,7 +753,6 @@ def remove_property(name: str) -> dict:
 @frappe.whitelist()
 def reorder_properties(practice_set: str, names: str | list | None = None) -> dict:
 	_need()
-	_assert_manager()
 	_get_set(practice_set)
 	if isinstance(names, str):
 		names = json.loads(names or "[]")
@@ -781,8 +773,6 @@ def start_attempt(practice_set: str) -> dict:
 	"""Resume an in-progress run, or start a new one."""
 	_need()
 	doc = _get_set(practice_set)
-	if not int(doc.is_active or 0) and not _is_manager():
-		frappe.throw(_("This practice set is not active."))
 	props = _properties(practice_set)
 	if not props:
 		frappe.throw(_("This set has no properties yet."))
@@ -828,7 +818,7 @@ def get_attempt(name: str) -> dict:
 		)
 	elif att.status == "In Progress":
 		att = _maybe_expire(_get_attempt(name, write=True))
-	return {"available": True, "can_manage": _is_manager(), **_shape_attempt(att)}
+	return {"available": True, **_flags(), **_shape_attempt(att)}
 
 
 @frappe.whitelist()
@@ -1003,7 +993,7 @@ def list_results(practice_set: str) -> dict:
 		)
 	return {
 		"available": True,
-		"can_manage": _is_manager(),
+		**_flags(),
 		"can_view_log": frappe.session.user == LANCE_USER,
 		"attempts": out,
 	}

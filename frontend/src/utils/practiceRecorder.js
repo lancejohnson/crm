@@ -84,13 +84,23 @@ export async function startPracticeRecording() {
   // getDisplayMedia MUST be the first await — Chrome drops the click's user
   // gesture after any yield, and then the picker never appears.
   mime = TYPES.find((t) => MediaRecorder.isTypeSupported(t))
-  // Bare { video: true } on purpose. Extra constraints (preferCurrentTab,
-  // width/height/fps) throw on some Chromes and the picker never shows.
-  // Pick "This tab" in the browser sheet.
-  const display = await navigator.mediaDevices.getDisplayMedia({
-    video: true,
-    audio: false,
-  })
+  // selfBrowserSurface include is the one that puts THIS tab in the picker;
+  // Chrome hides the calling tab otherwise. preferCurrentTab pre-selects it.
+  let display
+  try {
+    display = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: false,
+      preferCurrentTab: true,
+      selfBrowserSurface: 'include',
+    })
+  } catch (e) {
+    if (e?.name === 'NotAllowedError') throw e
+    display = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: false,
+    })
+  }
   stopTracks()
   captureOn = true
   queue = []
