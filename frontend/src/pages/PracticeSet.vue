@@ -216,101 +216,69 @@
       </table>
     </div>
 
-    <div v-if="comparePeople.length" class="mt-8 max-w-4xl">
-      <h2 class="mb-2 text-base font-medium text-ink-gray-8">{{ __('Summary') }}</h2>
-      <div
-        v-for="p in comparePeople"
-        :key="p.attempt"
-        class="mb-5"
-      >
-        <div class="mb-1 text-sm font-medium text-ink-gray-8">{{ p.user }}</div>
-        <div class="overflow-x-auto">
-          <table class="w-full text-left text-sm">
-            <thead class="text-xs text-ink-gray-5">
-              <tr>
-                <th class="py-1 pr-3 font-medium">{{ __('House') }}</th>
-                <th class="py-1 pr-3 font-medium">{{ __('ARV') }}</th>
-                <th class="py-1 pr-3 font-medium">{{ __('Repair') }}</th>
-                <th class="py-1 pr-3 font-medium">{{ __('Offer') }}</th>
-                <th class="py-1 font-medium">{{ __('Formula') }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <template v-for="h in p.rows" :key="h.name">
-                <tr
-                  v-if="!h.calcs.length"
-                  class="border-t border-outline-gray-1"
-                >
-                  <td class="py-1.5 pr-3 text-ink-gray-7">{{ h.address }}</td>
-                  <td colspan="4" class="py-1.5 text-ink-gray-4">—</td>
-                </tr>
-                <tr
-                  v-for="(c, i) in h.calcs"
-                  :key="h.name + ':' + i"
-                  class="border-t border-outline-gray-1"
-                >
-                  <td class="min-w-0 py-1.5 pr-3 text-ink-gray-7">
-                    {{ i === 0 ? h.address : '' }}
-                  </td>
-                  <td class="py-1.5 pr-3 tabular-nums text-ink-gray-8">{{ money(c.arv) }}</td>
-                  <td class="py-1.5 pr-3 tabular-nums text-ink-gray-8">{{ money(c.repairs) }}</td>
-                  <td class="py-1.5 pr-3 tabular-nums font-medium text-ink-gray-8">{{ money(c.offer) }}</td>
-                  <td class="py-1.5 text-ink-gray-6">{{ c.formula }}</td>
-                </tr>
-              </template>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
     <div v-if="compareHouses.length" class="mt-8 max-w-4xl">
-      <h2 class="mb-2 text-base font-medium text-ink-gray-8">{{ __('By house') }}</h2>
+      <h2 class="mb-2 text-base font-medium text-ink-gray-8">{{ __('Calcs') }}</h2>
       <div
         v-for="h in compareHouses"
         :key="h.name"
-        class="mb-5"
+        class="mb-6"
       >
-        <div class="mb-1 flex items-baseline gap-2 text-sm">
-          <span class="font-medium text-ink-gray-8">{{ h.address }}</span>
-          <span v-if="h.spread" class="text-xs text-ink-gray-5">
-            {{ __('offer spread {0}', [money(h.spread)]) }}
-          </span>
-        </div>
+        <div class="mb-1 text-sm font-medium text-ink-gray-8">{{ h.address }}</div>
         <div class="overflow-x-auto">
           <table class="w-full text-left text-sm">
             <thead class="text-xs text-ink-gray-5">
               <tr>
-                <th class="py-1 pr-3 font-medium">{{ __('Who') }}</th>
-                <th class="py-1 pr-3 font-medium">{{ __('ARV') }}</th>
-                <th class="py-1 pr-3 font-medium">{{ __('Repair') }}</th>
-                <th class="py-1 pr-3 font-medium">{{ __('Offer') }}</th>
-                <th class="py-1 font-medium">{{ __('Formula') }}</th>
+                <th class="py-1 pr-3 font-medium" />
+                <th
+                  v-for="c in h.cols"
+                  :key="c.attempt"
+                  class="py-1 pr-3 font-medium"
+                >
+                  {{ c.short }}
+                </th>
               </tr>
             </thead>
             <tbody>
-              <template v-for="r in h.rows" :key="r.attempt">
-                <tr
-                  v-if="!r.calcs.length"
-                  class="border-t border-outline-gray-1"
+              <tr class="border-t border-outline-gray-1">
+                <td class="py-1.5 pr-3 text-ink-gray-5">{{ __('ARV') }}</td>
+                <td
+                  v-for="c in h.cols"
+                  :key="c.attempt"
+                  class="py-1.5 pr-3 tabular-nums text-ink-gray-8"
                 >
-                  <td class="py-1.5 pr-3 text-ink-gray-8">{{ r.user }}</td>
-                  <td colspan="4" class="py-1.5 text-ink-gray-4">—</td>
-                </tr>
-                <tr
-                  v-for="(c, i) in r.calcs"
-                  :key="r.attempt + ':' + i"
-                  class="border-t border-outline-gray-1"
+                  {{ money(c.calc?.arv) }}
+                </td>
+              </tr>
+              <tr class="border-t border-outline-gray-1">
+                <td class="py-1.5 pr-3 text-ink-gray-5">{{ __('Repair') }}</td>
+                <td
+                  v-for="c in h.cols"
+                  :key="c.attempt"
+                  class="py-1.5 pr-3 tabular-nums text-ink-gray-8"
                 >
-                  <td class="py-1.5 pr-3 text-ink-gray-8">
-                    {{ i === 0 ? r.user : '' }}
-                  </td>
-                  <td class="py-1.5 pr-3 tabular-nums text-ink-gray-8">{{ money(c.arv) }}</td>
-                  <td class="py-1.5 pr-3 tabular-nums text-ink-gray-8">{{ money(c.repairs) }}</td>
-                  <td class="py-1.5 pr-3 tabular-nums font-medium text-ink-gray-8">{{ money(c.offer) }}</td>
-                  <td class="py-1.5 text-ink-gray-6">{{ c.formula }}</td>
-                </tr>
-              </template>
+                  {{ money(c.calc?.repairs) }}
+                </td>
+              </tr>
+              <tr class="border-t border-outline-gray-1">
+                <td class="py-1.5 pr-3 text-ink-gray-5">{{ __('Offer') }}</td>
+                <td
+                  v-for="c in h.cols"
+                  :key="c.attempt"
+                  class="py-1.5 pr-3 tabular-nums font-medium text-ink-gray-8"
+                >
+                  {{ money(c.calc?.offer) }}
+                </td>
+              </tr>
+              <tr class="border-t border-outline-gray-1">
+                <td class="py-1.5 pr-3 text-ink-gray-5">{{ __('Formula') }}</td>
+                <td
+                  v-for="c in h.cols"
+                  :key="c.attempt"
+                  class="py-1.5 pr-3 text-ink-gray-6"
+                >
+                  {{ c.calc?.formula || '—' }}
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -468,51 +436,29 @@ const compareHouses = computed(() => {
   const houses = properties.value || []
   return houses
     .map((h) => {
-      const rows = runs.map((a) => {
+      const cols = runs.map((a) => {
         const p = (a.properties || []).find((x) => x.name === h.name)
+        const calcs = p?.calcs || []
         return {
-          user: a.user_name,
           attempt: a.name,
-          calcs: p?.calcs || [],
+          user: a.user_name,
+          short: firstName(a.user_name),
+          calc: calcs[0] || null,
         }
       })
-      const offers = rows.flatMap((r) =>
-        r.calcs.map((c) => c.offer).filter((n) => n != null),
-      )
-      const spread =
-        offers.length >= 2 ? Math.max(...offers) - Math.min(...offers) : 0
       return {
         name: h.name,
         address: h.property_address,
-        rows,
-        spread,
-        priced: rows.some((r) => r.calcs.length),
+        cols,
+        priced: cols.some((c) => c.calc),
       }
     })
     .filter((h) => h.priced)
 })
-const comparePeople = computed(() => {
-  const runs = attempts.value || []
-  const houses = properties.value || []
-  return runs
-    .map((a) => {
-      const rows = houses.map((h) => {
-        const p = (a.properties || []).find((x) => x.name === h.name)
-        return {
-          name: h.name,
-          address: h.property_address,
-          calcs: p?.calcs || [],
-        }
-      })
-      return {
-        user: a.user_name,
-        attempt: a.name,
-        rows,
-        priced: rows.some((r) => r.calcs.length),
-      }
-    })
-    .filter((p) => p.priced)
-})
+
+function firstName(s) {
+  return String(s || '').trim().split(/\s+/)[0] || s || ''
+}
 
 function money(n) {
   if (n == null || n === '') return '—'
