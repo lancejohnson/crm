@@ -51,8 +51,8 @@ const props = defineProps({
 const ordered = computed(() =>
   [...props.messages].sort(
     (a, b) =>
-      new Date(a.communication_date || a.creation) -
-      new Date(b.communication_date || b.creation),
+      new Date(b.communication_date || b.creation) -
+      new Date(a.communication_date || a.creation),
   ),
 )
 
@@ -61,7 +61,7 @@ const open = ref(new Set())
 watch(
   ordered,
   (list) => {
-    open.value = new Set(list.length ? [list.length - 1] : [])
+    open.value = new Set(list.length ? [0] : [])
   },
   { immediate: true },
 )
@@ -95,7 +95,7 @@ function preview(msg) {
 }
 
 const subject = computed(() => {
-  const last = ordered.value[ordered.value.length - 1]
-  return (last?.data?.subject || '').replace(/^(re:\s*)+/i, '')
+  const first = ordered.value[0]
+  return (first?.data?.subject || '').replace(/^(re:\s*)+/i, '')
 })
 </script>

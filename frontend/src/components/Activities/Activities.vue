@@ -929,7 +929,7 @@ const emailMessages = computed(() => {
     (a) => a.activity_type === 'communication',
   )
   return [...list].sort(
-    (a, b) => new Date(a.creation) - new Date(b.creation),
+    (a, b) => new Date(b.creation) - new Date(a.creation),
   )
 })
 
@@ -1342,23 +1342,24 @@ const activities = computed(() => {
 const feedItems = computed(() => {
   const list = activities.value || []
   if (title.value !== 'Activity') return list
+  const emails = list.filter((a) => a.activity_type === 'communication')
+  if (!emails.length) return list
   const out = []
+  let placed = false
   for (const a of list) {
     if (a.activity_type === 'communication') {
-      const last = out[out.length - 1]
-      if (last?.activity_type === 'email_thread') {
-        last.messages.push(a)
-        continue
+      if (!placed) {
+        out.push({
+          activity_type: 'email_thread',
+          name: 'thread-all',
+          creation: a.creation,
+          messages: emails,
+        })
+        placed = true
       }
-      out.push({
-        activity_type: 'email_thread',
-        name: 'thread-' + a.name,
-        creation: a.creation,
-        messages: [a],
-      })
-    } else {
-      out.push(a)
+      continue
     }
+    out.push(a)
   }
   return out
 })
@@ -1489,7 +1490,7 @@ watch(
     draftLoadedFor.value = props.docname
     changeTabTo('emails')
     nextTick(() => {
-      const last = emailMessages.value[emailMessages.value.length - 1]
+      const last = emailMessages.value[0]
       emailBox.value.loadDraft({
         to: d.reply_to,
         subject: d.subject,
