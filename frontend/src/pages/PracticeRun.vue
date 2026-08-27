@@ -24,6 +24,13 @@
       <span v-if="attempt.status !== 'In Progress'" class="text-xs text-ink-gray-5">
         {{ attempt.status }}
       </span>
+      <span
+        v-if="recording || uploading"
+        class="flex items-center gap-1 text-xs font-medium text-red-600"
+      >
+        <span class="size-1.5 rounded-full bg-red-600" />
+        {{ uploading ? __('Saving recording…') : __('REC') }}
+      </span>
       <div class="ml-auto flex items-center gap-2">
         <Button
           v-if="attempt.status === 'In Progress'"
@@ -36,7 +43,7 @@
           v-if="attempt.status === 'In Progress'"
           variant="solid"
           :label="__('Submit set')"
-          :loading="submitting"
+          :loading="submitting || uploading"
           @click="() => submit()"
         />
         <Button v-else :label="__('Back to set')" @click="leave" />
@@ -79,6 +86,13 @@ import { Button, call, createResource, toast } from 'frappe-ui'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { sidebarCollapsedOverride } from '@/composables/settings'
+import {
+  beginPropertyRecording,
+  isPracticeRecording,
+  setPracticeAttempt,
+  stopPracticeRecording,
+  watchPracticeRecording,
+} from '@/utils/practiceRecorder'
 
 const props = defineProps({
   setId: { type: String, required: true },
@@ -90,15 +104,26 @@ const marking = ref(false)
 const submitting = ref(false)
 const remaining = ref(null)
 const elapsed = ref(0)
+const recording = ref(false)
+const uploading = ref(false)
 let tick = null
 let fetchedAt = 0
+let flushed = false
+let unwatchRec = null
 
 onMounted(() => {
   sidebarCollapsedOverride.value = true
+  setPracticeAttempt(props.attemptId)
+  recording.value = isPracticeRecording()
+  unwatchRec = watchPracticeRecording((on) => {
+    recording.value = on
+  })
 })
 onUnmounted(() => {
   sidebarCollapsedOverride.value = null
   clearInterval(tick)
+  unwatchRec?.()
+  if (!flushed && isPracticeRecording()) flushRecording()
 })
 
 const run = createResource({
@@ -193,6 +218,16 @@ watch(
     } catch (e) {
       toast.error(e.messages?.[0] || __('Could not open that property.'))
     }
+    if (!isPracticeRecording()) return
+    uploading.value = true
+    try {
+      const prev = await beginPropertyRecording(name)
+      applyRecording(prev)
+    } catch {
+      toast.error(__('Could not save the recording for the last property.'))
+    } finally {
+      uploading.value = false
+    }
   },
 )
 
@@ -220,9 +255,35 @@ async function doneCurrent() {
   }
 }
 
+function applyRecording(res) {
+  if (!res?.url || !res?.property || !run.data?.properties) return
+  run.data = {
+    ...run.data,
+    properties: run.data.properties.map((p) =>
+      p.name === res.property ? { ...p, recording_url: res.url } : p,
+    ),
+  }
+}
+
+async function flushRecording() {
+  if (flushed) return
+  if (!isPracticeRecording() && !recording.value) return
+  flushed = true
+  uploading.value = true
+  recording.value = false
+  try {
+    applyRecording(await stopPracticeRecording())
+  } catch {
+    toast.error(__('Could not save the recording.'))
+  } finally {
+    uploading.value = false
+  }
+}
+
 async function submit(timedOut = false) {
   submitting.value = true
   try {
+    await flushRecording()
     const res = await call('crm.api.practice.submit_attempt', {
       attempt: props.attemptId,
     })
@@ -237,7 +298,8 @@ async function submit(timedOut = false) {
   }
 }
 
-function leave() {
+async function leave() {
+  await flushRecording()
   router.push({ name: 'PracticeSet', params: { setId: props.setId } })
 }
 </script>

@@ -26,6 +26,8 @@ app deploys before that script runs.
 from __future__ import annotations
 
 import json
+import os
+import re
 from typing import Any
 
 import frappe
@@ -40,6 +42,12 @@ ATTEMPT = "CRM Practice Attempt"
 SALES_ROLES = ("System Manager", "Sales Manager", "Sales User")
 MANAGER_ROLES = ("System Manager", "Sales Manager")
 STATUSES = ("In Progress", "Submitted", "Timed Out")
+
+#: nginx `client_max_body_size` is 50m, so chunks stay well under that. The
+#: whole take is capped because a forgotten recorder should not fill the disk.
+MAX_CHUNK_BYTES = 8 * 1024 * 1024
+MAX_RECORDING_BYTES = 400 * 1024 * 1024
+_ATTEMPT_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def _available() -> bool:
@@ -83,6 +91,71 @@ def _json(raw) -> dict:
 
 def _dump(val) -> str:
 	return json.dumps(val, ensure_ascii=False, default=str)
+
+
+def _has_recording_col() -> bool:
+	return frappe.db.has_column(ATTEMPT, "recording_url")
+
+
+def _safe_id(name: str) -> str:
+	if not _ATTEMPT_NAME_RE.match(name or ""):
+		frappe.throw(_("Invalid name."))
+	return name
+
+
+def _part_path(attempt: str, property: str) -> str:
+	return frappe.get_site_path(
+		"private", "files",
+		f"practice-{_safe_id(attempt)}-{_safe_id(property)}.webm.part",
+	)
+
+
+def _dest_path(attempt: str, property: str) -> str:
+	return frappe.get_site_path(
+		"private", "files",
+		f"practice-{_safe_id(attempt)}-{_safe_id(property)}.webm",
+	)
+
+
+def _recording_url(att) -> str:
+	if _has_recording_col():
+		url = att.get("recording_url") if hasattr(att, "get") else getattr(att, "recording_url", None)
+		if url:
+			return str(url)
+	name = att.get("name") if hasattr(att, "get") else getattr(att, "name", None)
+	if not name:
+		return ""
+	return (
+		frappe.db.get_value(
+			"File",
+			{"attached_to_doctype": ATTEMPT, "attached_to_name": name},
+			"file_url",
+		)
+		or ""
+	)
+
+
+def _purge_recording(name: str) -> None:
+	folder = frappe.get_site_path("private", "files")
+	prefix = f"practice-{_safe_id(name)}"
+	try:
+		for fname in os.listdir(folder):
+			if fname.startswith(prefix):
+				try:
+					os.remove(os.path.join(folder, fname))
+				except OSError:
+					pass
+	except OSError:
+		pass
+	for fname in frappe.get_all(
+		"File",
+		filters={"attached_to_doctype": ATTEMPT, "attached_to_name": name},
+		pluck="name",
+	):
+		try:
+			frappe.delete_doc("File", fname, ignore_permissions=True, force=True)
+		except Exception:
+			pass
 
 
 def _user_label(user: str) -> str:
@@ -232,6 +305,7 @@ def _shape_attempt(att, properties: list[dict] | None = None) -> dict:
 				"selected_count": len(slot.get("selected") or []),
 				"hidden_count": len(slot.get("hidden") or []),
 				"has_offer": bool(slot.get("offer")),
+				"recording_url": slot.get("recording_url") or "",
 			}
 		)
 	return {
@@ -246,6 +320,7 @@ def _shape_attempt(att, properties: list[dict] | None = None) -> dict:
 		"time_limit_min": int(att.time_limit_min or 0),
 		"elapsed_seconds": _elapsed(att),
 		"remaining_seconds": _remaining(att),
+		"recording_url": _recording_url(att),
 		"properties": out_props,
 	}
 
@@ -369,6 +444,7 @@ def delete_set(name: str) -> dict:
 	_assert_manager()
 	_get_set(name)
 	for att in frappe.get_all(ATTEMPT, filters={"practice_set": name}, pluck="name"):
+		_purge_recording(att)
 		frappe.delete_doc(ATTEMPT, att, ignore_permissions=True, force=True)
 	for prop in frappe.get_all(PROP, filters={"practice_set": name}, pluck="name"):
 		frappe.delete_doc(PROP, prop, ignore_permissions=True, force=True)
@@ -595,13 +671,16 @@ def list_results(practice_set: str) -> dict:
 	filters: dict[str, Any] = {"practice_set": practice_set}
 	if not _is_manager():
 		filters["user"] = frappe.session.user
+	fields = [
+		"name", "user", "status", "started_at", "finished_at",
+		"time_limit_min", "results",
+	]
+	if _has_recording_col():
+		fields.append("recording_url")
 	rows = frappe.get_all(
 		ATTEMPT,
 		filters=filters,
-		fields=[
-			"name", "user", "status", "started_at", "finished_at",
-			"time_limit_min", "results",
-		],
+		fields=fields,
 		order_by="creation desc",
 		limit_page_length=200,
 	)
@@ -620,7 +699,7 @@ def list_results(practice_set: str) -> dict:
 				**{k: shaped[k] for k in (
 					"name", "user", "user_name", "status", "started_at",
 					"finished_at", "time_limit_min", "elapsed_seconds",
-					"remaining_seconds",
+					"remaining_seconds", "recording_url",
 				)},
 				"done": done,
 				"opened": opened,
@@ -633,6 +712,82 @@ def list_results(practice_set: str) -> dict:
 		"can_manage": _is_manager(),
 		"attempts": out,
 	}
+
+
+# ---------------------------------------------------------------------------------
+# Screen + mic recording
+# ---------------------------------------------------------------------------------
+@frappe.whitelist()
+def upload_recording_chunk(attempt: str, property: str, seq: int | str = 0) -> dict:
+	"""Append one MediaRecorder slice for this house. Chunks stay under nginx's 50m cap."""
+	_need()
+	att = _get_attempt(attempt, write=True)
+	prop = _get_prop(property)
+	if prop.practice_set != att.practice_set:
+		frappe.throw(_("That property is not in this set."))
+	upload = (frappe.request.files or {}).get("file")
+	if not upload:
+		frappe.throw(_("No file received."))
+	data = upload.stream.read()
+	if not data:
+		return {"ok": True, "bytes": 0}
+	if len(data) > MAX_CHUNK_BYTES:
+		frappe.throw(_("Recording chunk is too large."))
+	path = _part_path(att.name, prop.name)
+	try:
+		seq_n = int(seq or 0)
+	except (TypeError, ValueError):
+		seq_n = 0
+	os.makedirs(os.path.dirname(path), exist_ok=True)
+	mode = "wb" if seq_n == 0 else "ab"
+	with open(path, mode) as fh:
+		fh.write(data)
+	size = os.path.getsize(path)
+	if size > MAX_RECORDING_BYTES:
+		try:
+			os.remove(path)
+		except OSError:
+			pass
+		frappe.throw(_("Recording is too large."))
+	return {"ok": True, "bytes": size}
+
+
+@frappe.whitelist()
+def finish_recording(attempt: str, property: str) -> dict:
+	"""Turn this house's chunks into a private File and stamp it on the slot."""
+	_need()
+	att = _get_attempt(attempt, write=True)
+	prop = _get_prop(property)
+	if prop.practice_set != att.practice_set:
+		frappe.throw(_("That property is not in this set."))
+	part = _part_path(att.name, prop.name)
+	if not os.path.exists(part) or os.path.getsize(part) == 0:
+		return {"ok": False, "error": "no recording"}
+	dest = _dest_path(att.name, prop.name)
+	os.replace(part, dest)
+	fname = os.path.basename(dest)
+	file_url = f"/private/files/{fname}"
+	existing = frappe.db.get_value(
+		"File",
+		{"file_url": file_url, "attached_to_doctype": ATTEMPT, "attached_to_name": att.name},
+		"name",
+	)
+	if not existing:
+		frappe.get_doc(
+			{
+				"doctype": "File",
+				"file_name": fname,
+				"file_url": file_url,
+				"is_private": 1,
+				"attached_to_doctype": ATTEMPT,
+				"attached_to_name": att.name,
+			}
+		).insert(ignore_permissions=True)
+	results = _results(att)
+	slot = _slot(results, prop.name)
+	slot["recording_url"] = file_url
+	_write_results(att, results)
+	return {"ok": True, "url": file_url, "property": prop.name}
 
 
 # ---------------------------------------------------------------------------------

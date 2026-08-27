@@ -16,6 +16,14 @@
           :loading="saving"
           @click="saveMeta"
         />
+        <label
+          v-if="canRecord"
+          class="flex cursor-pointer items-center gap-1.5 text-sm text-ink-gray-7"
+          :title="__('Capture this tab and your mic so you can talk through the comps')"
+        >
+          <FormControl type="checkbox" v-model="wantRecord" />
+          {{ __('Record screen + mic') }}
+        </label>
         <Button
           variant="solid"
           :label="resumeLabel"
@@ -124,6 +132,12 @@
               <td class="py-2 pr-3 text-ink-gray-6">{{ a.status }}</td>
               <td class="py-2 pr-3 tabular-nums text-ink-gray-8">
                 {{ fmtDuration(a.elapsed_seconds) }}
+                <span
+                  v-if="a.properties?.some((p) => p.recording_url)"
+                  class="ml-1 text-[11px] font-medium text-red-600"
+                >
+                  {{ __('REC') }}
+                </span>
               </td>
               <td class="py-2 pr-3 text-ink-gray-6">
                 {{ a.done }}/{{ a.property_count }}
@@ -137,22 +151,40 @@
                 <div
                   v-for="p in a.properties"
                   :key="p.name"
-                  class="flex items-baseline justify-between gap-3 py-0.5 text-xs"
+                  class="py-1"
                 >
-                  <span class="min-w-0 truncate text-ink-gray-7">
-                    {{ p.property_address }}
-                  </span>
-                  <span class="shrink-0 tabular-nums text-ink-gray-5">
-                    <template v-if="p.duration_seconds != null">
-                      {{ fmtDuration(p.duration_seconds) }}
-                    </template>
-                    <template v-else-if="p.opened_at">{{ __('open') }}</template>
-                    <template v-else>—</template>
-                    <template v-if="p.selected_count">
-                      · {{ __('{0} picked', [p.selected_count]) }}
-                    </template>
-                    <template v-if="p.has_offer"> · {{ __('offer saved') }}</template>
-                  </span>
+                  <div class="flex items-baseline justify-between gap-3 text-xs">
+                    <span class="min-w-0 truncate text-ink-gray-7">
+                      {{ p.property_address }}
+                    </span>
+                    <span class="shrink-0 tabular-nums text-ink-gray-5">
+                      <template v-if="p.duration_seconds != null">
+                        {{ fmtDuration(p.duration_seconds) }}
+                      </template>
+                      <template v-else-if="p.opened_at">{{ __('open') }}</template>
+                      <template v-else>—</template>
+                      <template v-if="p.selected_count">
+                        · {{ __('{0} picked', [p.selected_count]) }}
+                      </template>
+                      <template v-if="p.has_offer"> · {{ __('offer saved') }}</template>
+                      <button
+                        v-if="p.recording_url"
+                        class="ml-2 font-medium text-red-600 hover:underline"
+                        @click.stop="playing = playing === playKey(a, p) ? '' : playKey(a, p)"
+                      >
+                        {{ playing === playKey(a, p) ? __('Hide') : __('Play') }}
+                      </button>
+                    </span>
+                  </div>
+                  <video
+                    v-if="playing === playKey(a, p)"
+                    class="mt-1 aspect-video w-full max-w-xl bg-black"
+                    controls
+                    autoplay
+                    preload="metadata"
+                    :src="p.recording_url"
+                    @click.stop
+                  />
                 </div>
               </td>
             </tr>
@@ -200,6 +232,12 @@ import {
 import { useDebounceFn } from '@vueuse/core'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import {
+  abandonPracticeRecording,
+  canPracticeRecord,
+  setPracticeAttempt,
+  startPracticeRecording,
+} from '@/utils/practiceRecorder'
 
 const props = defineProps({ setId: { type: String, required: true } })
 const router = useRouter()
@@ -208,8 +246,11 @@ const starting = ref(false)
 const deleting = ref(false)
 const confirmDelete = ref(false)
 const openRow = ref('')
+const playing = ref('')
 const leadOptions = ref([])
 const addKey = ref(0)
+const wantRecord = ref(false)
+const canRecord = computed(() => canPracticeRecord())
 const form = reactive({ title: '', time_limit_min: 0, notes: '', is_active: true })
 
 const detail = createResource({
@@ -246,6 +287,11 @@ function fmtDuration(sec) {
 
 function toggleRow(name) {
   openRow.value = openRow.value === name ? '' : name
+  if (openRow.value !== name) playing.value = ''
+}
+
+function playKey(a, p) {
+  return `${a.name}:${p.name}`
 }
 
 const searchLeads = useDebounceFn(async (q) => {
@@ -325,15 +371,26 @@ async function saveMeta() {
 
 async function start() {
   starting.value = true
+  let recording = false
   try {
+    if (wantRecord.value && canPracticeRecord()) {
+      try {
+        await startPracticeRecording()
+        recording = true
+      } catch {
+        toast.error(__('Could not start the recording — continuing without it.'))
+      }
+    }
     const res = await call('crm.api.practice.start_attempt', {
       practice_set: props.setId,
     })
+    if (recording) setPracticeAttempt(res.name)
     router.push({
       name: 'PracticeRun',
       params: { setId: props.setId, attemptId: res.name },
     })
   } catch (e) {
+    if (recording) await abandonPracticeRecording()
     toast.error(e.messages?.[0] || __('Could not start.'))
   } finally {
     starting.value = false

@@ -33,7 +33,10 @@ duplicating. Work substantial features in a worktree of your own.
   10 houses in 30 minutes. Each setter runs the set on the **same comps map**
   as a live lead; hides / picks / the offer calc write to **their attempt**,
   never to `CRM Lead.comps_hidden` / `comps_selected` or the timeline. Times
-  are recorded for the whole run and per house. Doctypes: ops
+  are recorded for the whole run and per house. Optional **screen + mic**
+  on Start (`practiceRecorder.js`): chunks upload as they arrive so a 30-minute
+  take never hits nginx's 50m body limit; the file is a private File on the
+  attempt, playable from the Times table. Doctypes: ops
   `setup_practice.py`. App: `crm/api/practice.py` +
   `pages/Practice.vue` / `PracticeSet.vue` / `PracticeRun.vue`. CompsView and
   CompOfferCalc take optional `practiceAttempt` / `practiceProperty` to redirect
