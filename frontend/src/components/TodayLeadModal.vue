@@ -48,6 +48,13 @@
             >
               {{ item.address }}
             </button>
+            <DispoBuyerBadges
+              v-if="leadDoc"
+              fetch
+              :city="leadDoc.property_city"
+              :state="leadDoc.property_state"
+              :county="leadDoc.property_county"
+            />
           </div>
           <Button variant="ghost" icon="x" class="shrink-0" @click="show = false" />
         </div>
@@ -237,6 +244,7 @@ import Activities from '@/components/Activities/Activities.vue'
 import CompsView from '@/components/CompsView.vue'
 import FirstCallReadCard from '@/components/FirstCallReadCard.vue'
 import ZillowAddressMatch from '@/components/ZillowAddressMatch.vue'
+import DispoBuyerBadges from '@/components/DispoBuyerBadges.vue'
 import { callHref, formatPhone } from '@/utils/phoneFormat'
 import { Badge, Button, Dialog, FeatherIcon, call } from 'frappe-ui'
 import { computed, ref, watch } from 'vue'

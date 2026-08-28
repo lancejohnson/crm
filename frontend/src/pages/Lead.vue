@@ -154,6 +154,16 @@
                 <AddressIcon class="size-3.5 shrink-0" />
                 <span class="truncate">{{ doc.property_address }}</span>
               </a>
+              <!-- Who already buys here: same chips as the Kanban. The parent
+                   column is `truncate` (whitespace-nowrap), so wrap them or a
+                   second badge clips. -->
+              <DispoBuyerBadges
+                fetch
+                class="whitespace-normal"
+                :city="doc.property_city"
+                :state="doc.property_state"
+                :county="doc.property_county"
+              />
               <!-- Acq price: just a $ icon + amount (no label), digits only,
                    live thousand separators; Enter/blur saves. -->
               <div
@@ -433,6 +443,7 @@ import TaxInfoCard from '@/components/TaxInfoCard.vue'
 import AgreementsCard from '@/components/AgreementsCard.vue'
 import UnderwritingCard from '@/components/UnderwritingCard.vue'
 import InvestorLiftCard from '@/components/InvestorLiftCard.vue'
+import DispoBuyerBadges from '@/components/DispoBuyerBadges.vue'
 import MoneyIcon from '@/components/Icons/MoneyIcon.vue'
 import CalendarIcon from '@/components/Icons/CalendarIcon.vue'
 import {

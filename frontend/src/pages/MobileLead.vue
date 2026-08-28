@@ -87,6 +87,13 @@
                 <AddressIcon class="size-3.5 shrink-0" />
                 <span class="truncate">{{ doc.property_address }}</span>
               </a>
+              <DispoBuyerBadges
+                fetch
+                class="whitespace-normal"
+                :city="doc.property_city"
+                :state="doc.property_state"
+                :county="doc.property_county"
+              />
               <!-- Acq price (digits only, live thousand separators) -->
               <div
                 class="flex items-center gap-1.5 text-sm text-ink-gray-7"
@@ -334,6 +341,7 @@ import TaxInfoCard from '@/components/TaxInfoCard.vue'
 import AgreementsCard from '@/components/AgreementsCard.vue'
 import UnderwritingCard from '@/components/UnderwritingCard.vue'
 import InvestorLiftCard from '@/components/InvestorLiftCard.vue'
+import DispoBuyerBadges from '@/components/DispoBuyerBadges.vue'
 import { setupCustomizations, isTranslatable, ddExpiration, parseColor, openWebsite } from '@/utils'
 import { getView } from '@/utils/view'
 import { callHref, formatPhone } from '@/utils/phoneFormat'

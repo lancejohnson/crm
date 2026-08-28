@@ -82,6 +82,14 @@ duplicating. Work substantial features in a worktree of your own.
   `zillowUrl`/`mapsUrl` helpers). Toasts if no address is set. Pure frontend.
   `frontend/src/pages/Lead.vue`.
 
+- **Dispo partner badges on the lead** — the same New Western / KeyGlee /
+  ezREIdispo chips the Kanban already shows (`DispoBuyerBadges`) now sit under
+  the address on `Lead.vue` + `MobileLead.vue` and in the Today lead-modal
+  header. Opt-in `fetch` hits `crm.api.dispo_buyers.get_dispo_buyers` (returns
+  the compact `summary()` list, not the raw resolve dict) from city/state/
+  county so a lead page does not need the kanban pseudo-field. Kanban still
+  passes `value` and never creates a per-card resource.
+
 - **Lance-only Team Activity board** — a **Team activity** button at the bottom
   of the app sidebar (rendered only for `lance.johnson@groundworkpro.com`)
   opens a one-day manager report. Laid out as a dense report (Lance's

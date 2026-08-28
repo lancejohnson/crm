@@ -17,7 +17,8 @@
 import NewWesternMark from '@/components/Icons/NewWesternMark.vue'
 import KeyGleeMark from '@/components/Icons/KeyGleeMark.vue'
 import EzReiMark from '@/components/Icons/EzReiMark.vue'
-import { computed } from 'vue'
+import { createResource } from 'frappe-ui'
+import { computed, watch } from 'vue'
 
 const MARKS = { nw: NewWesternMark, kg: KeyGleeMark, ez: EzReiMark }
 
@@ -25,10 +26,73 @@ const props = defineProps({
   // The server's `_dispo_buyers` pseudo-field: null when no buyer covers this
   // lead's area, so most cards render nothing at all.
   value: { type: [Array, Object, String], default: null },
+  // Lead page (and Today modal) have a location, not a precomputed field.
+  // Opt-in so the Kanban — which already ships `value` and mounts this once
+  // per card — never creates a resource per row.
+  fetch: { type: Boolean, default: false },
+  city: { type: String, default: '' },
+  state: { type: String, default: '' },
+  county: { type: String, default: '' },
 })
 
-const badges = computed(() => {
-  const v = props.value
+const fetched = props.fetch
+  ? createResource({
+      url: 'crm.api.dispo_buyers.get_dispo_buyers',
+      auto: false,
+    })
+  : null
+
+if (fetched) {
+  watch(
+    () => [props.city, props.state, props.county],
+    ([city, state, county]) => {
+      if (!city && !state && !county) {
+        fetched.data = null
+        return
+      }
+      fetched.submit({ city: city || '', state: state || '', county: county || '' })
+    },
+    { immediate: true },
+  )
+}
+
+const NO = 'No'
+
+// Compact the resolve() dict into the same badge list `summary()`
+// ships. Needed because prod still returns resolve() until this backend
+// deploys, and the Kanban already passes the compact array.
+function badgesFromResolve(r) {
+  if (!r || typeof r !== 'object') return []
+  const badges = []
+  if (r.new_western && r.new_western !== NO) {
+    badges.push({
+      buyer: 'nw',
+      market: r.new_western_market,
+      strong: r.new_western === 'Yes - NW city' || r.new_western === 'Yes - NW market',
+      status: r.new_western,
+    })
+  }
+  if (r.keyglee && r.keyglee !== NO) {
+    badges.push({
+      buyer: 'kg',
+      market: r.keyglee_market,
+      strong: r.keyglee === 'Yes - KG operating',
+      status: r.keyglee,
+    })
+  }
+  if (r.ezrei && r.ezrei !== NO) {
+    badges.push({
+      buyer: 'ez',
+      market: r.ezrei_market,
+      strong: true,
+      status: r.ezrei,
+      rank: r.ezrei_rank,
+    })
+  }
+  return badges
+}
+
+function parseValue(v) {
   if (!v) return []
   if (Array.isArray(v)) return v
   // Kanban rows arrive through parseRows, which can stringify a value on the
@@ -36,12 +100,19 @@ const badges = computed(() => {
   if (typeof v === 'string') {
     try {
       const parsed = JSON.parse(v)
-      return Array.isArray(parsed) ? parsed : []
+      return parseValue(parsed)
     } catch {
       return []
     }
   }
+  if (typeof v === 'object' && (v.new_western || v.keyglee || v.ezrei))
+    return badgesFromResolve(v)
   return []
+}
+
+const badges = computed(() => {
+  if (fetched) return parseValue(fetched.data)
+  return parseValue(props.value)
 })
 
 // FILLED = the company's own claim about where it buys. OUTLINED = ours.

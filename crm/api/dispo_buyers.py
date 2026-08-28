@@ -248,5 +248,10 @@ def summary(city=None, state=None, county=None) -> dict | None:
 
 @frappe.whitelist()
 def get_dispo_buyers(city=None, state=None, county=None):
-	"""Whitelisted single-lead lookup, for surfaces that hold a lead not a card."""
-	return resolve(city, state, county)
+	"""Whitelisted single-lead lookup, for surfaces that hold a lead not a card.
+
+	Returns the same compact badge list the Kanban ships as `_dispo_buyers`
+	(empty list when nobody covers the area), so the lead page can render
+	`<DispoBuyerBadges>` without re-deriving strong/weak client-side.
+	"""
+	return summary(city, state, county) or []
