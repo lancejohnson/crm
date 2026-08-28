@@ -33,6 +33,14 @@
         >
           {{ __('Novation') }}
         </button>
+        <button
+          type="button"
+          :class="{ on: kind === 'list' }"
+          :title="__('As-is − 6% commission − 2% closing − 2% concessions')"
+          @click="setKind('list')"
+        >
+          {{ __('List it') }}
+        </button>
       </div>
       <span class="head-r">
         <button
@@ -95,7 +103,7 @@
         </div>
       </template>
 
-      <span class="lab">{{ kind === 'novation' ? __('Current value') : __('ARV') }}</span>
+      <span class="lab">{{ valueLabel }}</span>
       <input
         v-for="col in visible"
         :key="'arv' + col"
@@ -108,6 +116,27 @@
         @input="typeMoney(col, 'arv', $event)"
       />
 
+      <template v-if="kind === 'list'">
+        <template v-for="cut in LIST_CUTS" :key="cut.key">
+          <span class="lab" :title="cut.why">{{ cut.label }}</span>
+          <div v-for="col in visible" :key="cut.key + col" class="cut">
+            <label class="pct">
+              <input
+                :ref="(el) => setField(cut.row, col, el)"
+                inputmode="numeric"
+                :value="Math.round((s[col][cut.key] || 0) * 100)"
+                @focus="$event.target.select()"
+                @change="setRate(col, cut.key, $event)"
+              />
+              <i>%</i>
+            </label>
+            <span class="out">
+              {{ s[col].arv ? '−' + money(run(col)[cut.result]) : '—' }}
+            </span>
+          </div>
+        </template>
+      </template>
+      <template v-else>
       <span class="lab">
         {{ kind === 'novation' ? __('− %') : __('% of ARV') }}
         <button
@@ -146,6 +175,7 @@
         @focus="$event.target.select()"
         @input="typeAfter(col, $event)"
       />
+      </template>
 
       <!-- Repairs is a NAMED choice, not a number to invent. The rep is on the
            phone with a seller describing a house; "kitchen & baths" is a thing
@@ -243,6 +273,7 @@
       </span>
       </template>
 
+      <template v-if="kind !== 'list'">
       <span class="lab">{{ __('Fee') }}</span>
       <input
         v-for="col in visible"
@@ -253,8 +284,9 @@
         @focus="$event.target.select()"
         @input="typeMoney(col, 'fee', $event)"
       />
+      </template>
 
-      <span class="lab offer">{{ __('Offer') }}</span>
+      <span class="lab offer">{{ kind === 'list' ? __('Takeaway') : __('Offer') }}</span>
       <label
         v-for="col in visible"
         :key="'offer' + col"
@@ -364,7 +396,7 @@
 
 <script setup>
 /**
- * Offer calculator. Cash or novation — cash by default, one kind at a time.
+ * Offer calculator. Cash, novation, or list-it — cash by default, one kind at a time.
  *
  * Cash has two formulas, because the desk uses both:
  *   2× repairs  ARV × 90% − 2×repairs − fee   (default; what OfferRail runs)
@@ -376,7 +408,11 @@
  * Novation is Current value − 10% − fee ($40k default). No repairs: we list
  * the house as-is. The 10% stays editable the same way cash's % does.
  *
- * Cash and novation are separate notebooks: switching does not rewrite the
+ * List it is as-is − 6% commission − 2% closing − 2% concessions. No fee, no
+ * repairs: it is what the seller would take home if they listed themselves.
+ * The three rates stay editable; the dollars and the takeaway are derived.
+ *
+ * The three kinds are separate notebooks: switching does not rewrite the
  * other kind's numbers or its comps. Each kind soft-fills its value from the
  * average of ITS comps table (same suggested-ARV the cash column has always
  * used), and every figure in the column is editable — derived rows back-solve.
@@ -460,13 +496,60 @@ const DEFAULT_PSF = 30
 const DEFAULT_FEE = 25000
 const DEFAULT_NOVATION_FEE = 40000
 const DEFAULT_NOVATION_PCT = 0.1
+const DEFAULT_COMMISSION_PCT = 0.06
+const DEFAULT_CLOSING_PCT = 0.02
+const DEFAULT_CONCESSIONS_PCT = 0.02
 const NOVATION_PCT_WHY = [
   __('6% Realtors'),
   __('2% closing costs'),
   __('2% minor repairs'),
 ].join(' · ')
+const LIST_CUTS = [
+  {
+    key: 'commissionPct',
+    result: 'commission',
+    row: 1,
+    label: __('Commission'),
+    why: __('Agent commission'),
+  },
+  {
+    key: 'closingPct',
+    result: 'closing',
+    row: 2,
+    label: __('Closing'),
+    why: __('Closing costs'),
+  },
+  {
+    key: 'concessionsPct',
+    result: 'concessions',
+    row: 3,
+    label: __('Concessions'),
+    why: __('Concessions and miscellaneous'),
+  },
+]
+function asKind(k) {
+  return k === 'novation' || k === 'list' ? k : 'cash'
+}
+
+function listRates() {
+  return {
+    commissionPct: DEFAULT_COMMISSION_PCT,
+    closingPct: DEFAULT_CLOSING_PCT,
+    concessionsPct: DEFAULT_CONCESSIONS_PCT,
+  }
+}
 
 function fresh(k, f) {
+  if (k === 'list') {
+    return {
+      arv: 0,
+      pct: 0.1,
+      mult: 1,
+      rehabPsf: DEFAULT_PSF,
+      fee: 0,
+      ...listRates(),
+    }
+  }
   if (k === 'novation') {
     return {
       arv: 0,
@@ -474,10 +557,18 @@ function fresh(k, f) {
       mult: 1,
       rehabPsf: DEFAULT_PSF,
       fee: DEFAULT_NOVATION_FEE,
+      ...listRates(),
     }
   }
   const g = f || FORMULAS[0]
-  return { arv: 0, pct: g.pct, mult: g.mult, rehabPsf: DEFAULT_PSF, fee: DEFAULT_FEE }
+  return {
+    arv: 0,
+    pct: g.pct,
+    mult: g.mult,
+    rehabPsf: DEFAULT_PSF,
+    fee: DEFAULT_FEE,
+    ...listRates(),
+  }
 }
 
 function emptyBook(k) {
@@ -485,8 +576,8 @@ function emptyBook(k) {
     s: [fresh(k), fresh(k)],
     cols: 1,
     notes: '',
-    // Cash follows the map until the rep edits the table. Novation starts
-    // empty — switching kinds must not copy the other notebook's comps.
+    // Cash follows the map until the rep edits the table. Novation and list-it
+    // start empty — switching kinds must not copy the other notebook's comps.
     comps: k === 'cash' ? null : [],
   }
 }
@@ -495,6 +586,12 @@ const kind = ref('cash')
 const books = reactive({
   cash: emptyBook('cash'),
   novation: emptyBook('novation'),
+  list: emptyBook('list'),
+})
+const valueLabel = computed(() => {
+  if (kind.value === 'novation') return __('Current value')
+  if (kind.value === 'list') return __('As-is')
+  return __('ARV')
 })
 // Template reads these; script uses S() so a kind switch cannot point at a
 // stale array. Comps live on the book — cash and novation keep their own.
@@ -568,6 +665,14 @@ const storageKey = computed(() =>
     : `compsCalc:${props.lead}`,
 )
 
+function readRate(row, camel, snake, fallback) {
+  const v = row?.[camel] ?? row?.[snake]
+  if (v === undefined || v === null || v === '') return fallback
+  const n = Number(v)
+  if (!Number.isFinite(n)) return fallback
+  return n > 1 ? n / 100 : n
+}
+
 function applyScene(k, i, row) {
   const base = fresh(k)
   const blank = !row || !Object.keys(row).length
@@ -579,8 +684,16 @@ function applyScene(k, i, row) {
     // A snapshot written before the toggle existed carries no `mult`, and its
     // numbers were computed with a single deduction — so it IS the classic
     // one. Only a genuine reset falls back to the column's default.
-    // Novation has no multiplier; leave the cash default in the slot unused.
-    mult: k === 'novation' ? 1 : Number(row.mult) || (blank ? base.mult : 1),
+    // Novation / list-it have no multiplier; leave the cash default unused.
+    mult: k === 'cash' ? Number(row.mult) || (blank ? base.mult : 1) : 1,
+    commissionPct: readRate(row, 'commissionPct', 'commission_pct', base.commissionPct),
+    closingPct: readRate(row, 'closingPct', 'closing_pct', base.closingPct),
+    concessionsPct: readRate(
+      row,
+      'concessionsPct',
+      'concessions_pct',
+      base.concessionsPct,
+    ),
   })
 }
 
@@ -601,6 +714,7 @@ function loadBook(k, raw) {
 function resetBooks() {
   books.cash = emptyBook('cash')
   books.novation = emptyBook('novation')
+  books.list = emptyBook('list')
   kind.value = 'cash'
   menuFor.value = -1
   custom[0] = false
@@ -627,10 +741,11 @@ function loadSaved() {
     } catch {
       stored = null
     }
-    if (stored?.cash || stored?.novation) {
+    if (stored?.cash || stored?.novation || stored?.list) {
       loadBook('cash', stored.cash)
       loadBook('novation', stored.novation)
-      if (stored.kind === 'novation') kind.value = 'novation'
+      loadBook('list', stored.list)
+      kind.value = asKind(stored.kind)
       // An earlier build copied the cash/map list onto novation at switch.
       // If the two lists are the same names, novation never got its own picks.
       const cashList = stored.cash?.comps ?? props.comps
@@ -639,16 +754,13 @@ function loadSaved() {
       }
     } else if (stored && Array.isArray(stored.s)) {
       // Pre-split draft: one notebook. Drop it into whichever kind it was.
-      const k = stored.kind === 'novation' ? 'novation' : 'cash'
+      const k = asKind(stored.kind)
       kind.value = k
       loadBook(k, stored)
     }
     const seed = props.seed
     if (seed && Array.isArray(seed.scenarios) && seed.scenarios.length) {
-      const k =
-        seed.kind === 'novation' || seed.scenarios[0]?.kind === 'novation'
-          ? 'novation'
-          : 'cash'
+      const k = asKind(seed.kind || seed.scenarios[0]?.kind)
       kind.value = k
       applyScene(k, 0, {})
       applyScene(k, 1, {})
@@ -687,6 +799,12 @@ function persist() {
           notes: books.novation.notes,
           comps: books.novation.comps,
         },
+        list: {
+          s: books.list.s,
+          cols: books.list.cols,
+          notes: books.list.notes,
+          comps: books.list.comps,
+        },
       }),
     )
   } catch {
@@ -711,7 +829,7 @@ watch(
     // must not dump the other notebook's (or the map's) list in.
     const b = books[kind.value]
     if (!b.comps) {
-      if (kind.value === 'novation') b.comps = []
+      if (kind.value !== 'cash') b.comps = []
       else return
     }
     const have = new Set(b.comps.map(compKey))
@@ -788,6 +906,9 @@ function addCompare() {
       mult: multOf(0),
       rehabPsf: S()[0].rehabPsf,
       fee: S()[0].fee,
+      commissionPct: S()[0].commissionPct,
+      closingPct: S()[0].closingPct,
+      concessionsPct: S()[0].concessionsPct,
     })
   }
   cols.value = 2
@@ -795,6 +916,23 @@ function addCompare() {
 
 function run(col) {
   const x = S()[col]
+  if (kind.value === 'list') {
+    const commission = Math.round(x.arv * (Number(x.commissionPct) || 0))
+    const closing = Math.round(x.arv * (Number(x.closingPct) || 0))
+    const concessions = Math.round(x.arv * (Number(x.concessionsPct) || 0))
+    const after = Math.round(x.arv - commission - closing - concessions)
+    return {
+      after,
+      cut: commission + closing + concessions,
+      commission,
+      closing,
+      concessions,
+      repairs: 0,
+      rehab: 0,
+      wholesale: after,
+      offer: after,
+    }
+  }
   if (kind.value === 'novation') {
     const cut = Math.round(x.arv * x.pct)
     const after = Math.round(x.arv - cut)
@@ -849,7 +987,7 @@ const arvHint = computed(() => (suggestedArv.value ? money(suggestedArv.value) :
 // Soft-fill: write the comps-table average into an empty (or still-suggested)
 // value so Current value / ARV starts from the same number the table is
 // pointing at. Per-kind, so editing cash cannot move novation's value.
-const lastSoft = { cash: 0, novation: 0 }
+const lastSoft = { cash: 0, novation: 0, list: 0 }
 function applySoft(k) {
   const v = suggestedArv.value
   if (!v) return
@@ -927,6 +1065,18 @@ function setPct(col, e) {
     kind.value === 'novation' ? DEFAULT_NOVATION_PCT : col ? 0.65 : 0.7
   S()[col].pct = (n > 1 ? n / 100 : n) || fallback
 }
+function setRate(col, key, e) {
+  const n = parseMoney(e.target.value)
+  S()[col][key] = n > 1 ? n / 100 : n || 0
+}
+function listCutPct(col) {
+  const x = S()[col]
+  return (
+    (Number(x.commissionPct) || 0) +
+    (Number(x.closingPct) || 0) +
+    (Number(x.concessionsPct) || 0)
+  )
+}
 
 /** After Vue writes `$1,250`, put the caret after the same digit it was on. */
 function putCaret(el, digitsBefore, formatted) {
@@ -975,7 +1125,10 @@ function typeOffer(col, e) {
   const el = e.target
   const digitsBefore = (el.value.slice(0, el.selectionStart).match(/\d/g) || []).length
   const n = parseMoney(el.value)
-  if (S()[col].arv) {
+  if (kind.value === 'list') {
+    const tot = listCutPct(col)
+    if (tot < 1) S()[col].arv = n / (1 - tot)
+  } else if (S()[col].arv) {
     const r = run(col)
     const base = kind.value === 'novation' ? r.after : r.wholesale
     S()[col].fee = base - n
@@ -1019,16 +1172,20 @@ async function save() {
       scenarios: JSON.stringify(
         visible.value.map((i) => {
           const x = S()[i]
-          return {
-            kind: kind.value,
-            arv: x.arv,
-            pct: x.pct,
-            fee: x.fee,
-            ...(kind.value === 'cash'
-              ? { mult: multOf(i), rehabPsf: x.rehabPsf }
-              : {}),
-            ...run(i),
+          const row = { kind: kind.value, arv: x.arv, ...run(i) }
+          if (kind.value === 'list') {
+            row.commission_pct = x.commissionPct
+            row.closing_pct = x.closingPct
+            row.concessions_pct = x.concessionsPct
+          } else {
+            row.pct = x.pct
+            row.fee = x.fee
+            if (kind.value === 'cash') {
+              row.mult = multOf(i)
+              row.rehabPsf = x.rehabPsf
+            }
           }
+          return row
         }),
       ),
       comps: JSON.stringify(
@@ -1135,6 +1292,7 @@ function onKeys(e) {
 }
 .head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -1400,7 +1558,23 @@ input.offer.bad {
 }
 .kind button {
   flex: none;
-  padding: 0 10px;
+  padding: 0 8px;
+}
+.cut {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+.cut .pct {
+  flex: none;
+  width: 3.6rem;
+}
+.cut .out {
+  flex: 1;
+  min-width: 0;
+  padding-right: 0;
 }
 
 /* A derived row can carry the figure it derived from. Same shape as the offer

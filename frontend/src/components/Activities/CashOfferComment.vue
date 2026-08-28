@@ -1,21 +1,47 @@
 <template>
   <div class="offer">
-    <div class="title">{{ isNovation ? __('Novation offer') : __('Cash offer') }}</div>
+    <div class="title">{{ kindTitle }}</div>
 
     <div v-for="(sc, i) in offer.scenarios" :key="i" class="scene">
       <div class="scene-h">
         {{ __('Scenario {0}', [i + 1]) }}
-        <span v-if="sc.pct || isNovation">
+        <span v-if="isList">
+          ({{ Math.round(listCutPct(sc) * 100) }}%)
+        </span>
+        <span v-else-if="sc.pct || isNovation">
           ({{ Math.round(sc.pct * 100) }}%<template
             v-if="!isNovation && Number(sc.mult) === 2"
           >
             · {{ __('2× repairs') }}</template>)
         </span>
       </div>
-      <template v-if="isNovation">
+      <template v-if="isList">
+        <div>{{ money(sc.arv) }} {{ __('as-is') }}</div>
+        <div>
+          − {{ __('commission') }} {{ Math.round((sc.commission_pct || 0) * 100) }}%
+          {{ money(sc.commission) }}
+        </div>
+        <div>
+          − {{ __('closing') }} {{ Math.round((sc.closing_pct || 0) * 100) }}%
+          {{ money(sc.closing) }}
+        </div>
+        <div>
+          − {{ __('concessions') }} {{ Math.round((sc.concessions_pct || 0) * 100) }}%
+          {{ money(sc.concessions) }}
+        </div>
+        <div>
+          = <b class="scene-offer">{{ money(sc.offer) }}</b>
+          {{ __('takeaway') }}
+        </div>
+      </template>
+      <template v-else-if="isNovation">
         <div>
           {{ money(sc.arv) }} − {{ Math.round((sc.pct || 0) * 100) }}% =
           {{ money(sc.after) }}
+        </div>
+        <div>
+          − {{ __('fee') }} {{ money(sc.fee) }} =
+          <b class="scene-offer">{{ money(sc.offer) }}</b>
         </div>
       </template>
       <template v-else>
@@ -34,11 +60,11 @@
             > = {{ money(sc.repairs) }} × 2</template>)
           </template>
         </div>
+        <div>
+          − {{ __('fee') }} {{ money(sc.fee) }} =
+          <b class="scene-offer">{{ money(sc.offer) }}</b>
+        </div>
       </template>
-      <div>
-        − {{ __('fee') }} {{ money(sc.fee) }} =
-        <b class="scene-offer">{{ money(sc.offer) }}</b>
-      </div>
     </div>
 
     <div class="block">
@@ -71,7 +97,7 @@
 
   <Dialog
     v-model="tweakOpen"
-    :options="{ title: isNovation ? __('Novation offer') : __('Cash offer'), size: '5xl' }"
+    :options="{ title: kindTitle, size: '5xl' }"
   >
     <template #body-content>
       <div class="mb-3 flex justify-end">
@@ -102,7 +128,7 @@
 
 <script setup>
 /**
- * Timeline card for a saved cash- or novation-offer comment.
+ * Timeline card for a saved cash-, novation-, or list-it-offer comment.
  *
  * The stored HTML used to be one wrapping line of "Comps: A · B", and
  * `.prose-f { break-all }` split prices mid-number so it read as plain text.
@@ -252,10 +278,8 @@ const offer = computed(() => {
   const raw = parsePayload(props.html) || parseLegacy(props.html) || {}
   const lead = raw.lead || props.lead || ''
   const scenarios = raw.scenarios || []
-  const kind =
-    raw.kind === 'novation' || scenarios[0]?.kind === 'novation'
-      ? 'novation'
-      : 'cash'
+  const hinted = raw.kind || scenarios[0]?.kind
+  const kind = hinted === 'novation' || hinted === 'list' ? hinted : 'cash'
   return {
     lead,
     kind,
@@ -267,6 +291,19 @@ const offer = computed(() => {
 })
 
 const isNovation = computed(() => offer.value.kind === 'novation')
+const isList = computed(() => offer.value.kind === 'list')
+const kindTitle = computed(() => {
+  if (isNovation.value) return __('Novation offer')
+  if (isList.value) return __('List it')
+  return __('Cash offer')
+})
+function listCutPct(sc) {
+  return (
+    (Number(sc.commission_pct) || 0) +
+    (Number(sc.closing_pct) || 0) +
+    (Number(sc.concessions_pct) || 0)
+  )
+}
 
 const lead = computed(() => offer.value.lead || props.lead || '')
 

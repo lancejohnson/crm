@@ -421,6 +421,8 @@ def _formula_label(sc: dict) -> str:
 			pct_s = ""
 	if kind == "novation":
 		return f"Novation{pct_s}"
+	if kind == "list":
+		return "List it"
 	mult = 2 if int(_int_or_none(sc.get("mult")) or 1) == 2 else 1
 	name = "2× repairs" if mult == 2 else "Classic"
 	return f"{name}{pct_s}"
@@ -436,12 +438,12 @@ def _offer_calcs(slot: dict) -> list:
 		if not isinstance(sc, dict):
 			continue
 		kind = sc.get("kind") or off.get("kind") or "cash"
-		if kind != "novation":
+		if kind not in ("novation", "list"):
 			kind = "cash"
 		row = {
 			"kind": kind,
 			"arv": _int_or_none(sc.get("arv")),
-			"repairs": None if kind == "novation" else _int_or_none(sc.get("repairs")),
+			"repairs": None if kind in ("novation", "list") else _int_or_none(sc.get("repairs")),
 			"offer": _int_or_none(sc.get("offer")),
 			"formula": _formula_label({**sc, "kind": kind}),
 		}

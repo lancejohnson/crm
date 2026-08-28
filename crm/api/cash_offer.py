@@ -4,8 +4,10 @@ This is the comps-page calculator, not the desk rail. The rail is
 90% ARV − 2×repairs − fee and lives in `price_determination`. Cash runs
 ARV × % − (mult × repairs) − assignment fee per scenario, where `mult` is
 1 (the classic 70% rule) or 2 (the same shape the rail uses). Novation is
-Current value − 10% − fee ($40k default) — no repairs. They must not write
-the same field or a re-price on one surface silently rewrites the other.
+Current value − 10% − fee ($40k default) — no repairs. List it is as-is
+− 6% commission − 2% closing − 2% concessions, and the number it produces
+is the seller's takeaway if they listed the house themselves. They must not
+write the same field or a re-price on one surface silently rewrites the other.
 
 The numbers are recomputed here rather than trusted from the client, so the
 timeline card and the calculator cannot disagree about what an offer was. A
@@ -57,7 +59,9 @@ def _zillow(addr):
 
 def _kind(raw):
 	k = (raw.get("kind") or "cash") if isinstance(raw, dict) else "cash"
-	return "novation" if k == "novation" else "cash"
+	if k in ("novation", "list"):
+		return k
+	return "cash"
 
 
 def _pct(raw, default=0):
@@ -69,6 +73,14 @@ def _pct(raw, default=0):
 	return pct
 
 
+def _rate(raw, *keys, default=0):
+	for k in keys:
+		if k in raw and raw.get(k) not in (None, ""):
+			n = _num(raw.get(k))
+			return n / 100.0 if n > 1 else n
+	return default
+
+
 def _scene(raw, sqft):
 	if not isinstance(raw, dict):
 		return None
@@ -77,6 +89,26 @@ def _scene(raw, sqft):
 		return None
 	kind = _kind(raw)
 	fee = _num(raw.get("fee"))
+	if kind == "list":
+		commission_pct = _rate(raw, "commission_pct", "commissionPct", default=0.06)
+		closing_pct = _rate(raw, "closing_pct", "closingPct", default=0.02)
+		concessions_pct = _rate(raw, "concessions_pct", "concessionsPct", default=0.02)
+		commission = round(arv * commission_pct)
+		closing = round(arv * closing_pct)
+		concessions = round(arv * concessions_pct)
+		after = round(arv - commission - closing - concessions)
+		return {
+			"kind": "list",
+			"arv": arv,
+			"commission_pct": commission_pct,
+			"closing_pct": closing_pct,
+			"concessions_pct": concessions_pct,
+			"commission": commission,
+			"closing": closing,
+			"concessions": concessions,
+			"after": after,
+			"offer": after,
+		}
 	if kind == "novation":
 		pct = _pct(raw, 0.10)
 		if pct < 0 or pct >= 1:
@@ -155,6 +187,19 @@ def _comp_facts(c):
 
 
 def _scene_payload(sc):
+	if sc.get("kind") == "list":
+		return {
+			"kind": "list",
+			"arv": sc["arv"],
+			"commission_pct": sc["commission_pct"],
+			"closing_pct": sc["closing_pct"],
+			"concessions_pct": sc["concessions_pct"],
+			"commission": sc["commission"],
+			"closing": sc["closing"],
+			"concessions": sc["concessions"],
+			"after": sc["after"],
+			"offer": sc["offer"],
+		}
 	if sc.get("kind") == "novation":
 		return {
 			"kind": "novation",
@@ -212,13 +257,44 @@ def _html(lead, scenes, comps, sqft, notes=""):
 		json.dumps(_payload(lead, scenes, comps, sqft, notes), separators=(",", ":")),
 		quote=True,
 	)
-	title = _("Novation offer") if scenes and scenes[0].get("kind") == "novation" else _("Cash offer")
+	kind = scenes[0].get("kind") if scenes else "cash"
+	if kind == "novation":
+		title = _("Novation offer")
+	elif kind == "list":
+		title = _("List it")
+	else:
+		title = _("Cash offer")
 	parts = [
 		'<div class="cash-offer" data-cash-offer="{}">'.format(attr),
 		"<div><b>{}</b></div>".format(escape_html(title)),
 	]
 	for i, sc in enumerate(scenes):
 		label = _("Scenario {0}").format(i + 1)
+		if sc.get("kind") == "list":
+			parts.append(
+				"<div>{label}</div>"
+				"<div>{arv} {asis}</div>"
+				"<div>− {comm_l} {comm_pct:.0f}% {comm}</div>"
+				"<div>− {clos_l} {clos_pct:.0f}% {clos}</div>"
+				"<div>− {conc_l} {conc_pct:.0f}% {conc}</div>"
+				'<div>= <b style="white-space:nowrap">{offer}</b> {take}</div>'.format(
+					label=escape_html(label),
+					arv=_money(sc["arv"]),
+					asis=escape_html(_("as-is")),
+					comm_l=escape_html(_("commission")),
+					comm_pct=sc["commission_pct"] * 100,
+					comm=_money(sc["commission"]),
+					clos_l=escape_html(_("closing")),
+					clos_pct=sc["closing_pct"] * 100,
+					clos=_money(sc["closing"]),
+					conc_l=escape_html(_("concessions")),
+					conc_pct=sc["concessions_pct"] * 100,
+					conc=_money(sc["concessions"]),
+					offer=_money(sc["offer"]),
+					take=escape_html(_("takeaway")),
+				)
+			)
+			continue
 		if sc.get("kind") == "novation":
 			parts.append(
 				"<div>{label} ({pct:.0f}%)</div>"
@@ -298,7 +374,7 @@ def _html(lead, scenes, comps, sqft, notes=""):
 
 @frappe.whitelist()
 def save_cash_offer(lead, scenarios=None, comps=None, subject_sqft=None, notes=None):
-	"""Write the current cash or novation calc onto the lead timeline. Does not touch the desk rail."""
+	"""Write the current cash, novation, or list-it calc onto the lead timeline. Does not touch the desk rail."""
 	_guard()
 	if not frappe.db.exists("CRM Lead", lead):
 		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)

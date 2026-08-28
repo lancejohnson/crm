@@ -709,17 +709,21 @@ duplicating. Work substantial features in a worktree of your own.
       old calc names itself, and typing 30 into "Other…" IS Kitchen & baths.
       **`mult` IS stored**, because it genuinely cannot be derived: a 70% column
       does not imply a single deduction once the percentage is editable.
-    - **Cash or novation**, cash by default. Two independent notebooks — switching
+    - **Cash, novation, or list-it**, cash by default. Three independent notebooks — switching
       does not rewrite the other kind's numbers or its comps, and a save writes
-      only the kind on screen. Novation's table starts empty and only takes pins
+      only the kind on screen. Novation and list-it start empty and only take pins
       picked while that kind is on; cash still follows the map until edited. The
-      10% has a hover `?` (6% Realtors / 2% closing / 2% minor repairs). Novation is **Current value − 10% − fee ($40k
-      default)**; no repairs, because we list the house as-is. Current value
+      novation 10% has a hover `?` (6% Realtors / 2% closing / 2% minor repairs). Novation is **Current value − 10% − fee ($40k
+      default)**; no repairs, because we list the house as-is. **List it** is
+      **as-is − 6% commission − 2% closing − 2% concessions** — no fee, no repairs;
+      the number is the seller's takeaway if they listed themselves. The three
+      rates stay editable; takeaway back-solves as-is. Current value / as-is
       soft-fills from that kind's comps-table average, same suggested-ARV cash
       uses. Every figure is editable (After % / Offer back-solve value / fee).
       Old saved calcs have no `kind` and stay cash. Server recomputes; the
-      timeline card titles itself "Novation offer" so a $40k fee without a rehab
-      line does not look like a missing row.
+      timeline card titles itself "Novation offer" / "List it" so a $40k fee
+      without a rehab line, or a 10% net sheet with no fee, does not look like a
+      missing row.
     - Two cash formulas: **`2× repairs` (ARV × 90% − 2×repairs − fee, the default)** and
       **`Classic` (× 70% − repairs − fee)**. The first is not new — it is what
       `OfferRail.vue` already runs on the lead desk, so this borrows the rail's
