@@ -28,7 +28,7 @@
       <div class="flex border-b border-outline-gray-1 py-1.5 text-xs font-medium text-ink-gray-5">
         <span class="min-w-0 flex-1">{{ __('Set') }}</span>
         <span class="w-28 shrink-0">{{ __('Properties') }}</span>
-        <span class="w-24 shrink-0">{{ __('Time') }}</span>
+        <span class="w-36 shrink-0">{{ __('Time') }}</span>
         <span class="w-44 shrink-0">{{ __('Last run') }}</span>
       </div>
       <button
@@ -49,8 +49,8 @@
         <span class="w-28 shrink-0 text-ink-gray-6">
           {{ s.property_count }}
         </span>
-        <span class="w-24 shrink-0 text-ink-gray-6">
-          {{ s.time_limit_min ? __('{0} min', [s.time_limit_min]) : __('Untimed') }}
+        <span class="w-36 shrink-0 text-ink-gray-6">
+          {{ timeLabel(s) }}
         </span>
         <span class="w-44 shrink-0 text-ink-gray-5">
           {{ s.my_attempt ? lastLabel(s.my_attempt) : '—' }}
@@ -64,7 +64,7 @@
     >
       <div class="text-lg font-medium text-ink-gray-7">{{ __('No practice sets yet') }}</div>
       <div class="text-sm">
-        {{ __('A set is a list of properties to comp, with an optional time limit.') }}
+        {{ __('A set is a list of properties to comp, with an optional time per listing.') }}
       </div>
       <Button
         v-if="canManage"
@@ -111,6 +111,14 @@ function fmtDuration(sec) {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
+function timeLabel(s) {
+  if (!s.time_limit_min) return __('Untimed')
+  if (s.time_limit_mode === 'per_listing') {
+    return __('{0} min / listing', [s.time_limit_min])
+  }
+  return __('{0} min', [s.time_limit_min])
+}
+
 function lastLabel(att) {
   if (att.status === 'In Progress') return __('In progress — {0}', [fmtDuration(att.elapsed_seconds)])
   if (att.status === 'Timed Out') return __('Timed out · {0}', [fmtDuration(att.elapsed_seconds)])
@@ -123,6 +131,7 @@ async function createSet() {
     const res = await call('crm.api.practice.save_set', {
       title: __('New set'),
       time_limit_min: 30,
+      time_limit_mode: 'per_listing',
       is_active: 1,
     })
     router.push({ name: 'PracticeSet', params: { setId: res.name } })

@@ -22,7 +22,13 @@
         {{ timerLabel }}
       </span>
       <span
-        v-if="current && attempt.status === 'In Progress'"
+        v-if="perListing && attempt.status === 'In Progress' && remaining != null"
+        class="text-xs text-ink-gray-5"
+      >
+        {{ __('this house') }}
+      </span>
+      <span
+        v-else-if="current && attempt.status === 'In Progress'"
         class="tabular-nums text-sm text-ink-gray-6"
       >
         {{ __('this house') }} {{ fmtDuration(houseElapsed(current)) }}
@@ -169,6 +175,7 @@ const run = createResource({
 const attempt = computed(() => run.data || {})
 const properties = computed(() => attempt.value.properties || [])
 const current = computed(() => properties.value[currentIndex.value] || null)
+const perListing = computed(() => attempt.value.time_limit_mode === 'per_listing')
 
 const reviewLabel = computed(() => {
   if (attempt.value.mine) return attempt.value.status
@@ -186,7 +193,9 @@ function houseElapsed(p) {
   if (
     attempt.value.status === 'In Progress' &&
     !attempt.value.paused &&
-    p.name === current.value?.name
+    p.name === current.value?.name &&
+    !p.done_at &&
+    !p.timed_out
   ) {
     s += Math.max(0, (Date.now() - fetchedAt) / 1000)
   }
@@ -213,6 +222,7 @@ function street(addr) {
 
 function chipClass(p, i) {
   if (i === currentIndex.value) return 'bg-gray-900 text-white'
+  if (p.timed_out) return 'bg-amber-100 text-amber-800'
   if (p.done_at) return 'bg-green-100 text-green-800'
   if (p.opened_at) return 'bg-surface-gray-2 text-ink-gray-8'
   return 'text-ink-gray-6 hover:bg-surface-gray-1'
@@ -243,12 +253,44 @@ function onTick() {
   }
   remaining.value = Math.max(0, Math.floor(d.remaining_seconds - waited))
   elapsed.value = (d.elapsed_seconds || 0) + waited
-  if (remaining.value === 0 && d.status === 'In Progress') onTimeUp()
+  if (remaining.value === 0 && d.status === 'In Progress') {
+    if (perListing.value) onHouseTimeUp()
+    else onTimeUp()
+  }
 }
 
 async function onTimeUp() {
   if (submitting.value) return
   await submit(true)
+}
+
+async function onHouseTimeUp() {
+  if (marking.value || submitting.value) return
+  const cur = current.value
+  if (!cur || cur.done_at || cur.timed_out) return
+  marking.value = true
+  try {
+    const res = await call('crm.api.practice.get_attempt', {
+      name: props.attemptId,
+    })
+    run.data = { ...run.data, ...res }
+    syncClock(res)
+    const updated = (res.properties || []).find((p) => p.name === cur.name)
+    if (!updated?.timed_out && !updated?.done_at) return
+    toast.warning(__('Time is up on this house.'))
+    const idx = currentIndex.value
+    const next = properties.value.findIndex((p, i) => i > idx && !p.done_at)
+    if (next >= 0) {
+      currentIndex.value = next
+    } else {
+      const other = properties.value.findIndex((p) => !p.done_at)
+      if (other >= 0) currentIndex.value = other
+    }
+  } catch (e) {
+    toast.error(e.messages?.[0] || __('Could not close this house.'))
+  } finally {
+    marking.value = false
+  }
 }
 
 watch(

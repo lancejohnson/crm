@@ -30,7 +30,8 @@ duplicating. Work substantial features in a worktree of your own.
 
 - **Practice comps** — sidebar **Practice** (`/practice`). Any sales user can
   build a set of properties (picked from real leads) with an optional time
-  limit — e.g. 10 houses in 30 minutes. Each acq rep runs the set on the **same
+  limit — **per listing by default** (e.g. 3 min each), or whole-set (10 houses
+  in 30 minutes). Existing sets with no mode stay whole-set. Each acq rep runs the set on the **same
   comps map** as a live lead; hides / picks / the offer calc write to **their
   attempt**, never to `CRM Lead.comps_hidden` / `comps_selected` or the timeline.
   Adding a house stamps a **seller-voice condition line** (`seller_note`, from
@@ -38,8 +39,9 @@ duplicating. Work substantial features in a worktree of your own.
   something to price off; it sits above the calc notes. Empty rows fill on first
   read. Guarded on the column.
   Times and recordings are team-visible on submitted runs (in-progress stays
-  private). **Calcs** on the set page is one table per house — people as columns,
-  ARV / repair / offer / formula as rows. Optional **screen + mic** on Start (`practiceRecorder.js`): Chrome
+  private). **Calcs** on the set page is one table per house — one column per
+  person (latest submitted run; in-progress omitted), ARV / repair / offer /
+  formula as rows. Optional **screen + mic** on Start (`practiceRecorder.js`): Chrome
   is asked for **this tab** (`preferCurrentTab` + `selfBrowserSurface: include`);
   chunks upload as they arrive so a 30-minute take never hits nginx's 50m body
   limit; playback is `stream_recording` (private File URLs 403 in `<video>`).

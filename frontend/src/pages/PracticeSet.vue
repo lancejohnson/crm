@@ -37,11 +37,24 @@
 
   <div class="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 pb-6 sm:px-5">
     <div v-if="canManage" class="mt-3 grid max-w-3xl grid-cols-1 gap-3 sm:grid-cols-2">
-      <FormControl v-model="form.title" type="text" :label="__('Name')" />
+      <FormControl class="sm:col-span-2" v-model="form.title" type="text" :label="__('Name')" />
+      <FormControl
+        v-model="form.time_limit_mode"
+        type="select"
+        :label="__('Timer')"
+        :options="[
+          { label: __('Per listing'), value: 'per_listing' },
+          { label: __('Whole set'), value: 'set' },
+        ]"
+      />
       <FormControl
         v-model="form.time_limit_min"
         type="number"
-        :label="__('Time limit (minutes)')"
+        :label="
+          form.time_limit_mode === 'per_listing'
+            ? __('Minutes per listing')
+            : __('Minutes for the whole set')
+        "
       />
       <FormControl
         class="sm:col-span-2"
@@ -59,7 +72,7 @@
     </p>
     <p class="mt-2 text-sm text-ink-gray-5">
       {{ __('{0} {1}', [properties.length, properties.length === 1 ? __('property') : __('properties')]) }}
-      <template v-if="shownLimit"> · {{ __('{0} min', [shownLimit]) }}</template>
+      <template v-if="shownLimit"> · {{ limitLabel }}</template>
     </p>
 
     <div class="mt-5 max-w-3xl">
@@ -403,7 +416,13 @@ const area = reactive({ states: '', cities: '', counties: '', zips: '' })
 const addingRandom = ref(false)
 const wantRecord = ref(false)
 const canRecord = computed(() => canPracticeRecord())
-const form = reactive({ title: '', time_limit_min: 0, notes: '', is_active: true })
+const form = reactive({
+  title: '',
+  time_limit_min: 0,
+  time_limit_mode: 'per_listing',
+  notes: '',
+  is_active: true,
+})
 
 const detail = createResource({
   url: 'crm.api.practice.get_set',
@@ -412,6 +431,8 @@ const detail = createResource({
   onSuccess(d) {
     form.title = d.title || ''
     form.time_limit_min = d.time_limit_min || 0
+    form.time_limit_mode =
+      d.time_limit_mode === 'per_listing' ? 'per_listing' : 'set'
     form.notes = d.notes || ''
     form.is_active = !!d.is_active
   },
@@ -443,8 +464,31 @@ const resumeLabel = computed(() =>
 const shownLimit = computed(
   () => Number(canManage.value ? form.time_limit_min : set.value.time_limit_min) || 0,
 )
+const timeMode = computed(() =>
+  canManage.value ? form.time_limit_mode : set.value.time_limit_mode || 'set',
+)
+const limitLabel = computed(() => {
+  if (!shownLimit.value) return ''
+  if (timeMode.value === 'per_listing') {
+    return __('{0} min / listing', [shownLimit.value])
+  }
+  return __('{0} min', [shownLimit.value])
+})
+const comparePeople = computed(() => {
+  // Newest priced run per person. In-progress stays off the board.
+  const seen = new Map()
+  for (const a of attempts.value || []) {
+    if (a.status === 'In Progress') continue
+    const key = a.user || a.user_name
+    if (seen.has(key)) continue
+    const priced = (a.properties || []).some((p) => (p.calcs || [])[0])
+    if (!priced) continue
+    seen.set(key, a)
+  }
+  return [...seen.values()]
+})
 const compareHouses = computed(() => {
-  const runs = attempts.value || []
+  const runs = comparePeople.value
   const houses = properties.value || []
   return houses
     .map((h) => {
@@ -606,6 +650,7 @@ async function persistMeta() {
     name: props.setId,
     title: form.title,
     time_limit_min: Number(form.time_limit_min) || 0,
+    time_limit_mode: form.time_limit_mode === 'per_listing' ? 'per_listing' : 'set',
     notes: form.notes,
     is_active: form.is_active ? 1 : 0,
   })
@@ -613,6 +658,10 @@ async function persistMeta() {
     detail.setData?.(res)
     form.title = res.title || form.title
     form.time_limit_min = res.time_limit_min ?? form.time_limit_min
+    if (res.time_limit_mode) {
+      form.time_limit_mode =
+        res.time_limit_mode === 'per_listing' ? 'per_listing' : 'set'
+    }
     form.notes = res.notes ?? form.notes
     form.is_active = !!res.is_active
   }

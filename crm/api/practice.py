@@ -9,8 +9,9 @@ set of properties Lance picked, with two differences that are the whole point:
   * each person's hides / picks / offer calc live on THEIR attempt, never on
     the CRM Lead — two people can take the same ten-house test and not see
     each other's work, and nothing they do rewrites a live deal
-  * a set can carry a time limit (10 properties in 30 minutes), and we record
-    how long the whole run and each house took
+  * a set can carry a time limit, defaulted per listing (e.g. 3 minutes each)
+    with a whole-set option (10 properties in 30 minutes), and we record how
+    long the whole run and each house took
 
 The map itself is `get_lead_comps` against the source lead, with the lead's
 team-wide `comps_hidden` / `comps_selected` swapped out for the attempt's.
@@ -111,6 +112,43 @@ def _dump(val) -> str:
 
 def _has_recording_col() -> bool:
 	return frappe.db.has_column(ATTEMPT, "recording_url")
+
+
+def _has_time_mode_col(doctype: str) -> bool:
+	return frappe.db.has_column(doctype, "time_limit_mode")
+
+
+def _raw_time_mode(obj) -> str:
+	if obj is None:
+		return ""
+	if isinstance(obj, dict):
+		return str(obj.get("time_limit_mode") or "")
+	val = getattr(obj, "time_limit_mode", None)
+	if val:
+		return str(val)
+	get = getattr(obj, "get", None)
+	if callable(get):
+		try:
+			return str(get("time_limit_mode") or "")
+		except Exception:
+			return ""
+	return ""
+
+
+def _time_mode(obj, results: dict | None = None) -> str:
+	"""per_listing or set. Empty/missing (legacy rows) is whole-set."""
+	raw = _raw_time_mode(obj)
+	if raw == "per_listing":
+		return "per_listing"
+	if raw == "set":
+		return "set"
+	if results is None and obj is not None and getattr(obj, "results", None) is not None:
+		results = _results(obj)
+	if isinstance(results, dict):
+		m = results.get(META)
+		if isinstance(m, dict) and m.get("time_limit_mode") == "per_listing":
+			return "per_listing"
+	return "set"
 
 
 def _safe_id(name: str) -> str:
@@ -399,6 +437,14 @@ def _remaining(att) -> int | None:
 	limit = int(att.time_limit_min or 0) * 60
 	if limit <= 0:
 		return None
+	if _time_mode(att) == "per_listing":
+		results = _results(att)
+		cur = _meta(results).get("current_property")
+		slot = results.get(cur) if cur else None
+		if not isinstance(slot, dict):
+			return limit
+		live = _live_elapsed(slot, _now(), _is_paused(results))
+		return max(0, limit - live)
 	return max(0, limit - _elapsed(att))
 
 
@@ -563,8 +609,36 @@ def _submit(att, *, timed_out: bool = False) -> None:
 	_enqueue_remux(att.name)
 
 
+def _expire_overtime_listings(att) -> None:
+	"""Close any house that has used up the per-listing clock. Does not submit the set."""
+	limit = int(att.time_limit_min or 0) * 60
+	if limit <= 0 or _time_mode(att) != "per_listing":
+		return
+	results = _results(att)
+	if _is_paused(results):
+		return
+	now = _now()
+	changed = False
+	for _key, slot in _iter_slots(results):
+		if slot.get("timed_out") or slot.get("done_at"):
+			continue
+		live = _live_elapsed(slot, now, False)
+		if live < limit:
+			continue
+		_close_segment(slot, now)
+		slot["timed_out"] = True
+		slot["done_at"] = str(now)
+		slot["duration_seconds"] = int(slot.get("elapsed_seconds") or 0)
+		changed = True
+	if changed:
+		_write_results(att, results)
+
+
 def _maybe_expire(att):
 	if att.status != "In Progress":
+		return att
+	if _time_mode(att) == "per_listing":
+		_expire_overtime_listings(att)
 		return att
 	rem = _remaining(att)
 	if rem == 0 and int(att.time_limit_min or 0) > 0:
@@ -593,6 +667,7 @@ def _shape_attempt(att, properties: list[dict] | None = None) -> dict:
 				)},
 				"opened_at": slot.get("opened_at") or "",
 				"done_at": slot.get("done_at") or "",
+				"timed_out": bool(slot.get("timed_out")),
 				"duration_seconds": slot.get("duration_seconds") if slot.get("done_at") else live,
 				"elapsed_seconds": live,
 				"selected_count": len(slot.get("selected") or []),
@@ -614,6 +689,7 @@ def _shape_attempt(att, properties: list[dict] | None = None) -> dict:
 		"started_at": _dt(att.started_at),
 		"finished_at": _dt(att.finished_at),
 		"time_limit_min": int(att.time_limit_min or 0),
+		"time_limit_mode": _time_mode(att, results),
 		"elapsed_seconds": _elapsed(att),
 		"remaining_seconds": _remaining(att),
 		"paused": paused,
@@ -648,6 +724,7 @@ def _shape_set(doc, *, with_properties: bool = False) -> dict:
 		"name": doc.name,
 		"title": doc.title,
 		"time_limit_min": int(doc.time_limit_min or 0),
+		"time_limit_mode": _time_mode(doc),
 		"notes": doc.notes or "",
 		"is_active": int(doc.is_active or 0),
 		"property_count": n,
@@ -669,9 +746,12 @@ def list_sets() -> dict:
 	_guard()
 	if not _available():
 		return {"available": False, **_flags(), "sets": []}
+	fields = ["name", "title", "time_limit_min", "notes", "is_active", "owner", "modified"]
+	if _has_time_mode_col(SET):
+		fields.append("time_limit_mode")
 	rows = frappe.get_all(
 		SET,
-		fields=["name", "title", "time_limit_min", "notes", "is_active", "owner", "modified"],
+		fields=fields,
 		order_by="modified desc",
 	)
 	return {
@@ -697,6 +777,7 @@ def save_set(
 	name: str = "",
 	title: str = "",
 	time_limit_min: int | str = 0,
+	time_limit_mode: str = "",
 	notes: str = "",
 	is_active: int | str = 1,
 ) -> dict:
@@ -709,6 +790,15 @@ def save_set(
 	except (TypeError, ValueError):
 		limit = 0
 	active = 0 if str(is_active) in ("0", "false", "False") else 1
+	raw_mode = str(time_limit_mode or "").strip()
+	if raw_mode == "per_listing":
+		mode = "per_listing"
+	elif raw_mode == "set":
+		mode = "set"
+	else:
+		# New sets default per listing; an existing save that omits the field
+		# keeps whatever is already on the doc (empty = whole-set, legacy).
+		mode = "per_listing" if not name else ""
 	if name:
 		doc = _get_set(name)
 		# `Document.title` can be a read-only helper off `title_field`; set() is
@@ -717,17 +807,20 @@ def save_set(
 		doc.set("time_limit_min", limit)
 		doc.set("notes", notes or "")
 		doc.set("is_active", active)
+		if mode and _has_time_mode_col(SET):
+			doc.set("time_limit_mode", mode)
 		doc.save(ignore_permissions=True)
 	else:
-		doc = frappe.get_doc(
-			{
-				"doctype": SET,
-				"title": title,
-				"time_limit_min": limit,
-				"notes": notes or "",
-				"is_active": active,
-			}
-		)
+		payload = {
+			"doctype": SET,
+			"title": title,
+			"time_limit_min": limit,
+			"notes": notes or "",
+			"is_active": active,
+		}
+		if _has_time_mode_col(SET):
+			payload["time_limit_mode"] = mode or "per_listing"
+		doc = frappe.get_doc(payload)
 		doc.insert(ignore_permissions=True)
 	return _shape_set(doc, with_properties=True) | {"available": True, **_flags()}
 
@@ -973,18 +1066,23 @@ def start_attempt(practice_set: str) -> dict:
 		att = _maybe_expire(_get_attempt(open_ones[0], write=True))
 		if att.status == "In Progress":
 			return {"available": True, **_shape_attempt(att, props)}
-	att = frappe.get_doc(
-		{
-			"doctype": ATTEMPT,
-			"practice_set": practice_set,
-			"user": frappe.session.user,
-			"status": "In Progress",
-			"started_at": _now(),
-			"time_limit_min": int(doc.time_limit_min or 0),
-			"results": "{}",
-		}
-	)
+	mode = _time_mode(doc)
+	payload = {
+		"doctype": ATTEMPT,
+		"practice_set": practice_set,
+		"user": frappe.session.user,
+		"status": "In Progress",
+		"started_at": _now(),
+		"time_limit_min": int(doc.time_limit_min or 0),
+		"results": "{}",
+	}
+	if _has_time_mode_col(ATTEMPT):
+		payload["time_limit_mode"] = mode
+	att = frappe.get_doc(payload)
 	att.insert(ignore_permissions=True)
+	results = _results(att)
+	_meta(results)["time_limit_mode"] = mode
+	_write_results(att, results)
 	return {"available": True, **_shape_attempt(att, props)}
 
 
@@ -1022,7 +1120,9 @@ def touch_property(attempt: str, property: str) -> dict:
 		if key != property:
 			_close_segment(other, now)
 	slot = _slot(results, property)
-	if not paused:
+	if slot.get("timed_out"):
+		pass
+	elif not paused:
 		_open_segment(slot, now)
 	elif not slot.get("opened_at"):
 		slot["opened_at"] = str(now)
@@ -1141,6 +1241,8 @@ def list_results(practice_set: str) -> dict:
 	]
 	if _has_recording_col():
 		fields.append("recording_url")
+	if _has_time_mode_col(ATTEMPT):
+		fields.append("time_limit_mode")
 	rows = frappe.get_all(
 		ATTEMPT,
 		filters=filters,
