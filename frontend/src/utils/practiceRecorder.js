@@ -27,6 +27,7 @@ let recorder = null
 let streams = []
 let queue = []
 let pumping = false
+let pumpTail = Promise.resolve()
 let attemptId = ''
 let propertyId = ''
 let seq = 0
@@ -237,6 +238,15 @@ function stopTracks() {
 }
 
 async function pump() {
+  // Chain onto the in-flight drain. A bare `if (pumping) return` made
+  // endPropertyRecording finish() while chunks were still uploading, so
+  // the stamped file was a few KB and the rest landed in a leftover .part.
+  const next = pumpTail.then(drain, drain)
+  pumpTail = next.catch(() => {})
+  return next
+}
+
+async function drain() {
   if (pumping || !attemptId || !propertyId) return
   pumping = true
   try {
@@ -262,7 +272,7 @@ async function pump() {
     }
   } finally {
     pumping = false
-    if (queue.length && attemptId && propertyId) pump()
+    if (queue.length && attemptId && propertyId) await drain()
   }
 }
 

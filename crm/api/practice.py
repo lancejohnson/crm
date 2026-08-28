@@ -171,6 +171,27 @@ def _dest_path(attempt: str, property: str) -> str:
 	)
 
 
+def _file_recording_url(attempt: str, prop: str) -> str:
+	"""Play is the file on disk, not the JSON stamp — a later results write
+	used to wipe `recording_url` while leaving a 50–100 MB webm behind."""
+	dest = _dest_path(attempt, prop)
+	part = _part_path(attempt, prop)
+	try:
+		dest_size = os.path.getsize(dest) if os.path.exists(dest) else 0
+		part_size = os.path.getsize(part) if os.path.exists(part) else 0
+	except OSError:
+		return ""
+	if part_size > dest_size:
+		try:
+			os.replace(part, dest)
+			dest_size = part_size
+		except OSError:
+			pass
+	if dest_size <= 0:
+		return ""
+	return f"/private/files/{os.path.basename(dest)}"
+
+
 def _ensure_seekable(path: str) -> str:
 	"""MediaRecorder webm has no cues, so <video> cannot scrub. ffmpeg -c copy
 	rewrites timestamps; a sidecar marks it done so we do not pay twice."""
@@ -332,6 +353,13 @@ def _get_prop(name: str):
 def _get_attempt(name: str, *, write: bool = False):
 	if not frappe.db.exists(ATTEMPT, name):
 		frappe.throw(_("Practice attempt {0} does not exist.").format(name), frappe.DoesNotExistError)
+	if write:
+		# results is one JSON blob; without the row lock, finish_recording's
+		# stamp loses to a concurrent set_comp_state / save_offer / touch.
+		frappe.db.sql(
+			"select name from `tabCRM Practice Attempt` where name=%s for update",
+			name,
+		)
 	doc = frappe.get_doc(ATTEMPT, name)
 	mine = doc.user == frappe.session.user
 	if write and not mine:
@@ -560,8 +588,17 @@ def _results(att) -> dict:
 
 
 def _write_results(att, results: dict) -> None:
-	frappe.db.set_value(ATTEMPT, att.name, "results", _dump(results))
-	att.results = _dump(results)
+	prev = _json(frappe.db.get_value(ATTEMPT, att.name, "results"))
+	for key, old in _iter_slots(prev):
+		url = (old.get("recording_url") or "").strip()
+		if not url:
+			continue
+		slot = results.get(key)
+		if isinstance(slot, dict) and not (slot.get("recording_url") or "").strip():
+			slot["recording_url"] = url
+	payload = _dump(results)
+	frappe.db.set_value(ATTEMPT, att.name, "results", payload)
+	att.results = payload
 
 
 def _slot(results: dict, prop: str) -> dict:
@@ -675,7 +712,9 @@ def _shape_attempt(att, properties: list[dict] | None = None) -> dict:
 				"has_offer": bool(slot.get("offer")),
 				"offer": _offer_amount(slot),
 				"calcs": _offer_calcs(slot),
-				"recording_url": slot.get("recording_url") or "",
+				"recording_url": (
+					slot.get("recording_url") or _file_recording_url(att.name, p.name)
+				),
 				"condition": slot.get("condition") or "",
 			}
 		)
@@ -1396,10 +1435,23 @@ def finish_recording(attempt: str, property: str) -> dict:
 	if prop.practice_set != att.practice_set:
 		frappe.throw(_("That property is not in this set."))
 	part = _part_path(att.name, prop.name)
-	if not os.path.exists(part) or os.path.getsize(part) == 0:
-		return {"ok": False, "error": "no recording"}
 	dest = _dest_path(att.name, prop.name)
-	os.replace(part, dest)
+	try:
+		part_size = os.path.getsize(part) if os.path.exists(part) else 0
+		dest_size = os.path.getsize(dest) if os.path.exists(dest) else 0
+	except OSError:
+		part_size = dest_size = 0
+	if part_size > dest_size:
+		os.replace(part, dest)
+	elif part_size:
+		# A later finish (house revisit, submit) must not replace a real
+		# take with the leftover crumbs still in .part.
+		try:
+			os.remove(part)
+		except OSError:
+			pass
+	elif dest_size <= 0:
+		return {"ok": False, "error": "no recording"}
 	fname = os.path.basename(dest)
 	file_url = f"/private/files/{fname}"
 	existing = frappe.db.get_value(
