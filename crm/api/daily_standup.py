@@ -47,11 +47,18 @@ from frappe.utils import get_datetime, getdate, now_datetime
 
 # ── cadence ────────────────────────────────────────────────────────────────────
 
-#: statuses that are actively chased on the phone
+#: statuses that used to be the whole chase set. Kept as a fallback if CRM Lead
+#: Status rows are missing, and as the standup's "early pipeline" grouping.
 CHASE_STATUSES = ("New", "Called No Answer", "Follow Up", "Future Follow Up")
 
 #: statuses Dennis works (closest-to-closing first — this order is the report order)
 CLOSER_STATUSES = ("Contract Sent", "Make Offer", "Underwriting")
+
+#: A lead in one of these CRM Lead Status.types is done — cadence must not
+#: resurrect it. Lost is Dead/Not Interested; Won is a closed deal. Everything
+#: else (acq + dispo) is tracked, not just the four chase names above.
+TERMINAL_STATUS_TYPES = ("Lost", "Won")
+CADENCE_PHASES = ("never", "week1", "week1_partial", "weekly", "monthly")
 
 #: phase 1 — first N business days after first contact, 2 calls per business day
 PHASE1_BUSINESS_DAYS = 5
@@ -118,9 +125,28 @@ def _live_lead_filter() -> str:
 	return ""
 
 
+def _tracked_statuses():
+	"""Every live status — not just New / Called No Answer / Follow Up.
+
+	Cadence still decides who is DUE today; this only decides who is eligible.
+	Keyed on CRM Lead Status.type so a renamed or new pipeline status is
+	picked up without a code change.
+	"""
+	try:
+		names = frappe.get_all(
+			"CRM Lead Status",
+			filters={"type": ["not in", list(TERMINAL_STATUS_TYPES)]},
+			pluck="name",
+		)
+	except Exception:
+		names = []
+	return tuple(names) if names else CHASE_STATUSES
+
+
 def _fetch_chase_rows(today):
-	"""Every chase-status lead with the three facts the cadence needs: when we
+	"""Every live lead with the three facts the cadence needs: when we
 	first tried, when we last called, and how many calls it has had today."""
+	statuses = _tracked_statuses()
 	rows = frappe.db.sql(
 		f"""
 		select l.name, l.lead_name, l.status, l.creation, l.property_address,
@@ -130,7 +156,7 @@ def _fetch_chase_rows(today):
 		  and (l.converted is null or l.converted != 1)
 		  {_live_lead_filter()}
 		""",
-		{"statuses": CHASE_STATUSES},
+		{"statuses": statuses},
 		as_dict=True,
 	)
 	rows = [r for r in rows if (r.lead_name or "").strip().lower() not in EXCLUDE_LEAD_NAMES]
@@ -220,19 +246,20 @@ def _classify(row, today):
 		phase, due, need = "monthly", since >= PHASE3_INTERVAL, 1
 		reason = ago(since)
 
-	# A due task pulls a lead onto the list and becomes its priority, except that
-	# never-called remains the leak at the very top. First-week leads retain the
-	# number of calls they owe; only their placement changes.
+	# A due task pulls a lead onto the list. If cadence already wants them,
+	# keep the cadence phase so a card can say both "in cadence" and "has a
+	# task". Only the leftover-task group (not yet due by cadence) becomes
+	# phase=task — never-called stays the leak at the very top.
 	if row.tasks_due_now:
 		title = (row.due_task_title or "").strip()
 		generic = title.lower() in ("", "follow up", "follow up call", "call back", "call")
 		task_reason = "task due" if generic else f"task: {title}"
-		if phase != "never":
-			phase, due, need = "task", True, max(need, 1)
-			reason = task_reason + f" · {ago(since)}"
-		else:
+		if phase == "never" or due:
 			need = max(need, 1)
 			reason += f" · {task_reason}"
+		else:
+			phase, due, need = "task", True, max(need, 1)
+			reason = task_reason + f" · {ago(since)}"
 
 	return (phase, max(0, need), due, reason)
 
@@ -406,16 +433,14 @@ def render_markdown(d, limit=25):
 	L.append(f"## Standup — {today.strftime('%a %-d %b %Y')}")
 
 	bs, cc = d["by_status"], d["closer_counts"]
-	L.append(
-		"**New** {n} · **No answer + Follow ups** {f} · **Underwriting** {u} · "
-		"**Make offer** {m} · **Contract sent** {c}".format(
-			n=bs.get("New", 0),
-			f=bs.get("Called No Answer", 0) + bs.get("Follow Up", 0) + bs.get("Future Follow Up", 0),
-			u=cc.get("Underwriting", 0),
-			m=cc.get("Make Offer", 0),
-			c=cc.get("Contract Sent", 0),
-		)
-	)
+	status_bits = [f"**{name}** {count}" for name, count in sorted(bs.items(), key=lambda kv: (-kv[1], kv[0]))]
+	if status_bits:
+		L.append(" · ".join(status_bits))
+	else:
+		L.append("_No live leads in the cadence._")
+	closer_bits = [f"**{name}** {count}" for name, count in sorted(cc.items(), key=lambda kv: (-kv[1], kv[0]))]
+	if closer_bits:
+		L.append("Closer: " + " · ".join(closer_bits))
 
 	# 1. closest to closing first
 	closer = [r for r in d["closer"] if r.flags]
@@ -430,7 +455,7 @@ def render_markdown(d, limit=25):
 	due = d["setter"]["due"]
 	L.append(f"\n### :telephone_receiver: Calling queue — {len(due)} leads, {d['calls_owed']} calls")
 	if not due:
-		L.append("_Nobody is due. Everything in the chase columns is either called today or booked._")
+		L.append("_Nobody is due. Everything live is either called today, booked, or not yet on cadence._")
 
 	per_group = {"never": 99, "week1": 12, "weekly": 8, "monthly": 5, "task": 5}
 	for phase in ("never", "week1", "weekly", "monthly", "task"):

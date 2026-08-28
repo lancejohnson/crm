@@ -36,6 +36,7 @@ from frappe import _
 from frappe.utils import escape_html, getdate, now_datetime
 
 from crm.api.daily_standup import (
+	CADENCE_PHASES,
 	build_standup,
 	is_business_day,
 	previous_business_day,
@@ -934,12 +935,21 @@ def get_today_board(
 			r["task"] = completed_task
 		else:
 			r["task"] = open_task or completed_task
+		# Open task, not a completed one: "has a task assigned" is the live next
+		# action, not yesterday's tick. Cadence is the stored phase — leftover-task
+		# cards keep phase=task so they don't pretend to be on the call ladder.
+		r["has_task"] = bool(open_task)
+		r["in_cadence"] = (r.get("phase") or "") in CADENCE_PHASES
 		r["last_incoming_text"] = incoming_by_lead.get(r.lead)
 
 	# The owner selector lists everyone who has cards today, counted BEFORE the
 	# owner filter, so a rep with an empty board can still see whose board has
 	# work on it and switch to it.
 	owners = _owner_options(rows)
+	owner_names = {o["user"]: o["full_name"] for o in owners}
+	for r in rows:
+		key = r.lead_owner or UNASSIGNED
+		r["owner_name"] = owner_names.get(key) or (r.lead_owner or _("Unassigned"))
 	if owner != ALL_OWNERS:
 		rows = [r for r in rows if (r.lead_owner or "") == owner]
 
@@ -956,7 +966,13 @@ def get_today_board(
 	if signal == "incoming":
 		rows = [r for r in rows if r.last_incoming_text]
 	elif signal == "task":
-		rows = [r for r in rows if r.task]
+		rows = [r for r in rows if r.has_task]
+	elif signal == "cadence":
+		rows = [r for r in rows if r.in_cadence]
+	elif signal == "task_only":
+		rows = [r for r in rows if r.has_task and not r.in_cadence]
+	elif signal == "cadence_only":
+		rows = [r for r in rows if r.in_cadence and not r.has_task]
 
 	priority_order = _priority_order()
 	priority_rank = {key: i for i, key in enumerate(priority_order)}
@@ -1019,6 +1035,60 @@ def _scope_rows_to_owner(rows, owner):
 	return [row for row in rows if owners.get(row.lead, UNASSIGNED) == owner]
 
 
+def _tally_report_days(rows):
+	by_day = {}
+	for row in rows:
+		day = getdate(row.for_date)
+		stats = by_day.setdefault(day, _empty_report_day(day))
+		stats["total"] += 1
+		if row.state == "Done":
+			stats["done"] += 1
+		elif row.state == "Skipped":
+			stats["skipped"] += 1
+	for stats in by_day.values():
+		_finish_report_day(stats)
+	return by_day
+
+
+def _streak_from_days(by_day, today):
+	"""100%-resolved business-day streak over `by_day`.
+
+	An unfinished current day does not erase the streak through yesterday.
+	"""
+	business_dates = sorted(day for day in by_day if is_business_day(day))
+	first_day = business_dates[0] if business_dates else today
+	cursor = today
+	if not is_business_day(cursor) or not by_day.get(cursor, {}).get("perfect"):
+		cursor = previous_business_day(cursor)
+	current_streak = 0
+	through = None
+	while cursor >= first_day:
+		stats = by_day.get(cursor)
+		if not stats or not stats["perfect"]:
+			break
+		if through is None:
+			through = str(cursor)
+		current_streak += 1
+		cursor = previous_business_day(cursor)
+	best_streak = 0
+	run = 0
+	cursor = first_day
+	while cursor <= today:
+		if is_business_day(cursor):
+			stats = by_day.get(cursor)
+			if stats and stats["perfect"]:
+				run += 1
+				best_streak = max(best_streak, run)
+			else:
+				run = 0
+		cursor += timedelta(days=1)
+	return {
+		"current": current_streak,
+		"best": best_streak,
+		"through": through,
+	}, business_dates
+
+
 def _empty_report_day(day):
 	return {
 		"date": str(getdate(day)),
@@ -1044,25 +1114,15 @@ def _finish_report_day(stats):
 
 @frappe.whitelist()
 def get_today_report(for_date=None, history_days=10, owner=None):
-	"""Progress today plus a 100%-resolved business-day streak.
+	"""Progress today plus the team's 100%-resolved business-day streak.
 
 	Both Done and Skipped cards count toward the streak. An unfinished current day
 	does not erase the streak earned through the previous business day.
 
-	`owner` scopes the numbers to one person's leads so the progress figures agree
-	with the board that is actually on screen — a bar reading 12/87 while the
-	visible board holds 30 cards is worse than no bar at all.
-
-	The streak follows that same scope: a rep's streak is now "every card on MY
-	board resolved", not the team's (Lance, 2026-08-06). It shipped team-wide as a
-	shared artifact, so this deliberately CHANGES what the number means; `scope` in
-	the response reports which meaning is in force, and the team streak is still
-	what `owner="all"` returns.
-
-	Caveat worth knowing: ownership is read off the lead at request time (see
-	`_scope_rows_to_owner`), so a reassigned lead moves its whole history with it.
-	A personal streak is therefore a statement about the leads you own NOW, not a
-	frozen record of who resolved what on the day.
+	`owner` scopes TODAY's figures (and `completed_by`) to the board on screen — a
+	bar reading 12/87 over a 30-card board is worse than no bar. The streak is
+	always the TEAM's: one number the whole acquisitions crew shares (Lance,
+	2026-08-28, reversing the personal streak from 2026-08-06).
 	"""
 	_guard()
 	today = getdate(for_date or now_datetime())
@@ -1089,66 +1149,25 @@ def get_today_report(for_date=None, history_days=10, owner=None):
 		limit_page_length=50000,
 	)
 
-	# Scope EVERY day to the owner, not just today — `by_day` is what the streak is
-	# computed from, so this is the one line that makes the streak personal. Done
-	# once, up front, so the whole history costs a single extra lead lookup.
-	if owner != ALL_OWNERS:
-		rows = _scope_rows_to_owner(rows, owner)
+	# Streak is ALWAYS the whole team. Today's bar still follows the board on
+	# screen, so a personal board doesn't show 12/87 over 30 cards.
+	team_by_day = _tally_report_days(rows)
+	team_streak, team_dates = _streak_from_days(team_by_day, today)
 
-	by_day = {}
-	for row in rows:
-		day = getdate(row.for_date)
-		stats = by_day.setdefault(day, _empty_report_day(day))
-		stats["total"] += 1
-		if row.state == "Done":
-			stats["done"] += 1
-		elif row.state == "Skipped":
-			stats["skipped"] += 1
-	for stats in by_day.values():
-		_finish_report_day(stats)
-
-	todays_rows = [row for row in rows if getdate(row.for_date) == today]
+	scoped_rows = rows if owner == ALL_OWNERS else _scope_rows_to_owner(rows, owner)
+	by_day = (
+		team_by_day if owner == ALL_OWNERS else _tally_report_days(scoped_rows)
+	)
+	todays_rows = [row for row in scoped_rows if getdate(row.for_date) == today]
 	today_stats = by_day.get(today, _empty_report_day(today))
-	business_dates = sorted(day for day in by_day if is_business_day(day))
-	first_day = business_dates[0] if business_dates else today
 
-	# Current streak: an in-progress today is not a failure until the day ends.
-	cursor = today
-	if not is_business_day(cursor) or not by_day.get(cursor, {}).get("perfect"):
-		cursor = previous_business_day(cursor)
-	current_streak = 0
-	through = None
-	while cursor >= first_day:
-		stats = by_day.get(cursor)
-		if not stats or not stats["perfect"]:
-			break
-		if through is None:
-			through = str(cursor)
-		current_streak += 1
-		cursor = previous_business_day(cursor)
-
-	# Best streak: missing or imperfect weekdays break the run.
-	best_streak = 0
-	run = 0
-	cursor = first_day
-	while cursor <= today:
-		if is_business_day(cursor):
-			stats = by_day.get(cursor)
-			if stats and stats["perfect"]:
-				run += 1
-				best_streak = max(best_streak, run)
-			else:
-				run = 0
-		cursor += timedelta(days=1)
-
-	scope = "owner" if owner != ALL_OWNERS else "team"
-	recent = [by_day[day] for day in sorted(business_dates, reverse=True)[:history_days]]
+	recent = [team_by_day[day] for day in sorted(team_dates, reverse=True)[:history_days]]
 	recent_total = sum(day["total"] for day in recent)
 	recent_resolved = sum(day["done"] + day["skipped"] for day in recent)
 	recent_average = round(recent_resolved * 100 / recent_total) if recent_total else 0
+	scope_today = "owner" if owner != ALL_OWNERS else "team"
 
-	# Credit list follows the same scope as the headline numbers, or the two halves
-	# of the same panel would describe different card sets.
+	# Credit list follows today's board, not the team streak.
 	people = Counter(
 		row.done_by for row in todays_rows if row.state == "Done" and row.done_by
 	)
@@ -1173,20 +1192,11 @@ def get_today_report(for_date=None, history_days=10, owner=None):
 		"recent": recent,
 		"recent_average": recent_average,
 		"completed_by": completed_by,
-		"streak": {
-			"current": current_streak,
-			"best": best_streak,
-			"through": through,
-		},
+		"streak": team_streak,
 		"owner": owner,
-		# Every figure in this response now describes the same card set, so one scope
-		# covers all of them. The keys stay separate because the UI labels them
-		# individually and a future divergence shouldn't need a payload change.
-		"scope": {"today": scope, "streak": scope, "recent": scope},
-		"definition": (
-			_("A streak day requires every Today card on your board to be resolved as Done or Skipped.")
-			if scope == "owner"
-			else _("A streak day requires every Today card to be resolved as Done or Skipped.")
+		"scope": {"today": scope_today, "streak": "team", "recent": "team"},
+		"definition": _(
+			"A streak day requires every Today card on the team board to be resolved as Done or Skipped."
 		),
 	}
 

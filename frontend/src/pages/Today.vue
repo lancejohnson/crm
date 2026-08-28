@@ -30,7 +30,7 @@
              other board-level controls rather than on each card: the whole point
              is to move several at once. -->
         <Button
-          :label="selecting ? __('Done selecting') : __('Select')"
+          :label="selecting ? __('Done') : __('Reassign')"
           :variant="selecting ? 'subtle' : undefined"
           :theme="selecting ? 'blue' : 'gray'"
           @click="toggleSelecting"
@@ -202,11 +202,28 @@
             </div>
 
             <div class="min-w-0 pr-16">
-              <div
-                class="truncate text-base font-medium text-ink-gray-8"
-                :class="item.state === 'Skipped' ? 'line-through opacity-60' : ''"
-              >
-                {{ item.lead_name }}
+              <div class="flex items-center gap-2">
+                <div v-if="showOwnerOnCard" class="shrink-0" @click.stop>
+                  <Dropdown
+                    :options="cardAssigneeOptions(item)"
+                    placement="bottom-start"
+                  >
+                    <button
+                      class="flex size-6 items-center justify-center rounded-full bg-surface-gray-2 text-[10px] font-semibold uppercase tracking-tight text-ink-gray-7 hover:bg-surface-gray-3 disabled:opacity-60"
+                      :title="item.owner_name || __('Unassigned')"
+                      :aria-label="__('Reassign {0}', [item.owner_name || __('Unassigned')])"
+                      :disabled="assigning"
+                    >
+                      {{ ownerInitials(item) }}
+                    </button>
+                  </Dropdown>
+                </div>
+                <div
+                  class="min-w-0 flex-1 truncate text-base font-medium text-ink-gray-8"
+                  :class="item.state === 'Skipped' ? 'line-through opacity-60' : ''"
+                >
+                  {{ item.lead_name }}
+                </div>
               </div>
               <button
                 v-if="item.address"
@@ -248,6 +265,18 @@
                 variant="subtle"
                 :theme="PHASE[item.priority_key].theme"
                 :label="__(PHASE[item.priority_key].label)"
+              />
+              <Badge
+                v-if="item.in_cadence"
+                variant="subtle"
+                theme="blue"
+                :label="__('Cadence')"
+              />
+              <Badge
+                v-if="item.has_task"
+                variant="subtle"
+                theme="green"
+                :label="__('Task')"
               />
               <div @click.stop>
                 <Dropdown
@@ -545,7 +574,7 @@ const boardCardCount = computed(() =>
 )
 const streakLabel = computed(() => {
   const days = todayReport.data?.streak?.current || 0
-  return `🔥 ${days} ${days === 1 ? __('day') : __('days')}`
+  return `🔥 ${__('Team')} · ${days} ${days === 1 ? __('day') : __('days')}`
 })
 const activeFilterCount = computed(
   () => [selectedStatus.value, selectedPriority.value, selectedSignal.value].filter(Boolean).length,
@@ -605,6 +634,21 @@ const filterOptions = computed(() => {
           icon: selectedSignal.value === 'task' ? 'check' : null,
           onClick: () => setFilter('signal', 'task'),
         },
+        {
+          label: __('In cadence'),
+          icon: selectedSignal.value === 'cadence' ? 'check' : null,
+          onClick: () => setFilter('signal', 'cadence'),
+        },
+        {
+          label: __('Task, not cadence'),
+          icon: selectedSignal.value === 'task_only' ? 'check' : null,
+          onClick: () => setFilter('signal', 'task_only'),
+        },
+        {
+          label: __('Cadence, no task'),
+          icon: selectedSignal.value === 'cadence_only' ? 'check' : null,
+          onClick: () => setFilter('signal', 'cadence_only'),
+        },
       ],
     },
   ]
@@ -660,7 +704,7 @@ function setOwner(owner) {
 }
 
 const ownerLabel = computed(() => {
-  if (selectedOwner.value === ALL_OWNERS) return __('Everyone')
+  if (selectedOwner.value === ALL_OWNERS) return __('The whole team')
   const match = (board.data?.owners || []).find(
     (o) => o.user === selectedOwner.value,
   )
@@ -669,11 +713,31 @@ const ownerLabel = computed(() => {
 })
 
 const viewingOwnBoard = computed(() => selectedOwner.value === sessionUser)
+const viewingTeamBoard = computed(() => selectedOwner.value === ALL_OWNERS)
+const showOwnerOnCard = computed(() => viewingTeamBoard.value || !viewingOwnBoard.value)
+
+function ownerInitials(item) {
+  const name = (item.owner_name || '').trim()
+  const parts = name.split(/\s+/).filter(Boolean)
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+  }
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  const email = (item.lead_owner || '').trim()
+  if (email) return email.slice(0, 2).toUpperCase()
+  return '?'
+}
 
 const ownerOptions = computed(() => {
   const owners = board.data?.owners || []
   const mine = owners.find((o) => o.user === sessionUser)
+  const teamCount = owners.reduce((n, o) => n + (o.count || 0), 0)
   const options = [
+    {
+      label: `${__('The whole team')}${teamCount ? ` (${teamCount})` : ''}`,
+      icon: viewingTeamBoard.value ? 'check' : null,
+      onClick: () => setOwner(ALL_OWNERS),
+    },
     {
       label: `${__('My leads')}${mine ? ` (${mine.count})` : ''}`,
       icon: viewingOwnBoard.value ? 'check' : null,
@@ -691,16 +755,6 @@ const ownerOptions = computed(() => {
       })),
     })
   }
-  options.push({
-    group: __('Everyone'),
-    items: [
-      {
-        label: __('The whole team'),
-        icon: selectedOwner.value === ALL_OWNERS ? 'check' : null,
-        onClick: () => setOwner(ALL_OWNERS),
-      },
-    ],
-  })
   return options
 })
 
@@ -723,9 +777,19 @@ const assigneeOptions = computed(() => {
   if (!people.length) return [{ label: __('No one to assign to'), onClick: () => {} }]
   return people.map((person) => ({
     label: person.full_name,
-    onClick: () => assignSelected(person.user),
+    onClick: () => assignCards(selectedNames.value, person.user),
   }))
 })
+
+function cardAssigneeOptions(item) {
+  const people = board.data?.assignees || []
+  if (!people.length) return [{ label: __('No one to assign to'), onClick: () => {} }]
+  return people.map((person) => ({
+    label: person.full_name,
+    icon: person.user === item.lead_owner ? 'check' : null,
+    onClick: () => assignCards([item.name], person.user),
+  }))
+}
 
 function isSelected(item) {
   return selectedNames.value.includes(item.name)
@@ -749,12 +813,12 @@ function toggleSelecting() {
   if (!selecting.value) clearSelection()
 }
 
-async function assignSelected(owner) {
-  if (!owner || !selectedNames.value.length || assigning.value) return
+async function assignCards(names, owner) {
+  if (!owner || !names?.length || assigning.value) return
   assigning.value = true
   try {
     const r = await call('crm.api.today_board.assign_today_leads', {
-      items: selectedNames.value,
+      items: names,
       owner,
     })
     const who =

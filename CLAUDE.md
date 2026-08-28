@@ -1156,9 +1156,18 @@ duplicating. Work substantial features in a worktree of your own.
   - **Not persisted across reloads** — unlike `dispoView`/`activityScope`, which
     are view modes. This is *whose work you are doing*, and silently reopening on
     a teammate's list is the one mistake here that costs real calls.
-  - **Bulk hand-over from the board** (`assign_today_leads`) — a **Select** mode
+  - **Cadence tracks every live status**, not just New / Called No Answer /
+    Follow Up / Future Follow Up. Eligibility is `CRM Lead Status.type` not in
+    Lost/Won (plus converted/parked still excluded); cadence still decides who is
+    *due*. Cards mark **Cadence** vs **Task** (`in_cadence` / `has_task`); a due
+    task on a cadence-due lead keeps the cadence phase so both badges can show.
+    Leftover-task-only stays `phase=task`. Filters: in cadence / task / task-only
+    / cadence-no-task.
+  - **Bulk hand-over from the board** (`assign_today_leads`) — **Reassign** mode
     turns every card into a checkbox and puts an "Assign to…" bar above the
-    columns. The board is where a rep already has the day's work in front of
+    columns. On the team (or anyone-else) board the owner name on the card is
+    itself a picker, so a daily review can move one lead without entering select
+    mode. The board is where a rep already has the day's work in front of
     them, so it is the cheapest place to say "these five are Dennis's now"; the
     alternative is opening five leads and editing a side-panel field on each.
     - **Nothing about the cards is migrated, and that is the design paying off.**
@@ -1189,13 +1198,9 @@ duplicating. Work substantial features in a worktree of your own.
     - `frontend/src/pages/Today.vue` + `crm/api/today_board.py`. No ops piece, no
       schema change.
   - `get_today_report(owner=...)` scopes **today's** figures + `completed_by` the
-    same way (a bar reading 12/87 over a 30-card board is worse than no bar), but
-    the **streak and recent-day history stay team-wide** — the streak shipped as a
-    shared artifact and silently personalising it would rewrite what the number
-    has meant. Response carries `scope`; `TodayReportModal.vue` labels which is
-    which. **GOTCHA**: `by_day` must stay team-wide inside `get_today_report` —
-    it's what the streak is computed from; only `today_stats`/`todays_rows` are
-    re-derived per owner.
+    same way (a bar reading 12/87 over a 30-card board is worse than no bar). The
+    **streak and recent-day history stay team-wide**. Response `scope` is
+    `{today: owner|team, streak: team, recent: team}`.
   - **Cards are rows, not a live recomputation** (ops doctype `CRM Today Item`).
     "Done"/"Skipped" are judgements a person made; recomputing would lose them,
     or resurrect a dismissed card, as soon as a call got logged — and the board
@@ -1235,20 +1240,11 @@ duplicating. Work substantial features in a worktree of your own.
     - The 48 orphaned cards from Aug 10/11 were deleted on prod under exactly
       those conditions (after-5pm creation + never touched + lead present on a
       later board), restoring both days to 100% and both reps to a 5-day streak.
-  - **The streak is PERSONAL, not team-wide** (gw303, reversing the original
-    decision at Lance's request). `get_today_report(owner=…)` now scopes
-    `by_day` — and therefore the streak and the recent-day history — to that
-    owner's leads, so a rep who clears their own board gets the day even when a
-    teammate still has cards open. Verified on prod: German 62 cards / 0 left →
-    streak 2 through today, while the team (89 cards, 1 left) read 1 through
-    yesterday, and the per-owner splits reconcile exactly to the team totals.
-    `owner="all"` still returns the team streak and `scope` reports which meaning
-    is in force; `TodayReportModal.vue` swaps its labels ('Your streak' /
-    'Recent business days (yours)') off that flag. **GOTCHA — frontend and
-    backend must ship together**: a frontend-only deploy labels team-wide data
-    as "Your streak", which is exactly what live verification caught. Ownership
-    is still read off the lead at request time, so a reassigned lead takes its
-    whole history with it — a personal streak describes the leads you own NOW.
+  - **The streak is TEAM-WIDE** (2026-08-28, reversing gw303's personal streak).
+    `get_today_report` always computes the streak (and recent-day history) from
+    every card; `owner` only scopes **today's** bar + `completed_by` so they
+    still match the board on screen. The flame button reads `🔥 Team · N days`.
+    A perfect day still means every card on the **team** board is Done or Skipped.
   - **Resolving a card writes the outcome onto the lead's timeline** (gw303) —
     `_log_outcome_comment()` posts a Comment on the CRM Lead ("Today board —
     marked Skipped (call 2)" + the reason). The board is where the judgement is
