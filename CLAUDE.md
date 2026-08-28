@@ -3386,8 +3386,10 @@ cd ../../frappe-crm-deploy && git pull
 # commit and push the compose pin bump in ../frappe-crm-deploy
 ```
 
-`build_image.sh` is the deploy step. It also takes `FORK=/path/to/worktree` to
-build+deploy straight from a worktree without merging first. Frontend has no
+`build_image.sh` is the deploy step. It **refuses a linked git worktree** —
+that path replaces prod with the whole tree and is how a feature branch
+deletes other people's live work. Merge to `groundwork`, deploy from the main
+checkout. `ALLOW_WORKTREE=1` overrides. Frontend has no
 tests upstream; the local `yarn build` and local `verify_ui` are the initial
 gates, while the in-image build and `smoke_test.py` are post-push deployment
 gates. Don't run `bench run-tests` against the prod site.
@@ -3551,9 +3553,9 @@ CRM_DEV_TARGET=https://crm.groundworkpro.com yarn dev    # same command in every
   with no scaffolding at all.
 - **Deploys serialise safely.** `build_image.sh` takes a machine-wide lock
   (`/tmp/frappe-crm-build.lock`), the next `gwN` is read from the SERVER's pin
-  so two agents can't collide on a tag, and each build ships its OWN worktree
-  via `git stash create`. The shared `crm-assets` volume is additive, so one
-  agent's deploy never deletes another's chunks.
+  so two agents can't collide on a tag. Worktrees are for local `yarn dev`
+  only; a deploy from one is refused. The shared `crm-assets` volume is
+  additive, so one agent's chunks never delete another's.
 - The dev API token is shared (Infisical), so every agent's dev server acts as
   the same user. Fine on one laptop; worth remembering if a session looks like
   it is "someone else's" activity.
