@@ -122,6 +122,7 @@ import ArrowUpRightIcon from '@/components/Icons/ArrowUpRightIcon.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 import Link from '@/components/Controls/Link.vue'
 import { taskStatusOptions, taskPriorityOptions, getFormat } from '@/utils'
+import { snapMidnightToMorning } from '@/utils/taskDue'
 import { usersStore } from '@/stores/users'
 import { useTelemetry } from 'frappe-ui/frappe'
 import {
@@ -249,6 +250,9 @@ function redirect() {
 async function updateTask() {
   if (!_task.value.assigned_to) {
     _task.value.assigned_to = getUser().name
+  }
+  if (_task.value.due_date) {
+    _task.value.due_date = snapMidnightToMorning(_task.value.due_date)
   }
   if (_task.value.name) {
     updateTaskResource.submit()

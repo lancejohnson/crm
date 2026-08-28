@@ -39,7 +39,7 @@
     </div>
     <div
       v-if="editing"
-      class="rounded bg-surface-gray-1 px-3 py-[7.5px] text-base leading-6"
+      class="rounded bg-surface-gray-1 px-3 py-[7.5px] text-sm leading-5"
     >
       <TextEditor
         ref="editor"
@@ -67,7 +67,7 @@
     </div>
     <div
       v-else
-      class="cursor-pointer rounded bg-surface-gray-1 px-3 py-[7.5px] text-base leading-6 transition-all duration-300 ease-in-out"
+      class="cursor-pointer rounded bg-surface-gray-1 px-3 py-[7.5px] text-sm leading-5 transition-all duration-300 ease-in-out"
     >
       <CashOfferComment
         v-if="isCashOffer"

@@ -51,7 +51,7 @@
           <input
             v-model="draft[i]"
             type="text"
-            class="min-w-0 flex-1 rounded-md border border-outline-gray-2 bg-surface-white px-2 py-1 text-base text-ink-gray-8 focus:outline-none focus:ring-1 focus:ring-outline-gray-3"
+            class="min-w-0 flex-1 rounded-md border border-outline-gray-2 bg-surface-white px-2 py-1 text-sm text-ink-gray-8 focus:outline-none focus:ring-1 focus:ring-outline-gray-3"
             @keydown.enter="addRow"
           />
           <Tooltip :text="__('Remove')">
@@ -69,7 +69,7 @@
             v-model="newOne"
             type="text"
             :placeholder="__('Add a quick comment…')"
-            class="min-w-0 flex-1 bg-transparent text-base text-ink-gray-8 placeholder:text-ink-gray-4 focus:outline-none"
+            class="min-w-0 flex-1 bg-transparent text-sm text-ink-gray-8 placeholder:text-ink-gray-4 focus:outline-none"
             @keydown.enter="addRow"
           />
         </div>

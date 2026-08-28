@@ -1924,8 +1924,14 @@ duplicating. Work substantial features in a worktree of your own.
   struck-through. Open tasks live only in the To-do block, completed only in
   history — no duplication. Creating/saving a task **stays on the Activity tab**
   (removed `TaskModal`'s `@after="redirect('tasks')"`).
-  - `frontend/src/components/Activities/TaskTodoList.vue` — **new** (quick-add w/
-    date picker + checkbox + per-row delete)
+  - `frontend/src/components/Activities/TaskTodoList.vue` — checklist (no nested
+    gray card): click title to rename, hover-check to complete, panel icon opens
+    `TaskModal`. Due chips are per-user (`crm.api.task_presets`, Frappe user
+    default `crm_task_due_presets`, no ops field) with a pencil editor like
+    quick comments; unset falls back to 2h / 3d / 1wk / 1mo. **Day/week/month
+    chips land at 9:00am America/Chicago**, not midnight and not now+N×24h;
+    hour chips stay relative to now. A DateTimePicker midnight snap does the
+    same 9am. Due labels read `Thu 9am` / `today 9am`, not `timeAgo`.
   - `frontend/src/components/Activities/Activities.vue` — `openTasks` computed +
     `get_task_activities()` (completed tasks → timeline entries keyed on
     `modified`), merged into the Activity feed; `task` branch in the timeline +

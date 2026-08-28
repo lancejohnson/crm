@@ -339,7 +339,7 @@
               </Tooltip>
             </div>
             <div
-              class="max-w-[78%] whitespace-pre-wrap rounded-lg px-2.5 py-1.5 text-base"
+              class="max-w-[78%] whitespace-pre-wrap rounded-lg px-2.5 py-1.5 text-sm"
               :class="
                 activity.activity_type == 'outgoing_text'
                   ? 'bg-blue-500 text-white'

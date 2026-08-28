@@ -22,7 +22,7 @@
       @click="showCallLogDetailModal = true"
     >
       <div class="flex items-center justify-between">
-        <div class="inline-flex gap-2 items-center text-base font-medium">
+        <div class="inline-flex gap-2 items-center text-sm font-medium">
           <div>
             {{
               call.type == 'Incoming' ? __('Inbound Call') : __('Outbound Call')

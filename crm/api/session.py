@@ -66,6 +66,9 @@ def get_users():
 
 		if frappe.session.user == user.name:
 			user.session_user = True
+			user.custom_task_due_presets = frappe.defaults.get_user_default(
+				"crm_task_due_presets"
+			)
 
 		user.is_telephony_agent = frappe.db.exists("CRM Telephony Agent", {"user": user.name})
 		user.language = user.language or system_language

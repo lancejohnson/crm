@@ -122,6 +122,15 @@ function updateTaskStatus(status, task) {
   })
 }
 
+async function patchTask(name, fields) {
+  await call('frappe.client.set_value', {
+    doctype: 'CRM Task',
+    name,
+    fieldname: fields,
+  })
+  activities.value.reload()
+}
+
 // Quick comment — one-tap canned comment from the Activity feed. Posts via the
 // same endpoint as the rich-text composer; content is HTML so wrap the plain
 // chip text in a <div> to match what the editor stores.
@@ -218,6 +227,7 @@ defineExpose({
   addTask,
   deleteTask,
   updateTaskStatus,
+  patchTask,
   addComment,
   showNote,
   createCallLog,
