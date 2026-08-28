@@ -327,6 +327,10 @@
         </b>
       </template>
     </div>
+    <p v-if="sellerNote" class="seller-note">
+      <span class="seller-note-lbl">{{ __('Seller said') }}</span>
+      {{ sellerNote }}
+    </p>
     <textarea
       v-model="notes"
       class="notes"
@@ -457,6 +461,7 @@ const props = defineProps({
   // localStorage key so a practice calc cannot leak onto a live deal.
   practiceAttempt: { type: String, default: '' },
   practiceProperty: { type: String, default: '' },
+  sellerNote: { type: String, default: '' },
 })
 
 // Matches OfferRail.vue's rail so the two surfaces cannot name the same
@@ -1342,6 +1347,24 @@ function onKeys(e) {
 .save:disabled {
   opacity: 0.4;
   cursor: default;
+}
+.seller-note {
+  margin: 8px 0 0;
+  padding: 6px 7px;
+  border-radius: 5px;
+  background: var(--surface-gray-2);
+  color: var(--ink-gray-8);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.seller-note-lbl {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-gray-5);
 }
 .notes {
   display: block;

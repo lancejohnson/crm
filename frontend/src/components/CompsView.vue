@@ -56,6 +56,7 @@
         :compact="!wide"
         :practice-attempt="practiceAttempt"
         :practice-property="practiceProperty"
+        :seller-note="sellerNote"
         :seed="practiceSeed"
         @remove="setCompState($event, 'none')"
         @open="openCompDetail"
@@ -666,6 +667,7 @@ const props = defineProps({
   // the real lead. Underwriting is off — that creates a real Drive sheet.
   practiceAttempt: { type: String, default: '' },
   practiceProperty: { type: String, default: '' },
+  sellerNote: { type: String, default: '' },
 })
 // This used to be a modal driven by `defineModel()`. It is now a full page, so
 // "open" is simply always true -- which keeps every existing `show.value` guard,

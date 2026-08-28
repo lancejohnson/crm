@@ -100,6 +100,7 @@
         :address="current.property_address"
         :practice-attempt="attemptId"
         :practice-property="current.name"
+        :seller-note="current.seller_note || ''"
         page-mode
         hide-address-match
       />

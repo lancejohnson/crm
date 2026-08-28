@@ -39,6 +39,7 @@ from frappe.utils import flt, get_datetime, get_fullname, now_datetime, time_dif
 from werkzeug.utils import send_file
 
 from crm.api.comps import _guard, get_lead_comps
+from crm.api.practice_condition import pick_seller_note
 
 SET = "CRM Practice Set"
 PROP = "CRM Practice Property"
@@ -305,22 +306,72 @@ def _get_attempt(name: str, *, write: bool = False):
 	return doc
 
 
+def _has_seller_note() -> bool:
+	return bool(frappe.db.has_column(PROP, "seller_note"))
+
+
+def _used_seller_notes(set_name: str) -> set[str]:
+	if not _has_seller_note():
+		return set()
+	return {
+		(n or "").strip()
+		for n in frappe.get_all(
+			PROP,
+			filters={"practice_set": set_name},
+			pluck="seller_note",
+		)
+		if (n or "").strip()
+	}
+
+
+def _stamp_seller_note(name: str, practice_set: str) -> str:
+	"""One seller-voice line per house. Empty rows (pre-this-field) fill on read."""
+	if not _has_seller_note():
+		return ""
+	note = pick_seller_note(_used_seller_notes(practice_set))
+	frappe.db.set_value(PROP, name, "seller_note", note, update_modified=False)
+	return note
+
+
 def _properties(set_name: str) -> list[dict]:
-	return frappe.get_all(
+	fields = [
+		"name",
+		"source_lead",
+		"lead_name",
+		"property_address",
+		"property_city",
+		"property_state",
+		"property_zip",
+		"sort_order",
+	]
+	has_note = _has_seller_note()
+	if has_note:
+		fields.append("seller_note")
+	rows = frappe.get_all(
 		PROP,
 		filters={"practice_set": set_name},
-		fields=[
-			"name",
-			"source_lead",
-			"lead_name",
-			"property_address",
-			"property_city",
-			"property_state",
-			"property_zip",
-			"sort_order",
-		],
+		fields=fields,
 		order_by="sort_order asc, creation asc",
 	)
+	if not has_note:
+		for row in rows:
+			row["seller_note"] = ""
+		return rows
+	used = {
+		(r.get("seller_note") or "").strip()
+		for r in rows
+		if (r.get("seller_note") or "").strip()
+	}
+	for row in rows:
+		note = (row.get("seller_note") or "").strip()
+		if note:
+			row["seller_note"] = note
+			continue
+		note = pick_seller_note(used)
+		frappe.db.set_value(PROP, row["name"], "seller_note", note, update_modified=False)
+		row["seller_note"] = note
+		used.add(note)
+	return rows
 
 
 def _elapsed(att) -> int:
@@ -538,6 +589,7 @@ def _shape_attempt(att, properties: list[dict] | None = None) -> dict:
 				**{k: p.get(k) for k in (
 					"name", "source_lead", "lead_name", "property_address",
 					"property_city", "property_state", "property_zip", "sort_order",
+					"seller_note",
 				)},
 				"opened_at": slot.get("opened_at") or "",
 				"done_at": slot.get("done_at") or "",
@@ -759,6 +811,7 @@ def _insert_property(practice_set: str, lead: str, sort_order: int) -> dict:
 			fields["property_lng"] = latlng.property_lng
 	doc = frappe.get_doc(fields)
 	doc.insert(ignore_permissions=True)
+	note = _stamp_seller_note(doc.name, practice_set)
 	return {
 		"name": doc.name,
 		"source_lead": doc.source_lead,
@@ -768,6 +821,7 @@ def _insert_property(practice_set: str, lead: str, sort_order: int) -> dict:
 		"property_state": doc.property_state,
 		"property_zip": doc.property_zip,
 		"sort_order": doc.sort_order,
+		"seller_note": note,
 	}
 
 

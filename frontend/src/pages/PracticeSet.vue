@@ -114,6 +114,12 @@
             <div class="truncate text-xs text-ink-gray-5">
               {{ p.lead_name }}
             </div>
+            <div
+              v-if="p.seller_note"
+              class="mt-0.5 line-clamp-2 text-xs text-ink-gray-6"
+            >
+              {{ p.seller_note }}
+            </div>
           </div>
           <template v-if="canManage">
             <Button variant="ghost" icon="chevron-up" :disabled="i === 0" @click="move(i, -1)" />

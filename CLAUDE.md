@@ -33,6 +33,10 @@ duplicating. Work substantial features in a worktree of your own.
   limit — e.g. 10 houses in 30 minutes. Each acq rep runs the set on the **same
   comps map** as a live lead; hides / picks / the offer calc write to **their
   attempt**, never to `CRM Lead.comps_hidden` / `comps_selected` or the timeline.
+  Adding a house stamps a **seller-voice condition line** (`seller_note`, from
+  `practice_condition.py` — real call phrasing, no repair label) so the run has
+  something to price off; it sits above the calc notes. Empty rows fill on first
+  read. Guarded on the column.
   Times and recordings are team-visible on submitted runs (in-progress stays
   private). **Calcs** on the set page is one table per house — people as columns,
   ARV / repair / offer / formula as rows. Optional **screen + mic** on Start (`practiceRecorder.js`): Chrome
