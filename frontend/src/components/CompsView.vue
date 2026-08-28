@@ -529,6 +529,32 @@
             {{ __('Pending ({0})', [pendingCount]) }}
           </span>
           <span class="text-ink-gray-5">{{ __('Fainter = older sale') }}</span>
+          <span
+            v-if="hasFlipOnBoard"
+            class="flex items-center gap-1.5"
+            :title="__('Possible flip — look before you price off it')"
+          >
+            <span
+              class="inline-block size-2.5 rounded-[3px]"
+              :style="{
+                border: '2px dashed ' + COMP_COLORS.sold.ink,
+                background: OFF_MARKET,
+              }"
+            />
+            {{ __('Dashed = possible flip') }}
+          </span>
+          <span
+            v-for="t in typeKindsOnBoard"
+            :key="t.kind"
+            class="flex items-center gap-1"
+          >
+            <span
+              class="inline-flex size-3 text-ink-gray-7"
+              aria-hidden="true"
+              v-html="t.svg"
+            />
+            {{ t.label }}
+          </span>
           <CompHelpKey />
           <span v-if="data?.selected_count" class="flex items-center gap-1.5">
             <span
@@ -593,7 +619,19 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { zillowUrl } from '@/utils/propertyLinks'
-import { COMP_COLORS, compColor, compState, daysToSell, finiteDays, isPending } from '@/utils/comps'
+import {
+  COMP_COLORS,
+  PROPERTY_TYPE_KIND_ORDER,
+  PROPERTY_TYPE_KINDS,
+  compColor,
+  compState,
+  daysToSell,
+  finiteDays,
+  isPending,
+  propertyTypeGlyphHtml,
+  propertyTypeGlyphSvg,
+  propertyTypeKind,
+} from '@/utils/comps'
 import CompDetailModal from '@/components/CompDetailModal.vue'
 import CompTrayCard from '@/components/CompTrayCard.vue'
 import CompSubjectCard from '@/components/CompSubjectCard.vue'
@@ -1108,24 +1146,29 @@ const markersByName = new Map()
 /**
  * Where a hovered pill sits in the stack, and where it stays afterwards.
  *
- * Above the SUBJECT too, which is why this is a Leaflet z-index OFFSET and not an
- * inline `style.zIndex`. The subject marker carries `zIndexOffset: 1000`, and
- * Leaflet computes each marker's real z from its latitude PLUS its offset and
- * rewrites the inline style on every pan and zoom -- so the old `el.style.zIndex
- * = 900` was both too low to clear the subject and erased the moment the map
- * moved. Going through `setZIndexOffset` is the only version Leaflet respects.
+ * This is a Leaflet z-index OFFSET, not an inline `style.zIndex`. Leaflet
+ * computes each marker's real z from its latitude PLUS its offset and rewrites
+ * the inline style on every pan and zoom -- so the old `el.style.zIndex = 900`
+ * was both too low to clear the subject and erased the moment the map moved.
+ * Going through `setZIndexOffset` is the only version Leaflet respects.
+ *
+ * Hover clears the subject. After the pointer leaves, the pill stays above its
+ * neighbouring COMPS (so a dense cluster is not whack-a-mole) but drops back
+ * UNDER the subject -- overlapping the blue pill and leaving it buried was the
+ * remaining complaint.
  */
 // The bands are far apart on purpose: Leaflet ADDS the marker's pixel y to the
 // offset, and the map can be ~1,000px tall, so bands any closer together would
 // let a pin near the bottom of the map outrank a raised pin near the top.
-// Normal pins land under ~1,700 and the subject under ~2,000.
-const HOVER_Z = 10000
-// One band below the hovered pill. A pill you have looked at STAYS on top of the
-// ones it overlaps after the pointer leaves, because the reason you hovered it
+// Normal pins land under ~1,700. Raised max offset 8000 + ~1,000px y stays under
+// the subject; hover clears it.
+const HOVER_Z = 12000
+const SUBJECT_Z = 10000
+// One band below the subject. A pill you have looked at STAYS on top of the
+// comps it overlaps after the pointer leaves, because the reason you hovered it
 // was to bring it out from under them -- dropping it straight back under is the
-// behaviour that makes a dense cluster feel like whack-a-mole. It yields only to
-// whatever is hovered next, so the stack ends up ordered by what you looked at
-// -- see `markRaised`, which is what actually makes that ordering true.
+// behaviour that makes a dense cluster feel like whack-a-mole. It yields to the
+// subject, and to whatever is hovered next -- see `markRaised`.
 const RAISED_Z = 5000
 //: How much room the raised band has to order itself in. RAISED_Z + rank + the
 //: marker's pixel y (~1,000 max) has to stay clear of HOVER_Z, so 3,000 leaves
@@ -1314,6 +1357,25 @@ watch([showStreet, streetViewPoint], syncStreetView)
 // the legend describes the pins in front of the rep, and a number that survives
 // filtering is the same mistake the Nearby label documents.
 const pendingCount = computed(() => comps.value.filter((c) => isPending(c)).length)
+
+// Type glyphs and the dashed-flip note only when the board actually holds one.
+// Same rule as pending: a legend entry for a state nothing on the map is in is
+// one more thing to read for nothing.
+const typeKindsOnBoard = computed(() => {
+  const seen = new Set()
+  for (const c of comps.value) {
+    const k = propertyTypeKind(c.property_type)
+    if (k) seen.add(k)
+  }
+  const sk = propertyTypeKind(data.value?.subject?.property_type)
+  if (sk) seen.add(sk)
+  return PROPERTY_TYPE_KIND_ORDER.filter((k) => seen.has(k)).map((kind) => ({
+    kind,
+    label: PROPERTY_TYPE_KINDS[kind].label,
+    svg: propertyTypeGlyphSvg(kind, 12),
+  }))
+})
+const hasFlipOnBoard = computed(() => comps.value.some((c) => c?.sale_history?.flip))
 
 // Comps a person threw out. They arrive in their own list precisely so they can
 // be shown without ever re-entering the pool: a discarded comp must not keep a
@@ -1636,7 +1698,9 @@ function pillFacts(c) {
   const f = c?.sale_history?.flip
   const soldOn = soldOnShort(c.removed_date)
   const listed = listingDays(c)
+  const typeKind = propertyTypeKind(c.property_type)
   return [
+    typeKind ? PROPERTY_TYPE_KINDS[typeKind].label : '',
     line2,
     year,
     soldOn ? __('sold {0}', [soldOn]) : '',
@@ -1718,25 +1782,29 @@ function subjectIcon(s) {
   const sf = s.sqft_label ? `${s.sqft_label}sf` : ''
   const line2 = [bb, sf].filter(Boolean).join(' · ')
   const label = __('Subject')
+  // Same type mark the comps wear, so a manufactured subject is not the one
+  // unmarked pill on a board of manufactured comps.
+  const glyph = propertyTypeGlyphHtml(s.property_type)
+  const glyphW = glyph ? 16 : 0
 
   // With details off (the D toggle) the comps collapse to a bare price, so the
   // subject collapses to a bare label rather than staying loud on its own.
   if (!showDetail.value || (!year && !line2)) {
-    const w = Math.max(52, Math.ceil(18 + label.length * 6.6))
+    const w = Math.max(52, Math.ceil(18 + glyphW + label.length * 6.6))
     return L.divIcon({
       className: 'comps-price-pill',
       html: `<div class="comps-pill-body" style="display:flex;align-items:center;
           justify-content:center;box-sizing:border-box;width:${w}px;height:24px;
           background:${SUBJECT};color:#fff;font:700 11px/1 ui-sans-serif,system-ui,sans-serif;
           border-radius:999px;border:2px solid #fff;
-          box-shadow:0 1px 6px rgba(0,0,0,.5);white-space:nowrap">${label}</div>`,
+          box-shadow:0 1px 6px rgba(0,0,0,.5);white-space:nowrap;overflow:visible">${glyph}${label}</div>`,
       iconSize: [w, 24],
       iconAnchor: [w / 2, 12],
       popupAnchor: [0, -14],
     })
   }
 
-  const top = label.length * 6.6 + (year ? 3 + year.length * 5.0 : 0)
+  const top = glyphW + label.length * 6.6 + (year ? 3 + year.length * 5.0 : 0)
   const w = Math.max(58, Math.ceil(14 + Math.max(top, line2.length * 5.05)))
   const yearHtml = year
     ? `<span style="font:500 9px/1 ui-sans-serif,system-ui,sans-serif;opacity:.8;
@@ -1752,9 +1820,9 @@ function subjectIcon(s) {
         align-items:center;justify-content:center;box-sizing:border-box;width:${w}px;
         height:34px;background:${SUBJECT};color:#fff;border-radius:9px;
         border:2px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.55);
-        white-space:nowrap;line-height:1">
-        <div style="display:flex;align-items:baseline;justify-content:center">
-          <span style="font:700 11px/1 ui-sans-serif,system-ui,sans-serif">${label}</span>${yearHtml}
+        white-space:nowrap;line-height:1;overflow:visible">
+        <div style="display:flex;align-items:center;justify-content:center">
+          ${glyph}<span style="font:700 11px/1 ui-sans-serif,system-ui,sans-serif">${label}</span>${yearHtml}
         </div>
         ${line2Html}
       </div>`,
@@ -1786,27 +1854,33 @@ function pillIcon(c) {
   const ring = c.selected
     ? `box-shadow:0 0 0 2px #fff,0 0 0 4px ${COMP_COLORS.subject.bg},0 1px 3px rgba(0,0,0,.4);`
     : 'box-shadow:0 1px 3px rgba(0,0,0,.35);'
-  const border = `1px solid ${withAlpha(pal.border, Math.max(alpha, 0.55))}`
+  // Flip used to be a star on the price line, which collides with the type glyph.
+  // A dashed outline leaves the interior alone: a condo flip is a dashed condo.
+  // Ink, not the faded fill, so it survives recency the way the old star did.
+  const flip = isFlip(c)
+  const border = flip
+    ? `2px dashed ${ink}`
+    : `1px solid ${withAlpha(pal.border, Math.max(alpha, 0.55))}`
+  const borderSolid = flip ? ink : pal.border
   const op = '1'
+  const glyph = propertyTypeGlyphHtml(c.property_type)
+  const glyphW = glyph ? 16 : 0
 
   if (!detailed) {
-    // The star survives the `D` collapse. Details are hidden on a dense board --
-    // exactly where a bad comp is easiest to price off by mistake -- so the one
-    // thing that says "do not trust this number" is not part of what gets hidden.
-    const bareStar = isFlip(c)
-      ? `<span style="font-size:10px;line-height:1;margin-right:1px">\u2605</span>`
-      : ''
-    const w = Math.max(40, Math.ceil(18 + (isFlip(c) ? 11 : 0) + price.length * 7.4))
+    // Glyph and dashed outline both survive the `D` collapse. Details are hidden
+    // on a dense board -- exactly where a bad (or wrong-type) comp is easiest to
+    // price off by mistake -- so neither mark is part of what gets hidden.
+    const w = Math.max(40, Math.ceil(18 + glyphW + (flip ? 4 : 0) + price.length * 7.4))
     return L.divIcon({
       className: 'comps-price-pill',
       html: `<div class="comps-pill-body" title="${escapeHtml(pillFacts(c))}"
           style="position:relative;display:flex;
           align-items:center;justify-content:center;
           box-sizing:border-box;width:${w}px;height:24px;background:${bg};color:${ink};
-          --pill-bg-solid:${pal.bg};--pill-border-solid:${pal.border};
+          --pill-bg-solid:${pal.bg};--pill-border-solid:${borderSolid};
           font:700 11px/1 ui-sans-serif,system-ui,sans-serif;border-radius:999px;
-          border:${border};${ring}white-space:nowrap;
-          opacity:${op}">${bareStar}${price}${hideBadge(c)}</div>`,
+          border:${border};${ring}white-space:nowrap;overflow:visible;
+          opacity:${op}">${glyph}${price}${hideBadge(c)}</div>`,
       iconSize: [w, 24],
       iconAnchor: [w / 2, 12],
       popupAnchor: [0, -14],
@@ -1830,20 +1904,13 @@ function pillIcon(c) {
   // sale (price cuts included -- a seller who cut twice sat there the whole time).
   // A live listing has not sold, so it never has one and the slot stays empty.
   const soldIn = soldInShort(c)
-  // A flip is marked by SHAPE, not by a word and not by a colour. Colour is spoken
-  // for by status and the fill fades with age, so a hue-based mark would vanish on
-  // exactly the stale comps; a star is drawn in the ink colour, which is held solid
-  // while the fill fades, so it survives both. Measured 10 flips on a real 50-comp
-  // Detroit board -- 7 sold, 1 for sale, 1 pending -- so it has to read on all three.
-  const flip = isFlip(c)
-  const starW = flip ? 11 : 0
   const top =
-    starW +
+    glyphW +
     price.length * 7.0 +
     (year ? 3 + year.length * 5.0 : 0) +
     (age ? 3 + age.length * 5.0 : 0)
   const line2w = line2.length * 5.05 + (soldIn ? 6 + soldIn.length * 5.05 : 0)
-  const w = Math.max(52, Math.ceil(12 + Math.max(top, line2w)))
+  const w = Math.max(52, Math.ceil(12 + (flip ? 4 : 0) + Math.max(top, line2w)))
   const yearHtml = year
     ? `<span style="font:500 9px/1 ui-sans-serif,system-ui,sans-serif;opacity:.72;
          margin-left:3px">${year}</span>`
@@ -1851,9 +1918,6 @@ function pillIcon(c) {
   const ageHtml = age
     ? `<span style="font:500 9px/1 ui-sans-serif,system-ui,sans-serif;opacity:.72;
          margin-left:3px">${age}</span>`
-    : ''
-  const starHtml = flip
-    ? `<span style="font-size:10px;line-height:1;margin-right:1px">\u2605</span>`
     : ''
   // Stretched to the pill's width so the two halves can sit at opposite ends --
   // facts left, time-to-sell right. Without a soldIn it stays centred exactly as
@@ -1875,10 +1939,10 @@ function pillIcon(c) {
         style="position:relative;display:flex;flex-direction:column;align-items:center;
         justify-content:center;box-sizing:border-box;width:${w}px;height:34px;
         background:${bg};color:${ink};border-radius:9px;border:${border};${ring}
-        --pill-bg-solid:${pal.bg};--pill-border-solid:${pal.border};
-        white-space:nowrap;line-height:1;opacity:${op}">
-        <div style="display:flex;align-items:baseline;justify-content:center">
-          ${starHtml}<span style="font:700 11.5px/1 ui-sans-serif,system-ui,sans-serif">${price}</span>${yearHtml}${ageHtml}
+        --pill-bg-solid:${pal.bg};--pill-border-solid:${borderSolid};
+        white-space:nowrap;line-height:1;opacity:${op};overflow:visible">
+        <div style="display:flex;align-items:center;justify-content:center">
+          ${glyph}<span style="font:700 11.5px/1 ui-sans-serif,system-ui,sans-serif">${price}</span>${yearHtml}${ageHtml}
         </div>
         ${line2Html}
         ${hideBadge(c)}
@@ -2140,7 +2204,7 @@ function render() {
 
   // The subject goes on LAST so it is never buried under a comp pill.
   const subjectMarker = L.marker([s.lat, s.lng], {
-    zIndexOffset: 1000,
+    zIndexOffset: SUBJECT_Z,
     // A real iconSize + centre anchor, NOT the 0x0-plus-transform trick the rings
     // use. With a zero-width container the horizontal translate(-50%) collapsed to
     // 0, so the marker for "the real parcel" was drawn ~9px to the RIGHT of the
@@ -2878,5 +2942,10 @@ input.comps-filter-num::placeholder {
   /* Transition the property that actually changes. Was `opacity`, which no
      longer moves, so the highlight also snapped rather than easing. */
   transition: background-color 90ms ease-out, border-color 90ms ease-out;
+  overflow: visible;
+}
+.comps-type-glyph svg {
+  display: block;
+  overflow: visible;
 }
 </style>

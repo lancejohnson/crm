@@ -114,7 +114,16 @@
 
       <div class="px-3 py-2">
         <div class="flex items-baseline justify-between gap-2">
-          <span class="text-base font-semibold text-ink-gray-9">{{ price }}</span>
+          <span class="flex items-center gap-1 text-base font-semibold text-ink-gray-9">
+            <span
+              v-if="typeGlyph"
+              class="inline-flex size-3.5 shrink-0 text-ink-gray-7"
+              :title="typeLabel"
+              aria-hidden="true"
+              v-html="typeGlyph"
+            />
+            {{ price }}
+          </span>
           <span class="shrink-0 text-xs tabular-nums text-ink-gray-5">
             {{ comp.distance_mi }} mi
           </span>
@@ -150,17 +159,14 @@
         >
           {{ timing }}
         </div>
-        <!-- Same star as the map pin, so the mark is learned once and recognised
-             here without relearning. Amber, not red: a flip is "look closer", not
-             an error, and plenty are perfectly good comps once you have seen the
-             photos. The card can afford the words the pill cannot, which is what
-             makes a bare star on the pill legible at all. -->
+        <!-- Same warning the map pin's dashed outline carries, in words the card
+             can afford. Amber, not red: a flip is "look closer", not an error,
+             and plenty are perfectly good comps once you have seen the photos. -->
         <div
           v-if="flipBadge"
           class="mt-1 flex items-baseline gap-1 rounded bg-surface-amber-1 px-1.5 py-1 text-2xs text-ink-amber-3"
           :title="`${flipBadge.label} — ${flipBadge.detail}`"
         >
-          <span aria-hidden="true">★</span>
           <span class="shrink-0 font-semibold">{{ flipBadge.label }}</span>
           <span class="truncate">{{ flipBadge.detail }}</span>
         </div>
@@ -226,6 +232,7 @@
 import { Button, FeatherIcon } from 'frappe-ui'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
+  PROPERTY_TYPE_KINDS,
   compColor,
   compState,
   compStateLabel,
@@ -234,6 +241,8 @@ import {
   formatLotSize,
   isActiveStatus,
   loadCompPhotos,
+  propertyTypeGlyphSvg,
+  propertyTypeKind,
   streetAddress,
 } from '@/utils/comps'
 
@@ -254,6 +263,11 @@ const palette = computed(() => compColor(props.comp))
 const state = computed(() => compState(props.comp))
 const stateLabel = computed(() => compStateLabel(state.value))
 const isPendingComp = computed(() => state.value === 'pending')
+const typeKind = computed(() => propertyTypeKind(props.comp.property_type))
+const typeLabel = computed(() => (typeKind.value ? PROPERTY_TYPE_KINDS[typeKind.value].label : ''))
+const typeGlyph = computed(() =>
+  typeKind.value ? propertyTypeGlyphSvg(typeKind.value, 14) : '',
+)
 
 // --- our own lazy loading ------------------------------------------------
 // See the GOTCHA in the template: the platform's `loading="lazy"` never fires
@@ -330,6 +344,7 @@ const price = computed(() => {
 const facts = computed(() => {
   const c = props.comp
   const bits = []
+  if (c.property_type) bits.push(c.property_type)
   if (c.bedrooms) bits.push(__('{0} bd', [c.bedrooms]))
   if (c.bathrooms) bits.push(__('{0} ba', [c.bathrooms]))
   if (c.square_footage) bits.push(Number(c.square_footage).toLocaleString() + ' ' + __('sqft'))
@@ -422,9 +437,8 @@ function soldInDays(c) {
 /**
  * The flip warning for the tray, as a badge rather than a sentence.
  *
- * Same star as the map pin, deliberately: the rep meets the mark on the pill and
- * has to recognise it here without relearning it. The words are affordable in the
- * tray in a way they are not on a 90px pill.
+ * The map pin uses a dashed outline (the type glyph took the interior slot the
+ * star used to occupy). The card can afford the words the pill cannot.
  */
 const flipBadge = computed(() => {
   const f = props.comp?.sale_history?.flip

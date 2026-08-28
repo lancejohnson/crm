@@ -87,6 +87,69 @@ export function compColor(statusOrComp) {
   return state === 'for_sale' ? COMP_COLORS.active : COMP_COLORS.sold
 }
 
+/**
+ * Property-type marks on the map pills.
+ *
+ * Colour is spoken for by status and the fill fades with recency, so type is an
+ * ink glyph — the same channel the flip star used to occupy. Single family is
+ * unmarked on purpose: it is most of the board, and a mark only earns its keep
+ * when it means "this is not a house". Apartment shares condo.
+ */
+export const PROPERTY_TYPE_KINDS = {
+  townhouse: { label: 'Townhouse' },
+  condo: { label: 'Condo' },
+  multi: { label: 'Multi-family' },
+  manufactured: { label: 'Manufactured' },
+  land: { label: 'Land' },
+}
+
+export const PROPERTY_TYPE_KIND_ORDER = [
+  'townhouse',
+  'condo',
+  'multi',
+  'manufactured',
+  'land',
+]
+
+export function propertyTypeKind(type) {
+  const t = String(type || '').toLowerCase()
+  if (!t) return null
+  if (t.includes('town')) return 'townhouse'
+  if (t.includes('condo') || t.includes('apartment') || /\bapt\b/.test(t)) return 'condo'
+  if (t.includes('multi')) return 'multi'
+  if (t.includes('manufact') || t.includes('mobile') || t.includes('trailer')) {
+    return 'manufactured'
+  }
+  if (/\bland\b/.test(t) || /\blot\b/.test(t) || t.includes('vacant')) return 'land'
+  return null
+}
+
+const TYPE_GLYPH_INNER = {
+  townhouse:
+    '<path fill="currentColor" d="M1 10.5V5L3.4 3.2v7.3H1zm3.6 0V4.4L6 2.8l1.4 1.6v6.1H4.6zM8.6 10.5V5L11 3.2v7.3H8.6z"/>',
+  condo:
+    '<rect x="1.2" y="1.2" width="9.6" height="9.6" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M1.2 6h9.6M6 1.2v9.6" fill="none" stroke="currentColor" stroke-width="1.5"/>',
+  multi:
+    '<rect x="2.2" y="1.2" width="7.6" height="9.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M2.2 4.4h7.6M2.2 7.6h7.6" fill="none" stroke="currentColor" stroke-width="1.5"/>',
+  manufactured:
+    '<rect x="1.4" y="1.8" width="9.2" height="6" rx="1.1" fill="currentColor"/><circle cx="4" cy="9.5" r="1.35" fill="currentColor"/><circle cx="8" cy="9.5" r="1.35" fill="currentColor"/>',
+  land: '<path fill="currentColor" d="M6 1.1l4.7 4.9-4.7 4.9L1.3 6z"/>',
+}
+
+export function propertyTypeGlyphSvg(kind, size = 12) {
+  const inner = TYPE_GLYPH_INNER[kind]
+  if (!inner) return ''
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12" width="${size}" height="${size}" aria-hidden="true">${inner}</svg>`
+}
+
+/** Inline HTML for a Leaflet pill. Empty string when the type is unmarked. */
+export function propertyTypeGlyphHtml(type, size = 12) {
+  const kind = propertyTypeKind(type)
+  if (!kind) return ''
+  const label = PROPERTY_TYPE_KINDS[kind].label
+  return `<span class="comps-type-glyph" title="${label}" style="display:inline-flex;width:${size}px;height:${size}px;margin-right:4px;flex:none;align-items:center;justify-content:center;overflow:visible">${propertyTypeGlyphSvg(kind, size)}</span>`
+}
+
 const DIMENSIONS = [
   {
     key: 'type',

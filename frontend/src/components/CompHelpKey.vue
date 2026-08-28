@@ -60,7 +60,8 @@
         </div>
         <p class="mt-2 text-2xs leading-4 text-ink-gray-5">
           {{ __('Red or violet: that top-right number is days listed, not a date.') }}
-          {{ __('★ is a possible flip — look before you price off it.') }}
+          {{ __('A dashed outline is a possible flip — look before you price off it.') }}
+          {{ __('A mark before the price is the property type (townhouse, condo, multi-family, manufactured, land). Single family has none.') }}
         </p>
 
         <div class="mt-3 text-2xs font-semibold uppercase tracking-wide text-ink-gray-5">
