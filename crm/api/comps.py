@@ -750,6 +750,13 @@ def _shape_detail(row, zpid=None):
 	else:
 		raw = zillow_api.property_details(row.get("address"))
 	details = zillow_api.normalize_detail(raw) if raw else None
+	# Zillow's /property returns an EMPTY SHELL (every field null, even zpid) for
+	# some listings its own /search happily returned — observed on a pending Philly
+	# row, by zpid AND by address. When the zpid path came back hollow and we know
+	# the address, one address retry is worth the spend before giving up on Zillow.
+	if not details and zpid and (row.get("address") or "").strip():
+		raw = zillow_api.property_details(row.get("address"))
+		details = zillow_api.normalize_detail(raw) if raw else None
 	photo_raw = zillow_api.property_photos(details.get("zpid")) if details else None
 	photos = zillow_api.photo_urls(photo_raw)
 	if details and details.get("cover_photo") and not photos:
@@ -808,7 +815,7 @@ def _batchdata_row(lead, comp):
 
 
 @frappe.whitelist()
-def get_comp_details(lead, comp):
+def get_comp_details(lead, comp, address=None):
 	"""On-demand Zillow facts + scrollable photos for one comp.
 
 	The compact Today view already has the comparison facts from `CRM Comp`; this
@@ -824,7 +831,11 @@ def get_comp_details(lead, comp):
 
 	if str(comp).startswith("zillow::"):
 		# Area-search pins are not CRM Comp rows. _shape_detail looks them up by zpid.
-		row = frappe._dict({"name": comp, "address": ""})
+		# The caller's address matters more than it looks: when Zillow's /property
+		# returns an empty shell for the zpid (it does, on some pending listings),
+		# the address is the only route left — a Zillow address retry, then the
+		# Realtor photo fallback, both of which no-op on an empty string.
+		row = frappe._dict({"name": comp, "address": str(address or "").strip()})
 	elif str(comp).startswith("batchdata::"):
 		# BatchData fallback pins are not CRM Comp rows either — resolve from the
 		# lead's cached blob; _shape_detail then looks Zillow up by address.
@@ -846,13 +857,26 @@ def get_comp_details(lead, comp):
 	key = _detail_cache_key(comp)
 	cached = frappe.cache().get_value(key)
 	if isinstance(cached, dict):
-		return {**cached, "cached": True}
+		# A remembered MISS written before the caller supplied an address is worth
+		# one address-armed retry — otherwise Retry serves the same failure for the
+		# whole TTL. `address_tried` stops a genuinely photo-less comp from being
+		# re-billed on every hover: after one armed attempt the miss caches again.
+		retry_with_address = (
+			str(address or "").strip()
+			and not (cached.get("photos") or [])
+			and not cached.get("address_tried")
+		)
+		if not retry_with_address:
+			return {**cached, "cached": True}
 
 	result = _shape_detail(row)
 	result["cached"] = False
+	result["address_tried"] = bool(str(address or "").strip() or row.get("address"))
 	# A full gallery is stable. One leftover Zillow frame (or a failed Realtor
 	# fallback) is not — retry soon rather than freezing a thin gallery for a month.
-	full = result.get("available") and len(result.get("photos") or []) > 1
+	# A Realtor gallery WITHOUT Zillow details (hollow-shell zpid) still counts:
+	# the photos are what the click was for, and the facts panel has the comp row.
+	full = len(result.get("photos") or []) > 1
 	ttl = DETAIL_CACHE_SECONDS if full else DETAIL_RETRY_SECONDS
 	frappe.cache().set_value(key, result, expires_in_sec=ttl)
 	# Do not read the cache again in this request: Frappe memoizes cache misses in

@@ -185,7 +185,7 @@
             </div>
 
             <div
-              v-if="error || (!loading && response && !response.available)"
+              v-if="error || (!loading && response && !response.available && !photos.length)"
               class="mt-5 rounded-lg border border-outline-gray-2 bg-surface-gray-1 p-3 text-sm text-ink-gray-6"
             >
               {{ error || response?.message || __('More details are unavailable right now.') }}
@@ -400,7 +400,13 @@ async function load(force = false) {
   try {
     const result = props.subjectMode
       ? await call('crm.api.comps.get_subject_details', { lead: props.lead })
-      : await call('crm.api.comps.get_comp_details', { lead: props.lead, comp: name })
+      : await call('crm.api.comps.get_comp_details', {
+          lead: props.lead,
+          comp: name,
+          // Lets the server fall back to an address lookup (Zillow, then Realtor
+          // photos) when the zpid /property call returns an empty shell.
+          address: props.comp.address || '',
+        })
     if (token !== requestToken) return
     response.value = result
     cache.set(name, result)
