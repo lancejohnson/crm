@@ -1,13 +1,15 @@
 """Prompt the owner when an iSpeedToLead lead is refund-eligible on call volume.
 
-iSpeedToLead refund when we dial a lot and never actually reach anyone.
-The rule Lance asked for: **10 outgoing phone calls inside 21 calendar days
-with no connect**. When that trips, the lead page shows a banner and the
+iSpeedToLead refund when we place **10 outgoing dials inside 14 days** and never
+reach anyone. The 10 are the **first** 10 outbound calls on the lead, not the
+most recent 10 — a later no-answer streak cannot resurrect a flag. Dead/Lost
+leads are excluded. When that trips, the lead page shows a banner and the
 owner gets one CRM notification.
 
 A connect is `custom_call_class == "Connected"` when the classifier (or a
 human) has labelled the call; otherwise a talk-time of 60s or more. Incoming
-calls do not count toward the 10.
+calls do not count as dials, but a pickup on either direction — ever — or
+any inbound text, kills the refund for good (Willie Simmons).
 
 The custom fields this reads (`custom_refundable`, `custom_refund_requested`)
 are provisioned by ops `setup_refundable_field.py`. Every access is
@@ -21,11 +23,12 @@ from datetime import datetime, timedelta
 import frappe
 from frappe.utils import get_datetime
 
+from crm.api.task_hygiene import is_terminal_status
 from crm.fcrm.doctype.crm_notification.crm_notification import notify_user
 
 ISTL_SOURCES = {"iSpeedToLead"}
 MIN_CALLS = 10
-WINDOW_DAYS = 21
+WINDOW_DAYS = 14
 CONNECT_CLASS = "Connected"
 CONNECT_SECONDS = 60
 # Calls that never left the phone do not count as attempts.
@@ -45,29 +48,31 @@ def _is_connect(row: dict) -> bool:
 	return int(row.get("duration") or 0) >= CONNECT_SECONDS
 
 
-def window_from_calls(calls: list[dict]) -> dict | None:
-	"""Return the 10-call / 21-day no-connect window, or None.
+def _when(row: dict) -> datetime | None:
+	t = get_datetime(row.get("start_time")) if row.get("start_time") else None
+	return t if isinstance(t, datetime) else None
 
-	`calls` must already be outgoing + countable, newest first.
-	Pure function so the rule can be tested without a site.
-	"""
-	if len(calls) < MIN_CALLS:
+
+def first_ten_in_fourteen(outgoing: list[dict]) -> dict | None:
+	"""The first 10 outbound dials, if they all land inside 14 days."""
+	dated = []
+	for row in outgoing:
+		t = _when(row)
+		if t:
+			dated.append((t, row))
+	dated.sort(key=lambda x: x[0])
+	if len(dated) < MIN_CALLS:
 		return None
-	batch = calls[:MIN_CALLS]
-	if any(_is_connect(row) for row in batch):
-		return None
-	times = [get_datetime(row.get("start_time")) for row in batch if row.get("start_time")]
-	times = [t for t in times if isinstance(t, datetime)]
-	if len(times) < MIN_CALLS:
-		return None
-	newest, oldest = max(times), min(times)
-	if newest.date() - oldest.date() >= timedelta(days=WINDOW_DAYS):
+	batch = dated[:MIN_CALLS]
+	first, last = batch[0][0], batch[-1][0]
+	span = (last.date() - first.date()).days
+	if span > WINDOW_DAYS:
 		return None
 	return {
 		"calls": MIN_CALLS,
-		"window_days": (newest.date() - oldest.date()).days,
-		"first_at": oldest,
-		"last_at": newest,
+		"window_days": span,
+		"first_at": first,
+		"last_at": last,
 	}
 
 
@@ -83,6 +88,8 @@ def evaluate(lead_name: str) -> dict:
 	lead = frappe.get_doc("CRM Lead", lead_name)
 	if _lead_source(lead) not in ISTL_SOURCES:
 		return empty
+	if is_terminal_status(lead.status):
+		return {"show": False, "reason": "lost"}
 	if lead.meta.has_field("custom_refund_requested") and lead.get("custom_refund_requested"):
 		return {"show": False, "reason": "already_requested"}
 	if lead.meta.has_field("custom_refundable") and lead.get("custom_refundable"):
@@ -97,14 +104,19 @@ def evaluate(lead_name: str) -> dict:
 		filters={
 			"reference_doctype": "CRM Lead",
 			"reference_docname": lead_name,
-			"type": "Outgoing",
 		},
 		fields=fields,
 		order_by="start_time desc",
-		limit_page_length=50,
+		limit_page_length=1000,
 	)
 	countable = [r for r in rows if (r.get("status") or "Completed") in COUNTABLE_STATUSES]
-	hit = window_from_calls(countable)
+	# Lifetime, both directions. Once we have talked to them, never flag again.
+	if any(_is_connect(r) for r in countable):
+		return {"show": False, "reason": "connected"}
+	if _inbound_text(lead_name):
+		return {"show": False, "reason": "texted"}
+	outgoing = [r for r in countable if (r.get("type") or "Outgoing") == "Outgoing"]
+	hit = first_ten_in_fourteen(outgoing)
 	if not hit:
 		return empty
 	return {
@@ -115,9 +127,25 @@ def evaluate(lead_name: str) -> dict:
 		"last_at": str(hit["last_at"]),
 		"message": (
 			f"{hit['calls']} outgoing calls in {hit['window_days'] or 'less than 1'} "
-			f"day(s) and no connect — ask iSpeedToLead for a refund."
+			f"day(s), no pickup and no text reply — ask iSpeedToLead for a refund."
 		),
 	}
+
+
+def _inbound_text(lead_name: str) -> bool:
+	"""Any inbound SMS on this lead. Sequence outbound does not count."""
+	if not frappe.db.exists("DocType", "Quo Message"):
+		return False
+	return bool(
+		frappe.db.count(
+			"Quo Message",
+			{
+				"reference_doctype": "CRM Lead",
+				"reference_docname": lead_name,
+				"direction": "Incoming",
+			},
+		)
+	)
 
 
 @frappe.whitelist()
@@ -165,3 +193,45 @@ def on_call_log_change(doc, method=None):
 			"redirect_to_docname": lead.name,
 		}
 	)
+
+
+def eligible_now():
+	"""Bench-only, read-only: ISTL leads the first-10-days rule would flag."""
+	import json
+
+	leads = frappe.get_all(
+		"CRM Lead",
+		filters={"source": "iSpeedToLead"},
+		fields=[
+			"name",
+			"lead_name",
+			"lead_owner",
+			"status",
+			"creation",
+			"property_address",
+		],
+		limit_page_length=2000,
+	)
+	hits = []
+	reasons = {}
+	for row in leads:
+		r = evaluate(row.name)
+		why = r.get("reason") or ("eligible" if r.get("show") else "no_outreach")
+		reasons[why] = reasons.get(why, 0) + 1
+		if not r.get("show"):
+			continue
+		owner = row.lead_owner or ""
+		hits.append(
+			{
+				"name": row.name,
+				"lead_name": row.lead_name,
+				"owner": owner.split("@")[0] if owner else "",
+				"status": row.status,
+				"creation": str(row.creation)[:10],
+				"calls": r.get("calls"),
+				"address": row.property_address or "",
+			}
+		)
+	hits.sort(key=lambda h: (-h["calls"], h["creation"]))
+	print(json.dumps({"istl": len(leads), "reasons": reasons, "eligible": hits}, default=str))
+	return {"istl": len(leads), "reasons": reasons, "n": len(hits)}

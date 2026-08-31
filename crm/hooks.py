@@ -256,7 +256,7 @@ doc_events = {
 	"CRM Property Tax Pull": {
 		"after_insert": ["crm.api.tax_info.on_tax_pull_insert"],
 	},
-	# 10 outgoing ISTL calls in 21 days with no connect → refund nudge.
+	# ISTL: first 10 outgoing dials in 14 days, no pickup ever, not Dead/Lost → refund nudge.
 	# See crm/api/istl_refund_nudge.py.
 	"CRM Call Log": {
 		"after_insert": ["crm.api.istl_refund_nudge.on_call_log_change"],

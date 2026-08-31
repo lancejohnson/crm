@@ -58,7 +58,7 @@ duplicating. Work substantial features in a worktree of your own.
 - **Refunds board** — sidebar **Refunds** (`/refunds`) is a kanban of
   `custom_refundable=1` leads (To Request / Requested / Waiting on us /
   Waiting on them / Complete). Marking Dead does not queue a refund; the
-  Refundable checkbox does. ISTL 10-calls-in-21-days with no connect nudges
+  Refundable checkbox does. ISTL first-10-dials-in-14-days with no pickup ever, no inbound text, not Dead/Lost, nudges
   the owner (`crm/api/istl_refund_nudge.py`). Fields: ops
   `setup_refundable_field.py`.
 
