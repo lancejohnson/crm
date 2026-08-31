@@ -91,7 +91,7 @@
                   </button>
                 </template>
                 <template v-else>
-                  {{ __('No Zillow photos are available for this property.') }}
+                  {{ __('No photos found on Zillow, Realtor, or Redfin for this property.') }}
                 </template>
               </div>
 

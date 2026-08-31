@@ -765,9 +765,10 @@ def _shape_detail(row, zpid=None):
 	# two sizes of the same synthesized Street View frame is really ONE photo, and
 	# counting it as two suppressed the Realtor fallback that could do better.
 	photos = _dedupe_streetview(photos)
-	# Off-market Zillow galleries often have a single leftover frame. Realtor
-	# listing photos stay up longer; one extra call, only when Zillow is thin,
-	# never for the tray. Absent an Apivex key this is a no-op.
+	# Off-market Zillow galleries often have a single leftover frame. The photo
+	# ladder is Zillow -> Realtor (apivex) -> Redfin: each rung fires only while
+	# the gallery is still ≤1 image, on an explicit open, never for the tray, and
+	# the winner rides the 30-day detail cache. Absent its key, a rung no-ops.
 	photo_source = "zillow" if photos else ""
 	if len(photos) <= 1:
 		from crm.api import apivex
@@ -776,6 +777,13 @@ def _shape_detail(row, zpid=None):
 		if len(realtor) > len(photos):
 			photos = realtor
 			photo_source = "realtor"
+	if len(photos) <= 1:
+		from crm.api import redfin
+
+		rf = redfin.redfin_photo_urls(_detail_address(row, details))
+		if len(rf) > len(photos):
+			photos = rf
+			photo_source = "redfin"
 
 	comp = dict(row)
 	for key in ("listed_date", "removed_date"):
