@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import frappe
 import requests
@@ -309,7 +309,9 @@ def _relink_existing(lead: str, digits: str) -> int:
 	return linked
 
 
-def _list_quo_calls(phone_number_id: str, participant: str) -> list[dict]:
+def _list_quo_calls(
+	phone_number_id: str, participant: str, created_after: str | None = None
+) -> list[dict]:
 	headers = _quo_headers()
 	if not headers or not phone_number_id or not participant:
 		return []
@@ -321,14 +323,26 @@ def _list_quo_calls(phone_number_id: str, participant: str) -> list[dict]:
 			"participants": [participant],
 			"maxResults": 100,
 		}
+		if created_after:
+			params["createdAfter"] = created_after
 		if page_token:
 			params["pageToken"] = page_token
-		resp = requests.get(
-			f"{QUO_API}/v1/calls",
-			headers=headers,
-			params=params,
-			timeout=QUO_TIMEOUT,
-		)
+		resp = None
+		for attempt in range(8):
+			resp = requests.get(
+				f"{QUO_API}/v1/calls",
+				headers=headers,
+				params=params,
+				timeout=QUO_TIMEOUT,
+			)
+			if resp.status_code != 429:
+				break
+			wait = 2 + attempt * 2
+			try:
+				wait = min(20, max(wait, int(resp.headers.get("Retry-After") or wait)))
+			except (TypeError, ValueError):
+				pass
+			time.sleep(wait)
 		time.sleep(QUO_SLEEP)
 		resp.raise_for_status()
 		body = resp.json() or {}
@@ -343,20 +357,42 @@ def _insert_call(lead: str, call: dict, participant: str, our_no: str, quo_users
 	call_id = str(call.get("id") or "")
 	if not call_id:
 		return False
+	incoming = (call.get("direction") or "") == "incoming"
+	from_no = participant if incoming else our_no
+	to_no = our_no if incoming else participant
 	existing = frappe.db.get_value(
-		"CRM Call Log", {"id": call_id}, ["name", "reference_docname"], as_dict=True
+		"CRM Call Log",
+		{"id": call_id},
+		["name", "reference_docname", "from", "to", "duration"],
+		as_dict=True,
 	)
 	if existing:
-		if not (existing.reference_docname or "").strip():
-			frappe.db.set_value(
-				"CRM Call Log",
-				existing.name,
-				{"reference_doctype": "CRM Lead", "reference_docname": lead},
-			)
+		# Unanswered Quo webhooks used to insert from=to our line with no lead.
+		# The list-by-participant sweep knows the real callee — patch the stub.
+		updates = {}
+		owner = (existing.reference_docname or "").strip()
+		if owner and owner != lead:
+			return False
+		if not owner:
+			updates["reference_doctype"] = "CRM Lead"
+			updates["reference_docname"] = lead
+		cur_from = existing.get("from") or ""
+		cur_to = existing.get("to") or ""
+		if cur_from == cur_to and from_no and to_no and from_no != to_no:
+			updates["from"] = from_no
+			updates["to"] = to_no
+		if not (existing.get("duration") or 0):
+			ring = call.get("duration") or 0
+			if ring:
+				try:
+					updates["duration"] = int(ring)
+				except (TypeError, ValueError):
+					pass
+		if updates:
+			frappe.db.set_value("CRM Call Log", existing.name, updates)
 			return True
 		return False
 
-	incoming = (call.get("direction") or "") == "incoming"
 	answered = call.get("answeredAt")
 	completed = call.get("completedAt")
 	duration = call.get("duration") or 0
@@ -589,3 +625,241 @@ def backfill_calls_for_number(lead: str, number: str) -> dict:
 		)
 		_publish(lead, digits, {"created": 0, "linked": 0, "error": str(exc)[:200]})
 		return {"ok": False, "error": str(exc)[:200]}
+
+
+
+def _quo_get(path: str, params: dict | None = None) -> dict:
+	headers = _quo_headers()
+	if not headers:
+		return {}
+	resp = None
+	for attempt in range(8):
+		resp = requests.get(
+			f"{QUO_API}{path}",
+			headers=headers,
+			params=params or {},
+			timeout=QUO_TIMEOUT,
+		)
+		if resp.status_code != 429:
+			break
+		wait = 2 + attempt * 2
+		try:
+			wait = min(20, max(wait, int(resp.headers.get("Retry-After") or wait)))
+		except (TypeError, ValueError):
+			pass
+		time.sleep(wait)
+	time.sleep(QUO_SLEEP)
+	resp.raise_for_status()
+	return resp.json() or {}
+
+
+def _iter_conversations(e164: str):
+	token = None
+	for _ in range(200):
+		params = {"phoneNumbers": e164, "maxResults": 50}
+		if token:
+			params["pageToken"] = token
+		body = _quo_get("/v1/conversations", params)
+		for row in body.get("data") or []:
+			yield row
+		token = body.get("nextPageToken")
+		if not token:
+			return
+
+
+def _lead_phone_index() -> dict[str, str]:
+	"""last10 -> newest CRM Lead name."""
+	fields = ["name", "mobile_no", "phone"]
+	if _has_extra():
+		fields.append("extra_phones")
+	out = {}
+	for row in frappe.get_all(
+		"CRM Lead", fields=fields, order_by="creation desc", limit_page_length=0
+	):
+		for number in iter_phones(row):
+			digits = last10(number)
+			if digits and digits not in out:
+				out[digits] = row.name
+	return out
+
+
+def _conv_id_from_deep_link(deep: str) -> str:
+	marker = "/c/"
+	idx = (deep or "").find(marker)
+	if idx < 0:
+		return ""
+	return (deep[idx + 3 :].split("?")[0].split("/")[0] or "").strip()
+
+
+def repair_self_call_logs(days: int = 60) -> dict:
+	"""Attach unanswered Quo self-logs (from=to) in the last N days to leads.
+
+	Our-line stubs omitted the callee. The call.completed webhook stored a
+	conversation id on data.deepLink (Sequence Events Log, ~30d). That
+	conversation's participant is the other party. Stubs whose from=to is an
+	external number are matched directly. Leftovers are outside-CRM numbers.
+	"""
+	days = max(1, int(days or 60))
+	lines = [ln for ln in _workspace_lines() if ln.get("id")]
+	ours = {}
+	for ln in lines:
+		digits = last10(ln.get("e164") or ln.get("number") or "")
+		if digits:
+			ours[digits] = ln.get("e164") or ln.get("number") or ""
+	if not ours:
+		return {"ok": False, "error": "no Quo lines"}
+
+	fields = ["name", "mobile_no", "phone"]
+	if _has_extra():
+		fields.append("extra_phones")
+	leads = frappe.get_all(
+		"CRM Lead", fields=fields, order_by="creation asc", limit_page_length=0
+	)
+	leads = _lead_phone_index()
+	print(f"repair start days={days} lines={len(ours)} lead_phones={len(leads)}", flush=True)
+
+	stubs = frappe.db.sql(
+		"""select name, id, `from`, `to`, start_time, duration
+		   from `tabCRM Call Log`
+		   where `from` = `to` and ifnull(reference_docname,'') = ''
+		     and creation >= date_sub(now(), interval %s day)""",
+		(days,),
+		as_dict=True,
+	)
+	patched = 0
+	ext_hit = 0
+	ours_hit = 0
+	no_party = 0
+	no_lead = 0
+
+	def _attach(name, lead, from_no, to_no):
+		nonlocal patched
+		frappe.db.set_value(
+			"CRM Call Log",
+			name,
+			{
+				"reference_doctype": "CRM Lead",
+				"reference_docname": lead,
+				"from": from_no,
+				"to": to_no,
+			},
+		)
+		patched += 1
+
+	ours_stubs = []
+	for stub in stubs:
+		digits = last10(stub.get("from"))
+		if digits not in ours:
+			lead = leads.get(digits) or ""
+			if lead:
+				_attach(stub.name, lead, stub.get("from") or "", stub.get("to") or "")
+				ext_hit += 1
+			else:
+				no_lead += 1
+			continue
+		ours_stubs.append(stub)
+
+	print(
+		f"stubs={len(stubs)} ours={len(ours_stubs)} ext_hit={ext_hit} ext_miss={no_lead}",
+		flush=True,
+	)
+
+	stub_ids = {(s.get("id") or s.name) for s in ours_stubs}
+	conv_by_call = {}
+	if stub_ids and frappe.db.exists("DocType", "Sequence Events Log"):
+		log_rows = frappe.db.sql(
+			"""select payload from `tabSequence Events Log`
+			   where event_type = 'call.completed'
+			     and creation >= date_sub(now(), interval %s day)""",
+			(min(days, 35),),
+		)
+		for (payload,) in log_rows:
+			try:
+				body = json.loads(payload or "")
+			except (TypeError, ValueError):
+				continue
+			data = body.get("data") or {}
+			if isinstance(data, str):
+				try:
+					data = json.loads(data)
+				except (TypeError, ValueError):
+					data = {}
+			if not isinstance(data, dict):
+				continue
+			obj = data.get("object") or {}
+			if not isinstance(obj, dict):
+				continue
+			cid = str(obj.get("id") or "")
+			if cid not in stub_ids:
+				continue
+			conv_id = _conv_id_from_deep_link(str(data.get("deepLink") or ""))
+			if conv_id:
+				conv_by_call[cid] = conv_id
+	print(f"webhook conv ids={len(conv_by_call)}", flush=True)
+
+	party_by_conv = {}
+	party_by_call = {}
+	needed = set(conv_by_call.values())
+	print(f"paging conversations for {len(ours)} lines", flush=True)
+	for e164 in sorted(set(ours.values())):
+		scanned = 0
+		for conv in _iter_conversations(e164):
+			scanned += 1
+			party = ""
+			for p in conv.get("participants") or []:
+				p = str(p)
+				if p and last10(p) not in ours:
+					party = p
+					break
+			if not party:
+				continue
+			cid = conv.get("id") or ""
+			if cid:
+				party_by_conv[cid] = party
+			lid = str(conv.get("lastActivityId") or "")
+			if lid in stub_ids:
+				party_by_call[lid] = party
+		print(f"  {e164} scanned={scanned}", flush=True)
+	print(
+		f"resolved conv={len(party_by_conv)} lastActivity={len(party_by_call)}",
+		flush=True,
+	)
+
+	for stub in ours_stubs:
+		cid = stub.get("id") or stub.name
+		conv_id = conv_by_call.get(cid) or ""
+		party = party_by_call.get(cid) or party_by_conv.get(conv_id) or ""
+		if not party:
+			no_party += 1
+			continue
+		lead = leads.get(last10(party)) or ""
+		if not lead:
+			no_lead += 1
+			continue
+		our_no = ours.get(last10(stub.get("from"))) or stub.get("from") or ""
+		_attach(stub.name, lead, our_no, party)
+		ours_hit += 1
+
+	if patched:
+		frappe.db.commit()
+	left = frappe.db.sql(
+		"""select count(*) from `tabCRM Call Log`
+		   where `from` = `to` and ifnull(reference_docname,'') = ''
+		     and creation >= date_sub(now(), interval %s day)""",
+		(days,),
+	)[0][0]
+	print(
+		f"repair done patched={patched} ours_hit={ours_hit} ext_hit={ext_hit} "
+		f"no_party={no_party} no_lead={no_lead} stubs_left={left}",
+		flush=True,
+	)
+	return {
+		"ok": True,
+		"days": days,
+		"patched": patched,
+		"ours_hit": ours_hit,
+		"ext_hit": ext_hit,
+		"no_party": no_party,
+		"no_lead": no_lead,
+		"stubs_left": left,
+	}
