@@ -9,11 +9,11 @@
           {{ item.lead_name }}
         </div>
 
-        <!-- Done: one tap picks the outcome. Five short answers, one per row, so
-             the whole list can be read without parsing it. -->
-        <div v-if="isDone" class="flex flex-col gap-2">
+        <!-- One tap picks the outcome. Short answers, one per row, so the whole
+             list can be read without parsing it. Same picker for Done and Skip. -->
+        <div class="flex flex-col gap-2">
           <button
-            v-for="option in DONE_OUTCOMES"
+            v-for="option in options"
             :key="option"
             class="flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left text-base"
             :class="
@@ -32,8 +32,7 @@
           </button>
         </div>
 
-        <!-- The note is required for "Other" (which means nothing on its own) and
-             optional for a skip (where any answer at all is a bonus). -->
+        <!-- The note is required for "Other" (which means nothing on its own). -->
         <div v-if="showNote">
           <div class="mb-1.5 text-xs text-ink-gray-5">{{ noteLabel }}</div>
           <Textarea
@@ -68,13 +67,23 @@
 import { Button, Dialog, ErrorMessage, FeatherIcon, Textarea } from 'frappe-ui'
 import { computed, nextTick, ref, watch } from 'vue'
 
-// Kept in step with `DONE_OUTCOMES` in crm/api/today_board.py, which validates
-// the value on the way in.
+// Kept in step with `DONE_OUTCOMES` / `SKIP_OUTCOMES` in crm/api/today_board.py,
+// which validates the value on the way in.
 const DONE_OUTCOMES = [
   'Connected',
   'No Answer',
   'Left a Voicemail',
   'Booked an Appointment',
+  'Other',
+]
+const SKIP_OUTCOMES = [
+  'Dead lead',
+  'Lost',
+  'Already scheduled',
+  'Already contacted',
+  'Check with Dennis',
+  'Follow up later',
+  'Not selling',
   'Other',
 ]
 
@@ -92,14 +101,15 @@ const error = ref('')
 const noteInput = ref(null)
 
 const isDone = computed(() => props.state === 'Done')
-const showNote = computed(() => !isDone.value || outcome.value === 'Other')
+const options = computed(() => (isDone.value ? DONE_OUTCOMES : SKIP_OUTCOMES))
+const showNote = computed(() => outcome.value === 'Other')
 const noteLabel = computed(() =>
   isDone.value ? __('What happened?') : __("What's the reason?"),
 )
 const notePlaceholder = computed(() =>
   isDone.value
     ? __('Tell us a little more…')
-    : __('Wrong number, bad time, already sold…'),
+    : __('Wrong number, bad time, under contract…'),
 )
 
 // Reset every time the modal opens: it is reused for every card on the board,
@@ -110,7 +120,6 @@ watch(show, (open) => {
   outcome.value = ''
   note.value = ''
   error.value = ''
-  if (!isDone.value) focusNote()
 })
 
 function choose(option) {
@@ -135,14 +144,18 @@ function onNoteEnter(event) {
 function confirm() {
   if (props.saving) return
   const text = note.value.trim()
-  if (isDone.value && !outcome.value) {
-    error.value = __('Pick what happened on the call.')
+  if (!outcome.value) {
+    error.value = isDone.value
+      ? __('Pick what happened on the call.')
+      : __('Pick a reason.')
     return
   }
-  if (isDone.value && outcome.value === 'Other' && !text) {
-    error.value = __('Say a little more about what happened.')
+  if (outcome.value === 'Other' && !text) {
+    error.value = isDone.value
+      ? __('Say a little more about what happened.')
+      : __('Say why this one is being skipped.')
     return
   }
-  emit('confirm', { outcome: isDone.value ? outcome.value : '', outcome_note: text })
+  emit('confirm', { outcome: outcome.value, outcome_note: text })
 }
 </script>

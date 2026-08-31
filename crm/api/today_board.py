@@ -3,11 +3,12 @@
 
 """The shared **Today** board — the surface the setters actually work from.
 
-The 5am standup DM tells Lance what the day looks like; this is where German and
-Exe do it. `crm.api.daily_standup` decides WHO lands on the board (Dennis's
-cadence, business-day counting, task suppression — all of it lives there and is
-not duplicated here); this module owns what happens to a card afterwards: tick it
-Done, Skip it, drag it into a different order.
+The 5am job still materialises this board; the DM Lance gets is yesterday's
+recap (`yesterday_recap`), not the calling list. `crm.api.daily_standup` decides
+WHO lands on the board (Dennis's cadence, business-day counting, task suppression
+— all of it lives there and is not duplicated here); this module owns what
+happens to a card afterwards: tick it Done, Skip it, drag it into a different
+order.
 
 Division of responsibility, deliberately:
 
@@ -54,6 +55,21 @@ DONE_OUTCOMES = (
 	"No Answer",
 	"Left a Voicemail",
 	"Booked an Appointment",
+	"Other",
+)
+
+#: Skip used to be a blank "why". 60 days of those notes (462 skips, 124 with
+#: no reason at all) clustered into the same handful of answers, so the picker
+#: is the Done one: one tap, Other still takes a sentence. Kept in step with
+#: `SKIP_OUTCOMES` in TodayOutcomeModal.vue.
+SKIP_OUTCOMES = (
+	"Dead lead",
+	"Lost",
+	"Already scheduled",
+	"Already contacted",
+	"Check with Dennis",
+	"Follow up later",
+	"Not selling",
 	"Other",
 )
 
@@ -1201,6 +1217,207 @@ def get_today_report(for_date=None, history_days=10, owner=None):
 	}
 
 
+#: Short labels for the Done-outcome picker. The recap has to fit a glance.
+OUTCOME_SHORT = {
+	"Left a Voicemail": "VM",
+	"Booked an Appointment": "Booked",
+}
+
+
+def yesterday_recap(today=None):
+	"""Team recap of the previous business day's Today board.
+
+	What the 5am DM actually sends: did we hit the streak, cards per person
+	(done/skip), Done outcomes, grouped skip reasons. `today` is the morning the
+	job runs, so passing Friday recaps Thursday.
+	"""
+	today = getdate(today or now_datetime())
+	day = previous_business_day(today)
+	empty = {
+		"available": _available(),
+		"day": str(day),
+		"hit": False,
+		"streak": {"current": 0, "best": 0, "through": None},
+		"total": 0,
+		"done": 0,
+		"skipped": 0,
+		"remaining": 0,
+		"people": [],
+		"done_outcomes": [],
+		"skip_reasons": [],
+	}
+	if not _available():
+		return empty
+
+	start = day - timedelta(days=370)
+	fields = ["for_date", "state", "done_by", "lead"]
+	if _supports_resolved_stamp():
+		fields.append("resolved_by")
+	if _supports_outcome():
+		fields += ["outcome", "outcome_note"]
+	rows = frappe.get_all(
+		DOCTYPE,
+		filters={"for_date": ["between", [start, day]]},
+		fields=fields,
+		order_by="for_date asc",
+		limit_page_length=50000,
+	)
+	team_by_day = _tally_report_days(rows)
+	streak, _ = _streak_from_days(team_by_day, day)
+	stats = team_by_day.get(day, _empty_report_day(day))
+
+	day_rows = [row for row in rows if getdate(row.for_date) == day]
+	people_done = Counter()
+	people_skip = Counter()
+	people_left = Counter()
+	outcomes = Counter()
+	skip_notes = Counter()
+	skip_display = {}
+	left_rows = [row for row in day_rows if row.state == "To Call"]
+	left_owners = {}
+	if left_rows:
+		lead_names = list({row.lead for row in left_rows if row.get("lead")})
+		if lead_names:
+			left_owners = {
+				lead.name: (lead.lead_owner or "")
+				for lead in frappe.get_all(
+					"CRM Lead",
+					filters={"name": ["in", lead_names]},
+					fields=["name", "lead_owner"],
+				)
+			}
+	for row in day_rows:
+		if row.state == "Done":
+			who = (row.get("resolved_by") or row.done_by or "").strip()
+			if who:
+				people_done[who] += 1
+			label = (row.get("outcome") or "").strip() or "(no outcome)"
+			outcomes[label] += 1
+		elif row.state == "Skipped":
+			who = (row.get("resolved_by") or row.done_by or "").strip()
+			if who:
+				people_skip[who] += 1
+			label = (row.get("outcome") or "").strip()
+			note = _norm_skip_note(row.get("outcome_note") or "")
+			# Canned skip reason when we have one; Other / legacy free-text uses
+			# the note, so the recap still names what happened.
+			reason = label if label and label != "Other" else (note or label or "(no reason)")
+			key = reason.casefold()
+			skip_notes[key] += 1
+			skip_display.setdefault(key, reason)
+		elif row.state == "To Call":
+			who = (left_owners.get(row.get("lead")) or "").strip()
+			people_left[who or "unassigned"] += 1
+
+	users = set(people_done) | set(people_skip) | {
+		u for u in people_left if u != "unassigned"
+	}
+	names = {}
+	if users:
+		names = {
+			u.name: (u.first_name or (u.full_name or u.name).split()[0])
+			for u in frappe.get_all(
+				"User",
+				filters={"name": ["in", list(users)]},
+				fields=["name", "first_name", "full_name"],
+			)
+		}
+	people = []
+	for user in users:
+		done = people_done[user]
+		skipped = people_skip[user]
+		left = people_left[user]
+		people.append({
+			"user": user,
+			"name": names.get(user, user.split("@")[0]),
+			"done": done,
+			"skipped": skipped,
+			"left": left,
+			"total": done + skipped,
+		})
+	if people_left.get("unassigned"):
+		people.append({
+			"user": "unassigned",
+			"name": "Unassigned",
+			"done": 0,
+			"skipped": 0,
+			"left": people_left["unassigned"],
+			"total": 0,
+		})
+	people.sort(key=lambda p: (-p["total"], -p["left"], p["name"]))
+
+	skip_reasons = [
+		{"reason": skip_display.get(reason, reason), "count": count}
+		for reason, count in skip_notes.most_common()
+	]
+
+	return {
+		"available": True,
+		"day": str(day),
+		"hit": bool(stats["perfect"]),
+		"streak": streak,
+		"total": stats["total"],
+		"done": stats["done"],
+		"skipped": stats["skipped"],
+		"remaining": stats["remaining"],
+		"people": people,
+		"done_outcomes": [
+			{"outcome": OUTCOME_SHORT.get(name, name), "count": count}
+			for name, count in outcomes.most_common()
+		],
+		"skip_reasons": skip_reasons,
+	}
+
+
+def _norm_skip_note(note):
+	s = " ".join((note or "").strip().split())
+	return s.rstrip(".")
+
+
+def render_yesterday_recap(d):
+	"""Short Mattermost DM: streak, per-person mix, done outcomes, every skip reason."""
+	day = getdate(d["day"])
+	label = day.strftime("%a %-d %b")
+	if not d.get("available"):
+		return f"**Yesterday {label}** — Today board isn't provisioned yet."
+	if not d["total"]:
+		return f"**Yesterday {label}** — no board."
+
+	streak_n = int((d.get("streak") or {}).get("current") or 0)
+	if d["hit"]:
+		head = f"**Yesterday {label}** — streak hit. :fire: {streak_n} day" + (
+			"s" if streak_n != 1 else ""
+		)
+	else:
+		left_bits = [
+			f"{p['name']} {p['left']}"
+			for p in sorted(
+				(d.get("people") or []), key=lambda p: (-(p.get("left") or 0), p["name"])
+			)
+			if p.get("left")
+		]
+		who = f" — {' · '.join(left_bits)}" if left_bits else ""
+		head = f"**Yesterday {label}** — streak missed ({d['remaining']} left{who})."
+
+	people_bits = []
+	for p in d.get("people") or []:
+		bits = [f"{p['done']} done", f"{p['skipped']} skip"]
+		if p.get("left"):
+			bits.append(f"{p['left']} left")
+		people_bits.append(f"**{p['name']}** {p['total']} ({' · '.join(bits)})")
+	people_line = " · ".join(people_bits) if people_bits else "_Nobody resolved a card._"
+
+	done_bits = [f"{o['outcome']} {o['count']}" for o in d.get("done_outcomes") or []]
+	done_line = f"Done {d['done']}" + (": " + " · ".join(done_bits) if done_bits else "")
+
+	skip_bits = []
+	for s in d.get("skip_reasons") or []:
+		skip_bits.append(s["reason"] if s["count"] == 1 else f"{s['reason']} {s['count']}")
+	skip_line = f"Skipped {d['skipped']}" + (": " + " · ".join(skip_bits) if skip_bits else "")
+
+	return "\n".join([head, people_line, done_line, skip_line])
+
+
 @frappe.whitelist()
 def set_today_priority_order(order):
 	"""Save this user's cross-device priority order without adding a schema field."""
@@ -1479,9 +1696,8 @@ def set_today_state(item, state, outcome=None, outcome_note=None):
 	Resolving a card is the one moment the rep already has the answer in their
 	head, so it is the only moment the answer is cheap to collect — asking later
 	means reconstructing thirty calls from memory. A Done card carries one of
-	`DONE_OUTCOMES`; a Skipped card carries an open-ended "why" instead, because
-	the interesting thing about a skip is precisely the part a fixed list would
-	have thrown away.
+	`DONE_OUTCOMES`; a Skipped card carries one of `SKIP_OUTCOMES`. Other on
+	either side still requires a sentence.
 
 	Re-submitting the SAME state only rewrites the outcome: correcting a
 	mis-click must not restamp `resolved_at`, which the intraday pulse reads as
@@ -1498,11 +1714,13 @@ def set_today_state(item, state, outcome=None, outcome_note=None):
 			frappe.throw(_("Invalid call outcome."))
 		if outcome == "Other" and not outcome_note:
 			frappe.throw(_("Say a little more about what happened."))
-	else:
-		# "Connected" is a statement about a call that was made. A skipped card is
-		# by definition a call that wasn't, so it never carries an outcome.
-		outcome = ""
+	elif state == "Skipped":
+		if outcome and outcome not in SKIP_OUTCOMES:
+			frappe.throw(_("Invalid skip reason."))
+		if outcome == "Other" and not outcome_note:
+			frappe.throw(_("Say why this one is being skipped."))
 	if state == "To Call":
+		outcome = ""
 		outcome_note = ""
 
 	doc = frappe.get_doc(DOCTYPE, item)

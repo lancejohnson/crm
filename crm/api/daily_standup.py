@@ -1,14 +1,16 @@
 # Copyright (c) 2026, Groundwork and contributors
 # For license information, please see license.txt
 
-"""The 5am daily standup list.
+"""Cadence for the Today board, plus the 5am recap DM.
 
-ONE definition of "what has to happen today", rendered two ways: a Mattermost DM
-at 5am CT, and (via `get_standup_lead_names`) the same set of leads drilled into
-the CRM Leads list. The two cannot drift, because they are the same query — that
-was the explicit design requirement. The previous attempt at this report was
-abandoned because its lists were wrong ("the due list had 33 leads, but most were
-Dead Lead"), so every rule here is written down and every exclusion is explicit.
+ONE definition of "what has to happen today". The Today board is generated from
+it at 5am; `get_standup_lead_names` still drills the same set into CRM Leads.
+The Mattermost DM is **not** that list anymore — Lance asked it off. The job
+still materialises the board, then DMs a four-line recap of *yesterday*
+(streak / cards per person / done+skip outcomes). The previous attempt at this
+report was abandoned because its lists were wrong ("the due list had 33 leads,
+but most were Dead Lead"), so every rule here is written down and every
+exclusion is explicit.
 
 The cadence is Dennis's, posted in the Acq channel 2026-07-31:
 
@@ -545,14 +547,15 @@ def send_dm(text):
 def send_daily_standup():
 	"""Scheduler entry point — 5am CT on business days.
 
-	Wrapped so a delivery failure is logged rather than crashing the scheduler
-	(which would silently take the whole cron slot down)."""
+	Still generates today's board first. The DM is yesterday's recap, not the
+	calling list. Wrapped so a delivery failure is logged rather than crashing
+	the scheduler (which would silently take the whole cron slot down)."""
 	try:
 		today = getdate(now_datetime())
 		if not is_business_day(today):
 			return
 		# materialise the shared Today board first, so the board the reps open is
-		# already populated when they read the DM that describes it
+		# already populated when they sit down — the DM no longer describes it
 		try:
 			from crm.api.today_board import generate_today
 
@@ -561,19 +564,34 @@ def send_daily_standup():
 			frappe.log_error(
 				title="standup: could not generate Today board", message=frappe.get_traceback()
 			)
-		data = build_standup(today)
-		send_dm(render_markdown(data))
+		from crm.api.today_board import render_yesterday_recap, yesterday_recap
+		from crm.api.spend_report import render_spend
+
+		text = render_yesterday_recap(yesterday_recap(today))
+		spend = render_spend(commit_snapshot=True)
+		if spend:
+			text = f"{text}\n\n{spend}"
+		send_dm(text)
 	except Exception:
 		frappe.log_error(title="standup: send_daily_standup failed", message=frappe.get_traceback())
 
 
 @frappe.whitelist()
 def preview_standup(today=None, send=0, note=None):
-	"""Dry run. Returns the exact markdown the 5am job would send; only actually
-	DMs when send=1. `note` prefixes the DM so a preview can never be mistaken for
-	the real 5am post."""
-	data = build_standup(getdate(today) if today else None)
-	text = render_markdown(data)
+	"""Dry run of the 5am recap DM. Only actually DMs when send=1. `note` prefixes
+	the DM so a preview can never be mistaken for the real 5am post.
+
+	`today` is the morning the job would run (so Friday recaps Thursday). The old
+	calling-list markdown is still `render_markdown(build_standup())` if needed.
+	"""
+	from crm.api.today_board import render_yesterday_recap, yesterday_recap
+	from crm.api.spend_report import render_spend
+
+	data = yesterday_recap(getdate(today) if today else None)
+	text = render_yesterday_recap(data)
+	spend = render_spend(commit_snapshot=bool(int(send or 0)))
+	if spend:
+		text = f"{text}\n\n{spend}"
 	if note:
 		text = f"_{note}_\n\n{text}"
 	post = send_dm(text) if int(send or 0) else None
@@ -581,12 +599,7 @@ def preview_standup(today=None, send=0, note=None):
 		"markdown": text,
 		"sent": bool(post),
 		"post_id": post,
-		"counts": {
-			"setter_due": len(data["setter"]["due"]),
-			"setter_total": len(data["setter"]["all"]),
-			"calls_owed": data["calls_owed"],
-			"closer_flagged": len([r for r in data["closer"] if r.flags]),
-		},
+		"recap": data,
 	}
 
 

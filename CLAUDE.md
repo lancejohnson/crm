@@ -1418,9 +1418,11 @@ duplicating. Work substantial features in a worktree of your own.
   - **Resolving a card asks what happened** (`Modals/TodayOutcomeModal.vue`).
     Ticking ✓ or dragging into **Done** opens a five-option picker — Connected /
     No Answer / Left a Voicemail / Booked an Appointment / **Other** — where
-    Other requires a sentence; dragging into **Skipped** asks an open-ended
-    "why" instead, because the interesting part of a skip is exactly what a fixed
-    list would throw away. Stored on `CRM Today Item.outcome` /
+    Other requires a sentence. **Skipped** is the same shape (Lance, 2026-08-31):
+    Dead lead / Lost / Already scheduled / Already contacted / Check with Dennis /
+    Follow up later / Not selling / **Other**, taken from 60 days of free-text
+    skip notes (462 skips; 124 had no reason). Other still requires a sentence.
+    Stored on `CRM Today Item.outcome` /
     `outcome_note` (ops `setup_today_board.py`, both `has_field`-guarded via
     `_supports_outcome()` so the app is safe to deploy first) and rendered back
     onto the card, so a wrong answer is visible and fixable rather than
@@ -1531,13 +1533,20 @@ duplicating. Work substantial features in a worktree of your own.
     Scheduled Job Type row exists. Cron `*/30 9-17 * * 1-5` is read in the SITE
     timezone (America/Chicago); the job itself enforces the real 9:30am–5:00pm
     window so the working hours live in one readable place.
-- **Daily standup list (5am CT Mattermost DM)** — the list Lance runs the morning
-  call from. `crm/api/daily_standup.py` (**new**) holds ONE server-side definition
-  of "what has to happen today", rendered two ways: a DM as the `pi` Mattermost
-  bot, and the same lead set via `get_standup_lead_names(bucket)` for a CRM Leads
-  drill-in — so the standup list and the board **cannot drift**. Replaces an
-  earlier abandoned report whose lists were wrong ("the due list had 33 leads, but
-  most were Dead Lead"), so every rule and exclusion is explicit.
+- **Daily standup (5am CT Mattermost DM)** — the calling list is the Today board,
+  not a DM. The 5am job still **generates** that board, then DMs Lance a
+  **four-line recap of yesterday**: streak hit/missed, cards per person (done/skip),
+  leftover owners, Done outcomes, every skip reason — plus a spend footer
+  (`crm/api/spend_report.py`): BatchData wallet (the line that used to ride the
+  calling-list DM) and ISTL money-balance vs yesterday's snapshot, read through
+  LeadMarket `GET /api/istl-balance` (LeadMarket already stays logged into ISTL;
+  CRM never holds that password). RealEstateAPI has no usage endpoint, so it is
+  not in the footer. Cadence still lives in `crm/api/daily_standup.py` so the
+  board and `get_standup_lead_names(bucket)` cannot drift. `preview_standup(send=0)`
+  previews the recap (`today` = the morning the job runs) and does **not** move
+  the ISTL snapshot. ISTL line needs `leadmarket_token` in site_config (Infisical
+  `LEADMARKET_GMAIL_WEBHOOK_TOKEN` or `LEADMARKET_WEB_SECRET`). The old list
+  renderer (`render_markdown`) is kept but not sent.
   - **Cadence = Dennis's**, posted in the Acq channel 2026-07-31: 2x/day for a
     week → weekly for 3 weeks → monthly. Two clarifications from Lance:
     "Call/Text" means call AND text but **only calls are metered** (texts are fast
