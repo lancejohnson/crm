@@ -2353,7 +2353,7 @@ function openSubjectDetail() {
 function fmtInt(v) {
   if (v === '' || v == null) return ''
   const n = Math.round(Number(String(v).replace(/[^0-9-]/g, '')))
-  return Number.isFinite(n) ? n.toLocaleString() : ''
+  return Number.isFinite(n) ? String(n) : ''
 }
 
 function typeFilter(key, e) {
