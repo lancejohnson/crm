@@ -151,6 +151,10 @@
               </a>
             </div>
 
+            <div v-if="staleNote" class="mt-3 rounded-lg bg-surface-amber-1 p-3 text-xs leading-relaxed text-ink-amber-3">
+              {{ staleNote }}
+            </div>
+
             <div class="mt-5 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
               <div v-for="fact in facts" :key="fact.label">
                 <div class="text-xs text-ink-gray-5">{{ fact.label }}</div>
@@ -322,19 +326,59 @@ const streetPoint = computed(() => {
 const hasStreetView = computed(() => !!streetPoint.value)
 
 // Status, in the same four-state grammar as the pills and the tray cards.
-const state = computed(() => compState(props.comp))
+//
+// Fresh-vs-pin reconciliation: the pin is a SNAPSHOT (the 7-day circle cache,
+// or the pooled index's last ask); `details` is a LIVE Zillow read made on this
+// click. When the two disagree about whether the house is on the market, the
+// live read wins — the 1712 W Seybert pin said "For sale · $379,999" for a
+// house Zillow knew had sold for $91,000 weeks earlier (a scrubbed bogus
+// listing frozen in our cache), and a rep reads that headline as ARV evidence.
+// Only the three definite Zillow statuses carry an opinion; OTHER/null defer
+// to the pin.
+const FRESH_STATES = { RECENTLY_SOLD: 'sold', SOLD: 'sold', FOR_SALE: 'for_sale', PENDING: 'pending' }
+const pinState = computed(() => compState(props.comp))
+const freshState = computed(() => {
+  if (props.subjectMode) return null
+  return FRESH_STATES[String(details.value?.home_status || '').trim().toUpperCase()] || null
+})
+const state = computed(() => freshState.value || pinState.value)
 const statusLabel = computed(() => compStateLabel(state.value))
-const palette = computed(() => compColor(props.comp))
+const palette = computed(() => compColor({ ...(props.comp || {}), listing_state: state.value }))
+// The trust-damaging case gets said out loud: the pin claimed a LIVE listing
+// (with its price in the headline) and the live read says the house has sold.
+const staleListing = computed(
+  () => freshState.value === 'sold' && (pinState.value === 'for_sale' || pinState.value === 'pending'),
+)
+const staleNote = computed(() => {
+  if (!staleListing.value) return ''
+  const sale = details.value?.last_sale
+  const sold = sale?.price
+    ? formatCompMoney(sale.price) + (sale.date ? ' · ' + dateOnly(sale.date) : '')
+    : ''
+  const ask = props.comp?.price ? formatCompMoney(props.comp.price) : ''
+  if (sold && ask)
+    return __('Zillow now reports this property sold ({0}). The {1} listing on this pin is out of date.', [sold, ask])
+  if (sold) return __('Zillow now reports this property sold ({0}); this pin is out of date.', [sold])
+  return __('Zillow now reports this property sold; the listing on this pin is out of date.')
+})
 const compLocation = computed(() =>
   [props.comp?.city, props.comp?.state, props.comp?.zip].filter(Boolean).join(', '),
 )
-const displayPrice = computed(
-  () => details.value?.asking_price || props.comp?.price || details.value?.zestimate,
-)
+const displayPrice = computed(() => {
+  // A reconciled sale outranks everything: once Zillow says the house SOLD,
+  // neither the pin's stale ask nor a leftover asking_price is the number.
+  if (freshState.value === 'sold' && details.value?.last_sale?.price)
+    return details.value.last_sale.price
+  return details.value?.asking_price || props.comp?.price || details.value?.zestimate
+})
 const displayPriceLabel = computed(() => {
   // Name the number honestly: an agreed contract price, a live ask, a verified
   // sale, an estimate and a stale last-ask are five different claims, and only
   // some of them are prices anybody ever committed to.
+  if (freshState.value === 'sold' && details.value?.last_sale?.price) {
+    const when = details.value?.last_sale?.date
+    return when ? __('Sold · {0}', [dateOnly(when)]) : __('Sold')
+  }
   if (details.value?.asking_price) return __('Current Zillow ask')
   if (state.value === 'pending') return __('Agreed price · under contract')
   // The subject is not on the market, so its headline number is whatever it last
