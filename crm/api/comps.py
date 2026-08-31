@@ -761,6 +761,10 @@ def _shape_detail(row, zpid=None):
 	photos = zillow_api.photo_urls(photo_raw)
 	if details and details.get("cover_photo") and not photos:
 		photos = [details["cover_photo"]]
+	# Dedupe BEFORE the thin-gallery check: a photo-less home whose "gallery" is
+	# two sizes of the same synthesized Street View frame is really ONE photo, and
+	# counting it as two suppressed the Realtor fallback that could do better.
+	photos = _dedupe_streetview(photos)
 	# Off-market Zillow galleries often have a single leftover frame. Realtor
 	# listing photos stay up longer; one extra call, only when Zillow is thin,
 	# never for the tray. Absent an Apivex key this is a no-op.
@@ -786,6 +790,44 @@ def _shape_detail(row, zpid=None):
 		"photo_source": photo_source,
 		"message": "" if details else _("Zillow details are unavailable for this property."),
 	}
+
+
+def _dedupe_streetview(photos):
+	"""Collapse provider-synthesized Street View frames of the same spot.
+
+	The RapidAPI Zillow provider fabricates `maps.googleapis.com/…/streetview`
+	URLs for photo-less homes — signed with ITS OWN shared, quota-limited Google
+	key — and serves the SAME shot at several sizes, so a subject gallery read
+	"2 / 2" with both frames identical. Keep the largest per location; the rest
+	add nothing but extra rolls of the quota dice.
+	"""
+	from urllib.parse import parse_qs, urlparse
+
+	best = {}
+	keyed = []
+	for i, url in enumerate(photos or []):
+		loc = None
+		try:
+			p = urlparse(url)
+			if p.netloc == "maps.googleapis.com" and "/streetview" in p.path:
+				q = parse_qs(p.query)
+				loc = (q.get("location") or [""])[0] or None
+				size = (q.get("size") or ["0x0"])[0]
+				try:
+					w, h = size.lower().split("x")
+					area = int(w) * int(h)
+				except Exception:
+					area = 0
+		except Exception:
+			loc = None
+		keyed.append(loc)
+		if loc is not None and (loc not in best or area > best[loc][0]):
+			best[loc] = (area, i)
+	return [
+		url
+		for i, url in enumerate(photos or [])
+		if keyed[i] is None or best[keyed[i]][1] == i
+	]
 
 
 def _batchdata_row(lead, comp):
@@ -867,7 +909,9 @@ def get_comp_details(lead, comp, address=None):
 			and not cached.get("address_tried")
 		)
 		if not retry_with_address:
-			return {**cached, "cached": True}
+			# Dedupe on READ so entries cached before _dedupe_streetview existed
+			# get the fix without a version bump (which would re-bill every gallery).
+			return {**cached, "photos": _dedupe_streetview(cached.get("photos")), "cached": True}
 
 	result = _shape_detail(row)
 	result["cached"] = False
@@ -983,7 +1027,9 @@ def get_subject_details(lead):
 	key = _detail_cache_key(f"subject::{zpid or lead}")
 	cached = frappe.cache().get_value(key)
 	if isinstance(cached, dict):
-		return {**cached, "cached": True}
+		# Same read-side dedupe as get_comp_details — pre-fix cached subjects hold
+		# the same Street View shot twice.
+		return {**cached, "photos": _dedupe_streetview(cached.get("photos")), "cached": True}
 
 	row = frappe._dict(
 		{
@@ -1009,7 +1055,9 @@ def get_subject_details(lead):
 	cover = facts.get("cover_photo") or ""
 	photos = list(result.get("photos") or [])
 	if cover and cover not in photos:
-		photos = [cover] + photos
+		# The cover is often the 400px variant of a Street View frame the gallery
+		# already holds at 1152px — dedupe after prepending, not just string-compare.
+		photos = _dedupe_streetview([cover] + photos)
 		result["photos"] = photos
 		result["photos_available"] = bool(photos)
 	result["cached"] = False

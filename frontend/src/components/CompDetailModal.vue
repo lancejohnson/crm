@@ -71,10 +71,12 @@
           <div class="flex min-h-0 flex-col border-b bg-surface-gray-2 md:border-b-0 md:border-r">
             <div class="relative flex min-h-[12rem] flex-1 items-center justify-center overflow-hidden bg-black/90 sm:min-h-[16rem]">
               <img
-                v-if="photos.length"
-                :src="photos[photoIndex]"
+                v-if="photos.length && !photoBroken"
+                :src="photoSrc"
                 :alt="comp?.address"
                 class="size-full object-contain"
+                @error="onPhotoError"
+                @load="onPhotoLoad"
               />
               <div v-else-if="loading" class="flex flex-col items-center gap-2 text-sm text-ink-white/70">
                 <FeatherIcon name="loader" class="size-5 animate-spin" />
@@ -82,7 +84,15 @@
               </div>
               <div v-else class="flex flex-col items-center gap-2 px-6 text-center text-sm text-ink-white/70">
                 <FeatherIcon name="image" class="size-7" />
-                {{ __('No Zillow photos are available for this property.') }}
+                <template v-if="photoBroken">
+                  {{ __('This photo did not load.') }}
+                  <button class="font-medium text-ink-white hover:underline" @click="retryPhoto">
+                    {{ __('Retry') }}
+                  </button>
+                </template>
+                <template v-else>
+                  {{ __('No Zillow photos are available for this property.') }}
+                </template>
               </div>
 
               <template v-if="photos.length > 1">
@@ -245,6 +255,49 @@ const response = ref(null)
 const photoIndex = ref(0)
 const cache = new Map()
 let requestToken = 0
+
+// Provider-synthesized Street View frames ride a SHARED, quota-limited Google
+// key, so they fail in bursts — the classic "the photo frequently doesn't
+// show". One cache-busted reload usually lands (the key does not enforce its
+// URL signature); a photo that fails twice gets the placeholder, never a
+// broken frame.
+const photoBust = ref(0)
+const photoBroken = ref(false)
+const retriedPhotos = new Set()
+
+const photoSrc = computed(() => {
+  const url = photos.value[photoIndex.value] || ''
+  if (!url || !photoBust.value || !retriedPhotos.has(url)) return url
+  return url + (url.includes('?') ? '&' : '?') + 'cb=' + photoBust.value
+})
+
+function onPhotoError() {
+  const url = photos.value[photoIndex.value] || ''
+  if (!url) return
+  if (url.includes('maps.googleapis.com') && !retriedPhotos.has(url)) {
+    retriedPhotos.add(url)
+    photoBust.value = Date.now()
+    return
+  }
+  photoBroken.value = true
+}
+
+function onPhotoLoad() {
+  photoBroken.value = false
+}
+
+function retryPhoto() {
+  const url = photos.value[photoIndex.value] || ''
+  retriedPhotos.add(url)
+  photoBust.value = Date.now()
+  photoBroken.value = false
+}
+
+// Any navigation (arrows, thumbnails, a new comp) gets a clean slate — a broken
+// state left behind would show the placeholder over a perfectly good photo.
+watch(photoIndex, () => {
+  photoBroken.value = false
+})
 
 const details = computed(() => response.value?.details || null)
 const photos = computed(() => {
