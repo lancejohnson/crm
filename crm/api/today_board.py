@@ -28,7 +28,7 @@ while the call number keeps generation structurally idempotent.
 
 import json
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import timedelta
 
 import frappe
@@ -1243,8 +1243,6 @@ def yesterday_recap(today=None):
 		"skipped": 0,
 		"remaining": 0,
 		"people": [],
-		"done_outcomes": [],
-		"skip_reasons": [],
 	}
 	if not _available():
 		return empty
@@ -1270,9 +1268,9 @@ def yesterday_recap(today=None):
 	people_done = Counter()
 	people_skip = Counter()
 	people_left = Counter()
-	outcomes = Counter()
-	skip_notes = Counter()
-	skip_display = {}
+	people_done_out = defaultdict(Counter)
+	people_skip_out = defaultdict(Counter)
+	people_skip_display = defaultdict(dict)
 	left_rows = [row for row in day_rows if row.state == "To Call"]
 	left_owners = {}
 	if left_rows:
@@ -1291,20 +1289,20 @@ def yesterday_recap(today=None):
 			who = (row.get("resolved_by") or row.done_by or "").strip()
 			if who:
 				people_done[who] += 1
-			label = (row.get("outcome") or "").strip() or "(no outcome)"
-			outcomes[label] += 1
+				label = (row.get("outcome") or "").strip() or "(no outcome)"
+				people_done_out[who][label] += 1
 		elif row.state == "Skipped":
 			who = (row.get("resolved_by") or row.done_by or "").strip()
-			if who:
-				people_skip[who] += 1
 			label = (row.get("outcome") or "").strip()
 			note = _norm_skip_note(row.get("outcome_note") or "")
 			# Canned skip reason when we have one; Other / legacy free-text uses
 			# the note, so the recap still names what happened.
 			reason = label if label and label != "Other" else (note or label or "(no reason)")
-			key = reason.casefold()
-			skip_notes[key] += 1
-			skip_display.setdefault(key, reason)
+			if who:
+				people_skip[who] += 1
+				key = reason.casefold()
+				people_skip_out[who][key] += 1
+				people_skip_display[who].setdefault(key, reason)
 		elif row.state == "To Call":
 			who = (left_owners.get(row.get("lead")) or "").strip()
 			people_left[who or "unassigned"] += 1
@@ -1334,6 +1332,12 @@ def yesterday_recap(today=None):
 			"skipped": skipped,
 			"left": left,
 			"total": done + skipped,
+			"done_outcomes": _count_list(
+				people_done_out[user], short=OUTCOME_SHORT
+			),
+			"skip_reasons": _count_list(
+				people_skip_out[user], display=people_skip_display[user]
+			),
 		})
 	if people_left.get("unassigned"):
 		people.append({
@@ -1343,13 +1347,10 @@ def yesterday_recap(today=None):
 			"skipped": 0,
 			"left": people_left["unassigned"],
 			"total": 0,
+			"done_outcomes": [],
+			"skip_reasons": [],
 		})
 	people.sort(key=lambda p: (-p["total"], -p["left"], p["name"]))
-
-	skip_reasons = [
-		{"reason": skip_display.get(reason, reason), "count": count}
-		for reason, count in skip_notes.most_common()
-	]
 
 	return {
 		"available": True,
@@ -1361,11 +1362,6 @@ def yesterday_recap(today=None):
 		"skipped": stats["skipped"],
 		"remaining": stats["remaining"],
 		"people": people,
-		"done_outcomes": [
-			{"outcome": OUTCOME_SHORT.get(name, name), "count": count}
-			for name, count in outcomes.most_common()
-		],
-		"skip_reasons": skip_reasons,
 	}
 
 
@@ -1374,8 +1370,27 @@ def _norm_skip_note(note):
 	return s.rstrip(".")
 
 
+def _count_list(counter, short=None, display=None):
+	items = []
+	for key, count in counter.most_common():
+		label = key
+		if display:
+			label = display.get(key, key)
+		if short:
+			label = short.get(label, label)
+		items.append({"label": label, "count": count})
+	return items
+
+
+def _mix_bits(items):
+	bits = []
+	for item in items or []:
+		bits.append(item["label"] if item["count"] == 1 else f"{item['label']} {item['count']}")
+	return " · ".join(bits)
+
+
 def render_yesterday_recap(d):
-	"""Short Mattermost DM: streak, per-person mix, done outcomes, every skip reason."""
+	"""Streak line, then one block per person with their own done/skip reasons."""
 	day = getdate(d["day"])
 	label = day.strftime("%a %-d %b")
 	if not d.get("available"):
@@ -1399,23 +1414,24 @@ def render_yesterday_recap(d):
 		who = f" — {' · '.join(left_bits)}" if left_bits else ""
 		head = f"**Yesterday {label}** — streak missed ({d['remaining']} left{who})."
 
-	people_bits = []
-	for p in d.get("people") or []:
+	blocks = [head]
+	people = d.get("people") or []
+	if not people:
+		blocks.append("_Nobody resolved a card._")
+		return "\n".join(blocks)
+	for p in people:
 		bits = [f"{p['done']} done", f"{p['skipped']} skip"]
 		if p.get("left"):
 			bits.append(f"{p['left']} left")
-		people_bits.append(f"**{p['name']}** {p['total']} ({' · '.join(bits)})")
-	people_line = " · ".join(people_bits) if people_bits else "_Nobody resolved a card._"
-
-	done_bits = [f"{o['outcome']} {o['count']}" for o in d.get("done_outcomes") or []]
-	done_line = f"Done {d['done']}" + (": " + " · ".join(done_bits) if done_bits else "")
-
-	skip_bits = []
-	for s in d.get("skip_reasons") or []:
-		skip_bits.append(s["reason"] if s["count"] == 1 else f"{s['reason']} {s['count']}")
-	skip_line = f"Skipped {d['skipped']}" + (": " + " · ".join(skip_bits) if skip_bits else "")
-
-	return "\n".join([head, people_line, done_line, skip_line])
+		blocks.append("")
+		blocks.append(f"**{p['name']}** {p['total']} ({' · '.join(bits)})")
+		done_mix = _mix_bits(p.get("done_outcomes"))
+		if done_mix:
+			blocks.append(f"Done: {done_mix}")
+		skip_mix = _mix_bits(p.get("skip_reasons"))
+		if skip_mix:
+			blocks.append(f"Skipped: {skip_mix}")
+	return "\n".join(blocks)
 
 
 @frappe.whitelist()
