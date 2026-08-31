@@ -781,6 +781,32 @@ def _shape_detail(row, zpid=None):
 	}
 
 
+def _batchdata_row(lead, comp):
+	"""Resolve a `batchdata::` comp back to its shaped row.
+
+	BatchData fallback comps are not CRM Comp docs — they live in the lead's
+	`batchdata_comps` cache blob. Looking the name up in CRM Comp therefore threw
+	DoesNotExistError, which broke BOTH photo surfaces for every BatchData comp:
+	the tray's hover prefetch and the detail modal ("Comparable property
+	batchdata::… does not exist"). `fetch_for_lead` reads the cached blob for free;
+	on a cache miss it re-runs the paid search, which is the documented no-cache
+	contract ("works but re-bills") and cannot normally happen right after the map
+	just rendered the comp.
+	"""
+	from crm.api import batchdata_comps
+
+	try:
+		doc = frappe.get_doc("CRM Lead", lead)
+		rows = batchdata_comps.fetch_for_lead(doc)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "BatchData comp detail lookup failed")
+		return None
+	for r in rows or []:
+		if r.get("name") == comp:
+			return frappe._dict(r)
+	return None
+
+
 @frappe.whitelist()
 def get_comp_details(lead, comp):
 	"""On-demand Zillow facts + scrollable photos for one comp.
@@ -799,6 +825,10 @@ def get_comp_details(lead, comp):
 	if str(comp).startswith("zillow::"):
 		# Area-search pins are not CRM Comp rows. _shape_detail looks them up by zpid.
 		row = frappe._dict({"name": comp, "address": ""})
+	elif str(comp).startswith("batchdata::"):
+		# BatchData fallback pins are not CRM Comp rows either — resolve from the
+		# lead's cached blob; _shape_detail then looks Zillow up by address.
+		row = _batchdata_row(lead, comp)
 	else:
 		row = frappe.db.get_value(
 			DOCTYPE,
