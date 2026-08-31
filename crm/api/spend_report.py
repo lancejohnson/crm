@@ -14,6 +14,9 @@ Lux is the only consumer. Until they grow one, there is nothing honest to print.
 ISTL wallet is read through LeadMarket (`GET /api/istl-balance`), which already
 stays logged in. CRM never holds the ISTL password. The day-over-day delta is a
 snapshot in a Frappe default, so a preview does not move it.
+
+Refunds are the Refunds-board columns: To Request (CRM, not sent), Requested +
+Waiting (sent to ISTL), Complete × `lead_cost` (amount received).
 """
 
 import json
@@ -46,7 +49,60 @@ def render_spend(commit_snapshot=False):
 			lines.append(line)
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "spend: ISTL line failed")
+	try:
+		line = refund_line()
+		if line:
+			lines.append(line)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "spend: refund line failed")
 	return "\n".join(lines)
+
+
+#: In-flight with the vendor — same columns as `Refunds.vue` minus To Request / Complete.
+REQUESTED_STATUSES = ("Requested", "Waiting on us", "Waiting on them")
+
+
+def refund_line():
+	"""`Refunds: 19 to request · 28 in ISTL · $754 received (26)`."""
+	if not frappe.db.has_column("CRM Lead", "custom_refundable"):
+		return ""
+	has_status = frappe.db.has_column("CRM Lead", "custom_refund_status")
+	has_requested = frappe.db.has_column("CRM Lead", "custom_refund_requested")
+	has_cost = frappe.db.has_column("CRM Lead", "lead_cost")
+	status_expr = "'To Request'"
+	if has_status and has_requested:
+		status_expr = """CASE
+			WHEN custom_refund_status IN ('To Request','Requested','Waiting on us','Waiting on them','Complete')
+				THEN custom_refund_status
+			WHEN IFNULL(custom_refund_requested,0)=1 THEN 'Requested'
+			ELSE 'To Request'
+		END"""
+	elif has_status:
+		status_expr = "IFNULL(NULLIF(custom_refund_status,''), 'To Request')"
+	elif has_requested:
+		status_expr = "IF(IFNULL(custom_refund_requested,0)=1, 'Requested', 'To Request')"
+	cost_expr = "0"
+	if has_cost:
+		cost_expr = "CAST(NULLIF(lead_cost,'') AS DECIMAL(12,2))"
+	rows = frappe.db.sql(
+		f"""SELECT {status_expr} AS st, COUNT(*) AS n, COALESCE(SUM({cost_expr}), 0) AS cost
+		   FROM `tabCRM Lead`
+		   WHERE IFNULL(custom_refundable,0)=1
+		   GROUP BY st""",
+		as_dict=True,
+	)
+	by_status = {r.st: r for r in rows}
+	to_request = int((by_status.get("To Request") or {}).get("n") or 0)
+	in_istl = sum(int((by_status.get(s) or {}).get("n") or 0) for s in REQUESTED_STATUSES)
+	complete = by_status.get("Complete") or {}
+	received_n = int(complete.get("n") or 0)
+	received = float(complete.get("cost") or 0)
+	bits = [f"**{to_request}** to request", f"**{in_istl}** in ISTL"]
+	if received_n:
+		bits.append(f"**${received:,.0f}** received ({received_n})")
+	else:
+		bits.append("$0 received")
+	return "Refunds: " + " · ".join(bits)
 
 
 def istl_line(commit_snapshot=False):
