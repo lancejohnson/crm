@@ -12,7 +12,7 @@ endpoint directly from the CRM; it worked, and it was still the wrong place
 for the traffic to live.
 
 The service constructs CDN photo URLs from its rate-limited avm sweep (the
-photo-bearing detail endpoints are WAF-403 from the box; see geo/photos.py in
+photo-bearing detail endpoints are WAF-403 from the box; see redfin_scraper/photos.py in
 the redfin-scraper-api repo for the URL scheme and its verification). One GET
 per lookup, fired only when Zillow AND Realtor are both empty, result cached
 30 days by the comp detail cache.
