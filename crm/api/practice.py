@@ -171,10 +171,116 @@ def _dest_path(attempt: str, property: str) -> str:
 	)
 
 
+def _chunk_prefix(attempt: str, property: str) -> str:
+	return frappe.get_site_path(
+		"private", "files",
+		f"practice-{_safe_id(attempt)}-{_safe_id(property)}.webm.part.",
+	)
+
+
+def _chunk_path(attempt: str, property: str, seq: int) -> str:
+	return f"{_chunk_prefix(attempt, property)}{seq:06d}"
+
+
+def _chunk_manifest_path(attempt: str, property: str) -> str:
+	return f"{_dest_path(attempt, property)}.chunks.json"
+
+
+def _chunk_rows(attempt: str, property: str) -> list[tuple[int, str]]:
+	prefix = _chunk_prefix(attempt, property)
+	folder, stem = os.path.dirname(prefix), os.path.basename(prefix)
+	try:
+		names = os.listdir(folder)
+	except OSError:
+		return []
+	rows = []
+	for name in names:
+		if not name.startswith(stem):
+			continue
+		tail = name[len(stem):]
+		if tail.isdigit():
+			rows.append((int(tail), os.path.join(folder, name)))
+	return sorted(rows)
+
+
+def _chunk_manifest(attempt: str, property: str) -> dict[str, int]:
+	path = _chunk_manifest_path(attempt, property)
+	try:
+		with open(path, encoding="utf-8") as fh:
+			data = json.load(fh)
+		return {
+			str(int(key)): max(0, int(value))
+			for key, value in (data or {}).items()
+		}
+	except (OSError, TypeError, ValueError, json.JSONDecodeError):
+		return {}
+
+
+def _write_chunk_manifest(attempt: str, property: str, manifest: dict[str, int]) -> None:
+	path = _chunk_manifest_path(attempt, property)
+	tmp = path + ".tmp"
+	with open(tmp, "w", encoding="utf-8") as fh:
+		json.dump(manifest, fh, sort_keys=True)
+	os.replace(tmp, path)
+
+
+def _assemble_recording_chunks(attempt: str, property: str) -> tuple[str, list[str]]:
+	"""Build one WebM from durable, idempotent sequence files.
+
+	A missing sequence means upload was interrupted. Keep every chunk in place so
+	a later retry/recovery can complete it; never publish a file with a hole.
+	"""
+	rows = _chunk_rows(attempt, property)
+	if not rows:
+		return "", []
+	seqs = [seq for seq, _path in rows]
+	if seqs != list(range(seqs[-1] + 1)):
+		return "", []
+
+	dest = _dest_path(attempt, property)
+	tmp = dest + ".assembling"
+	total = 0
+	try:
+		with open(tmp, "wb") as out:
+			for _seq, path in rows:
+				with open(path, "rb") as src:
+					shutil.copyfileobj(src, out, length=1024 * 1024)
+				total += os.path.getsize(path)
+				if total > MAX_RECORDING_BYTES:
+					frappe.throw(_("Recording is too large."))
+		dest_size = os.path.getsize(dest) if os.path.exists(dest) else 0
+		if total > dest_size:
+			os.replace(tmp, dest)
+			try:
+				os.remove(dest + ".seekable")
+			except OSError:
+				pass
+		else:
+			os.remove(tmp)
+	except Exception:
+		try:
+			os.remove(tmp)
+		except OSError:
+			pass
+		raise
+	return dest, [path for _seq, path in rows]
+
+
+def _cleanup_recording_chunks(attempt: str, property: str, paths: list[str]) -> None:
+	for path in [*paths, _chunk_manifest_path(attempt, property)]:
+		try:
+			os.remove(path)
+		except OSError:
+			pass
+
+
 def _file_recording_url(attempt: str, prop: str) -> str:
 	"""Play is the file on disk, not the JSON stamp — a later results write
 	used to wipe `recording_url` while leaving a 50–100 MB webm behind."""
-	dest = _dest_path(attempt, prop)
+	dest, chunks = _assemble_recording_chunks(attempt, prop)
+	if dest and chunks:
+		_cleanup_recording_chunks(attempt, prop, chunks)
+	dest = dest or _dest_path(attempt, prop)
 	part = _part_path(attempt, prop)
 	try:
 		dest_size = os.path.getsize(dest) if os.path.exists(dest) else 0
@@ -1368,7 +1474,12 @@ def list_view_log(practice_set: str = "") -> dict:
 # ---------------------------------------------------------------------------------
 @frappe.whitelist()
 def upload_recording_chunk(attempt: str, property: str, seq: int | str = 0) -> dict:
-	"""Append one MediaRecorder slice for this house. Chunks stay under nginx's 50m cap."""
+	"""Persist one idempotent MediaRecorder slice for this house.
+
+	Each sequence gets its own file. Retrying a request after a lost response
+	overwrites that sequence instead of appending it twice; an interrupted take
+	keeps every acknowledged slice available for later assembly/recovery.
+	"""
 	_need()
 	att = _get_attempt(attempt, write=True)
 	prop = _get_prop(property)
@@ -1382,23 +1493,34 @@ def upload_recording_chunk(attempt: str, property: str, seq: int | str = 0) -> d
 		return {"ok": True, "bytes": 0}
 	if len(data) > MAX_CHUNK_BYTES:
 		frappe.throw(_("Recording chunk is too large."))
-	path = _part_path(att.name, prop.name)
 	try:
-		seq_n = int(seq or 0)
+		seq_n = int(seq)
 	except (TypeError, ValueError):
-		seq_n = 0
-	os.makedirs(os.path.dirname(path), exist_ok=True)
-	mode = "wb" if seq_n == 0 else "ab"
-	with open(path, mode) as fh:
-		fh.write(data)
-	size = os.path.getsize(path)
-	if size > MAX_RECORDING_BYTES:
-		try:
-			os.remove(path)
-		except OSError:
-			pass
+		frappe.throw(_("Invalid recording sequence."))
+	if seq_n < 0 or seq_n > 100_000:
+		frappe.throw(_("Invalid recording sequence."))
+
+	path = _chunk_path(att.name, prop.name, seq_n)
+	manifest = _chunk_manifest(att.name, prop.name)
+	key = str(seq_n)
+	previous = manifest.get(key)
+	if previous is None and os.path.exists(path):
+		previous = os.path.getsize(path)
+	previous = previous or 0
+	total = sum(manifest.values()) - previous + len(data)
+	if total > MAX_RECORDING_BYTES:
 		frappe.throw(_("Recording is too large."))
-	return {"ok": True, "bytes": size}
+
+	os.makedirs(os.path.dirname(path), exist_ok=True)
+	tmp = path + ".tmp"
+	with open(tmp, "wb") as fh:
+		fh.write(data)
+	manifest[key] = len(data)
+	# Manifest first is conservative across a crash: it may temporarily count a
+	# missing sequence, but it can never undercount bytes and exceed the cap.
+	_write_chunk_manifest(att.name, prop.name, manifest)
+	os.replace(tmp, path)
+	return {"ok": True, "bytes": total, "seq": seq_n}
 
 
 @frappe.whitelist()
@@ -1413,6 +1535,9 @@ def stream_recording(attempt: str, property: str):
 	prop = _get_prop(property)
 	if prop.practice_set != att.practice_set:
 		frappe.throw(_("That property is not in this set."))
+	# Reading is also the recovery path for a browser that closed before the
+	# explicit finish call: contiguous durable chunks can still become a take.
+	_file_recording_url(att.name, prop.name)
 	path = _ensure_seekable(_dest_path(att.name, prop.name))
 	if not os.path.exists(path) or os.path.getsize(path) == 0:
 		frappe.throw(_("No recording."), frappe.DoesNotExistError)
@@ -1441,8 +1566,9 @@ def finish_recording(attempt: str, property: str) -> dict:
 	prop = _get_prop(property)
 	if prop.practice_set != att.practice_set:
 		frappe.throw(_("That property is not in this set."))
+	dest, chunk_paths = _assemble_recording_chunks(att.name, prop.name)
+	dest = dest or _dest_path(att.name, prop.name)
 	part = _part_path(att.name, prop.name)
-	dest = _dest_path(att.name, prop.name)
 	try:
 		part_size = os.path.getsize(part) if os.path.exists(part) else 0
 		dest_size = os.path.getsize(dest) if os.path.exists(dest) else 0
@@ -1465,6 +1591,8 @@ def finish_recording(attempt: str, property: str) -> dict:
 	slot = _slot(results, prop.name)
 	slot["recording_url"] = file_url
 	_write_results(att, results)
+	if chunk_paths:
+		_cleanup_recording_chunks(att.name, prop.name, chunk_paths)
 	return {"ok": True, "url": file_url, "property": prop.name}
 
 

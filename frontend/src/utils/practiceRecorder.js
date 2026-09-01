@@ -20,6 +20,7 @@ const VIDEO = {
   width: { max: 1920 },
   height: { max: 1080 },
 }
+const UPLOAD_RETRY_DELAYS = [500, 1_500, 4_000]
 
 let mime = ''
 let mixed = null
@@ -197,7 +198,10 @@ export function beginPropertyRecording(property) {
     })
     recorder.ondataavailable = (e) => {
       if (e.data?.size) {
-        queue.push(e.data)
+        // Assign the sequence BEFORE upload. A failed request keeps the same
+        // blob + sequence at the head of the queue, so retrying is idempotent
+        // and never punches a hole in the WebM.
+        queue.push({ blob: e.data, seq: seq++ })
         pump()
       }
     }
@@ -287,29 +291,42 @@ async function drain() {
   pumping = true
   try {
     while (queue.length) {
-      const blob = queue.shift()
-      const n = seq
-      seq += 1
-      const form = new FormData()
-      form.append('attempt', attemptId)
-      form.append('property', propertyId)
-      form.append('seq', String(n))
-      form.append('file', blob, `chunk-${n}.webm`)
+      const item = queue[0]
+      await uploadChunk(item)
+      // Only discard bytes after the server acknowledged this exact sequence.
+      queue.shift()
+    }
+  } finally {
+    pumping = false
+  }
+}
+
+async function uploadChunk({ blob, seq: n }) {
+  let lastError
+  for (let attempt = 0; attempt <= UPLOAD_RETRY_DELAYS.length; attempt += 1) {
+    const form = new FormData()
+    form.append('attempt', attemptId)
+    form.append('property', propertyId)
+    form.append('seq', String(n))
+    form.append('file', blob, `chunk-${n}.webm`)
+    try {
       const res = await fetch('/api/method/crm.api.practice.upload_recording_chunk', {
         method: 'POST',
         credentials: 'same-origin',
         headers: window.csrf_token ? { 'X-Frappe-CSRF-Token': window.csrf_token } : {},
         body: form,
       })
-      if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text || 'upload failed')
-      }
+      if (res.ok) return
+      const text = await res.text()
+      lastError = new Error(text || 'upload failed')
+    } catch (error) {
+      lastError = error
     }
-  } finally {
-    pumping = false
-    if (queue.length && attemptId && propertyId) await drain()
+    if (attempt < UPLOAD_RETRY_DELAYS.length) {
+      await new Promise((resolve) => setTimeout(resolve, UPLOAD_RETRY_DELAYS[attempt]))
+    }
   }
+  throw lastError || new Error('upload failed')
 }
 
 async function finish() {
