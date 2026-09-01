@@ -1428,7 +1428,14 @@ def stream_recording(attempt: str, property: str):
 
 @frappe.whitelist()
 def finish_recording(attempt: str, property: str) -> dict:
-	"""Turn this house's chunks into a private File and stamp it on the slot."""
+	"""Finalize this house's on-disk stream and stamp it on the slot.
+
+	Do NOT insert a Frappe File row here. A normal practice take is 40–150 MB,
+	while File validates the whole assembled file against the site's 25 MB upload
+	limit. The chunks already live in private/files and playback is our guarded
+	Range endpoint, so the File row adds no access control and used to make long
+	takes fail at the final stamp while leaving perfectly good bytes on disk.
+	"""
 	_need()
 	att = _get_attempt(attempt, write=True)
 	prop = _get_prop(property)
@@ -1454,22 +1461,6 @@ def finish_recording(attempt: str, property: str) -> dict:
 		return {"ok": False, "error": "no recording"}
 	fname = os.path.basename(dest)
 	file_url = f"/private/files/{fname}"
-	existing = frappe.db.get_value(
-		"File",
-		{"file_url": file_url, "attached_to_doctype": ATTEMPT, "attached_to_name": att.name},
-		"name",
-	)
-	if not existing:
-		frappe.get_doc(
-			{
-				"doctype": "File",
-				"file_name": fname,
-				"file_url": file_url,
-				"is_private": 1,
-				"attached_to_doctype": ATTEMPT,
-				"attached_to_name": att.name,
-			}
-		).insert(ignore_permissions=True)
 	results = _results(att)
 	slot = _slot(results, prop.name)
 	slot["recording_url"] = file_url

@@ -6,7 +6,8 @@
 - `PracticeRun.vue` allowed another property selection while `touch_property` and the previous recording rollover were still in flight. Responses could land out of order and replace the current per-listing clock with an older property response.
 - `practiceRecorder.js` also allowed concurrent `beginPropertyRecording` calls to share and overwrite `recorder`, `propertyId`, `queue`, and `seq`.
 - Window capture had been replaced by a current-tab-biased `getDisplayMedia` call (`preferCurrentTab`, `selfBrowserSurface: include`). Closing a shared Zillow tab ends that capture.
-- The actual recoverable files are on the app server. Attempt `4hq25i5q59` has canonical recordings for `ri612pe0tg` (45,287,440 bytes) and `rn15bm8416` (90,174,031 bytes) even though their JSON result stamps are absent. `_file_recording_url` already exposes canonical/partial files; they should be re-stamped with `finish_recording` after deploy.
+- The actual recoverable files are on the app server. Attempt `4hq25i5q59` has canonical recordings for `ri612pe0tg` (45,287,440 bytes) and `rn15bm8416` (90,174,031 bytes) even though their JSON result stamps are absent.
+- Recovery exposed the final root cause: `finish_recording` inserted a Frappe `File` row for the assembled take. Frappe applies the site's 25 MB upload ceiling to that existing on-disk file, so 45–90 MB recordings failed after upload but before their JSON stamp. Playback already uses the guarded Range endpoint, so finalization must stamp the canonical path without creating a `File` row.
 
 ## Comps shortcut
 

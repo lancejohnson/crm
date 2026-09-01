@@ -48,7 +48,10 @@ duplicating. Work substantial features in a worktree of your own.
   clicks can no longer return stale timer state or overwrite shared recorder
   globals. Chunks upload as they arrive so a 30-minute take never hits nginx's
   50m body limit; playback is `stream_recording` (private File URLs 403 in
-  `<video>`). Canonical/`.part` files remain the recovery source when a JSON
+  `<video>`). Finalization deliberately does **not** insert a Frappe `File` row:
+  the assembled take is commonly 40–150 MB and File enforces the site's 25 MB
+  upload ceiling, which used to reject the final stamp while leaving valid bytes
+  on disk. Canonical/`.part` files remain the recovery source when a JSON
   recording stamp is lost.
   Play opens a modal player (`PracticePlayer.vue`) with speed, fullscreen, a
   comments thread, and Loom-style timestamped emoji + comments (Space play,
