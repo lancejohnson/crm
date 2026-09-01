@@ -73,6 +73,7 @@ const DONE_OUTCOMES = [
   'Connected',
   'No Answer',
   'Left a Voicemail',
+  'Sent a Text',
   'Booked an Appointment',
   'Other',
 ]

@@ -54,6 +54,7 @@ DONE_OUTCOMES = (
 	"Connected",
 	"No Answer",
 	"Left a Voicemail",
+	"Sent a Text",
 	"Booked an Appointment",
 	"Other",
 )
@@ -1220,6 +1221,7 @@ def get_today_report(for_date=None, history_days=10, owner=None):
 #: Short labels for the Done-outcome picker. The recap has to fit a glance.
 OUTCOME_SHORT = {
 	"Left a Voicemail": "VM",
+	"Sent a Text": "Texted",
 	"Booked an Appointment": "Booked",
 }
 
