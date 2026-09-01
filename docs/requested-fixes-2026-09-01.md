@@ -43,10 +43,15 @@ Observed:
    stops when a Zillow tab is opened and then closed. Attachment
    `d7ynwq5u73r5ifb859ppf8oc3c`, `2026-08-31 12-46-38.mkv`, is a 22,114,524-byte,
    29.823-second valid bug-report screen recording; it is not a Practice backup.
-2. `xssoqjah73bhig1knuxpz3x7gc` — manual refund tickets. Names David Smith
-   (`CRM-LEAD-2026-00988`) and William Kellum (`CRM-LEAD-2026-01102`). The thread
-   says a general support ticket must be created when the lead is missing from
-   the provider refund form.
+2. `xssoqjah73bhig1knuxpz3x7gc` — manual refund tickets. The complete thread
+   names **Gary Roser** (`CRM-LEAD-2026-01096`), **William Kellum**
+   (`CRM-LEAD-2026-01102`), **Juan R Rosario Sierra**
+   (`CRM-LEAD-2026-00986`), and **David Smith** (`CRM-LEAD-2026-00988`). Gary is
+   explicitly reported as absent from ISTL’s refund form; the thread then says
+   missing leads must be filed one-per-general-support-ticket and uses the thread
+   to collect that day’s missing refunds. German confirms the listed Juan/David
+   submissions were made. Omitting Gary and Juan from the first audit draft was
+   an audit error.
 3. `pot9yjk3wtng8pwj4apac5jxaa` — Timothy Arter. He was absent from the refund
    request tab, was filed as a ticket, and later refunded; provider issue URL
    `https://app.ispeedtolead.com/issue/6a95cb9c4844105ef9ae33a3`.
@@ -271,14 +276,27 @@ Captured before implementation:
 
 | Lead | Status/source | refundable | requested | refund status | Mattermost evidence |
 |---|---|---:|---:|---|---|
-| David Smith `00988` | Follow Up / PropertyLeads | 0 | 0 | blank | manually submitted; absent from board |
+| Gary Roser `01096` | Called No Answer / iSpeedToLead | 0 | 0 | blank | explicitly “not showing on ISTL”; absent from board |
 | William Kellum `01102` | Dead Lead / iSpeedToLead | 1 | 0 | To Request | manually submitted; board falsely says not requested |
+| Juan R Rosario Sierra `00986` | Called No Answer / PropertyLeads | 0 | 0 | blank | listed in the manual-ticket thread and confirmed submitted; absent from board |
+| David Smith `00988` | Follow Up / PropertyLeads | 0 | 0 | blank | manually submitted; absent from board |
 | Timothy Arter `01091` | Dead Lead / iSpeedToLead | 1 | 1 | Complete | manually submitted, later reconciled; origin unknowable |
 
-Post-implementation readback: all three have
-`custom_refund_manual_ticket=1`; David and William are Requested, Timothy remains
-Complete. The Refunds DOM contained each name exactly once and three Manual
-ticket badges.
+Post-implementation readback at audit correction time:
+
+```text
+CRM-LEAD-2026-00986  Juan R Rosario Sierra  Called No Answer  PropertyLeads  refundable=0 requested=0 status=NULL manual_ticket=0 vendor=47127335
+CRM-LEAD-2026-01096  Gary Roser             Called No Answer  iSpeedToLead   refundable=0 requested=0 status=NULL manual_ticket=0 vendor=6a8d99f4a28c3374447130e2
+```
+
+Neither omitted lead has a linked Communication. Their impact is therefore
+still live: both are absent from Refunds and the CRM records neither the manual
+submission nor its status. **Disposition:** they are documented unresolved
+examples for queued manual-refund item 5; that item must mark/backfill them only
+when their submitted-ticket status is confirmed, rather than guessing Complete.
+The three examples already handled have `custom_refund_manual_ticket=1`; David
+and William are Requested, Timothy remains Complete. The Refunds DOM contained
+each handled name exactly once and three Manual ticket badges.
 
 ## 7. Simplify scheduling a task
 
