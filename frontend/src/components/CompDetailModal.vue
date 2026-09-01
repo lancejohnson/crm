@@ -501,8 +501,11 @@ async function load(force = false) {
           lead: props.lead,
           comp: name,
           // Lets the server fall back to an address lookup (Zillow, then Realtor
-          // photos) when the zpid /property call returns an empty shell.
+          // photos) when the zpid /property call returns an empty shell; lat/lng
+          // feed the Redfin photo rung's neighbourhood sweep.
           address: props.comp.address || '',
+          lat: props.comp.lat ?? null,
+          lng: props.comp.lng ?? null,
         })
     if (token !== requestToken) return
     response.value = result

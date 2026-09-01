@@ -337,12 +337,13 @@ export function streetAddress(address) {
  * 30 days server-side — this just stops a hover-then-open from asking twice.
  */
 const photoPromises = new Map()
-export function loadCompPhotos(lead, name, address = '') {
+export function loadCompPhotos(lead, name, address = '', lat = null, lng = null) {
   if (!lead || !name) return Promise.resolve([])
   const key = `${lead}:${name}`
   if (photoPromises.has(key)) return photoPromises.get(key)
-  // address rescues zillow:: pins whose zpid /property lookup comes back hollow
-  const p = call('crm.api.comps.get_comp_details', { lead, comp: name, address })
+  // address rescues zillow:: pins whose zpid /property lookup comes back hollow;
+  // lat/lng feed the Redfin photo rung's neighbourhood sweep
+  const p = call('crm.api.comps.get_comp_details', { lead, comp: name, address, lat, lng })
     .then((r) => (Array.isArray(r?.photos) ? r.photos : []))
     .catch(() => [])
   photoPromises.set(key, p)

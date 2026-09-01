@@ -780,7 +780,13 @@ def _shape_detail(row, zpid=None):
 	if len(photos) <= 1:
 		from crm.api import redfin
 
-		rf = redfin.redfin_photo_urls(_detail_address(row, details))
+		# Coordinates come from the row (CRM Comp / BatchData / client-passed for
+		# zillow:: pins), falling back to the fresh Zillow detail's own point.
+		rf = redfin.redfin_photo_urls(
+			_detail_address(row, details),
+			lat=row.get("lat") or (details or {}).get("lat"),
+			lng=row.get("lng") or (details or {}).get("lng"),
+		)
 		if len(rf) > len(photos):
 			photos = rf
 			photo_source = "redfin"
@@ -865,7 +871,7 @@ def _batchdata_row(lead, comp):
 
 
 @frappe.whitelist()
-def get_comp_details(lead, comp, address=None):
+def get_comp_details(lead, comp, address=None, lat=None, lng=None):
 	"""On-demand Zillow facts + scrollable photos for one comp.
 
 	The compact Today view already has the comparison facts from `CRM Comp`; this
@@ -884,8 +890,9 @@ def get_comp_details(lead, comp, address=None):
 		# The caller's address matters more than it looks: when Zillow's /property
 		# returns an empty shell for the zpid (it does, on some pending listings),
 		# the address is the only route left — a Zillow address retry, then the
-		# Realtor photo fallback, both of which no-op on an empty string.
-		row = frappe._dict({"name": comp, "address": str(address or "").strip()})
+		# Realtor photo fallback, both of which no-op on an empty string. The
+		# coordinates are what the Redfin rung sweeps around.
+		row = frappe._dict({"name": comp, "address": str(address or "").strip(), "lat": lat, "lng": lng})
 	elif str(comp).startswith("batchdata::"):
 		# BatchData fallback pins are not CRM Comp rows either — resolve from the
 		# lead's cached blob; _shape_detail then looks Zillow up by address.
@@ -898,6 +905,7 @@ def get_comp_details(lead, comp, address=None):
 				"name", "address", "city", "state", "zip", "price", "status",
 				"listed_date", "removed_date", "days_on_market", "days_old",
 				"bedrooms", "bathrooms", "square_footage", "year_built", "property_type",
+				"lat", "lng",
 			],
 			as_dict=True,
 		)
@@ -1046,6 +1054,11 @@ def get_subject_details(lead):
 			"city": doc.get("property_city") or "",
 			"state": doc.get("property_state") or "",
 			"zip": doc.get("property_zip") or "",
+			# For the Redfin photo rung. Cached coords only — 0.0 means ungeocoded
+			# (truthiness, the _subject_point rule), and geocoding here would spend
+			# a Census call on a gallery open.
+			"lat": doc.get("property_lat") or None,
+			"lng": doc.get("property_lng") or None,
 			# The subject is not for sale and has no comp price; the panel reads its
 			# money off `details` (Zestimate, last sale) exactly as it does for a comp
 			# whose own price is unknown.

@@ -318,7 +318,13 @@ const street = computed(() => streetAddress(props.comp.address) || props.comp.ad
 
 function prefetchPhotos() {
   if (photos.value.length || !props.lead) return
-  loadCompPhotos(props.lead, props.comp.name, props.comp.address || '').then((urls) => {
+  loadCompPhotos(
+    props.lead,
+    props.comp.name,
+    props.comp.address || '',
+    props.comp.lat ?? null,
+    props.comp.lng ?? null,
+  ).then((urls) => {
     if (!urls.length) return
     photos.value = urls
     const cover = props.comp.photo
