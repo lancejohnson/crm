@@ -50,7 +50,9 @@ duplicating. Work substantial features in a worktree of your own.
   50m body limit. Each sequence is a separate deterministic `.part.NNNNNN`
   file: the client retains the blob until acknowledgement and retries the SAME
   sequence, so a lost response cannot drop or double-append bytes; an interrupted
-  browser leaves contiguous chunks that read/finish can assemble later. Playback
+  browser leaves contiguous chunks that read/finish can assemble later. Read-time
+  shaping NEVER deletes them (it can run while the recorder is still producing
+  the tail); only an explicit successful finish cleans sequence files. Playback
   is `stream_recording` (private File URLs 403 in `<video>`). Finalization
   deliberately does **not** insert a Frappe `File` row:
   the assembled take is commonly 40–150 MB and File enforces the site's 25 MB

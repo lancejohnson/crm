@@ -277,9 +277,11 @@ def _cleanup_recording_chunks(attempt: str, property: str, paths: list[str]) -> 
 def _file_recording_url(attempt: str, prop: str) -> str:
 	"""Play is the file on disk, not the JSON stamp — a later results write
 	used to wipe `recording_url` while leaving a 50–100 MB webm behind."""
-	dest, chunks = _assemble_recording_chunks(attempt, prop)
-	if dest and chunks:
-		_cleanup_recording_chunks(attempt, prop, chunks)
+	dest, _chunks = _assemble_recording_chunks(attempt, prop)
+	# Read-time recovery may run while MediaRecorder is still producing later
+	# sequences (`touch_property` returns a freshly shaped attempt). Keep every
+	# chunk until explicit finish stamps the completed take; deleting seq 0 here
+	# stranded the tail and made the partial read-time assembly permanent.
 	dest = dest or _dest_path(attempt, prop)
 	part = _part_path(attempt, prop)
 	try:
