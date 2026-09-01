@@ -21,7 +21,7 @@
       >
         <Tooltip :text="__('Mark as done')">
           <button
-            class="flex shrink-0 items-center text-ink-gray-4 hover:text-ink-green-3"
+            class="flex size-7 shrink-0 items-center justify-center rounded text-ink-gray-4 hover:bg-surface-gray-3 hover:text-ink-green-3"
             @click="modalRef.updateTaskStatus('Done', task)"
           >
             <LucideCircle class="size-4 group-hover/td:hidden" />
@@ -53,7 +53,7 @@
 
         <Tooltip :text="__('Delete')">
           <button
-            class="hidden shrink-0 items-center text-ink-gray-4 hover:text-ink-red-3 group-hover/td:flex"
+            class="flex size-7 shrink-0 items-center justify-center rounded text-ink-gray-4 opacity-100 hover:bg-surface-red-1 hover:text-ink-red-3 focus:opacity-100 sm:opacity-0 sm:group-hover/td:opacity-100"
             @click="modalRef.deleteTask(task.name)"
           >
             <LucideTrash2 class="size-3.5" />
@@ -136,39 +136,44 @@
           class="todo-composer min-w-0 flex-1 text-sm text-ink-gray-8 placeholder:text-ink-gray-4"
           @keydown.enter.prevent="submit"
         />
-        <Button
-          variant="solid"
-          :label="__('Add')"
-          :disabled="!newTitle.trim()"
-          @click="submit"
-        />
       </div>
-      <div class="mt-2 flex flex-wrap items-center gap-1.5 pl-6">
+      <div
+        class="mt-2 flex flex-wrap items-center gap-1.5 pl-6"
+        role="group"
+        :aria-label="__('When')"
+      >
         <span class="mr-0.5 text-xs text-ink-gray-4">{{ __('When') }}</span>
         <button
+          type="button"
           class="rounded-md border px-2 py-0.5 text-sm"
           :class="dueChoiceClass(!newDue)"
+          :aria-pressed="!newDue"
           @click="clearDue"
         >
           {{ __('No date') }}
         </button>
         <Tooltip
-          v-for="f in presets"
-          :key="f.label"
+          v-for="(f, i) in presets"
+          :key="i"
           :text="dueTooltip(f)"
         >
           <button
+            type="button"
             class="rounded-md border px-2 py-0.5 text-sm"
-            :class="dueChoiceClass(selectedPreset === f.label)"
-            @click="selectPreset(f)"
+            :class="dueChoiceClass(selectedPresetIndex === i)"
+            :aria-pressed="selectedPresetIndex === i"
+            @click="selectPreset(f, i)"
           >
             {{ f.label }}
           </button>
         </Tooltip>
         <Tooltip :text="__('Pick a due date')">
           <button
+            type="button"
             class="flex items-center rounded-md border px-1.5 py-1"
-            :class="dueChoiceClass(showDatePicker && !selectedPreset)"
+            :class="dueChoiceClass(showDatePicker && selectedPresetIndex < 0)"
+            :aria-pressed="showDatePicker && selectedPresetIndex < 0"
+            :aria-label="__('Pick a due date')"
             @click="openDatePicker"
           >
             <LucideCalendar class="size-3.5" />
@@ -176,12 +181,21 @@
         </Tooltip>
         <Tooltip :text="__('Customize due-date choices')">
           <button
-            class="flex items-center text-ink-gray-4 hover:text-ink-gray-7"
+            type="button"
+            class="flex size-7 items-center justify-center rounded text-ink-gray-4 hover:bg-surface-gray-2 hover:text-ink-gray-7"
+            :aria-label="__('Customize due-date choices')"
             @click="startEdit"
           >
             <LucidePencil class="size-3.5" />
           </button>
         </Tooltip>
+        <Button
+          class="ml-auto"
+          variant="solid"
+          :label="__('Add')"
+          :disabled="!newTitle.trim()"
+          @click="submit"
+        />
       </div>
       <div
         v-if="showDatePicker"
@@ -190,7 +204,7 @@
         <span class="shrink-0 text-xs text-ink-gray-4">{{ __('Due') }}</span>
         <DateTimePicker
           v-model="newDue"
-          @update:modelValue="selectedPreset = ''"
+          @update:modelValue="selectedPresetIndex = -1"
           class="todo-datepicker flex-1"
           :placeholder="__('Due date')"
           :format="getFormat('', '', true, true, false)"
@@ -233,7 +247,7 @@ const { getUser } = usersStore()
 const newTitle = ref('')
 const newDue = ref('')
 const showDatePicker = ref(false)
-const selectedPreset = ref('')
+const selectedPresetIndex = ref(-1)
 
 
 const savedPresets = computed(() => {
@@ -271,7 +285,7 @@ function submit() {
   newTitle.value = ''
   newDue.value = ''
   showDatePicker.value = false
-  selectedPreset.value = ''
+  selectedPresetIndex.value = -1
   props.modalRef.addTask(t, due)
 }
 
@@ -279,20 +293,20 @@ function dueTooltip(f) {
   return __('Follow up') + ' · ' + formatDate(dueFromPreset(f), 'ddd, MMM D, YYYY | hh:mm a')
 }
 
-function selectPreset(f) {
-  selectedPreset.value = f.label
+function selectPreset(f, index) {
+  selectedPresetIndex.value = index
   newDue.value = formatDueStamp(dueFromPreset(f))
   showDatePicker.value = false
 }
 
 function clearDue() {
-  selectedPreset.value = ''
+  selectedPresetIndex.value = -1
   newDue.value = ''
   showDatePicker.value = false
 }
 
 function openDatePicker() {
-  selectedPreset.value = ''
+  selectedPresetIndex.value = -1
   showDatePicker.value = !showDatePicker.value
 }
 

@@ -42,7 +42,6 @@
         </div>
 
         <button
-          v-if="!editMode"
           type="button"
           class="flex w-fit items-center gap-1 text-sm text-ink-gray-5 hover:text-ink-gray-8"
           @click="advancedOpen = !advancedOpen"
@@ -51,7 +50,7 @@
           {{ advancedOpen ? __('Fewer options') : __('More options') }}
         </button>
 
-        <template v-if="editMode || advancedOpen">
+        <template v-if="advancedOpen">
           <div>
             <div class="mb-1.5 text-xs text-ink-gray-5">
               {{ __('Notes') }}
@@ -161,7 +160,12 @@ const props = defineProps({
 const show = defineModel({ type: Boolean })
 const tasks = defineModel('reloadTasks', { type: Object, default: () => ({}) })
 
-const emit = defineEmits(['updateTask', 'after'])
+const emit = defineEmits(['updateTask', 'after', 'update:modelValue'])
+
+function closeModal() {
+  show.value = false
+  emit('update:modelValue', false)
+}
 
 const router = useRouter()
 const { users, getUser } = usersStore()
@@ -191,6 +195,22 @@ const validateTask = () => {
   return true
 }
 
+const MUTABLE_FIELDS = [
+  'title',
+  'description',
+  'assigned_to',
+  'due_date',
+  'status',
+  'priority',
+  'call_outcome',
+]
+
+function taskValues() {
+  return Object.fromEntries(
+    MUTABLE_FIELDS.map((field) => [field, _task.value[field] ?? '']),
+  )
+}
+
 const createTaskResource = createResource({
   url: 'frappe.client.insert',
   makeParams() {
@@ -199,20 +219,20 @@ const createTaskResource = createResource({
         doctype: 'CRM Task',
         reference_doctype: props.doctype,
         reference_docname: props.doc || null,
-        ..._task.value,
+        ...taskValues(),
       },
     }
   },
   validate: validateTask,
   onSuccess(d) {
-    if (d.name) {
+    if (d?.name) {
       updateOnboardingStep('create_first_task')
       capture('task_created')
       tasks.value?.reload?.()
       emit('after', d, true)
-      show.value = false
       toast.success(__('Task created'))
     }
+    closeModal()
   },
 })
 
@@ -222,16 +242,23 @@ const updateTaskResource = createResource({
     return {
       doctype: 'CRM Task',
       name: _task.value.name,
-      fieldname: _task.value,
+      // Activity/realtime reloads can make the modal's `modified` timestamp
+      // stale while it is open. Sending the whole fetched row made Frappe treat
+      // that metadata as an optimistic-lock token and reject a normal edit.
+      // Only send fields a person can actually edit.
+      fieldname: taskValues(),
     }
   },
   validate: validateTask,
   onSuccess(d) {
-    if (d.name) {
+    if (d?.name) {
       tasks.value?.reload?.()
       emit('after', d)
-      show.value = false
     }
+    closeModal()
+  },
+  onError(e) {
+    toast.error(e?.messages?.[0] || __('Could not update task'))
   },
 })
 
@@ -269,10 +296,13 @@ async function updateTask() {
     _task.value.due_date = snapMidnightToMorning(_task.value.due_date)
   }
   if (_task.value.name) {
-    updateTaskResource.submit()
+    await updateTaskResource.submit()
   } else {
-    createTaskResource.submit()
+    await createTaskResource.submit()
   }
+  // Resource callbacks vary across frappe-ui cache/realtime paths; the awaited
+  // successful submit is the authoritative close point for both create/edit.
+  closeModal()
 }
 
 function render() {
@@ -282,7 +312,7 @@ function render() {
     _task.value = { ...props.task }
     if (_task.value.title) {
       editMode.value = true
-      advancedOpen.value = true
+      advancedOpen.value = false
     } else {
       _task.value.status = _task.value.status || 'Todo'
       advancedOpen.value = false

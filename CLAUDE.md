@@ -1954,13 +1954,15 @@ duplicating. Work substantial features in a worktree of your own.
   feature (its own Tasks tab + heavyweight `TaskModal`) is now surfaced in the
   **unified Activity timeline**: a pinned **"To-do"** block at the top of the
   Activity feed lists every open task with an explicit **What + When + Add**
-  flow: title first, then No date / 2h / 3d / 1wk / 1mo / calendar, and nothing
-  is created until Add/Enter. A due chip SELECTS the date; it no longer silently
-  creates a generic “Follow up” when the title is blank. Inserts default to the
-  current user + `Todo`. The full Task modal opens as a compact **Schedule a
-  Task** form (title + when, advanced fields behind More options), a **hover circle →
-  click-to-complete** checkbox, and a **hover trash icon** to delete a to-do
-  inline; tasks sort by due date (overdue first), the relative due date is **red**
+  flow: title first, then No date / 2h / 3d / 1wk / 1mo / calendar, then Add in
+  both visual AND keyboard order; nothing is created until Add/Enter. A due chip
+  SELECTS the date (and exposes `aria-pressed`); it no longer silently creates a
+  generic “Follow up” when the title is blank. Inserts default to the current
+  user + `Todo`. The full Task modal opens as a compact **Schedule a Task** form
+  (title + when, advanced fields behind More options on create AND edit), a
+  touch-sized hover circle → click-to-complete checkbox, and a trash action that
+  is always visible on touch but quiet-until-hover on desktop; tasks sort by due
+  date (overdue first), the relative due date is **red**
   once overdue / **amber** when due today. Completed/canceled tasks drop into the
   chronological history anchored at their completion date (`modified`),
   struck-through. Open tasks live only in the To-do block, completed only in
@@ -1976,6 +1978,11 @@ duplicating. Work substantial features in a worktree of your own.
     chips land at 9:00am America/Chicago**, not midnight and not now+N×24h;
     hour chips stay relative to now. A DateTimePicker midnight snap does the
     same 9am. Due labels read `Thu 9am` / `today 9am`, not `timeAgo`.
+  - `TaskModal.vue` sends ONLY mutable task fields. Passing the whole fetched row
+    included a stale `modified` timestamp after realtime reloads and caused
+    `TimestampMismatchError` on ordinary edits. The awaited successful submit is
+    also the authoritative close point (with an explicit model update), so modal
+    closure does not depend on frappe-ui resource callback timing.
   - `frontend/src/components/Activities/Activities.vue` — `openTasks` computed +
     `get_task_activities()` (completed tasks → timeline entries keyed on
     `modified`), merged into the Activity feed; `task` branch in the timeline +
