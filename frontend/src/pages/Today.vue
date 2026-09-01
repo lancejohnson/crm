@@ -175,7 +175,7 @@
               class="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
               @click.stop
             >
-              <Tooltip v-if="item.state !== 'Done'" :text="__('Done')">
+              <Tooltip :text="item.state === 'Done' ? __('Edit outcome') : __('Done')">
                 <button
                   class="flex size-7 items-center justify-center rounded-md hover:bg-surface-gray-2"
                   @click.stop="requestState(item, 'Done')"
@@ -183,7 +183,7 @@
                   <CheckIcon class="size-4 text-ink-green-3" />
                 </button>
               </Tooltip>
-              <Tooltip v-if="item.state !== 'Skipped'" :text="__('Skip for today')">
+              <Tooltip :text="item.state === 'Skipped' ? __('Edit skip reason') : __('Skip for today')">
                 <button
                   class="flex size-7 items-center justify-center rounded-md hover:bg-surface-gray-2"
                   @click.stop="requestState(item, 'Skipped')"

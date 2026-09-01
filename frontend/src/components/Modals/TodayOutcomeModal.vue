@@ -1,6 +1,9 @@
 <template>
   <Dialog v-model="show" :options="{ title: isDone ? __('How did it go?') : __('Why skip this one?') }">
     <template #body-content>
+      <DialogDescription class="sr-only">
+        {{ isDone ? __('Choose what happened on this call.') : __('Choose why this card is being skipped.') }}
+      </DialogDescription>
       <div class="flex flex-col gap-4">
         <div
           v-if="item?.lead_name"
@@ -65,6 +68,7 @@
 
 <script setup>
 import { Button, Dialog, ErrorMessage, FeatherIcon, Textarea } from 'frappe-ui'
+import { DialogDescription } from 'reka-ui'
 import { computed, nextTick, ref, watch } from 'vue'
 
 // Kept in step with `DONE_OUTCOMES` / `SKIP_OUTCOMES` in crm/api/today_board.py,

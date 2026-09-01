@@ -19,6 +19,9 @@
       </div>
     </template>
     <template #body-content>
+      <DialogDescription class="sr-only">
+        {{ editMode ? __('Edit the task schedule and optional details.') : __('Choose what needs to happen and when.') }}
+      </DialogDescription>
       <div class="flex flex-col gap-4">
         <div class="grid gap-4 sm:grid-cols-[minmax(0,1fr)_13rem]">
           <div class="space-y-1.5">
@@ -150,6 +153,7 @@ import {
 import { useOnboarding } from 'frappe-ui/frappe'
 import { ref, watch, nextTick, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { DialogDescription } from 'reka-ui'
 
 const props = defineProps({
   task: { type: Object, default: () => ({}) },

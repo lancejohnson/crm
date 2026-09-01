@@ -1444,8 +1444,8 @@ duplicating. Work substantial features in a worktree of your own.
     buttons so they cannot overflow a narrow desktop card), drag across columns,
     and drag to reorder within one. Realtime `crm_today` keeps boards in step.
   - **Resolving a card asks what happened** (`Modals/TodayOutcomeModal.vue`).
-    Ticking ✓ or dragging into **Done** opens a five-option picker — Connected /
-    No Answer / Left a Voicemail / Booked an Appointment / **Other** — where
+    Ticking ✓ or dragging into **Done** opens a picker — Connected / No Answer /
+    Left a Voicemail / **Sent a Text** / Booked an Appointment / **Other** — where
     Other requires a sentence. **Skipped** is the same shape (Lance, 2026-08-31):
     Dead lead / Lost / Already scheduled / Already contacted / Check with Dennis /
     Follow up later / Not selling / **Other**, taken from 60 days of free-text
@@ -1454,7 +1454,9 @@ duplicating. Work substantial features in a worktree of your own.
     `outcome_note` (ops `setup_today_board.py`, both `has_field`-guarded via
     `_supports_outcome()` so the app is safe to deploy first) and rendered back
     onto the card, so a wrong answer is visible and fixable rather than
-    write-only. Re-submitting the same state only rewrites the outcome and
+    write-only. Done and Skip actions remain available on their own columns as
+    **Edit outcome / Edit skip reason**, so correction uses the same-state API
+    instead of put-back/re-resolve. Re-submitting the same state only rewrites the outcome and
     deliberately does **not** restamp `resolved_at` — the intraday pulse reads
     that column as "resolved in this half hour", so correcting a mis-click must
     not move a card into a later window. **Put back is never interrogated**:
