@@ -3052,6 +3052,35 @@ duplicating. Work substantial features in a worktree of your own.
   (webhook leads carry the full string; manually-entered leads are street-only
   with separate city/state/zip fields, which used to put just "123 Main St" on
   agreements).
+  - **The Standard PSA body is rebuilt from a Google Doc, not edited in
+    DocuSeal** (latest: 2026-09-01, doc `1dFP9Rmh…`, templates **5678345**
+    one-seller / **5678348** two-sellers). `tmp/build_psa_templates_v2.py` is the
+    whole pipeline — export the doc to PDF, locate the underscore blanks with
+    `tmp/find_blanks.py`, upload untagged → set roles → PUT fields at those
+    bboxes → clone (dodges the values-prefill 500) → values-test → archive the
+    build original. `tmp/preview_psa_fields.py` draws the boxes onto the PDF so
+    placement is checked BEFORE anything is created on DocuSeal; the locator
+    reproduces the previous build's hardcoded coordinates exactly, so it is
+    trustworthy.
+    - **The old templates are deliberately left UNARCHIVED.** The resolver takes
+      the highest non-archived id per name, so the new build wins for new
+      agreements while every in-flight submission keeps rendering as signed.
+      That also means the swap goes live **the moment the templates exist — no
+      deploy** (`_resolve_template_ids` hits the DocuSeal API on every create).
+    - **GOTCHA — a field area MUST carry `attachment_uuid`**, even on a
+      one-document template. Without it the PUT returns 200, `GET` lists every
+      field with correct coordinates, and a `values` prefill is accepted and
+      stored — but the signing page renders **no fields at all**, i.e. an
+      unfillable blank form, while every API response looks perfect. Take it
+      from `documents[0].uuid`. The Aug-27 script omitted it and only got away
+      with it because opening a template in the DocuSeal UI backfills the value.
+    - **v2's wording changed the terms, so two NEW blanks exist**: `Closing Days`
+      ("we close within ___ calendar days **after the inspection period ends**" —
+      the old text hardcoded 30 days from execution, a different clock) and
+      `Offer Expires Days`. Inspection is now **calendar** days, not business
+      days. Both new fields are required and deliberately NOT prefilled — no safe
+      default exists, and `required` means the rep must fill them before they can
+      sign. `Sale Price` was never prefilled either.
   - **Amendment type (2026-07-14)** — "Amendment (price / closing date)" in the
     type dropdown creates an Amendment-to-PSA envelope from the DocuSeal
     templates `Amendment - One Seller` / `- Two Sellers` (ids 4996712/4996713,

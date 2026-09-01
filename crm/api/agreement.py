@@ -322,6 +322,17 @@ def create_docuseal_agreement(
 			"Property Address": addr,
 		})
 	else:
+		# The live Purchase Agreement template carries: Agreement Date, Seller
+		# Name(s), Property Address, Sale Price, Due Diligence Days, Earnest Money,
+		# Closing Days, Offer Expires Days, Additional Terms, Signer Name, Title
+		# (+ the signature/date fields). Keys below that the template doesn't have
+		# (County / APN / Governing State / Occupancy / Personal Property /
+		# Disclosed Defects) are ignored by DocuSeal and kept only so an older
+		# template revision would still prefill.
+		#
+		# Sale Price, Closing Days and Offer Expires Days are deliberately NOT
+		# prefilled: they are per-deal terms with no safe default, and each is a
+		# REQUIRED field, so the rep must enter them before they can sign.
 		buyer_values = _clean({
 			# from the lead
 			"Seller Name(s)": sellers_joined,
