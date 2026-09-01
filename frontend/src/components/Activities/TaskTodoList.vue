@@ -31,20 +31,10 @@
           </button>
         </Tooltip>
 
-        <input
-          v-if="editingTitle === task.name"
-          ref="titleInput"
-          v-model="titleDraft"
-          type="text"
-          class="min-w-0 flex-1 bg-transparent text-sm text-ink-gray-8 focus:outline-none"
-          @keydown.enter.prevent="saveTitle(task)"
-          @keydown.esc.prevent="editingTitle = null"
-          @blur="saveTitle(task)"
-        />
         <button
-          v-else
-          class="min-w-0 flex-1 truncate text-left text-sm text-ink-gray-8"
-          @click="startTitleEdit(task)"
+          class="min-w-0 flex-1 truncate text-left text-sm text-ink-gray-8 hover:underline"
+          :title="__('Edit task and schedule')"
+          @click="modalRef.showTask(task)"
         >
           {{ task.title }}
         </button>
@@ -61,14 +51,6 @@
           </div>
         </Tooltip>
 
-        <Tooltip :text="__('Edit details')">
-          <button
-            class="hidden shrink-0 items-center text-ink-gray-4 hover:text-ink-gray-7 group-hover/td:flex"
-            @click="modalRef.showTask(task)"
-          >
-            <LucidePanelRight class="size-3.5" />
-          </button>
-        </Tooltip>
         <Tooltip :text="__('Delete')">
           <button
             class="hidden shrink-0 items-center text-ink-gray-4 hover:text-ink-red-3 group-hover/td:flex"
@@ -141,49 +123,58 @@
       </div>
     </div>
 
-    <!-- composer: title on its own line, when-chips underneath so they never
-         crush the input the way the old 2h/24h/1wk/1mo row did -->
-    <div v-else class="border-t border-outline-gray-1 px-3 pt-1.5 pb-2.5">
+    <!-- One explicit flow: say what the task is, choose when, then Add. Due
+         chips select a date instead of silently creating a generic task. -->
+    <div v-else class="border-t border-outline-gray-1 px-3 pt-2 pb-2.5">
       <div class="flex items-center gap-2">
         <LucidePlus class="size-4 shrink-0 text-ink-gray-4" />
         <input
           v-model="newTitle"
           type="text"
-          :placeholder="__('Add a follow-up…')"
+          :placeholder="__('What needs to happen?')"
           autocomplete="off"
           class="todo-composer min-w-0 flex-1 text-sm text-ink-gray-8 placeholder:text-ink-gray-4"
-          @keydown.enter="submit"
+          @keydown.enter.prevent="submit"
+        />
+        <Button
+          variant="solid"
+          :label="__('Add')"
+          :disabled="!newTitle.trim()"
+          @click="submit"
         />
       </div>
-      <div class="mt-1.5 flex flex-wrap items-center gap-1.5 pl-6">
+      <div class="mt-2 flex flex-wrap items-center gap-1.5 pl-6">
+        <span class="mr-0.5 text-xs text-ink-gray-4">{{ __('When') }}</span>
+        <button
+          class="rounded-md border px-2 py-0.5 text-sm"
+          :class="dueChoiceClass(!newDue)"
+          @click="clearDue"
+        >
+          {{ __('No date') }}
+        </button>
         <Tooltip
           v-for="f in presets"
           :key="f.label"
           :text="dueTooltip(f)"
         >
           <button
-            class="rounded-md border border-outline-gray-1 bg-surface-white px-2 py-0.5 text-sm text-ink-gray-7 hover:bg-surface-gray-3"
-            @click="followUp(f)"
+            class="rounded-md border px-2 py-0.5 text-sm"
+            :class="dueChoiceClass(selectedPreset === f.label)"
+            @click="selectPreset(f)"
           >
             {{ f.label }}
           </button>
         </Tooltip>
-        <span
-          v-if="!presets.length"
-          class="text-xs text-ink-gray-4"
-        >
-          {{ __('No due chips — click the pencil to add some.') }}
-        </span>
         <Tooltip :text="__('Pick a due date')">
           <button
-            class="flex items-center text-ink-gray-4 hover:text-ink-gray-6"
-            :class="{ 'text-ink-gray-7': showDatePicker || newDue }"
-            @click="showDatePicker = !showDatePicker"
+            class="flex items-center rounded-md border px-1.5 py-1"
+            :class="dueChoiceClass(showDatePicker && !selectedPreset)"
+            @click="openDatePicker"
           >
             <LucideCalendar class="size-3.5" />
           </button>
         </Tooltip>
-        <Tooltip :text="__('Customize due-date chips')">
+        <Tooltip :text="__('Customize due-date choices')">
           <button
             class="flex items-center text-ink-gray-4 hover:text-ink-gray-7"
             @click="startEdit"
@@ -199,6 +190,7 @@
         <span class="shrink-0 text-xs text-ink-gray-4">{{ __('Due') }}</span>
         <DateTimePicker
           v-model="newDue"
+          @update:modelValue="selectedPreset = ''"
           class="todo-datepicker flex-1"
           :placeholder="__('Due date')"
           :format="getFormat('', '', true, true, false)"
@@ -215,7 +207,6 @@ import ListTodoIcon from '~icons/lucide/list-todo'
 import LucideCalendar from '~icons/lucide/calendar'
 import LucideCircle from '~icons/lucide/circle'
 import LucideCircleCheckBig from '~icons/lucide/circle-check-big'
-import LucidePanelRight from '~icons/lucide/panel-right'
 import LucidePencil from '~icons/lucide/pencil'
 import LucidePlus from '~icons/lucide/plus'
 import LucideTrash2 from '~icons/lucide/trash-2'
@@ -230,7 +221,7 @@ import {
 import { formatDate, dueColor, parseColor, getFormat } from '@/utils'
 import { usersStore } from '@/stores/users'
 import { Button, Tooltip, DateTimePicker, call, toast } from 'frappe-ui'
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed } from 'vue'
 
 const props = defineProps({
   tasks: { type: Array, default: () => [] },
@@ -242,9 +233,7 @@ const { getUser } = usersStore()
 const newTitle = ref('')
 const newDue = ref('')
 const showDatePicker = ref(false)
-const editingTitle = ref(null)
-const titleDraft = ref('')
-
+const selectedPreset = ref('')
 
 
 const savedPresets = computed(() => {
@@ -282,6 +271,7 @@ function submit() {
   newTitle.value = ''
   newDue.value = ''
   showDatePicker.value = false
+  selectedPreset.value = ''
   props.modalRef.addTask(t, due)
 }
 
@@ -289,29 +279,27 @@ function dueTooltip(f) {
   return __('Follow up') + ' · ' + formatDate(dueFromPreset(f), 'ddd, MMM D, YYYY | hh:mm a')
 }
 
-function followUp(f) {
-  const title = newTitle.value.trim() || __('Follow up')
-  newTitle.value = ''
+function selectPreset(f) {
+  selectedPreset.value = f.label
+  newDue.value = formatDueStamp(dueFromPreset(f))
+  showDatePicker.value = false
+}
+
+function clearDue() {
+  selectedPreset.value = ''
   newDue.value = ''
-  props.modalRef.addTask(title, formatDueStamp(dueFromPreset(f)))
+  showDatePicker.value = false
 }
 
-const titleInput = ref(null)
-
-async function startTitleEdit(task) {
-  editingTitle.value = task.name
-  titleDraft.value = task.title
-  await nextTick()
-  const el = titleInput.value?.el || titleInput.value
-  el?.focus?.()
-  el?.select?.()
+function openDatePicker() {
+  selectedPreset.value = ''
+  showDatePicker.value = !showDatePicker.value
 }
 
-async function saveTitle(task) {
-  const t = titleDraft.value.trim()
-  editingTitle.value = null
-  if (!t || t === task.title) return
-  await props.modalRef.patchTask?.(task.name, { title: t })
+function dueChoiceClass(selected) {
+  return selected
+    ? 'border-outline-gray-3 bg-surface-gray-3 font-medium text-ink-gray-8'
+    : 'border-outline-gray-1 bg-surface-white text-ink-gray-6 hover:bg-surface-gray-2'
 }
 
 const editing = ref(false)

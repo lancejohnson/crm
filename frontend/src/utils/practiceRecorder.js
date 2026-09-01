@@ -33,6 +33,7 @@ let propertyId = ''
 let seq = 0
 let captureOn = false
 let stopping = null
+let recorderTail = Promise.resolve()
 const listeners = new Set()
 
 export function watchPracticeRecording(fn) {
@@ -87,24 +88,44 @@ export function resumePracticeRecording() {
   }
 }
 
-export async function startPracticeRecording() {
+export async function startPracticeRecording(mode = 'tab') {
   // getDisplayMedia MUST be the first await — Chrome drops the click's user
   // gesture after any yield, and then the picker never appears.
   mime = TYPES.find((t) => MediaRecorder.isTypeSupported(t))
-  // selfBrowserSurface include is the one that puts THIS tab in the picker;
-  // Chrome hides the calling tab otherwise. preferCurrentTab pre-selects it.
+  const windowMode = mode === 'window'
+  // Window mode keeps Zillow/tab switching inside one recording. The browser
+  // still owns the final permission choice, but displaySurface makes the
+  // intended surface the first picker tab. Tab mode keeps the old one-click
+  // path, including the calling tab itself.
+  const video = {
+    ...VIDEO,
+    displaySurface: windowMode ? 'window' : 'browser',
+  }
   let display
   try {
-    display = await navigator.mediaDevices.getDisplayMedia({
-      video: VIDEO,
-      audio: false,
-      preferCurrentTab: true,
-      selfBrowserSurface: 'include',
-    })
+    display = await navigator.mediaDevices.getDisplayMedia(
+      windowMode
+        ? {
+            video,
+            audio: false,
+            preferCurrentTab: false,
+            selfBrowserSurface: 'exclude',
+            monitorTypeSurfaces: 'exclude',
+            surfaceSwitching: 'exclude',
+          }
+        : {
+            video,
+            audio: false,
+            preferCurrentTab: true,
+            selfBrowserSurface: 'include',
+          },
+    )
   } catch (e) {
-    if (e?.name === 'NotAllowedError') throw e
+    if (e?.name === 'NotAllowedError' || e?.name === 'AbortError') throw e
+    // Older Chromium builds reject the preference keys as a group. Keep the
+    // display-surface hint while dropping only those optional preferences.
     display = await navigator.mediaDevices.getDisplayMedia({
-      video: VIDEO,
+      video,
       audio: false,
     })
   }
@@ -152,30 +173,45 @@ export function setPracticeAttempt(id) {
   pump()
 }
 
-export async function beginPropertyRecording(property) {
-  if (!captureOn || !mixed) return null
-  const prev = await endPropertyRecording()
-  if (!captureOn || !mixed) return prev
-  queue = []
-  seq = 0
-  propertyId = property
-  recorder = new MediaRecorder(mixed, {
-    mimeType: mime || undefined,
-    videoBitsPerSecond: 1_600_000,
-    audioBitsPerSecond: 128_000,
-  })
-  recorder.ondataavailable = (e) => {
-    if (e.data?.size) {
-      queue.push(e.data)
-      pump()
-    }
-  }
-  recorder.start(1000)
-  emit()
-  return prev
+function enqueueRecorderTransition(fn) {
+  // A house switch can take seconds while its last chunks upload. Without one
+  // lane, two quick clicks both finish the same recorder and then each starts a
+  // new one; the later call overwrites the shared property/queue state.
+  const next = recorderTail.then(fn, fn)
+  recorderTail = next.catch(() => {})
+  return next
 }
 
-export async function endPropertyRecording() {
+export function beginPropertyRecording(property) {
+  return enqueueRecorderTransition(async () => {
+    if (!captureOn || !mixed) return null
+    const prev = await endPropertyRecordingNow()
+    if (!captureOn || !mixed) return prev
+    queue = []
+    seq = 0
+    propertyId = property
+    recorder = new MediaRecorder(mixed, {
+      mimeType: mime || undefined,
+      videoBitsPerSecond: 1_600_000,
+      audioBitsPerSecond: 128_000,
+    })
+    recorder.ondataavailable = (e) => {
+      if (e.data?.size) {
+        queue.push(e.data)
+        pump()
+      }
+    }
+    recorder.start(1000)
+    emit()
+    return prev
+  })
+}
+
+export function endPropertyRecording() {
+  return enqueueRecorderTransition(endPropertyRecordingNow)
+}
+
+async function endPropertyRecordingNow() {
   if (stopping) return stopping
   if (!recorder && !queue.length) return null
   stopping = (async () => {

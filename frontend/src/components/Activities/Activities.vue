@@ -194,7 +194,11 @@
         </div>
       </div>
       <div v-else-if="title == 'Emails'" class="px-3 pb-4 sm:px-10">
-        <EmailThread v-if="emailMessages.length" :messages="emailMessages" />
+        <EmailThread
+          v-if="emailMessages.length"
+          :messages="emailMessages"
+          @reply="replyToEmail"
+        />
       </div>
       <div
         v-else-if="title == 'Attachments'"
@@ -247,7 +251,7 @@
             v-if="activity.activity_type == 'email_thread'"
             class="pb-5 mt-px"
           >
-            <EmailThread :messages="activity.messages" />
+            <EmailThread :messages="activity.messages" @reply="replyToEmail" />
           </div>
           <div
             v-else-if="activity.activity_type == 'communication'"
@@ -923,6 +927,10 @@ const refundDraft = computed(() => {
     return {}
   }
 })
+
+function replyToEmail(email) {
+  emailBox.value?.replyTo?.(email)
+}
 
 const emailMessages = computed(() => {
   const list = (all_activities.data?.versions || []).filter(

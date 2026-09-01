@@ -343,6 +343,13 @@
         :setAt="doc.first_call_at"
         @saved="document.reload()"
       />
+      <RefundStatusCard
+        :lead="leadId"
+        :refundable="doc.custom_refundable"
+        :manualTicket="doc.custom_refund_manual_ticket"
+        :status="doc.custom_refund_status"
+        @saved="document.reload()"
+      />
       <PhotosCard :lead="leadId" @open="showPhotoGallery = true" />
       <TaxInfoCard :lead="leadId" @fetch="activities?.fetchTaxInfo()" />
       <AgreementsCard :lead="leadId" @create="activities?.createAgreement()" />
@@ -436,6 +443,7 @@ import SidePanelLayout from '@/components/SidePanelLayout.vue'
 import SLASection from '@/components/SLASection.vue'
 import CustomActions from '@/components/CustomActions.vue'
 import FirstCallReadCard from '@/components/FirstCallReadCard.vue'
+import RefundStatusCard from '@/components/RefundStatusCard.vue'
 import LeadPhonesCard from '@/components/LeadPhonesCard.vue'
 import PhotosCard from '@/components/PhotosCard.vue'
 import PhotoGalleryModal from '@/components/Modals/PhotoGalleryModal.vue'

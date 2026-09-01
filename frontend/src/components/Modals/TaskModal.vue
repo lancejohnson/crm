@@ -3,7 +3,7 @@
     <template #body-title>
       <div class="flex items-center gap-3">
         <h3 class="text-2xl font-semibold leading-6 text-ink-gray-9">
-          {{ editMode ? __('Edit Task') : __('Create Task') }}
+          {{ editMode ? __('Edit Task') : __('Schedule a Task') }}
         </h3>
         <Button
           v-if="task?.reference_docname"
@@ -20,92 +20,104 @@
     </template>
     <template #body-content>
       <div class="flex flex-col gap-4">
-        <div class="space-y-1.5">
-          <FormLabel :label="__('Title')" required />
-          <TextInput
-            ref="title"
-            :label="__('Title')"
-            v-model="_task.title"
-            :placeholder="__('Call with John Doe')"
-            required
-          />
-        </div>
-        <div>
-          <div class="mb-1.5 text-xs text-ink-gray-5">
-            {{ __('Description') }}
-          </div>
-          <TextEditor
-            ref="description"
-            variant="outline"
-            editor-class="!prose-sm overflow-auto min-h-[180px] max-h-80 py-1.5 px-2 rounded border border-[--surface-gray-2] bg-surface-gray-2 placeholder-ink-gray-4 hover:border-outline-gray-modals hover:bg-surface-gray-3 hover:shadow-sm focus:bg-surface-white focus:border-outline-gray-4 focus:shadow-sm focus:ring-0 focus-visible:ring-2 focus-visible:ring-outline-gray-3 text-ink-gray-8 transition-colors"
-            :bubbleMenu="true"
-            :content="_task.description"
-            :placeholder="
-              __('Took a call with John Doe and discussed the new project.')
-            "
-            @change="(val) => (_task.description = val)"
-          />
-        </div>
-        <div class="flex flex-wrap items-center gap-2">
-          <Dropdown :options="taskStatusOptions(updateTaskStatus)">
-            <Button :label="_task.status">
-              <template #prefix>
-                <TaskStatusIcon :status="_task.status" />
-              </template>
-            </Button>
-          </Dropdown>
-          <Link
-            class="form-control"
-            :value="getUser(_task.assigned_to).full_name"
-            doctype="User"
-            :placeholder="__('John Doe')"
-            :filters="{
-              name: ['in', users.data.crmUsers?.map((user) => user.name)],
-              ignore_user_type: 1,
-            }"
-            :hideMe="true"
-            @change="(option) => (_task.assigned_to = option)"
-          >
-            <template #prefix>
-              <UserAvatar class="mr-2 !h-4 !w-4" :user="_task.assigned_to" />
-            </template>
-            <template #item-prefix="{ option }">
-              <UserAvatar class="mr-2" :user="option.value" size="sm" />
-            </template>
-            <template #item-label="{ option }">
-              <Tooltip :text="option.value">
-                <div class="cursor-pointer text-ink-gray-9">
-                  {{ getUser(option.value).full_name }}
-                </div>
-              </Tooltip>
-            </template>
-          </Link>
-          <div class="w-36">
-            <DateTimePicker
-              v-model="_task.due_date"
-              class="datepicker"
-              :placeholder="__('01/04/2024 11:30 PM')"
-              :format="getFormat('', '', true, true, false)"
-              input-class="border-none"
+        <div class="grid gap-4 sm:grid-cols-[minmax(0,1fr)_13rem]">
+          <div class="space-y-1.5">
+            <FormLabel :label="__('What needs to happen?')" required />
+            <TextInput
+              ref="title"
+              v-model="_task.title"
+              :placeholder="__('Call seller about offer')"
+              required
             />
           </div>
-          <Dropdown :options="taskPriorityOptions(updateTaskPriority)">
-            <Button :label="_task.priority">
-              <template #prefix>
-                <TaskPriorityIcon :priority="_task.priority" />
-              </template>
-            </Button>
-          </Dropdown>
-          <Dropdown :options="taskOutcomeOptions(updateTaskOutcome)">
-            <Button :label="_task.call_outcome || __('Call Outcome')" />
-          </Dropdown>
+          <div class="space-y-1.5">
+            <FormLabel :label="__('When?')" />
+            <DateTimePicker
+              v-model="_task.due_date"
+              class="datepicker w-full"
+              :placeholder="__('No due date')"
+              :format="getFormat('', '', true, true, false)"
+            />
+          </div>
         </div>
+
+        <button
+          v-if="!editMode"
+          type="button"
+          class="flex w-fit items-center gap-1 text-sm text-ink-gray-5 hover:text-ink-gray-8"
+          @click="advancedOpen = !advancedOpen"
+        >
+          <FeatherIcon :name="advancedOpen ? 'chevron-up' : 'chevron-down'" class="size-3.5" />
+          {{ advancedOpen ? __('Fewer options') : __('More options') }}
+        </button>
+
+        <template v-if="editMode || advancedOpen">
+          <div>
+            <div class="mb-1.5 text-xs text-ink-gray-5">
+              {{ __('Notes') }}
+            </div>
+            <TextEditor
+              ref="description"
+              variant="outline"
+              editor-class="!prose-sm overflow-auto min-h-[120px] max-h-64 py-1.5 px-2 rounded border border-[--surface-gray-2] bg-surface-gray-2 placeholder-ink-gray-4 hover:border-outline-gray-modals hover:bg-surface-gray-3 hover:shadow-sm focus:bg-surface-white focus:border-outline-gray-4 focus:shadow-sm focus:ring-0 focus-visible:ring-2 focus-visible:ring-outline-gray-3 text-ink-gray-8 transition-colors"
+              :bubbleMenu="true"
+              :content="_task.description"
+              :placeholder="__('Anything the assignee should know…')"
+              @change="(val) => (_task.description = val)"
+            />
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <Dropdown :options="taskStatusOptions(updateTaskStatus)">
+              <Button :label="_task.status">
+                <template #prefix>
+                  <TaskStatusIcon :status="_task.status" />
+                </template>
+              </Button>
+            </Dropdown>
+            <Link
+              class="form-control"
+              :value="getUser(_task.assigned_to).full_name"
+              doctype="User"
+              :placeholder="__('Assign to')"
+              :filters="{
+                name: ['in', users.data.crmUsers?.map((user) => user.name)],
+                ignore_user_type: 1,
+              }"
+              :hideMe="true"
+              @change="(option) => (_task.assigned_to = option)"
+            >
+              <template #prefix>
+                <UserAvatar class="mr-2 !h-4 !w-4" :user="_task.assigned_to" />
+              </template>
+              <template #item-prefix="{ option }">
+                <UserAvatar class="mr-2" :user="option.value" size="sm" />
+              </template>
+              <template #item-label="{ option }">
+                <Tooltip :text="option.value">
+                  <div class="cursor-pointer text-ink-gray-9">
+                    {{ getUser(option.value).full_name }}
+                  </div>
+                </Tooltip>
+              </template>
+            </Link>
+            <Dropdown :options="taskPriorityOptions(updateTaskPriority)">
+              <Button :label="_task.priority">
+                <template #prefix>
+                  <TaskPriorityIcon :priority="_task.priority" />
+                </template>
+              </Button>
+            </Dropdown>
+            <Dropdown :options="taskOutcomeOptions(updateTaskOutcome)">
+              <Button :label="_task.call_outcome || __('Call Outcome')" />
+            </Dropdown>
+          </div>
+        </template>
       </div>
     </template>
     <template #actions>
       <div class="flex justify-end">
         <Button
-          :label="editMode ? __('Update') : __('Create')"
+          :label="editMode ? __('Update') : __('Schedule')"
           variant="solid"
           :loading="createTaskResource.loading || updateTaskResource.loading"
           @click="updateTask"
@@ -134,6 +146,7 @@ import {
   toast,
   TextInput,
   FormLabel,
+  FeatherIcon,
 } from 'frappe-ui'
 import { useOnboarding } from 'frappe-ui/frappe'
 import { ref, watch, nextTick, onMounted } from 'vue'
@@ -157,12 +170,13 @@ const { capture } = useTelemetry()
 
 const title = ref(null)
 const editMode = ref(false)
+const advancedOpen = ref(false)
 const _task = ref({
   title: '',
   description: '',
   assigned_to: '',
   due_date: '',
-  status: 'Backlog',
+  status: 'Todo',
   priority: 'Low',
   call_outcome: '',
   reference_doctype: props.doctype,
@@ -268,6 +282,10 @@ function render() {
     _task.value = { ...props.task }
     if (_task.value.title) {
       editMode.value = true
+      advancedOpen.value = true
+    } else {
+      _task.value.status = _task.value.status || 'Todo'
+      advancedOpen.value = false
     }
   })
 }

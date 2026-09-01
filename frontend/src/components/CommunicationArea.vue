@@ -197,9 +197,11 @@ async function sendMail() {
   let cc = newEmailEditor.value.ccEmails || []
   let bcc = newEmailEditor.value.bccEmails || []
   const refundDraft = Boolean(doc.value.custom_refund_draft_json)
-  if (refundDraft) {
-    fromEmail = 'lance.johnson@groundworkpro.com'
-  }
+  const refundReply =
+    props.doctype === 'CRM Lead' &&
+    Boolean(doc.value.custom_refundable) &&
+    recipients.some((address) => /ispeedtolead(help)?\.|zendesk\.com/i.test(address || ''))
+  if (refundDraft || refundReply) fromEmail = 'lance.johnson@groundworkpro.com'
 
   if (attachments.value.length) {
     capture('email_attachments_added')
@@ -217,14 +219,19 @@ async function sendMail() {
     sender: fromEmail,
     sender_full_name: getUser()?.full_name || undefined,
   })
+  if (refundReply) {
+    await call('crm.api.refunds.set_refund_state', {
+      lead: doc.value.name,
+      status: 'Waiting on them',
+    })
+    doc.value.custom_refund_status = 'Waiting on them'
+  }
   if (refundDraft) {
     await call('frappe.client.set_value', {
       doctype: 'CRM Lead',
       name: doc.value.name,
-      fieldname: {
-        custom_refund_draft_json: '',
-        custom_refund_status: 'Waiting on them',
-      },
+      fieldname: 'custom_refund_draft_json',
+      value: '',
     })
     doc.value.custom_refund_draft_json = ''
   }
@@ -312,6 +319,16 @@ function toggleCommentBox() {
   showCommentBox.value = !showCommentBox.value
 }
 
+function replyTo(email) {
+  if (!email) return
+  loadDraft({
+    to: email.sender,
+    subject: email.subject || '',
+    body: '',
+    quoteHtml: email.content || '',
+  })
+}
+
 function loadDraft({ to, subject: subj, body, quoteHtml }) {
   showCommentBox.value = false
   showEmailBox.value = true
@@ -344,5 +361,6 @@ defineExpose({
   showComment: showCommentBox,
   editor: newEmailEditor,
   loadDraft,
+  replyTo,
 })
 </script>

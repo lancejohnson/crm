@@ -2744,8 +2744,13 @@ useKeyboardShortcuts({
     { keys: ['d', 'D'], action: () => (showDetail.value = !showDetail.value) },
     { keys: ['p', 'P'], action: () => (showParcels.value = !showParcels.value) },
     { keys: ['s', 'S'], action: () => (showStreet.value = !showStreet.value) },
-    // Hide tray + calculator together. `C` still folds only the calc.
-    { keys: ['f', 'F'], action: () => toggleCompsFocusMap() },
+    // Hide tray + calculator together. Browser Find keeps Cmd/Ctrl+F; only a
+    // bare F owns this action. `C` still folds only the calc.
+    {
+      keys: ['f', 'F'],
+      guard: (e) => !e.metaKey && !e.ctrlKey && !e.altKey,
+      action: () => toggleCompsFocusMap(),
+    },
     // Only where the calculator exists, so `c` stays free elsewhere.
     // No-op in full-map: the calc is not on screen, and flipping the pref
     // behind the overlay would surprise on the way back out.

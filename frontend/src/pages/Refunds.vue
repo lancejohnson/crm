@@ -40,11 +40,19 @@
                   · {{ lead.lost_reason }}
                 </template>
               </div>
-              <div
-                v-if="lead.custom_refund_requested"
-                class="mt-1 text-xs text-ink-gray-5"
-              >
-                {{ __('Requested') }}
+              <div class="mt-2 flex items-center gap-1.5">
+                <Badge
+                  v-if="lead.custom_refund_manual_ticket"
+                  variant="subtle"
+                  theme="orange"
+                  :label="__('Manual ticket')"
+                />
+                <span
+                  v-else-if="lead.custom_refund_requested"
+                  class="text-xs text-ink-gray-5"
+                >
+                  {{ __('Requested') }}
+                </span>
               </div>
             </router-link>
           </template>
@@ -56,7 +64,7 @@
 
 <script setup>
 import Draggable from 'vuedraggable'
-import { createListResource, call, toast } from 'frappe-ui'
+import { Badge, createListResource, call, toast } from 'frappe-ui'
 import { computed } from 'vue'
 
 const STATUSES = [
@@ -78,6 +86,7 @@ const list = createListResource({
     'custom_refundable',
     'custom_refund_requested',
     'custom_refund_status',
+    'custom_refund_manual_ticket',
     'modified',
   ],
   filters: { custom_refundable: 1 },
@@ -105,20 +114,12 @@ async function onChange(evt, toStatus) {
   const lead = evt.added?.element
   if (!lead || statusOf(lead) === toStatus) return
   try {
-    await call('frappe.client.set_value', {
-      doctype: 'CRM Lead',
-      name: lead.name,
-      fieldname: {
-        custom_refund_status: toStatus,
-        ...((toStatus === 'Requested' || toStatus === 'Complete') && {
-          custom_refund_requested: 1,
-        }),
-      },
+    await call('crm.api.refunds.set_refund_state', {
+      lead: lead.name,
+      status: toStatus,
     })
     lead.custom_refund_status = toStatus
-    if (toStatus === 'Requested' || toStatus === 'Complete') {
-      lead.custom_refund_requested = 1
-    }
+    if (toStatus !== 'To Request') lead.custom_refund_requested = 1
   } catch (e) {
     toast.error(e.messages?.[0] || __('Could not move lead'))
     list.reload()

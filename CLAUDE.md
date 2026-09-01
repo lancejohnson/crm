@@ -41,10 +41,15 @@ duplicating. Work substantial features in a worktree of your own.
   Times and recordings are team-visible on submitted runs (in-progress stays
   private). **Calcs** on the set page is one table per house — one column per
   person (latest submitted run; in-progress omitted), ARV / repair / offer /
-  formula as rows. Optional **screen + mic** on Start (`practiceRecorder.js`): Chrome
-  is asked for **this tab** (`preferCurrentTab` + `selfBrowserSurface: include`);
-  chunks upload as they arrive so a 30-minute take never hits nginx's 50m body
-  limit; playback is `stream_recording` (private File URLs 403 in `<video>`).
+  formula as rows. Optional **screen + mic** on Start (`practiceRecorder.js`):
+  choose **Browser window** (recommended, keeps Zillow tab switches inside the
+  capture) or **This tab**. Property switches are locked until the server clock
+  + recorder rollover finish, and recorder transitions share one queue; quick
+  clicks can no longer return stale timer state or overwrite shared recorder
+  globals. Chunks upload as they arrive so a 30-minute take never hits nginx's
+  50m body limit; playback is `stream_recording` (private File URLs 403 in
+  `<video>`). Canonical/`.part` files remain the recovery source when a JSON
+  recording stamp is lost.
   Play opens a modal player (`PracticePlayer.vue`) with speed, fullscreen, a
   comments thread, and Loom-style timestamped emoji + comments (Space play,
   ←/→ skip, [ ] speed, C comment, F full). Stored as `Comment` rows on the
@@ -58,9 +63,16 @@ duplicating. Work substantial features in a worktree of your own.
 - **Refunds board** — sidebar **Refunds** (`/refunds`) is a kanban of
   `custom_refundable=1` leads (To Request / Requested / Waiting on us /
   Waiting on them / Complete). Marking Dead does not queue a refund; the
-  Refundable checkbox does. ISTL first-10-dials-in-14-days with no pickup ever, no inbound text, not Dead/Lost, nudges
-  the owner (`crm/api/istl_refund_nudge.py`). Fields: ops
-  `setup_refundable_field.py`.
+  Refundable control does. A **Refund** sidebar card exists on desktop AND
+  mobile for every lead, so an active Follow Up can stay live while it is
+  tracked here. **Manual support ticket** means the lead was missing from the
+  provider refund form; one check marks it refundable + requested and the board
+  labels its origin. Inbound refund email threads always have Reply, even when
+  Pi produced no draft; sending to ISTL updates Waiting on them. ISTL
+  first-10-dials-in-14-days with no pickup ever, no inbound text, not Dead/Lost,
+  nudges the owner (`crm/api/istl_refund_nudge.py`). The host mail poller credits
+  only the actual transition to Complete, not every duplicate completion email.
+  Fields: ops `setup_refundable_field.py`.
 
 - **Multiple phones per lead + Quo call backfill** — a lead can hold as many
   numbers as the rep types in. `mobile_no` stays the primary (Call / Text /
@@ -1930,9 +1942,12 @@ duplicating. Work substantial features in a worktree of your own.
 - **Lead/Deal tasks as a Trello-style to-do list** — the existing `CRM Task`
   feature (its own Tasks tab + heavyweight `TaskModal`) is now surfaced in the
   **unified Activity timeline**: a pinned **"To-do"** block at the top of the
-  Activity feed lists every open task with a Trello-style **inline quick-add**
-  (`Add a task…` + a `DateTimePicker` for an optional **due date/time**, Enter →
-  insert defaulted to current user + `Todo`), a **hover circle →
+  Activity feed lists every open task with an explicit **What + When + Add**
+  flow: title first, then No date / 2h / 3d / 1wk / 1mo / calendar, and nothing
+  is created until Add/Enter. A due chip SELECTS the date; it no longer silently
+  creates a generic “Follow up” when the title is blank. Inserts default to the
+  current user + `Todo`. The full Task modal opens as a compact **Schedule a
+  Task** form (title + when, advanced fields behind More options), a **hover circle →
   click-to-complete** checkbox, and a **hover trash icon** to delete a to-do
   inline; tasks sort by due date (overdue first), the relative due date is **red**
   once overdue / **amber** when due today. Completed/canceled tasks drop into the
@@ -1941,8 +1956,10 @@ duplicating. Work substantial features in a worktree of your own.
   history — no duplication. Creating/saving a task **stays on the Activity tab**
   (removed `TaskModal`'s `@after="redirect('tasks')"`).
   - `frontend/src/components/Activities/TaskTodoList.vue` — checklist (no nested
-    gray card): click title to rename, hover-check to complete, panel icon opens
-    `TaskModal`. Due chips are per-user (`crm.api.task_presets`, Frappe user
+    gray card): click a title to edit the task + schedule in `TaskModal`; hover-
+    check completes it. This replaces the hidden split where title-click renamed
+    but a hover-only panel icon edited the schedule (unreachable on touch). Due
+    chips are per-user (`crm.api.task_presets`, Frappe user
     default `crm_task_due_presets`, no ops field) with a pencil editor like
     quick comments; unset falls back to 2h / 3d / 1wk / 1mo. **Day/week/month
     chips land at 9:00am America/Chicago**, not midnight and not now+N×24h;

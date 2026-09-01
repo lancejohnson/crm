@@ -50,13 +50,14 @@
         <Button
           v-if="attempt.status === 'In Progress' && attempt.mine"
           :label="attempt.paused ? __('Resume') : __('Pause')"
+          :disabled="switchingProperty || uploading"
           :loading="pausing"
           @click="togglePause"
         />
         <Button
           v-if="attempt.status === 'In Progress' && attempt.mine"
           :label="__('Done with this one')"
-          :disabled="!current"
+          :disabled="!current || switchingProperty || uploading"
           :loading="marking"
           @click="doneCurrent"
         />
@@ -64,6 +65,7 @@
           v-if="attempt.status === 'In Progress' && attempt.mine"
           variant="solid"
           :label="__('Submit set')"
+          :disabled="switchingProperty"
           :loading="submitting || uploading"
           @click="() => submit()"
         />
@@ -76,8 +78,12 @@
         v-for="(p, i) in properties"
         :key="p.name"
         class="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ink-gray-4"
-        :class="chipClass(p, i)"
+        :class="[
+          chipClass(p, i),
+          switchingProperty || uploading ? 'cursor-wait opacity-60' : '',
+        ]"
         :title="p.property_address"
+        :disabled="switchingProperty || uploading"
         @click="select(i)"
       >
         <span>{{ i + 1 }}. {{ street(p.property_address) }}</span>
@@ -96,7 +102,11 @@
         rows="2"
         class="form-input mb-2 w-full shrink-0 resize-y text-sm"
         :placeholder="__('Condition — roof, kitchen, foundation…')"
-        :disabled="attempt.status !== 'In Progress' || attempt.mine === false"
+        :disabled="
+          attempt.status !== 'In Progress' ||
+          attempt.mine === false ||
+          switchingProperty
+        "
         @blur="persistCondition(current.name)"
       />
       <CompsView
@@ -143,6 +153,7 @@ const remaining = ref(null)
 const elapsed = ref(0)
 const recording = ref(false)
 const uploading = ref(false)
+const switchingProperty = ref(false)
 const pausing = ref(false)
 const condition = ref('')
 let tick = null
@@ -265,7 +276,7 @@ async function onTimeUp() {
 }
 
 async function onHouseTimeUp() {
-  if (marking.value || submitting.value) return
+  if (marking.value || submitting.value || switchingProperty.value || uploading.value) return
   const cur = current.value
   if (!cur || cur.done_at || cur.timed_out) return
   marking.value = true
@@ -305,39 +316,49 @@ watch(
 watch(
   () => current.value?.name,
   async (name, prev) => {
-    if (prev) await persistCondition(prev)
-    condition.value =
-      properties.value.find((p) => p.name === name)?.condition || ''
-    if (!name || attempt.value.status !== 'In Progress' || attempt.value.mine === false) return
+    switchingProperty.value = true
     try {
-      const res = await call('crm.api.practice.touch_property', {
-        attempt: props.attemptId,
-        property: name,
-      })
-      run.data = { ...run.data, ...res }
-      syncClock(res)
-      if (!condition.value) {
-        condition.value =
-          res.properties?.find((p) => p.name === name)?.condition || ''
+      // Keep one property transition in flight. A recording rollover can take a
+      // few seconds; letting another tab click through during that window sent
+      // touch/clock responses back out of order and made the timer jump.
+      if (prev) await persistCondition(prev)
+      condition.value =
+        properties.value.find((p) => p.name === name)?.condition || ''
+      if (!name || attempt.value.status !== 'In Progress' || attempt.value.mine === false) return
+      try {
+        const res = await call('crm.api.practice.touch_property', {
+          attempt: props.attemptId,
+          property: name,
+        })
+        run.data = { ...run.data, ...res }
+        syncClock(res)
+        if (!condition.value) {
+          condition.value =
+            res.properties?.find((p) => p.name === name)?.condition || ''
+        }
+      } catch (e) {
+        toast.error(e.messages?.[0] || __('Could not open that property.'))
+        return
       }
-    } catch (e) {
-      toast.error(e.messages?.[0] || __('Could not open that property.'))
-    }
-    if (attempt.value.paused || !isPracticeRecording()) return
-    if (hasPracticeRecorder() && !prev) return
-    uploading.value = true
-    try {
-      const ended = await beginPropertyRecording(name)
-      applyRecording(ended)
-    } catch {
-      toast.error(__('Could not save the recording for the last property.'))
+      if (attempt.value.paused || !isPracticeRecording()) return
+      if (hasPracticeRecorder() && !prev) return
+      uploading.value = true
+      try {
+        const ended = await beginPropertyRecording(name)
+        applyRecording(ended)
+      } catch {
+        toast.error(__('Could not save the recording for the last property.'))
+      } finally {
+        uploading.value = false
+      }
     } finally {
-      uploading.value = false
+      switchingProperty.value = false
     }
   },
 )
 
 function select(i) {
+  if (switchingProperty.value || uploading.value || i === currentIndex.value) return
   currentIndex.value = i
 }
 

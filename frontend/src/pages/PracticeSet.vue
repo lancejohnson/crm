@@ -16,14 +16,17 @@
           :loading="saving"
           @click="saveMeta"
         />
-        <label
+        <Dropdown
           v-if="canRecord"
-          class="flex cursor-pointer items-center gap-1.5 text-sm text-ink-gray-7"
-          :title="__('Capture this tab and your mic so you can talk through the comps')"
+          :options="captureOptions"
+          placement="bottom-end"
         >
-          <FormControl type="checkbox" v-model="wantRecord" />
-          {{ __('Record screen + mic') }}
-        </label>
+          <Button
+            variant="subtle"
+            :label="captureLabel"
+            :title="captureTitle"
+          />
+        </Dropdown>
         <Button
           variant="solid"
           :label="resumeLabel"
@@ -384,6 +387,7 @@ import {
   Breadcrumbs,
   Button,
   Dialog,
+  Dropdown,
   FormControl,
   call,
   createResource,
@@ -414,8 +418,42 @@ const addKey = ref(0)
 const randomCount = ref(5)
 const area = reactive({ states: '', cities: '', counties: '', zips: '' })
 const addingRandom = ref(false)
-const wantRecord = ref(false)
+const savedCaptureMode = localStorage.getItem('practiceCaptureMode')
+const captureMode = ref(['off', 'window', 'tab'].includes(savedCaptureMode) ? savedCaptureMode : 'off')
 const canRecord = computed(() => canPracticeRecord())
+const captureLabel = computed(() => {
+  if (captureMode.value === 'window') return __('Record: window')
+  if (captureMode.value === 'tab') return __('Record: this tab')
+  return __('No recording')
+})
+const captureTitle = computed(() =>
+  captureMode.value === 'window'
+    ? __('Records the browser window and your mic, including tabs you switch to')
+    : captureMode.value === 'tab'
+      ? __('Records only this CRM tab and your mic')
+      : __('Start without screen or microphone recording'),
+)
+const captureOptions = computed(() => [
+  {
+    label: __('Browser window + mic'),
+    description: __('Recommended — keeps recording while you use Zillow tabs'),
+    onClick: () => setCaptureMode('window'),
+  },
+  {
+    label: __('This tab + mic'),
+    description: __('Only the CRM tab'),
+    onClick: () => setCaptureMode('tab'),
+  },
+  {
+    label: __('No recording'),
+    onClick: () => setCaptureMode('off'),
+  },
+])
+
+function setCaptureMode(mode) {
+  captureMode.value = mode
+  localStorage.setItem('practiceCaptureMode', mode)
+}
 const form = reactive({
   title: '',
   time_limit_min: 0,
@@ -683,16 +721,16 @@ async function start() {
   starting.value = true
   let recording = false
   try {
-    if (wantRecord.value && canPracticeRecord()) {
+    if (captureMode.value !== 'off' && canPracticeRecord()) {
       try {
-        await startPracticeRecording()
+        await startPracticeRecording(captureMode.value)
         recording = true
       } catch (e) {
         if (e?.name !== 'NotAllowedError' && e?.name !== 'AbortError') {
           toast.error(
             e?.message
               ? __('Could not start recording: {0}', [e.message])
-              : __('Could not start the recording — pick this tab and allow the mic.'),
+              : __('Could not start the recording — choose the requested surface and allow the mic.'),
           )
         }
       }
