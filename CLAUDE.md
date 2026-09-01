@@ -277,12 +277,17 @@ duplicating. Work substantial features in a worktree of your own.
     - `today_board.warm_status(for_date)` reports warm/cold/unlocated, so "is it
       working?" has an answer. Verified on prod: **8 → 20 → 49 → 60** across ticks,
       0 failures, 0 429s, no overlapping jobs.
-    - **GOTCHA — a DEPLOY empties the warm cache.** `build_image.sh` ends in a
-      cache clear, which flushes the Redis DB the area/pin caches live in
-      (observed: 60 warm → 0 immediately after gw353). Nothing is broken and the
-      sweep refills the board within ~40 minutes on its own — but it does mean the
-      first opens right after any deploy are slow, which has always been true and
-      now has a name. Avoid deploying into the 9:30am start if you can.
+    - **FIXED (gw365) — a deploy no longer empties the warm cache.** It used to:
+      `build_image.sh` ends in `bench clear-cache`, and Frappe's `clear_cache()`
+      deletes every site key EXCEPT prefixes named in the `persistent_cache_keys`
+      hook — which was never declared (observed: 60 warm → 0 after gw353; ~300
+      RapidAPI calls rebought over ~40 min). `crm/hooks.py` now declares
+      `zillow_area` / `zillow_pin` / `crm:comp-detail` / `zillow_quota_remaining`
+      (verified on prod: 650 circles + 6,106 pins survive a real clear-cache).
+      CONSEQUENCE: the version constants baked into the keys
+      (`AREA_CACHE_VERSION` etc.) are now the ONLY invalidation path — changing
+      the shape of a cached row means bumping the matching constant; a deploy no
+      longer papers over forgetting.
   - **Pending / under contract is asked for explicitly** (gw352):
     `isPendingUnderContract=1` on the ForSale search. Default ForSale **hides**
     them — measured Davenport **97 → 156** listings, Indianapolis **281 → 359**.
