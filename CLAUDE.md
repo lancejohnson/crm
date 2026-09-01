@@ -74,9 +74,11 @@ duplicating. Work substantial features in a worktree of your own.
   Waiting on them / Complete). Marking Dead does not queue a refund; the
   Refundable control does. A **Refund** sidebar card exists on desktop AND
   mobile for every lead, so an active Follow Up can stay live while it is
-  tracked here. **Manual support ticket** means the lead was missing from the
-  provider refund form; one check marks it refundable + requested and the board
-  labels its origin. Inbound refund email threads always have Reply, even when
+  tracked here. Missing-form work has TWO explicit states: **Not in provider
+  refund form** marks it refundable but leaves it To Request; **Manual support
+  ticket submitted** also marks requested + Requested (and implies the first
+  flag). The board labels either origin, so “missing” is never mistaken for
+  “already submitted”. Inbound refund email threads always have Reply, even when
   Pi produced no draft; sending to ISTL updates Waiting on them. ISTL
   first-10-dials-in-14-days with no pickup ever, no inbound text, not Dead/Lost,
   nudges the owner (`crm/api/istl_refund_nudge.py`). The host mail poller credits

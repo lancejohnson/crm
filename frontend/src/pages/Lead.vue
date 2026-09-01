@@ -346,6 +346,7 @@
       <RefundStatusCard
         :lead="leadId"
         :refundable="doc.custom_refundable"
+        :notInProvider="doc.custom_refund_not_in_provider"
         :manualTicket="doc.custom_refund_manual_ticket"
         :status="doc.custom_refund_status"
         @saved="document.reload()"

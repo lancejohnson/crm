@@ -30,14 +30,29 @@
       <label class="mt-3 flex cursor-pointer items-start gap-2 text-sm text-ink-gray-7">
         <FormControl
           type="checkbox"
+          :modelValue="notInProvider"
+          :disabled="saving"
+          @update:modelValue="setNotInProvider"
+        />
+        <span>
+          <span class="font-medium text-ink-gray-8">{{ __('Not in provider refund form') }}</span>
+          <span class="mt-0.5 block text-xs leading-relaxed text-ink-gray-5">
+            {{ __('The lead is missing from the normal refund request list.') }}
+          </span>
+        </span>
+      </label>
+
+      <label class="mt-3 flex cursor-pointer items-start gap-2 text-sm text-ink-gray-7">
+        <FormControl
+          type="checkbox"
           :modelValue="manualTicket"
           :disabled="saving"
           @update:modelValue="setManualTicket"
         />
         <span>
-          <span class="font-medium text-ink-gray-8">{{ __('Manual support ticket') }}</span>
+          <span class="font-medium text-ink-gray-8">{{ __('Manual support ticket submitted') }}</span>
           <span class="mt-0.5 block text-xs leading-relaxed text-ink-gray-5">
-            {{ __('Use when the lead was missing from the provider refund form and you filed a general ticket.') }}
+            {{ __('Check after filing the fallback general support ticket.') }}
           </span>
         </span>
       </label>
@@ -75,6 +90,7 @@ const STATUSES = ['To Request', 'Requested', 'Waiting on us', 'Waiting on them',
 const props = defineProps({
   lead: { type: String, required: true },
   refundable: { type: [Boolean, Number], default: false },
+  notInProvider: { type: [Boolean, Number], default: false },
   manualTicket: { type: [Boolean, Number], default: false },
   status: { type: String, default: '' },
 })
@@ -112,6 +128,10 @@ function mark() {
 
 function remove() {
   update({ refundable: 0 })
+}
+
+function setNotInProvider(value) {
+  update({ not_in_provider: value ? 1 : 0 })
 }
 
 function setManualTicket(value) {

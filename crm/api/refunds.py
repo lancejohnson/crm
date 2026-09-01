@@ -37,6 +37,7 @@ def _draft(lead) -> dict:
 def set_refund_state(
 	lead: str,
 	refundable=None,
+	not_in_provider=None,
 	manual_ticket=None,
 	status: str | None = None,
 ):
@@ -66,8 +67,20 @@ def set_refund_state(
 				"custom_refund_requested_on": None,
 				"custom_refund_status": "",
 			})
+			if doc.meta.has_field("custom_refund_not_in_provider"):
+				updates["custom_refund_not_in_provider"] = 0
 			if doc.meta.has_field("custom_refund_manual_ticket"):
 				updates["custom_refund_manual_ticket"] = 0
+
+	if not_in_provider is not None:
+		if not doc.meta.has_field("custom_refund_not_in_provider"):
+			frappe.throw(_("Provider-form tracking is not provisioned."))
+		missing = _as_bool(not_in_provider)
+		updates["custom_refund_not_in_provider"] = 1 if missing else 0
+		if missing:
+			updates["custom_refundable"] = 1
+			if not (doc.get("custom_refund_status") or "").strip():
+				updates["custom_refund_status"] = "To Request"
 
 	if manual_ticket is not None:
 		if not doc.meta.has_field("custom_refund_manual_ticket"):
@@ -76,6 +89,8 @@ def set_refund_state(
 		updates["custom_refund_manual_ticket"] = 1 if manual else 0
 		if manual:
 			updates["custom_refundable"] = 1
+			if doc.meta.has_field("custom_refund_not_in_provider"):
+				updates["custom_refund_not_in_provider"] = 1
 			updates["custom_refund_requested"] = 1
 			if not doc.get("custom_refund_requested_on"):
 				updates["custom_refund_requested_on"] = now_datetime()

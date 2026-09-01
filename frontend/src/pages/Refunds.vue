@@ -47,6 +47,12 @@
                   theme="orange"
                   :label="__('Manual ticket')"
                 />
+                <Badge
+                  v-else-if="lead.custom_refund_not_in_provider"
+                  variant="subtle"
+                  theme="orange"
+                  :label="__('Not in provider form')"
+                />
                 <span
                   v-else-if="lead.custom_refund_requested"
                   class="text-xs text-ink-gray-5"
@@ -86,6 +92,7 @@ const list = createListResource({
     'custom_refundable',
     'custom_refund_requested',
     'custom_refund_status',
+    'custom_refund_not_in_provider',
     'custom_refund_manual_ticket',
     'modified',
   ],
