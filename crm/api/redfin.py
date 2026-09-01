@@ -1,23 +1,25 @@
 # Copyright (c) 2026, Groundwork and contributors
 # For license information, please see license.txt
 
-"""Redfin photos — third rung of the gallery ladder, via groundwork-geo.
+"""Redfin photos — third rung of the gallery ladder, via redfin-scraper-api.
 
-The CRM does not talk to Redfin. groundwork-geo owns the one Redfin client on
-this egress IP — the WAF budget is IP-keyed, so several apps each running their
-own scraper would collectively exhaust it with nobody able to tell which one
-did (that service's CLAUDE.md, "Why this is a service and not a library"). The
-first cut of this module scraped Redfin's avm endpoint directly from the CRM;
-it worked, and it was still the wrong place for the traffic to live.
+The CRM does not talk to Redfin. redfin-scraper-api (formerly groundwork-geo)
+owns the one Redfin client on this egress IP — the WAF budget is IP-keyed, so
+several apps each running their own scraper would collectively exhaust it with
+nobody able to tell which one did (that service's CLAUDE.md, "Why this is a
+service and not a library"). The first cut of this module scraped Redfin's avm
+endpoint directly from the CRM; it worked, and it was still the wrong place
+for the traffic to live.
 
 The service constructs CDN photo URLs from its rate-limited avm sweep (the
 photo-bearing detail endpoints are WAF-403 from the box; see geo/photos.py in
-the groundwork-geo repo for the URL scheme and its verification). One GET per
-lookup, fired only when Zillow AND Realtor are both empty, result cached 30
-days by the comp detail cache.
+the redfin-scraper-api repo for the URL scheme and its verification). One GET
+per lookup, fired only when Zillow AND Realtor are both empty, result cached
+30 days by the comp detail cache.
 
-Config-gated like crm/api/geo.py: no `geo_service_url` in site_config means
-every call is a silent no-op and the ladder degrades exactly as before.
+Config-gated like crm/api/geo.py: reads `redfin_scraper_url` (pre-rename
+fallback `geo_service_url`); absent both, every call is a silent no-op and
+the ladder degrades exactly as before.
 """
 
 import requests
@@ -26,9 +28,9 @@ TIMEOUT = 15
 
 
 def _base_url():
-	import frappe
+	from crm.api.geo import _base_url as geo_base
 
-	return (frappe.conf.get("geo_service_url") or "").strip().rstrip("/")
+	return geo_base()
 
 
 def redfin_photo_urls(address: str, lat=None, lng=None, limit=60):

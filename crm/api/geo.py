@@ -1,4 +1,8 @@
-"""Client for the groundwork-geo service (neighbourhood properties + parcels).
+"""Client for the redfin-scraper-api service (neighbourhood properties + parcels).
+
+(The service was named groundwork-geo until 2026-08-31; same box, same port,
+same endpoints — only the name changed, because the abstract one hid the fact
+that it is the fleet's one and only Redfin scraper.)
 
 The service is source-agnostic — it takes coordinates and knows nothing about a
 CRM Lead. This module owns the mapping in the other direction: lead -> point,
@@ -10,9 +14,11 @@ rep waits on a page. So the work starts when the lead lands and the desk reads
 whatever is ready — the same shape as the Zillow facts cache, one order of
 magnitude slower.
 
-Config-gated like `contract_parser_url`: with no `geo_service_url` in
+Config-gated like `contract_parser_url`: with no `redfin_scraper_url` in
 site_config every entry point is a no-op, so the app is safe to deploy before
-the service exists and degrades quietly if it goes away.
+the service exists and degrades quietly if it goes away. The pre-rename
+`geo_service_url` key still works as a fallback so config and code never have
+to move in lockstep.
 """
 
 import frappe
@@ -24,7 +30,8 @@ TIMEOUT = 10
 
 
 def _base_url():
-	return (frappe.conf.get("geo_service_url") or "").strip().rstrip("/")
+	url = frappe.conf.get("redfin_scraper_url") or frappe.conf.get("geo_service_url") or ""
+	return url.strip().rstrip("/")
 
 
 def _enabled():
@@ -59,7 +66,7 @@ def warm_lead(lead, radius_m=None):
 	because a geo outage must never be able to fail a lead insert.
 	"""
 	if not _enabled():
-		return {"ok": False, "reason": "geo_service_url not configured"}
+		return {"ok": False, "reason": "redfin_scraper_url not configured"}
 
 	lat, lng = _lead_point(lead)
 	if lat is None:
@@ -225,7 +232,7 @@ def warm_backfill(dry_run=1, limit=None, radius_m=None):
 	"""
 	dry_run = str(dry_run) not in ("0", "false", "False", "")
 	if not _enabled():
-		return {"ok": False, "reason": "geo_service_url not configured"}
+		return {"ok": False, "reason": "redfin_scraper_url not configured"}
 
 	# Parked import leads are excluded. They are bulk-loaded inventory nobody is
 	# working, and warming them would sweep ~500 neighbourhoods for no rep --
