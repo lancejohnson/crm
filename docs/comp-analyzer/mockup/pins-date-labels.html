@@ -1,0 +1,189 @@
+<!doctype html>
+<html>
+<head>
+<meta charset=utf-8>
+<title>Comp pins — date encodings that don’t need labels</title>
+<style>
+ body{font:13px/1.5 ui-sans-serif,system-ui,sans-serif;background:#e8e6e1;color:#161614;margin:0;padding:24px 28px;}
+ h1{font-size:17px;margin:0 0 4px} h2{font-size:14px;margin:26px 0 2px}
+ .sub{color:#6b6862;font-size:12px;margin:0 0 10px;max-width:72ch}
+ .board{background:#dcd9d3;border:1px solid #c9c5bd;border-radius:6px;padding:16px;
+        display:flex;flex-wrap:wrap;gap:9px;align-items:flex-start}
+ .stats{font:12px/1.6 ui-monospace,Menlo,monospace;background:#f6f5f2;border:1px solid #d8d4cc;
+        border-radius:5px;padding:9px 12px;margin-top:8px;display:inline-block}
+ .pill{border-radius:9px;padding:4px 6px 5px;box-sizing:border-box;position:relative;
+       box-shadow:0 1px 2px rgba(0,0,0,.28);cursor:default}
+ .l1{display:flex;align-items:baseline;justify-content:center;white-space:nowrap}
+ .price{font:700 11.5px/1 ui-sans-serif,system-ui,sans-serif}
+ .meta{font:500 9px/1 ui-sans-serif,system-ui,sans-serif;opacity:.72;margin-left:3px}
+ .l2{display:flex;align-items:baseline;justify-content:space-between;gap:6px;white-space:nowrap;
+     font:500 9px/1 ui-sans-serif,system-ui,sans-serif;opacity:.9;margin-top:2px;width:100%}
+ .dts{font-variant-numeric:tabular-nums}
+ .key{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#4a4843;margin:8px 0 0}
+ .key b{font-weight:600}
+ .hint{font-size:11px;color:#6b6862;margin-top:6px}
+ code{background:#f6f5f2;padding:1px 4px;border-radius:3px;font-size:11px}
+ .pill.grow:hover{padding-right:8px}
+</style>
+</head>
+<body>
+<h1>Comp pins — saying which date is which, without eating the map</h1>
+<p class="sub">
+  Live pills stay unlabelled (a <code>39d</code> next to a <code>77d</code> is what shipped).
+  Words on the pill do not fit — “39d ago” / “took 77d” measured ~15–40px extra, which is the
+  whole two-line layout. These four encodings try to make the two numbers
+  <b>different kinds of thing</b>, so they don’t need a caption.
+</p>
+<p class="sub">Real Detroit board, 12 of the 50, same colours and fade.</p>
+<div id="out"></div>
+
+<script>
+const TODAY = new Date(2026, 7, 25) // Aug 25, 2026 — the day this board was captured
+const COMPS = [
+  {price:120000, year:1948, beds:3, baths:2, sqft:1550, state:'sold', recency:39, dts:77},
+  {price:129900, year:1951, beds:3, baths:1, sqft:1055, state:'sold', recency:81, dts:46, flip:true},
+  {price:45000,  year:1949, beds:3, baths:1, sqft:1136, state:'sold', recency:33, dts:60},
+  {price:52000,  year:1948, beds:3, baths:1, sqft:1059, state:'sold', recency:36, dts:30},
+  {price:76500,  year:1936, beds:3, baths:2, sqft:1225, state:'sold', recency:134, dts:null},
+  {price:85000,  year:null, beds:3, baths:2, sqft:1147, state:'pending', recency:96, dts:null},
+  {price:130000, year:1950, beds:3, baths:1, sqft:1178, state:'for_sale', recency:40, dts:null},
+  {price:150000, year:null, beds:4, baths:1, sqft:1514, state:'for_sale', recency:16, dts:null},
+  {price:125000, year:1948, beds:3, baths:1, sqft:1208, state:'sold', recency:118, dts:169, flip:true},
+  {price:70000,  year:null, beds:3, baths:2, sqft:1500, state:'sold', recency:91, dts:null},
+  {price:58000,  year:1936, beds:4, baths:2, sqft:1495, state:'pending', recency:189, dts:null},
+  {price:135000, year:1952, beds:3, baths:2, sqft:1360, state:'for_sale', recency:64, dts:null},
+]
+const C = {
+  for_sale:{bg:'#d92d20',ink:'#fff'},
+  sold:{bg:'#f5c518',ink:'#3a2f00'},
+  pending:{bg:'#7c3aed',ink:'#fff'},
+}
+const money = n => '$' + Math.round(n/1000) + 'k'
+const agoShort = d => {
+  d = Number(d); if (!isFinite(d) || d < 0) return ''
+  if (d < 31) return Math.round(d) + 'd'
+  if (d < 365) return Math.round(d / 30.44) + 'mo'
+  const y = d / 365.25
+  return (y < 2 ? y.toFixed(1) : Math.round(y)) + 'y'
+}
+const fade = d => {
+  d = Number(d); if (!isFinite(d)) return 1
+  const t = Math.min(Math.max(d / 360, 0), 1)
+  return 1 - 0.68 * t * t * (3 - 2 * t)
+}
+const facts = c => {
+  const p = []
+  if (c.beds) p.push(c.beds + '/' + (c.baths || '-'))
+  if (c.sqft) p.push(Math.round(c.sqft).toLocaleString() + 'sf')
+  return p.join(' · ')
+}
+const soldOn = recency => {
+  const d = new Date(TODAY)
+  d.setDate(d.getDate() - Math.round(recency))
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function paint(el, c) {
+  const col = C[c.state] || C.sold
+  const isSold = c.state === 'sold'
+  el.style.color = col.ink
+  el.style.background = (c.state === 'pending' || !isSold)
+    ? col.bg
+    : `rgba(245,197,24,${fade(c.recency).toFixed(3)})`
+}
+
+function pill(c, variant) {
+  const el = document.createElement('div')
+  el.className = 'pill'
+  paint(el, c)
+  const isSold = c.state === 'sold'
+  const pending = c.state === 'pending'
+  const star = c.flip ? '<span style="font-size:10px;margin-right:1px">★</span>' : ''
+  const year = c.year ? `<span class=meta>${c.year}</span>` : ''
+  const f = facts(c)
+
+  let age = pending ? 'Pending' : agoShort(c.recency)
+  let right = (variant !== 'E' && isSold && c.dts != null) ? `${c.dts}d` : ''
+  let title = ''
+
+  if (variant === 'B' && isSold) {
+    age = soldOn(c.recency)
+    right = c.dts != null ? `${c.dts}d` : ''
+    title = `${soldOn(c.recency)} · ${c.dts != null ? 'took ' + c.dts + 'd to sell' : 'time to sell unknown'}`
+  }
+  if (variant === 'C') {
+    el.classList.add('grow')
+    const restAge = age
+    const restRight = right
+    const hoverAge = pending ? 'Pending' : (isSold ? agoShort(c.recency) + ' ago' : agoShort(c.recency) + ' on mkt')
+    const hoverRight = right ? 'took ' + right : ''
+    el.addEventListener('mouseenter', () => fill(hoverAge, hoverRight))
+    el.addEventListener('mouseleave', () => fill(restAge, restRight))
+  }
+  if (variant === 'E') right = ''
+
+  function fill(a, r) {
+    const ageHtml = a ? `<span class=meta>${a}</span>` : ''
+    const line2 = (f || r)
+      ? `<div class=l2 style="justify-content:${r && f ? 'space-between' : 'center'}">
+           <span>${f}</span>${r ? `<span class=dts>${r}</span>` : ''}</div>`
+      : ''
+    el.innerHTML =
+      `<div class=l1>${star}<span class=price>${money(c.price)}</span>${year}${ageHtml}</div>${line2}`
+  }
+  fill(age, right)
+  if (title) el.title = title
+  return el
+}
+
+const VARIANTS = [
+  ['A', 'A — now (unlabelled positional)',
+   'Top-right = recency, bottom-right = time to sell. Zero extra width. The thing you forgot, because both numbers are <code>Nd</code>.'],
+  ['B', 'B — date vs duration <b>(recommended)</b>',
+   'Top-right becomes the <b>calendar date it sold</b> (<code>Jul 17</code>), bottom-right stays a duration (<code>77d</code>). Same slot, no words — a date and a duration cannot be swapped in your head. Live listings stay <code>40d</code> (they have not sold). Slightly wider (~12px) on sold pills because <code>Jul 17</code> is longer than <code>39d</code>.'],
+  ['C', 'C — hover to label',
+   'At rest, identical to A (same 90px). Hover and it grows into <code>39d ago</code> / <code>took 77d</code>. Costs nothing until you ask. The tray already does this with words; this is the same move on the pin.'],
+  ['E', 'E — drop time-to-sell off the pill',
+   'Pill only says how fresh the evidence is. Time-to-sell lives on the tray card, where there is room to write “took 77d to sell”. The pin goes back to one number, which is how it was before sale history shipped.'],
+]
+
+const out = document.getElementById('out')
+for (const [v, title, desc] of VARIANTS) {
+  const h = document.createElement('h2'); h.innerHTML = title; out.appendChild(h)
+  const p = document.createElement('p'); p.className = 'sub'; p.innerHTML = desc; out.appendChild(p)
+  if (v === 'B') {
+    const k = document.createElement('div'); k.className = 'key'
+    k.innerHTML = '<span><b>Jul 17</b> = when it sold</span><span><b>77d</b> = how long that listing sat</span><span><b>40d</b> on red = days on market</span>'
+    out.appendChild(k)
+  }
+  if (v === 'A') {
+    const k = document.createElement('div'); k.className = 'key'
+    k.innerHTML = '<span>top-right <b>39d</b> = how long ago</span><span>bottom-right <b>77d</b> = days it took to sell</span>'
+    out.appendChild(k)
+  }
+  const b = document.createElement('div'); b.className = 'board'; b.dataset.v = v
+  COMPS.forEach(c => b.appendChild(pill(c, v)))
+  out.appendChild(b)
+  if (v === 'C') {
+    const hint = document.createElement('div'); hint.className = 'hint'
+    hint.textContent = 'Hover a pin.'
+    out.appendChild(hint)
+  }
+  const s = document.createElement('div'); s.className = 'stats'; s.id = 's' + v; out.appendChild(s)
+}
+
+requestAnimationFrame(() => {
+  for (const [v] of VARIANTS) {
+    const board = document.querySelector(`.board[data-v="${v}"]`)
+    const ws = [...board.children].map(e => e.getBoundingClientRect().width)
+    const hs = [...board.children].map(e => e.getBoundingClientRect().height)
+    const avg = ws.reduce((a, b) => a + b, 0) / ws.length
+    const max = Math.max(...ws)
+    const area = ws.reduce((a, b, i) => a + b * hs[i], 0)
+    document.getElementById('s' + v).textContent =
+      `avg ${avg.toFixed(0)}px  ·  widest ${max.toFixed(0)}px  ·  total ink ${(area / 1000).toFixed(1)}k px²  ·  ${ws.length} pins`
+  }
+})
+</script>
+</body>
+</html>

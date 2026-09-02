@@ -1,0 +1,109 @@
+<!doctype html><html><head><meta charset=utf-8>
+<title>Comp pins — sale history density</title>
+<style>
+ body{font:13px/1.5 ui-sans-serif,system-ui,sans-serif;background:#e8e6e1;color:#161614;margin:0;padding:24px 28px;}
+ h1{font-size:17px;margin:0 0 4px} h2{font-size:14px;margin:26px 0 2px}
+ .sub{color:#6b6862;font-size:12px;margin:0 0 10px;max-width:70ch}
+ .board{background:#dcd9d3;border:1px solid #c9c5bd;border-radius:6px;padding:16px;
+        display:flex;flex-wrap:wrap;gap:9px;align-items:flex-start}
+ .stats{font:12px/1.6 ui-monospace,Menlo,monospace;background:#f6f5f2;border:1px solid #d8d4cc;
+        border-radius:5px;padding:9px 12px;margin-top:8px;display:inline-block}
+ .pill{border-radius:4px;padding:3px 5px;box-sizing:border-box;position:relative;
+       box-shadow:0 1px 2px rgba(0,0,0,.28);cursor:default}
+ .l1{display:flex;align-items:baseline;gap:3px;white-space:nowrap}
+ .price{font:700 11px/1 ui-sans-serif,system-ui,sans-serif}
+ .meta{font:500 9px/1 ui-sans-serif,system-ui,sans-serif;opacity:.72}
+ .l2{display:flex;justify-content:space-between;gap:6px;white-space:nowrap;
+     font:500 9px/1 ui-sans-serif,system-ui,sans-serif;opacity:.9;margin-top:2px}
+ .dts{font-variant-numeric:tabular-nums}
+ .edge{border-left:3px solid #161614!important;padding-left:4px}
+ .wedge::after{content:"";position:absolute;top:0;right:0;border-width:0 7px 7px 0;
+               border-style:solid;border-color:transparent #161614 transparent transparent;
+               border-top-right-radius:4px}
+ .ring{outline:2px dashed #161614;outline-offset:1px}
+ legend,.key{font-size:12px;color:#4a4843}
+ .key b{font-weight:600}
+ code{background:#f6f5f2;padding:1px 4px;border-radius:3px;font-size:11px}
+</style></head><body>
+<h1>Comp pins &mdash; where the sale history goes</h1>
+<p class=sub>Real board: <b id=addr></b> &mdash; all 50 comps actually returned, real prices,
+facts, recency fade and flip flags. Colour = status (red for sale, yellow sold, violet pending)
+and fade = how stale, both already positional today. The question is only where
+<b>time&#8209;to&#8209;sell</b> and <b>flip</b> go.</p>
+<div id=out></div>
+<script>
+const DATA = {"subject": {"lat": 42.44906596, "lng": -82.96579994, "source": {"beds": "zillow", "baths": "zillow", "sqft": "zillow", "year_built": "zillow", "property_type": "zillow", "assessed_value": "zillow"}, "beds_band": [3.0, 3.0], "beds_exact": true, "beds": 3.0, "beds_label": "3", "baths_band": [1.0, 1.0], "baths_exact": true, "baths": 1.0, "baths_label": "1", "sqft_band": [1376.0, 1376.0], "sqft_exact": true, "sqft": 1376.0, "sqft_label": "1,376", "year_built_band": [1932.0, 1932.0], "year_built_exact": true, "year_built": 1932.0, "year_built_label": "1932", "property_type": "Single Family", "last_sale": {"price": 79000.0, "date": "2026-05-04", "source": "Public Record"}, "zestimate": 103100.0, "rent_zestimate": 1303.0, "lot_size": "4,530 sqft", "zpid": 88119016, "has_zillow": true, "cover_photo": "https://maps.googleapis.com/maps/api/streetview?location=15217+Carlisle+St%2C+Detroit%2C+MI+48205&size=400x300&key=AIzaSyARFMLB1na-BBWf7_R3-5YOQQaHqEJf6RQ&source=outdoor&&signature=QLV9Mc6tlWKchzhu55hDvyxgzk0=", "last_listing": {"price": 105000.0, "status": "Inactive", "listed_date": "2025-08-18", "removed_date": "2026-02-25", "days_on_market": 191}, "self_comp_key": "15217-carlisle-st-detroit-mi-48205-d57a9c1e", "condition": "Cosmetic - Flooring, Paint", "assessed_value": 31500.0, "annual_tax": null, "asking_price": null}, "address": "15217 Carlisle St, Detroit, MI 48205", "comps": [{"address": "15237 Carlisle St, Detroit, MI 48205", "price": 85000.0, "beds": 3.0, "baths": 2.0, "sqft": 1147.0, "year": null, "state": "pending", "status": "Active", "recency": 96.0, "dom": 96, "dts": null, "ago": null, "cuts": 0, "flip": null}, {"address": "15300 Collingham Dr, Detroit, MI 48205", "price": 120000.0, "beds": 3.0, "baths": 2.0, "sqft": 1550.0, "year": 1948, "state": "sold", "status": "Inactive", "recency": 39, "dom": 39, "dts": 77, "ago": 39, "cuts": 0, "flip": null}, {"address": "15225 Edmore Dr, Detroit, MI 48205", "price": 130000.0, "beds": 3.0, "baths": 1.0, "sqft": 1178.0, "year": 1950, "state": "for_sale", "status": "Active", "recency": 40, "dom": 40, "dts": null, "ago": 181, "cuts": 0, "flip": {"kind": "relist", "hold": 181, "pct": 1.5689161150083983}}, {"address": "15256 Edmore Dr, Detroit, MI 48205", "price": 121987.0, "beds": 3.0, "baths": 2.0, "sqft": 1500.0, "year": null, "state": "sold", "status": "Inactive", "recency": 153, "dom": null, "dts": null, "ago": 153, "cuts": 0, "flip": null}, {"address": "15640 Stricker Ave, Eastpointe, MI 48021", "price": 150000.0, "beds": 4.0, "baths": 1.0, "sqft": 1514.0, "year": null, "state": "for_sale", "status": "Active", "recency": 16.0, "dom": 16, "dts": null, "ago": 5184, "cuts": 0, "flip": null}, {"address": "15226 Bringard Dr, Detroit, MI 48205", "price": 45000.0, "beds": 3.0, "baths": 1.0, "sqft": 1136.0, "year": 1949, "state": "sold", "status": "Inactive", "recency": 33, "dom": 51, "dts": 60, "ago": 33, "cuts": 0, "flip": null}, {"address": "15011 Bringard Dr, Detroit, MI 48205", "price": 125000.0, "beds": 3.0, "baths": 1.0, "sqft": 1208.0, "year": 1948, "state": "sold", "status": "Inactive", "recency": 118, "dom": 43, "dts": 169, "ago": 118, "cuts": 1, "flip": {"kind": "resale", "hold": 217, "pct": 1.173913043478261}}, {"address": "15503 Edmore Dr, Detroit, MI 48205", "price": 79000.0, "beds": 3.0, "baths": 1.0, "sqft": 1285.0, "year": 1941, "state": "off_market", "status": "Inactive", "recency": 118, "dom": 161, "dts": 185, "ago": 2356, "cuts": 2, "flip": null}, {"address": "14973 Bringard Dr, Detroit, MI 48205", "price": 60000.0, "beds": 3.0, "baths": 2.0, "sqft": 1431.0, "year": 1936, "state": "sold", "status": "Inactive", "recency": 134, "dom": 39, "dts": null, "ago": 134, "cuts": 0, "flip": null}, {"address": "14756 Ego Ave, Eastpointe, MI 48021", "price": 145000.0, "beds": 3.0, "baths": 1.0, "sqft": 1199.0, "year": null, "state": "sold", "status": "Inactive", "recency": 60, "dom": null, "dts": null, "ago": 60, "cuts": 0, "flip": null}, {"address": "14921 Bringard Dr, Detroit, MI 48205", "price": 135000.0, "beds": 3.0, "baths": 2.0, "sqft": 1360.0, "year": 1952.0, "state": "for_sale", "status": "Active", "recency": 64, "dom": 4, "dts": null, "ago": 10584, "cuts": 0, "flip": null}, {"address": "15241 Eastburn St, Detroit, MI 48205", "price": 58000.0, "beds": 4.0, "baths": 2.0, "sqft": 1495.0, "year": 1936, "state": "pending", "status": "Active", "recency": 189, "dom": 176, "dts": null, "ago": 1195, "cuts": 3, "flip": null}, {"address": "15275 Eastburn St, Detroit, MI 48205", "price": 56000.0, "beds": 3.0, "baths": 1.0, "sqft": 1100.0, "year": 1940, "state": "sold", "status": "Inactive", "recency": 112, "dom": 204, "dts": null, "ago": 112, "cuts": 0, "flip": null}, {"address": "15211 Eastburn St, Detroit, MI 48205", "price": 89900.0, "beds": 3.0, "baths": 2.0, "sqft": 1088.0, "year": null, "state": "pending", "status": "Active", "recency": 106.0, "dom": 106, "dts": null, "ago": 893, "cuts": 3, "flip": null}, {"address": "14767 Jacob Ave, Eastpointe, MI 48021", "price": 134900.0, "beds": 3.0, "baths": 1.0, "sqft": 1058.0, "year": null, "state": "sold", "status": "Inactive", "recency": 172, "dom": null, "dts": 63, "ago": 172, "cuts": 1, "flip": null}, {"address": "15644 Carlisle St, Detroit, MI 48205", "price": 129900.0, "beds": 3.0, "baths": 1.0, "sqft": 1055.0, "year": 1951, "state": "sold", "status": "Inactive", "recency": 81, "dom": 37, "dts": 46, "ago": 81, "cuts": 0, "flip": {"kind": "resale", "hold": 305, "pct": 3.1633280984583827}}, {"address": "14931 Eastburn St, Detroit, MI 48205", "price": 76500.0, "beds": 3.0, "baths": 2.0, "sqft": 1225.0, "year": null, "state": "for_sale", "status": "Active", "recency": 33.0, "dom": 33, "dts": null, "ago": 5710, "cuts": 2, "flip": null}, {"address": "15026 Eastburn St, Detroit, MI 48205", "price": 52000.0, "beds": 3.0, "baths": 1.0, "sqft": 1059.0, "year": 1948, "state": "sold", "status": "Inactive", "recency": 36, "dom": 13, "dts": 30, "ago": 36, "cuts": 0, "flip": null}, {"address": "15211 Fairmount Dr, Detroit, MI 48205", "price": 70000.0, "beds": 3.0, "baths": 2.0, "sqft": 1500.0, "year": null, "state": "sold", "status": "Inactive", "recency": 91, "dom": null, "dts": null, "ago": 91, "cuts": 0, "flip": null}, {"address": "15475 Eastburn St, Detroit, MI 48205", "price": 72500.0, "beds": 3.0, "baths": 1.0, "sqft": 1074.0, "year": null, "state": "sold", "status": "Inactive", "recency": 294, "dom": null, "dts": 630, "ago": 294, "cuts": 3, "flip": null}, {"address": "15219 Fairmount Dr, Detroit, MI 48205", "price": 62000.0, "beds": 3.0, "baths": 1.0, "sqft": 1222.0, "year": null, "state": "sold", "status": "Inactive", "recency": 300, "dom": null, "dts": 50, "ago": 300, "cuts": 0, "flip": null}, {"address": "15130 Sprenger Ave, Eastpointe, MI 48021", "price": 216000.0, "beds": 3.0, "baths": 2.0, "sqft": 1451.0, "year": null, "state": "sold", "status": "Inactive", "recency": 326, "dom": null, "dts": 30, "ago": 326, "cuts": 0, "flip": null}, {"address": "14928 Eastburn St, Detroit, MI 48205", "price": 99500.0, "beds": 3.0, "baths": 2.0, "sqft": 1128.0, "year": null, "state": "sold", "status": "Inactive", "recency": 357, "dom": null, "dts": 32, "ago": 357, "cuts": 0, "flip": null}, {"address": "14904 Eastburn St, Detroit, MI 48205", "price": 49500.0, "beds": 3.0, "baths": 1.0, "sqft": 1248.0, "year": 1949, "state": "sold", "status": "Inactive", "recency": 152, "dom": 26, "dts": 175, "ago": 152, "cuts": 1, "flip": null}, {"address": "15709 Collingham Dr, Detroit, MI 48205", "price": 115000.0, "beds": 3.0, "baths": 1.0, "sqft": 1189.0, "year": 1939, "state": "sold", "status": "Inactive", "recency": 174, "dom": 45, "dts": 285, "ago": 174, "cuts": 0, "flip": null}, {"address": "15162 Sprenger Ave, Eastpointe, MI 48021", "price": 160000.0, "beds": 3.0, "baths": 2.0, "sqft": 1332.0, "year": null, "state": "sold", "status": "Inactive", "recency": 186, "dom": null, "dts": 9, "ago": 186, "cuts": 0, "flip": {"kind": "resale", "hold": 109, "pct": 0.3333333333333333}}, {"address": "15309 Fairmount Dr, Detroit, MI 48205", "price": 14000.0, "beds": 3.0, "baths": 1.0, "sqft": 1119.0, "year": null, "state": "sold", "status": "Inactive", "recency": 228, "dom": null, "dts": null, "ago": 228, "cuts": 0, "flip": null}, {"address": "20834 Eastwood Blvd, Warren, MI 48089", "price": 100000.0, "beds": 3.0, "baths": 1.0, "sqft": 1288.0, "year": null, "state": "sold", "status": "Inactive", "recency": 300, "dom": null, "dts": null, "ago": 300, "cuts": 0, "flip": null}, {"address": "14953 Fairmount Dr, Detroit, MI 48205", "price": 25662.0, "beds": null, "baths": 1.0, "sqft": 1080.0, "year": null, "state": "sold", "status": "Inactive", "recency": 183, "dom": null, "dts": null, "ago": 183, "cuts": 0, "flip": null}, {"address": "20947 Beechwood Ave, Eastpointe, MI 48021", "price": 97500.0, "beds": 3.0, "baths": 2.0, "sqft": 1039.0, "year": null, "state": "sold", "status": "Inactive", "recency": 55, "dom": null, "dts": 57, "ago": 55, "cuts": 4, "flip": null}, {"address": "15608 Stricker Ave, Eastpointe, MI 48021", "price": 118000.0, "beds": 3.0, "baths": 1.0, "sqft": 1238.0, "year": null, "state": "sold", "status": "Inactive", "recency": 106, "dom": null, "dts": null, "ago": 106, "cuts": 0, "flip": null}, {"address": "15145 Sprenger Ave, Eastpointe, MI 48021", "price": 150000.0, "beds": 3.0, "baths": 1.0, "sqft": 1476.0, "year": null, "state": "sold", "status": "Inactive", "recency": 298, "dom": null, "dts": 21, "ago": 298, "cuts": 0, "flip": null}, {"address": "15161 Sprenger Ave, Eastpointe, MI 48021", "price": 130000.0, "beds": 3.0, "baths": 2.0, "sqft": 1352.0, "year": null, "state": "sold", "status": "Inactive", "recency": 341, "dom": null, "dts": null, "ago": 341, "cuts": 0, "flip": null}, {"address": "15625 Bringard Dr, Detroit, MI 48205", "price": 133900.0, "beds": 3.0, "baths": 1.0, "sqft": 1538.0, "year": 1950.0, "state": "off_market", "status": "Inactive", "recency": 181, "dom": 87, "dts": null, "ago": 217, "cuts": 0, "flip": null}, {"address": "14930 Fairmount Dr, Detroit, MI 48205", "price": 107500.0, "beds": 3.0, "baths": 2.0, "sqft": 1270.0, "year": null, "state": "sold", "status": "Inactive", "recency": 167, "dom": null, "dts": 200, "ago": 167, "cuts": 3, "flip": {"kind": "resale", "hold": 272, "pct": 4.375}}, {"address": "15400 Sprenger Ave, Eastpointe, MI 48021", "price": 155000.0, "beds": 3.0, "baths": 1.0, "sqft": 1101.0, "year": null, "state": "sold", "status": "Inactive", "recency": 302, "dom": null, "dts": 211, "ago": 302, "cuts": 1, "flip": {"kind": "resale", "hold": 228, "pct": 2.4444444444444446}}, {"address": "20703 Dexter Blvd, Warren, MI 48089", "price": 125000.0, "beds": 3.0, "baths": 1.0, "sqft": 1080.0, "year": null, "state": "sold", "status": "Inactive", "recency": 329, "dom": null, "dts": null, "ago": 329, "cuts": 0, "flip": {"kind": "resale", "hold": 104, "pct": 0.35135135135135137}}, {"address": "15271 Rossini Dr, Detroit, MI 48205", "price": 125000.0, "beds": 3.0, "baths": 1.0, "sqft": 1179.0, "year": 1943.0, "state": "off_market", "status": "Inactive", "recency": 206, "dom": 78, "dts": null, "ago": 1554, "cuts": 0, "flip": null}, {"address": "14910 Fairmount Dr, Detroit, MI 48205", "price": 15000.0, "beds": 3.0, "baths": 1.0, "sqft": 1116.0, "year": null, "state": "sold", "status": "Inactive", "recency": 99, "dom": null, "dts": 76, "ago": 99, "cuts": 1, "flip": null}, {"address": "15361 Sprenger Ave, Eastpointe, MI 48021", "price": 140000.0, "beds": 3.0, "baths": 1.0, "sqft": 1461.0, "year": null, "state": "pending", "status": "Active", "recency": 141.0, "dom": 141, "dts": null, "ago": 141, "cuts": 0, "flip": {"kind": "relist", "hold": 141, "pct": 0.5705279217428373}}, {"address": "14983 Rossini Dr, Detroit, MI 48205", "price": 98000.0, "beds": 3.0, "baths": 2.0, "sqft": 1550.0, "year": null, "state": "sold", "status": "Inactive", "recency": 335, "dom": null, "dts": null, "ago": 335, "cuts": 0, "flip": null}, {"address": "14639 Jacob Ave, Eastpointe, MI 48021", "price": 140000.0, "beds": 3.0, "baths": 1.0, "sqft": 1035.0, "year": null, "state": "for_sale", "status": "Active", "recency": 148.0, "dom": 148, "dts": null, "ago": 4922, "cuts": 0, "flip": null}, {"address": "14827 Fairmount Dr, Detroit, MI 48205", "price": 75000.0, "beds": 3.0, "baths": 1.0, "sqft": 1378.0, "year": 1930.0, "state": "off_market", "status": "Inactive", "recency": 199, "dom": 57, "dts": null, "ago": 8687, "cuts": 0, "flip": null}, {"address": "21059 Beechwood Ave, Eastpointe, MI 48021", "price": 60000.0, "beds": 3.0, "baths": 2.0, "sqft": 1314.0, "year": null, "state": "sold", "status": "Inactive", "recency": 210, "dom": null, "dts": null, "ago": 210, "cuts": 0, "flip": null}, {"address": "15705 Juliana Ave, Eastpointe, MI 48021", "price": 225000.0, "beds": 3.0, "baths": 1.0, "sqft": 1419.0, "year": null, "state": "sold", "status": "Inactive", "recency": 95, "dom": null, "dts": 395, "ago": 95, "cuts": 9, "flip": null}, {"address": "14931 Rossini Dr, Detroit, MI 48205", "price": 110000.0, "beds": 3.0, "baths": 1.0, "sqft": 1254.0, "year": 1945.0, "state": "off_market", "status": "Inactive", "recency": 88, "dom": 367, "dts": 75, "ago": 1730, "cuts": 0, "flip": {"kind": "resale", "hold": 252, "pct": 0.3333333333333333}}, {"address": "14777 Fairmount Dr, Detroit, MI 48205", "price": 45001.0, "beds": 3.0, "baths": 2.0, "sqft": 1397.0, "year": 1930, "state": "sold", "status": "Inactive", "recency": 56, "dom": 8, "dts": 27, "ago": 56, "cuts": 0, "flip": null}, {"address": "21120 Beechwood Ave, Eastpointe, MI 48021", "price": 150000.0, "beds": 3.0, "baths": 1.0, "sqft": 1326.0, "year": null, "state": "sold", "status": "Inactive", "recency": 61, "dom": null, "dts": 48, "ago": 61, "cuts": 0, "flip": null}, {"address": "20970 La Salle Blvd, Warren, MI 48089", "price": 170000.0, "beds": 4.0, "baths": 2.0, "sqft": 1400.0, "year": null, "state": "sold", "status": "Inactive", "recency": 211, "dom": null, "dts": null, "ago": 211, "cuts": 0, "flip": null}, {"address": "14643 Lydia Ave, Eastpointe, MI 48021", "price": 197900.0, "beds": 3.0, "baths": 1.0, "sqft": 1232.0, "year": null, "state": "sold", "status": "Inactive", "recency": 250, "dom": null, "dts": 64, "ago": 250, "cuts": 2, "flip": {"kind": "resale", "hold": 142, "pct": 0.7990909090909091}}]};
+document.getElementById('addr').textContent = DATA.address;
+const C = {for_sale:{bg:'#d92d20',ink:'#fff'}, sold:{bg:'#f5c518',ink:'#3a2f00'},
+           off_market:{bg:'#f5c518',ink:'#3a2f00'}, pending:{bg:'#7c3aed',ink:'#fff'}};
+const money = n => '$' + Math.round(n).toLocaleString();
+const agoShort = d => { d=Number(d); if(!isFinite(d)||d<0) return '';
+  if(d<31) return Math.round(d)+'d'; if(d<365) return Math.round(d/30.44)+'mo';
+  const y=d/365.25; return (y<2?y.toFixed(1):Math.round(y))+'y'; };
+const fade = d => { d=Number(d); if(!isFinite(d)) return 1; const t=Math.min(Math.max(d/360,0),1);
+  const s=t*t*(3-2*t); return 1-0.68*s; };
+function facts(c){ const p=[]; if(c.beds)p.push(c.beds+'/'+(c.baths||'-')); 
+  if(c.sqft)p.push(Math.round(c.sqft).toLocaleString()+'sf'); return p.join(' \u00b7 '); }
+
+function pill(c, variant){
+  const st = c.state||'sold', col = C[st]||C.sold;
+  const isSold = st==='sold'||st==='off_market';
+  const el = document.createElement('div');
+  el.className='pill';
+  const op = isSold ? fade(c.recency) : 1;
+  el.style.background = col.bg; el.style.color = col.ink; el.style.opacity = 1;
+  // fade the FILL only, never the text (house rule)
+  el.style.background = st==='pending'||!isSold ? col.bg
+    : `rgba(245,197,24,${op.toFixed(3)})`;
+  const age = st==='pending' ? 'Pending' : agoShort(isSold ? c.ago ?? c.recency : c.recency);
+  const f = c.flip;
+  let l1 = `<span class=price>${money(c.price)}</span>`;
+  if(c.year) l1 += `<span class=meta>${c.year}</span>`;
+  if(age) l1 += `<span class=meta>${age}</span>`;
+  let right = '';
+  if(variant!=='A' && c.dts!=null) right = `<span class="meta dts">${c.dts}d</span>`;
+
+  if(variant==='A'){ // labelled strawman
+    let s = money(c.price);
+    if(c.year) s+=' \u00b7 built '+c.year;
+    if(facts(c)) s+=' \u00b7 '+facts(c);
+    if(c.dts!=null) s+=' \u00b7 '+c.dts+'d to sell';
+    if(age) s+=' \u00b7 sold '+age+' ago';
+    if(f) s+=' \u00b7 FLIP +'+Math.round(f.pct*100)+'%';
+    el.innerHTML = `<div class=l1 style="white-space:nowrap"><span class=price style="font-weight:600">${s}</span></div>`;
+    return el;
+  }
+  el.innerHTML = `<div class=l1>${l1}</div>`
+    + `<div class=l2><span>${facts(c)}</span>${right}</div>`;
+  if(f){ if(variant==='B') el.classList.add('edge');
+         if(variant==='C') el.classList.add('wedge');
+         if(variant==='D') el.classList.add('ring'); }
+  return el;
+}
+const VARIANTS = [
+ ['A','Labelled &mdash; the strawman','Every fact spelled out. This is what &ldquo;too much info&rdquo; looks like: one long line per pin, unreadable the moment two overlap.'],
+ ['B','Positional + left edge bar','Time&#8209;to&#8209;sell takes the empty <b>bottom&#8209;right</b> slot (no label &mdash; a bare <code>77d</code> under the facts). Flip = a black bar down the left edge.'],
+ ['C','Positional + corner wedge','Same positioning; flip marked by a folded corner, top&#8209;right. Costs zero width.'],
+ ['D','Positional + dashed ring','Same positioning; flip ringed. Note the app already uses a solid outline for hover, so this risks collision.'],
+];
+const out = document.getElementById('out');
+for(const [v,title,desc] of VARIANTS){
+  const h=document.createElement('h2'); h.innerHTML=title; out.appendChild(h);
+  const p=document.createElement('p'); p.className='sub'; p.innerHTML=desc; out.appendChild(p);
+  const b=document.createElement('div'); b.className='board';
+  DATA.comps.forEach(c=>b.appendChild(pill(c,v)));
+  out.appendChild(b);
+  const s=document.createElement('div'); s.className='stats'; s.id='s'+v; out.appendChild(s);
+}
+requestAnimationFrame(()=>{
+ for(const [v] of VARIANTS){
+   const board=document.getElementById('s'+v).previousElementSibling;
+   const ws=[...board.children].map(e=>e.getBoundingClientRect().width);
+   const hs=[...board.children].map(e=>e.getBoundingClientRect().height);
+   const avg=ws.reduce((a,b)=>a+b,0)/ws.length, max=Math.max(...ws);
+   const area=ws.reduce((a,b,i)=>a+b*hs[i],0);
+   document.getElementById('s'+v).textContent =
+     `avg ${avg.toFixed(0)}px  ·  widest ${max.toFixed(0)}px  ·  total ink ${(area/1000).toFixed(1)}k px²  ·  ${ws.length} pins`;
+ }
+});
+</script></body></html>

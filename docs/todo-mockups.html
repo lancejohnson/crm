@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>To-do mockups</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink-9: #383838;
+      --ink-8: #525252;
+      --ink-7: #6b6b6b;
+      --ink-6: #7c7c7c;
+      --ink-5: #a6a6a6;
+      --ink-4: #c2c2c2;
+      --red: #e03636;
+      --amber: #c47d00;
+      --green: #278a5b;
+      --line: #e8e8e8;
+      --fill: #f4f4f4;
+      --white: #fff;
+      --feed: #fafafa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      background: #ececec;
+      color: var(--ink-9);
+    }
+    header {
+      padding: 28px 32px 8px;
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+    header h1 { font-size: 18px; font-weight: 600; margin: 0 0 6px; }
+    header p { margin: 0; color: var(--ink-7); font-size: 13px; line-height: 1.45; max-width: 62ch; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(280px, 1fr));
+      gap: 20px;
+      padding: 16px 24px 40px;
+      max-width: 980px;
+      margin: 0 auto;
+    }
+    .col { display: flex; flex-direction: column; gap: 10px; }
+    .label { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-6); }
+    .pitch { font-size: 12px; color: var(--ink-7); line-height: 1.4; min-height: 3.2em; }
+    .feed {
+      background: var(--feed);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 16px 0 20px;
+      min-height: 360px;
+    }
+    .chrome {
+      font-size: 11px; color: var(--ink-5); padding: 0 20px 10px;
+      border-bottom: 1px solid var(--line); margin-bottom: 12px;
+    }
+    .pad { padding: 0 20px; }
+
+    /* shared bits */
+    .row { display: flex; align-items: center; gap: 8px; padding: 7px 0; }
+    .title { flex: 1; min-width: 0; font-size: 14px; color: var(--ink-8); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .due { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--ink-5); white-space: nowrap; }
+    .due.over { color: var(--red); font-weight: 500; }
+    .due.today { color: var(--amber); font-weight: 500; }
+    .circ {
+      width: 15px; height: 15px; border: 1.5px solid var(--ink-4); border-radius: 99px; flex: 0 0 auto;
+    }
+    .chip {
+      border: 1px solid var(--line); background: var(--white); color: var(--ink-7);
+      font-size: 11px; padding: 3px 8px; border-radius: 6px; cursor: default;
+    }
+    .chip.on { border-color: var(--ink-9); color: var(--ink-9); background: #fff; }
+    .input {
+      border: 0; background: transparent; font: inherit; font-size: 14px; color: var(--ink-8);
+      outline: none; width: 100%;
+    }
+    .input::placeholder { color: var(--ink-4); }
+    .hd { display: flex; align-items: baseline; gap: 6px; font-size: 13px; font-weight: 500; color: var(--ink-7); margin-bottom: 4px; }
+    .hd span { font-size: 11px; font-weight: 400; color: var(--ink-4); }
+    .pencil { margin-left: auto; color: var(--ink-4); font-size: 12px; }
+
+    /* NOW — the hated one */
+    .card {
+      margin: 0 16px; background: var(--fill); border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+    }
+    .card .hd { padding: 10px 12px 4px; }
+    .card .row { padding: 6px 12px; }
+    .card .composer { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--line); }
+    .card .chips { display: flex; gap: 4px; flex: 0 0 auto; }
+    .tiny { font-size: 10px; padding: 2px 5px; }
+
+    /* A */
+    .a .list { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 4px; }
+    .a .composer { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 10px; }
+    .a .chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 0 0 23px; }
+
+    /* B — when-first */
+    .when {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 8px 0 14px;
+    }
+    .when button {
+      border: 1px solid var(--line); background: var(--white); border-radius: 8px;
+      padding: 10px 10px 8px; text-align: left; font: inherit; cursor: default;
+    }
+    .when button b { display: block; font-size: 14px; font-weight: 600; }
+    .when button em { display: block; font-style: normal; font-size: 11px; color: var(--ink-5); margin-top: 2px; }
+    .b .row { padding: 8px 0; border-top: 1px solid var(--line); }
+    .b .when-label { font-size: 12px; font-weight: 600; width: 72px; flex: 0 0 auto; }
+    .b .when-label.over { color: var(--red); }
+    .b .when-label.today { color: var(--amber); }
+
+    /* C — command bar */
+    .cmd {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--white); border: 1px solid var(--line); border-radius: 8px;
+      padding: 8px 10px; margin-bottom: 12px;
+    }
+    .c .row { padding: 8px 4px; }
+    .accent { width: 3px; height: 18px; border-radius: 2px; background: transparent; flex: 0 0 auto; }
+    .accent.over { background: var(--red); }
+    .accent.today { background: var(--amber); }
+    .hint { font-size: 11px; color: var(--ink-5); margin: 6px 0 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>To-do — three directions</h1>
+    <p>
+      Same lead, same three follow-ups. The gray card on the left is what you have now.
+      A is what already landed in code (uncommitted). B and C are alternatives — pick one and I’ll build that.
+    </p>
+  </header>
+
+  <div class="grid">
+    <!-- NOW -->
+    <div class="col">
+      <div class="label">Now</div>
+      <div class="pitch">Nested gray card. Chips crush the input. Clicking a row dumps you into the giant Task modal. Due dates read as “in 3 days” off midnight.</div>
+      <div class="feed">
+        <div class="chrome">Activity</div>
+        <div class="card">
+          <div class="hd">To-do <span>3</span></div>
+          <div class="row"><div class="circ"></div><div class="title">Follow up</div><div class="due over">3 days ago</div></div>
+          <div class="row"><div class="circ"></div><div class="title">Send comps</div><div class="due today">in 5 hours</div></div>
+          <div class="row"><div class="circ"></div><div class="title">Call back after inspection</div><div class="due">in 6 days</div></div>
+          <div class="composer">
+            <span style="color:var(--ink-4)">+</span>
+            <input class="input" placeholder="Add a task…" />
+            <div class="chips">
+              <span class="chip tiny">2h</span>
+              <span class="chip tiny">24h</span>
+              <span class="chip tiny">1wk</span>
+              <span class="chip tiny">1mo</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- A -->
+    <div class="col">
+      <div class="label">A · Quiet list</div>
+      <div class="pitch">No card. Title is the row. Chips live under the input so they can’t crush it. Click title to rename; the modal is a side door. This is what’s in the working tree.</div>
+      <div class="feed a">
+        <div class="chrome">Activity</div>
+        <div class="pad">
+          <div class="hd">To-do <span>3</span><span class="pencil">✎</span></div>
+          <div class="list">
+            <div class="row"><div class="circ"></div><div class="title">Follow up</div><div class="due over">yesterday</div></div>
+            <div class="row"><div class="circ"></div><div class="title">Send comps</div><div class="due today">today 9am</div></div>
+            <div class="row"><div class="circ"></div><div class="title">Call back after inspection</div><div class="due">Thu 9am</div></div>
+          </div>
+          <div class="composer">
+            <div class="row" style="padding:0">
+              <span style="color:var(--ink-4)">+</span>
+              <input class="input" placeholder="Add a follow-up…" />
+              <span style="color:var(--ink-4);font-size:13px">📅</span>
+            </div>
+            <div class="chips">
+              <span class="chip">2h</span>
+              <span class="chip">3d</span>
+              <span class="chip">1wk</span>
+              <span class="chip">1mo</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- B -->
+    <div class="col">
+      <div class="label">B · When first</div>
+      <div class="pitch">The job is “call them Thursday,” not “create a task.” Big when-buttons stamp a Follow up at 9am CT. Title is optional. Time is the left column so overdue is a glance.</div>
+      <div class="feed b">
+        <div class="chrome">Activity</div>
+        <div class="pad">
+          <div class="hd">Follow up <span class="pencil">✎ chips</span></div>
+          <div class="when">
+            <button><b>2 hours</b><em>today 3:40pm</em></button>
+            <button><b>3 days</b><em>Thu 9:00am</em></button>
+            <button><b>1 week</b><em>Fri 9:00am</em></button>
+            <button><b>1 month</b><em>Sep 28 9:00am</em></button>
+          </div>
+          <div class="row"><div class="when-label over">Yesterday</div><div class="circ"></div><div class="title">Follow up</div></div>
+          <div class="row"><div class="when-label today">Today 9am</div><div class="circ"></div><div class="title">Send comps</div></div>
+          <div class="row"><div class="when-label">Thu 9am</div><div class="circ"></div><div class="title">Call back after inspection</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- C -->
+    <div class="col">
+      <div class="label">C · One field</div>
+      <div class="pitch">Type the follow-up, tap a chip, Enter. Overdue gets a red tick, today amber. Closest to how the Today board already feels — a working list, not a widget.</div>
+      <div class="feed c">
+        <div class="chrome">Activity</div>
+        <div class="pad">
+          <div class="cmd">
+            <span style="color:var(--ink-4)">+</span>
+            <input class="input" placeholder="Follow up…" value="" />
+            <span class="chip on">3d</span>
+            <span class="chip">2h</span>
+            <span class="chip">1wk</span>
+          </div>
+          <div class="hint">3 days → Thu 9:00am CT · Enter to add</div>
+          <div class="row"><div class="accent over"></div><div class="circ"></div><div class="title">Follow up</div><div class="due over">yesterday</div></div>
+          <div class="row"><div class="accent today"></div><div class="circ"></div><div class="title">Send comps</div><div class="due today">today 9am</div></div>
+          <div class="row"><div class="accent"></div><div class="circ"></div><div class="title">Call back after inspection</div><div class="due">Thu 9am</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

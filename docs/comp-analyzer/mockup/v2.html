@@ -1,0 +1,1347 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lead desk · comp analyzer · v2</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+:root{
+  --t1:#18181a; --t2:#62636a; --t3:#9a9ba3;
+  --bg:#fff; --bg1:#fbfbfc; --bg2:#f4f4f6; --bg3:#ebebef;
+  --br:#e8e8ec; --br2:#dcdce2;
+  --accent:#2563c9; --subject:#2563c9; --active:#d97706; --offmkt:#475569;
+  --green:#15683c; --amber:#9a5308; --red:#b3261e; --dead:#7a7a82;
+  --r:6px; --rs:5px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{font:13px/1.5 Inter,-apple-system,"Segoe UI",system-ui,sans-serif;color:var(--t1);
+  background:var(--bg2);-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;
+  height:100vh;overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+input,select{font:inherit}
+h2{margin:0;font-size:14.5px;font-weight:600;letter-spacing:-.01em}
+.lb{font-size:10px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;color:var(--t3)}
+
+.stage{height:100vh;padding:10px;display:flex;justify-content:center}
+.modal{width:100%;max-width:1600px;height:100%;background:var(--bg);border:1px solid var(--br2);
+  border-radius:9px;overflow:hidden;display:flex;flex-direction:column;position:relative}
+
+.hd{display:flex;align-items:center;gap:9px;padding:7px 12px;border-bottom:1px solid var(--br);flex:none}
+.hd .ad{font-size:12px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dets{display:flex;gap:4px;flex:none}
+.det{display:flex;align-items:center;gap:4px;padding:2px 6px;border:1px solid var(--br);
+  border-radius:var(--rs);background:var(--bg1)}
+.det:focus-within{border-color:var(--accent);background:var(--bg)}
+.det .dk{font-size:9.5px;font-weight:500;text-transform:uppercase;color:var(--t3)}
+.det input{width:30px;border:0;background:none;padding:0;font-size:12px;font-weight:500;color:var(--t1);text-align:right}
+.det input:focus{outline:0}
+.det.w input{width:46px}
+.hact{display:flex;gap:5px;margin-left:auto;flex:none;align-items:center}
+.hb{height:26px;padding:0 10px;border:1px solid var(--br2);border-radius:var(--rs);
+  font-size:12px;font-weight:500;display:flex;align-items:center;gap:5px;background:var(--bg)}
+.hb.call{background:var(--green);border-color:var(--green);color:#fff}
+.hb.end{background:var(--red);border-color:var(--red);color:#fff}
+.hb .ic{width:5px;height:5px;border-radius:50%;background:currentColor}
+.live{display:flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:var(--rs);
+  background:#fdecea;color:var(--red);font-size:12px;font-weight:500}
+.live .rec{width:5px;height:5px;border-radius:50%;background:var(--red);animation:b 1.4s infinite}
+@keyframes b{0%,100%{opacity:1}50%{opacity:.3}}
+/* Build stamp. Several mockups shipped under the same filename and a cached copy
+   is indistinguishable from a current one — so the page says which it is. */
+.stamp{font-size:10px;color:var(--t3);font-variant-numeric:tabular-nums;
+  border:1px solid var(--br);border-radius:var(--rs);padding:2px 6px}
+.x{width:25px;height:25px;border-radius:var(--rs);color:var(--t3);display:grid;place-items:center;flex:none}
+.x:hover{background:var(--bg2);color:var(--t1)}
+
+/* One screen. Activity is an OVERLAY, not a grid track: it's reference material,
+   and taking width from the centre crushed the comp table down to two columns. */
+.body{flex:1;min-height:0;display:grid;grid-template-columns:344px minmax(0,1fr) 306px}
+.actcol{position:absolute;top:41px;bottom:0;right:0;width:290px;z-index:900;
+  background:var(--bg);border-left:1px solid var(--br2);display:none;
+  flex-direction:column;box-shadow:-14px 0 34px -16px rgba(0,0,0,.3)}
+.actcol.on{display:flex}
+.col{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}
+.bl{border-left:1px solid var(--br)}
+.sech{display:flex;align-items:center;gap:6px;padding:4px 11px;border-bottom:1px solid var(--br);
+  flex:none;min-height:30px}
+
+.seg{display:flex;gap:2px;background:var(--bg2);padding:2px;border-radius:var(--rs)}
+.sgb{flex:1;padding:4px 8px;border-radius:4px;font-size:11.5px;font-weight:500;color:var(--t2);
+  text-align:center;white-space:nowrap;line-height:1.25}
+.sgb.on{background:var(--bg);color:var(--t1);box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.sgv{display:block;font-size:10px;font-weight:500;color:var(--t3);margin-top:1px}
+.sgb.on .sgv{color:var(--t2)}
+
+/* ── copilot ── */
+.feed{flex:1;overflow-y:auto;padding:10px 11px;display:flex;flex-direction:column;gap:9px;min-height:0}
+/* the opening comp read stays put; everything after it scrolls under */
+.stickypost{position:sticky;top:-10px;z-index:6;margin:-10px -11px 0;padding:10px 11px 9px;
+  background:var(--bg1);border-bottom:1px solid var(--br);box-shadow:0 8px 10px -9px rgba(0,0,0,.22)}
+.say .sh{font-size:10px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;color:var(--t3);
+  margin-bottom:6px;display:flex;justify-content:space-between}
+.say .line{font-size:13px;line-height:1.55;color:var(--t1)}
+.say .line b{font-weight:600}
+.say .arvline{margin-top:8px;padding-top:8px;border-top:1px solid var(--br);
+  display:flex;justify-content:space-between;align-items:baseline}
+.say .arvline .ak{font-size:11.5px;color:var(--t2)}
+.say .arvline .av{font-size:18px;font-weight:600;color:var(--t1)}
+.say .hood{margin-top:6px;font-size:11.5px;color:var(--t2);display:flex;align-items:baseline;gap:6px}
+.say .hood b{color:var(--t1);font-weight:600;font-size:12.5px}
+.say .hood .src2{color:var(--t3);font-size:10.5px;margin-left:auto}
+.utt{font-size:12px;line-height:1.4}
+.utt .who{font-size:10px;font-weight:500;color:var(--t3);margin-right:5px}
+.utt .t{color:var(--t2)} .utt.me .t{color:var(--t3)}
+.sig{border-left:2px solid var(--br2);padding-left:8px}
+.sig .st{font-size:12px;font-weight:450;color:var(--t1);line-height:1.4}
+.vd{border-left:2px solid var(--br2);padding-left:9px}
+.vd.sup{border-left-color:var(--green)} .vd.against{border-left-color:var(--amber)}
+.vd .heard{font-size:11.5px;color:var(--t3);font-style:italic}
+.vd .verdict{font-size:12px;color:var(--t1);line-height:1.4;margin-top:2px}
+.vd .verdict .tag{font-weight:600}
+.vd.sup .verdict .tag{color:var(--green)} .vd.against .verdict .tag{color:var(--amber)}
+.vd .row2{display:flex;gap:4px;margin-top:6px;flex-wrap:wrap}
+.cmd{height:23px;padding:0 8px;border-radius:var(--rs);background:var(--t1);color:#fff;
+  font-size:11px;font-weight:500}
+.cmd.ghost{background:var(--bg);border:1px solid var(--br2);color:var(--t2)}
+.cmd.done{background:var(--green)}
+.parked{font-size:11px;color:var(--t3);border-top:1px dashed var(--br2);padding-top:8px}
+.parked button{color:var(--accent);font-weight:500}
+.pk{font-size:11px;color:var(--t2);border-left:2px solid var(--br2);padding-left:8px;margin-top:4px}
+.miniput{display:flex;gap:6px;padding:8px 11px;border-top:1px solid var(--br);flex:none;background:var(--bg)}
+.miniput input{flex:1;height:29px;border:1px solid var(--br2);border-radius:var(--rs);padding:0 9px;
+  font-size:12.5px;background:var(--bg1);min-width:0}
+.miniput input:focus{outline:0;border-color:var(--accent);background:var(--bg)}
+.miniput button{height:29px;padding:0 10px;border-radius:var(--rs);background:var(--bg2);
+  font-size:11.5px;font-weight:500;color:var(--t2)}
+
+/* ── map ── */
+/* map 44 / table 56 — the map was 436px and didn't need it; the 20% it gives up
+   becomes about three more comp rows visible without scrolling. */
+.mediapane{position:relative;flex:46 1 0;min-height:150px;background:var(--bg2)}
+/* isolation:isolate traps Leaflet's own pane z-indexes (400 tiles / 600 markers /
+   800 controls) inside this box. Without it they compete in .mediapane's stacking
+   context and paint straight over the Street pane below. Same bug as the overlay. */
+.mapel{position:absolute;inset:0;isolation:isolate;z-index:0}
+.leg{position:absolute;left:8px;bottom:8px;z-index:500;display:flex;gap:8px;align-items:center;
+  background:rgba(255,255,255,.94);border:1px solid var(--br);border-radius:var(--r);
+  padding:3px 8px;font-size:10px;color:var(--t2)}
+.leg span{display:flex;align-items:center;gap:3px}
+.leg i{width:7px;height:7px;border-radius:2px}
+.fade{width:30px;height:7px;border-radius:2px;background:linear-gradient(90deg,#475569,rgba(71,85,105,.32))}
+.svwrap{position:absolute;inset:0;display:none} .svwrap.on{display:block;z-index:1}
+.svwrap iframe{width:100%;height:100%;border:0;position:relative;z-index:1}
+.svfall{position:absolute;inset:0;z-index:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:6px;background:linear-gradient(160deg,#2f343b,#1c2025);color:#c8ced6;
+  text-align:center;padding:16px;font-size:11.5px;line-height:1.5}
+
+/* ── comp table ── */
+.ctwrap{display:flex;flex-direction:column;flex:54 1 0;min-height:180px;border-top:1px solid var(--br)}
+.filters{display:flex;gap:4px;padding:6px 9px;border-bottom:1px solid var(--br);flex:none}
+.fsel{border:1px solid var(--br);border-radius:var(--rs);background:var(--bg1);font-size:11px;
+  color:var(--t2);padding:3px 4px;flex:1;min-width:0}
+.fsel:focus{outline:0;border-color:var(--accent)}
+.ctscroll{flex:1;overflow:auto;min-height:0}
+table.ct{width:100%;border-collapse:collapse;font-size:12px}
+table.ct th{position:sticky;top:0;background:var(--bg);z-index:2;text-align:left;font-weight:500;
+  color:var(--t3);font-size:10px;text-transform:uppercase;letter-spacing:.04em;padding:6px 9px;
+  border-bottom:1px solid var(--br2);cursor:pointer;white-space:nowrap;user-select:none}
+table.ct th:hover{color:var(--t1)}
+table.ct th .ar{opacity:.55;font-size:9px}
+table.ct td{padding:5px 9px;border-bottom:1px solid var(--br);color:var(--t2);white-space:nowrap}
+table.ct tr{cursor:pointer}
+table.ct tr:hover td{background:var(--bg1)}
+table.ct tr.on td{background:#f5f8fe}
+table.ct tr.focus td{box-shadow:inset 0 1px 0 var(--accent),inset 0 -1px 0 var(--accent)}
+table.ct .adr{color:var(--t1)}
+table.ct .pp{color:var(--t1);font-weight:600}
+table.ct .psf{color:var(--t1);font-weight:500}
+table.ct .arvh{color:var(--accent);font-weight:600}
+.cchk{width:14px;height:14px;border:1px solid var(--br2);border-radius:3px;flex:none;
+  display:inline-grid;place-items:center;font-size:9px;color:transparent}
+.dotst{width:6px;height:6px;border-radius:2px;flex:none}
+.d{font-size:10px;margin-left:5px;font-weight:500}
+.d.up{color:#c0554c} .d.dn{color:#4a8f68}
+.cnd{font-size:10.5px;padding:1px 6px;border-radius:4px;background:var(--bg2);color:var(--t2);cursor:help}
+.cnd.renovated{background:#e9f3ec;color:var(--green)}
+.cnd.retail{background:#eef4fe;color:var(--accent)}
+.cnd.asis{background:#fdecea;color:var(--red)}
+.cnd.unk{background:var(--bg2);color:var(--t3)}
+.ctfoot{flex:none;display:flex;align-items:center;gap:9px;padding:6px 10px;
+  border-top:1px solid var(--br2);background:var(--bg1);font-size:11.5px;color:var(--t2)}
+.ctfoot b{color:var(--t1);font-weight:600}
+.ctfoot .sp{margin-left:auto}
+
+/* ── right: read · repairs · offer ── */
+.rscroll{flex:1;overflow-y:auto;min-height:0}
+.pblock{padding:13px 14px;border-bottom:1px solid var(--br)}
+.rhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;min-height:13px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;height:27px;font-size:12px}
+.row .k{color:var(--t2);display:flex;align-items:center;gap:6px;min-width:0}
+.row .k span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* the operator column carries every sign, so each value can be one plain format */
+.row .op{width:9px;flex:none;color:var(--t3);text-align:center;font-size:11px}
+/* Inputs carry padding + a transparent border so they can show a focus ring.
+   Spans had neither, so editable values sat 6px left of computed ones and the
+   column read ragged. Give every value the SAME box, whatever the tag. */
+.row .v{font-weight:500;color:var(--t1);flex:none;font-size:12px;
+  padding:1px 5px;border:1px solid transparent;border-radius:4px;box-sizing:border-box;
+  text-align:right}
+.row .v.mut{color:var(--t3);font-weight:400}
+.row input.v{width:96px;background:transparent;color:var(--t1)}
+.row input.v:hover{background:var(--bg2)}
+.row input.v:focus{outline:0;background:var(--bg);border-color:var(--accent)}
+.row.tot{border-top:1px solid var(--br);margin-top:9px;padding-top:11px;height:auto;padding-bottom:2px}
+.row.tot .k{color:var(--t1);font-weight:500}
+.row.big{border-top:1px solid var(--br2);margin-top:14px;padding-top:14px;height:auto;
+  align-items:baseline}
+/* label and figure share a size — a 13px word beside a 24px number read as two
+   unrelated things rather than one row. Both step up from the 12px rows above. */
+.row.big .k{color:var(--t1);font-weight:600;font-size:17px}
+.row.big .v{font-size:17px;font-weight:600;letter-spacing:-.015em;line-height:1.2}
+.chk{width:13px;height:13px;border:1px solid var(--br2);border-radius:3px;flex:none;
+  display:grid;place-items:center;font-size:8.5px;color:transparent}
+.row.pick{cursor:pointer;border-radius:4px;margin:0 -5px;padding:0 5px}
+.row.pick:hover{background:var(--bg2)}
+.row.pick.on .chk{background:var(--t1);border-color:var(--t1);color:#fff}
+.sublb2{font-size:10px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;color:var(--t3);
+  margin:18px 0 7px;padding-top:14px;border-top:1px solid var(--br)}
+/* Full-bleed band, not an inset card: a card's own padding pushed its rows 11px
+   right of every row above it. */
+.wantrow{background:#fdf8ee;border-top:1px solid #f2e4c9;border-bottom:1px solid #f2e4c9;
+  margin:16px -14px 0;padding:9px 14px}
+.wantrow .row .k{color:var(--amber)}
+.wantrow input.v{background:var(--bg);border-color:var(--br2)}
+
+.g2{display:grid;grid-template-columns:12px 15px 1fr 1fr;grid-template-rows:13px 1fr 1fr}
+.axP{grid-column:3/5;grid-row:1;text-align:center;font-size:9px;font-weight:500;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--t3)}
+.axM{grid-column:1;grid-row:2/4;writing-mode:vertical-rl;transform:rotate(180deg);display:flex;
+  align-items:center;justify-content:center;font-size:9px;font-weight:500;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--t3)}
+.gh,.gr{font-size:10.5px;display:flex;align-items:center;justify-content:center;color:var(--t3)}
+.q{border:1px solid var(--br);background:var(--bg1);padding:8px 9px;text-align:left;
+  min-height:44px;position:relative}
+.q:hover{background:var(--bg2);border-color:var(--br2)}
+.q .qt{font-size:11.5px;font-weight:450;color:var(--t2);line-height:1.15}
+.q1{border-radius:var(--rs) 0 0 0} .q2{border-radius:0 var(--rs) 0 0;border-left:0}
+.q3{border-radius:0 0 0 var(--rs);border-top:0} .q4{border-radius:0 0 var(--rs) 0;border-left:0;border-top:0}
+.q.on{background:var(--bg);border-color:currentColor;box-shadow:0 0 0 1px currentColor inset;z-index:1}
+.q[data-q=send].on{color:var(--green)} .q[data-q=educate].on{color:var(--amber)}
+.q[data-q=scam].on{color:var(--red)}  .q[data-q=dead].on{color:var(--dead)}
+.q.on .qt{color:currentColor;font-weight:600}
+/* the 'most leads' hint lived here as a 4px dot; at this size it read as a
+   speck of dirt rather than information, so it's a tooltip now */
+.go{width:100%;height:31px;border-radius:var(--rs);background:var(--t1);color:#fff;
+  font-size:12px;font-weight:500}
+.go.hot{background:var(--green)} .go.quiet{background:var(--bg);border:1px solid var(--br2);color:var(--t2)}
+.rfoot{border-top:1px solid var(--br2);padding:10px 14px;flex:none;background:var(--bg1)}
+.go.alt{flex:1;background:var(--bg);border:1px solid var(--br2);color:var(--t1)}
+.go.alt:hover{background:var(--bg2)}
+.savedline{font-size:11px;color:var(--t3);margin-bottom:7px;line-height:1.4;min-height:15px}
+.savedline b{color:var(--t2);font-weight:500}
+
+/* activity */
+.act{flex:1;overflow-y:auto;padding:9px 11px;display:flex;flex-direction:column;gap:7px;min-height:0}
+.ev{display:flex;gap:7px;font-size:11.5px}
+.ev .tm{flex:none;width:32px;text-align:right;font-size:9.5px;color:var(--t3);padding-top:2px}
+.ev .bd{min-width:0;flex:1}
+.msg{display:inline-block;max-width:94%;padding:5px 8px;border-radius:var(--r);line-height:1.35}
+.msg.in{background:var(--bg2)} .msg.out{background:var(--accent);color:#fff}
+.ev.out .bd{text-align:right}
+.note{color:var(--t2);font-size:11px} .note b{color:var(--t1);font-weight:500}
+.cnt2{display:inline-grid;place-items:center;min-width:16px;height:16px;padding:0 4px;
+  border-radius:99px;background:var(--bg3);color:var(--t2);font-size:10px;font-weight:600}
+.hb.on{background:var(--t1);border-color:var(--t1);color:#fff}
+.hb.on .cnt2{background:rgba(255,255,255,.22);color:#fff}
+
+/* comp modal — above Leaflet's panes (markers 600, controls 800) */
+/* ── command palette · matches the shape of the app's CommandPalette.vue ── */
+.pal{position:absolute;inset:0;z-index:1400;background:rgba(24,24,26,.4);display:none;
+  align-items:flex-start;justify-content:center;padding:80px 22px}
+.pal.on{display:flex}
+.palbox{width:100%;max-width:580px;background:var(--bg);border:1px solid var(--br2);
+  border-radius:10px;overflow:hidden;box-shadow:0 22px 60px -14px rgba(0,0,0,.4);
+  display:flex;flex-direction:column;max-height:100%}
+.palbox input{width:100%;border:0;border-bottom:1px solid var(--br);padding:13px 15px;
+  font-size:14px;color:var(--t1)}
+.palbox input:focus{outline:0}
+.pallist{overflow-y:auto;padding:6px 0;min-height:0}
+.palgrp{font-size:9.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--t3);padding:8px 15px 4px}
+.palrow{display:flex;align-items:center;gap:10px;padding:7px 15px;font-size:13px;
+  color:var(--t1);cursor:pointer}
+.palrow.sel{background:var(--bg2)}
+.palrow .pmeta{margin-left:auto;font-size:10.5px;color:var(--t3);
+  border:1px solid var(--br);border-radius:4px;padding:1px 5px}
+.palrow .psub{font-size:11px;color:var(--t3)}
+.palempty{padding:18px 15px;font-size:12.5px;color:var(--t3)}
+
+/* ── shortcut cheatsheet (?) ── */
+.keys{position:absolute;inset:0;z-index:1400;background:rgba(24,24,26,.45);display:none;
+  align-items:center;justify-content:center;padding:24px}
+.keys.on{display:flex}
+.keysbox{background:var(--bg);border:1px solid var(--br2);border-radius:10px;padding:18px 20px;
+  max-width:620px;width:100%;max-height:100%;overflow-y:auto;
+  box-shadow:0 22px 60px -14px rgba(0,0,0,.4)}
+.keysgrid{display:grid;grid-template-columns:1fr 1fr;gap:2px 26px;margin-top:10px}
+.krow{display:flex;align-items:center;gap:9px;padding:5px 0;font-size:12.5px;color:var(--t2)}
+.krow kbd{font:500 11px/1 Inter,sans-serif;border:1px solid var(--br2);border-bottom-width:2px;
+  border-radius:4px;padding:3px 6px;color:var(--t1);background:var(--bg1);min-width:22px;
+  text-align:center;flex:none}
+.ksec{font-size:9.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--t3);margin:12px 0 2px}
+
+.ovl{position:absolute;inset:0;z-index:1200;background:rgba(24,24,26,.55);display:none;
+  align-items:center;justify-content:center;padding:22px}
+.ovl.on{display:flex}
+.cd{background:var(--bg);border-radius:9px;width:100%;max-width:880px;height:660px;max-height:100%;
+  display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--br2);
+  box-shadow:0 18px 60px -12px rgba(0,0,0,.45)}
+.cdhd{display:flex;align-items:center;gap:9px;padding:8px 12px;border-bottom:1px solid var(--br);flex:none}
+.cdhd h3{margin:0;font-size:14px;font-weight:600}
+.badge{font-size:10.5px;padding:2px 7px;border-radius:var(--rs);background:var(--bg2);color:var(--t2)}
+.badge.act{background:#fdf3e6;color:var(--amber)}
+.badge.subj{background:#eef4fe;color:var(--subject)}
+.cdbody{flex:1;min-height:240px;display:grid;grid-template-columns:minmax(0,1fr) 288px}
+.cdgal{position:relative;background:#1b1f24;min-height:240px}
+.cdgal img{width:100%;height:100%;object-fit:cover;display:block}
+.cdgal .noimg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  color:#8b94a0;font-size:12px;padding:20px;text-align:center}
+.cdgal .noimg[hidden]{display:none}
+.cderr{padding:16px;font-size:12.5px;color:var(--red);white-space:pre-wrap;line-height:1.5}
+.nav{position:absolute;top:50%;transform:translateY(-50%);width:28px;height:28px;border-radius:50%;
+  background:rgba(0,0,0,.5);color:#fff;display:grid;place-items:center;font-size:15px;z-index:3}
+.nav:hover{background:rgba(0,0,0,.75)}
+.nav.p{left:8px} .nav.n{right:8px}
+.cnt{position:absolute;right:8px;bottom:8px;background:rgba(0,0,0,.62);color:#fff;font-size:10.5px;
+  padding:2px 7px;border-radius:99px;z-index:3}
+.cdside{border-left:1px solid var(--br);overflow-y:auto;padding:10px 12px;min-height:0;background:var(--bg)}
+.cdthumbs{display:flex;gap:5px;padding:7px 10px;overflow-x:auto;border-top:1px solid var(--br);
+  background:var(--bg1);flex:none}
+.cdthumbs button{width:52px;height:38px;border-radius:3px;overflow:hidden;border:2px solid transparent;
+  flex:none;background:var(--bg3)}
+.cdthumbs button.on{border-color:var(--accent)}
+.cdthumbs img{width:100%;height:100%;object-fit:cover}
+.hist .hr{display:flex;justify-content:space-between;font-size:11.5px;padding:3px 0;
+  border-bottom:1px solid var(--br);color:var(--t2)}
+.hist .hr b{color:var(--t1);font-weight:500}
+.cdfoot{display:flex;gap:7px;padding:9px 12px;border-top:1px solid var(--br);flex:none;align-items:center}
+.cdfoot .zl{font-size:12px;color:var(--accent);font-weight:500;margin-left:auto}
+.usebtn{height:30px;padding:0 12px;border-radius:var(--rs);font-size:12px;font-weight:500;
+  background:var(--accent);color:#fff}
+.usebtn.off{background:var(--bg);border:1px solid var(--br2);color:var(--t2)}
+
+/* ── the only thing this adds to v17 ──────────────────────────────────────
+   A line of reasoning under each input the analyzer filled in. Deliberately
+   NOT a panel: the rep is looking at the ARV field when they wonder where the
+   ARV came from, so the answer belongs under the ARV field. */
+.why{font-size:11px;line-height:1.5;color:var(--t2);border-left:2px solid var(--accent);
+  padding:3px 0 3px 8px;margin:3px 0 9px}
+.why b{color:var(--t1);font-weight:600}
+.why.mut{border-left-color:var(--br2);color:var(--t3)}
+.why.mut b{color:var(--t2)}
+.why:empty{display:none}
+/* A dot beside a label means the analyzer set this value, and it can be typed
+   over. Nothing is locked -- the machine decides what LANDS, the human owns it. */
+.ai{position:relative}
+.ai::after{content:'';position:absolute;top:-1px;right:-9px;width:4px;height:4px;
+  border-radius:50%;background:var(--accent)}
+tr.whyrow td{padding:0 9px 7px 30px;border-top:0}
+tr.whyrow .why{margin:0}
+.hb.on{background:var(--t1);border-color:var(--t1);color:#fff}
+</style>
+</head>
+<body>
+<div class="stage">
+<div class="modal">
+
+  <div class="hd">
+    <h2>Janice Tilby</h2><span class="ad">906 W Walnut Ave, Olivia MN</span>
+    <div class="dets">
+      <span class="det"><span class="dk">bd</span><input value="2" data-f="beds"></span>
+      <span class="det"><span class="dk">ba</span><input value="1" data-f="baths"></span>
+      <span class="det w"><span class="dk">sqft</span><input value="890" data-f="sqft"></span>
+      <span class="det"><span class="dk">yr</span><input value="1947" data-f="year"></span>
+    </div>
+    <div class="hact">
+      <!-- Activity is lead-level history, the same tier as Call — so it sits with the
+           lead-level actions rather than hiding behind an arrow on the window edge. -->
+      <button class="hb on" id="whyBtn" title="Show the analyzer's reasoning under each field it filled">Reasoning</button>
+      <button class="hb" id="actBtn">Activity<span class="cnt2" id="actCount"></span></button>
+      <button class="hb call" id="callBtn"><span class="ic"></span>Start call</button>
+      <span class="live" id="liveTag" hidden><span class="rec"></span><span id="timer">00:00</span></span>
+      <button class="hb end" id="endBtn" hidden>End call</button>
+      <span class="stamp" id="stamp" title="Which build you are looking at"></span>
+      <button class="x">✕</button>
+    </div>
+  </div>
+
+  <div class="body" id="body">
+
+    <!-- LEFT · copilot -->
+    <div class="col">
+      <div class="sech"><span class="lb">Copilot</span>
+        <span class="lb" id="copState" style="margin-left:auto">Idle</span></div>
+      <div class="feed" id="feed"></div>
+      <div class="miniput"><input id="ui" placeholder="Tell the copilot…"><button id="usend">Send</button></div>
+    </div>
+
+    <!-- CENTRE · map + comp table -->
+    <div class="col bl">
+      <div class="sech"><span class="lb" id="mediaLb">Comps map</span>
+        <div class="seg" style="margin-left:auto;width:126px">
+          <button class="sgb on" data-v="map">Map</button>
+          <button class="sgb" data-v="street">Street</button>
+        </div>
+      </div>
+      <div class="mediapane">
+        <div class="mapel" id="map"></div>
+        <div class="svwrap" id="sv"><div class="svfall">
+          <div style="font-weight:600;color:#fff" id="svTitle">Street View</div>
+          <div style="max-width:320px" id="svMsg">Loading…</div>
+          <a href="#" id="svOpen" style="color:#9dc0f5">Open in Google Street View ↗</a></div>
+          <iframe id="svFrame" referrerpolicy="origin"></iframe></div>
+        <div class="leg" id="leg">
+          <span><i style="background:#2563c9"></i>Subject</span>
+          <span><i style="background:#475569"></i>Sold</span>
+          <span><i style="background:#d97706"></i>Listed</span>
+          <span><i class="fade"></i>0–360d</span>
+        </div>
+      </div>
+      <div class="ctwrap">
+        <div class="filters">
+          <select class="fsel" data-fl="st"><option value="">Any status</option>
+            <option value="off">Sold</option><option value="active">Listed</option></select>
+          <select class="fsel" data-fl="age"><option value="">Any age</option>
+            <option value="90">≤90d</option><option value="180">≤180d</option><option value="365">≤1yr</option></select>
+          <select class="fsel" data-fl="d"><option value="">Any dist</option>
+            <option value="0.5">≤½mi</option><option value="1">≤1mi</option></select>
+          <select class="fsel" data-fl="cond"><option value="">Any condition</option>
+            <option value="renovated">Renovated</option><option value="retail_ready">Retail ready</option>
+            <option value="as_is">As-is</option></select>
+          <span style="flex:1"></span>
+        </div>
+        <div class="ctscroll">
+          <table class="ct">
+            <thead><tr>
+              <th style="width:26px"></th>
+              <th data-sort="a">Address</th><th data-sort="p">Price</th><th data-sort="psf">$/sf</th>
+              <th data-sort="psf" title="What ours is worth at this comp's price per foot">ARV here</th>
+              <th data-sort="cond">Condition</th>
+              <th data-sort="bd">Bd/Ba</th><th data-sort="sf">Sqft</th><th data-sort="yr">Year</th>
+              <th data-sort="d">Dist</th><th data-sort="days">Age</th>
+            </tr></thead>
+            <tbody id="ctbody"></tbody>
+          </table>
+        </div>
+        <div class="ctfoot" id="ctfoot"></div>
+      </div>
+    </div>
+
+    <!-- RIGHT · read · repairs · offer -->
+    <div class="col bl">
+      <div class="rscroll">
+        <div class="pblock" style="padding-top:15px">
+          <div class="g2">
+            <div class="axP">Price</div><div class="axM">Motivation</div>
+            <div class="gh" style="grid-column:3;grid-row:1;align-self:end">✕</div>
+            <div class="gh" style="grid-column:4;grid-row:1;align-self:end">✓</div>
+            <div class="gr" style="grid-column:2;grid-row:2">✓</div>
+            <button class="q q1" data-q="educate" style="grid-column:3;grid-row:2" title="Most leads land here">
+              <span class="qt">Educate</span></button>
+            <button class="q q2" data-q="send" style="grid-column:4;grid-row:2"><span class="qt">Send offer</span></button>
+            <div class="gr" style="grid-column:2;grid-row:3">✕</div>
+            <button class="q q3" data-q="dead" style="grid-column:3;grid-row:3"><span class="qt">Dead</span></button>
+            <button class="q q4" data-q="scam" style="grid-column:4;grid-row:3"><span class="qt">Scam?</span></button>
+          </div>
+        </div>
+
+        <div class="pblock" style="border-bottom:0">
+          <div class="seg" id="lvSeg" title="From the Fix & Flip sheet, at this square footage">
+            <button class="sgb on" data-l="smooth">Smooth<span class="sgv" data-lp="smooth"></span></button>
+            <button class="sgb" data-l="shiver">Shiver<span class="sgv" data-lp="shiver"></span></button>
+            <button class="sgb" data-l="abandon">Abandon<span class="sgv" data-lp="abandon"></span></button>
+          </div>
+          <div class="why" data-why="lv"></div>
+          <div style="margin-top:8px" id="mj"></div>
+          <div class="why" data-why="mj"></div>
+          <div class="row tot"><span class="k"><span class="op">=</span><span class="ai">Repair estimate</span></span>
+            <input class="v" data-in="rep" inputmode="numeric"></div>
+          <div class="why" data-why="rep"></div>
+
+          <div class="sublb2">Offer</div>
+          <div class="row"><span class="k"><span class="op"></span><span class="ai">ARV</span></span>
+            <input class="v" data-in="arv" inputmode="numeric"></div>
+          <div class="why" data-why="arv"></div>
+          <div class="row"><span class="k"><span class="op">×</span><span>Margin</span></span>
+            <input class="v" data-in="mg" inputmode="numeric"></div>
+          <div class="row"><span class="k"><span class="op">=</span><span>Gross</span></span>
+            <span class="v mut" id="grossV"></span></div>
+          <div class="row"><span class="k"><span class="op">−</span><span>Repairs × 2</span></span>
+            <span class="v" id="rep2V"></span></div>
+          <div class="row"><span class="k"><span class="op">−</span><span>Fee</span></span>
+            <input class="v" data-in="fee" inputmode="numeric"></div>
+          <div class="row big"><span class="k"><span class="op">=</span><span>Max offer</span></span>
+            <span class="v" id="offer"></span></div>
+
+          <div class="wantrow">
+            <div class="row"><span class="k"><span class="op"></span><span>They want</span></span>
+              <input class="v" id="askIn" inputmode="numeric" placeholder="—"></div>
+            <div class="row"><span class="k"><span class="op"></span><span>Apart</span></span>
+              <span class="v" id="gapV"></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="rfoot">
+        <div class="savedline" id="savedLine"></div>
+        <div style="display:flex;gap:7px">
+          <button class="go alt" id="saveBtn">Save</button>
+          <button class="go" id="cta" style="flex:2">Send agreement</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- activity: slides over, nothing reflows -->
+  <aside class="actcol" id="actCol">
+    <div class="sech"><span class="lb">Activity</span>
+      <button id="actHide" style="margin-left:auto;color:var(--t3)" title="Close (])">✕</button></div>
+    <div class="act" id="act"></div>
+  </aside>
+
+  <!-- command palette -->
+  <div class="pal" id="pal">
+    <div class="palbox">
+      <input id="palIn" placeholder="Search commands, comps, the lead…" autocomplete="off">
+      <div class="pallist" id="palList"></div>
+    </div>
+  </div>
+
+  <!-- shortcuts -->
+  <div class="keys" id="keysOvl">
+    <div class="keysbox">
+      <div style="display:flex;align-items:baseline;gap:9px">
+        <h3 style="margin:0;font-size:15px">Keyboard</h3>
+        <span class="lb">press ? any time</span>
+        <button class="x" id="keysClose" style="margin-left:auto">✕</button>
+      </div>
+      <div id="keysBody"></div>
+    </div>
+  </div>
+
+  <!-- comp detail -->
+  <div class="ovl" id="ovl">
+    <div class="cd">
+      <div class="cdhd">
+        <h3 id="cdA"></h3><span class="badge" id="cdSt"></span>
+        <span class="lb" id="cdDist"></span>
+        <button class="x" id="cdClose" style="margin-left:auto">✕</button>
+      </div>
+      <div class="cdbody">
+        <div class="cdgal">
+          <div class="noimg" id="cdNoImg" hidden>Photo unavailable in this browser</div>
+          <img id="cdImg" alt="" onerror="this.style.visibility='hidden';document.getElementById('cdNoImg').hidden=false">
+          <button class="nav p" data-cph="-1">‹</button><button class="nav n" data-cph="1">›</button>
+          <span class="cnt" id="cdCnt"></span>
+        </div>
+        <div class="cdside">
+          <div class="lb">Condition · read from photos &amp; listing</div>
+          <div id="cdWhy" style="font-size:11.5px;color:var(--t2);line-height:1.45;margin:3px 0 9px"></div>
+          <div id="cdFacts"></div>
+          <div class="lb" style="margin-top:11px">Price history</div>
+          <div class="hist" id="cdHist"></div>
+        </div>
+      </div>
+      <div class="cdthumbs" id="cdThumbs"></div>
+      <div class="cdfoot">
+        <button class="usebtn" id="cdUse"></button>
+        <a class="zl" id="cdZ" href="#" target="_blank">Open on Zillow ↗</a>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+'use strict';
+/* The real cached Zillow record for this lead (crm.api.zillow facts_for_lead).
+   last_sale is genuinely null — Zillow holds no recorded sale for this parcel, so
+   the sheet says so rather than inventing one. */
+const S={lat:44.77973361,lng:-94.98967058,sqft:890,beds:2,baths:1,year:1947,zest:113400,
+  phone:'(320) 555-0148',addr:'906 W Walnut Ave, Olivia MN',
+  zpid:106822927, rentZest:1342, taxAssessed:93660, lot:'6,359 sqft',
+  ptype:'Single Family', homeStatus:'FOR_SALE', lastSale:null};
+
+/* devproppy/wholesaling classifies comps exactly this way (comp_engine.py):
+   renovated | retail_ready | as_is | unknown. `unknown` is a real outcome — the
+   photo classifier returns a null score when there are too few interior shots,
+   so the UI has to be able to say "couldn't call it" rather than guess. */
+const COND={renovated:['Renovated','renovated'],retail_ready:['Retail ready','retail'],
+            as_is:['As-is','asis'],unknown:['Unknown','unk']};
+const C=[
+ {a:'815 W Walnut Ave', p:97000, sf:780, bd:2,ba:1,yr:1951,lat:44.77975,lng:-94.99170,st:'off',days:28,d:0.1,
+  cond:'renovated', why:'new kitchen and flooring in the photos, “tastefully remodeled” in the copy',
+  hist:[['Sold','Jul 2026','$97,000'],['Listed','Apr 2026','$104,900']]},
+ {a:'311 S 10th St',    p:124900,sf:940, bd:3,ba:1,yr:1955,lat:44.77540,lng:-94.98700,st:'active',days:96,d:0.3,
+  cond:'retail_ready', why:'clean and livable, but original cabinets and bath tile',
+  hist:[['Listed','Apr 2026','$124,900'],['Sold','Jun 2018','$71,500']]},
+ {a:'720 W Lincoln Ave',p:118000,sf:880, bd:2,ba:1,yr:1948,lat:44.78550,lng:-94.99050,st:'off',days:145,d:0.4,
+  cond:'renovated', why:'refinished floors, updated bath, “move-in ready”',
+  hist:[['Sold','Mar 2026','$118,000'],['Sold','Sep 2011','$63,000']]},
+ {a:'1204 W DePue Ave', p:109500,sf:820, bd:2,ba:1,yr:1962,lat:44.77400,lng:-94.99800,st:'off',days:240,d:0.6,
+  cond:'retail_ready', why:'well kept but original throughout',
+  hist:[['Sold','Dec 2025','$109,500']]},
+ {a:'402 N Park Dr',    p:132000,sf:1010,bd:3,ba:2,yr:1971,lat:44.78900,lng:-94.97900,st:'off',days:330,d:0.8,
+  cond:'renovated', why:'renovated kitchen, newer mechanicals mentioned',
+  hist:[['Sold','Sep 2025','$132,000'],['Sold','May 2007','$88,000']]},
+ {a:'96 Cedar St',      p:121500,sf:900, bd:2,ba:1,yr:1940,lat:44.78100,lng:-94.96700,st:'off',days:60,d:1.1,
+  cond:'renovated', why:'full cosmetic refresh visible in the photos',
+  hist:[['Sold','Jun 2026','$121,500']]},
+ {a:'233 W Elm St',     p:76000, sf:710, bd:2,ba:1,yr:1936,lat:44.77300,lng:-94.98400,st:'off',days:410,d:0.7,
+  cond:'as_is', why:'“handyman special”, peeling exterior and a torn-out kitchen',
+  hist:[['Sold','Jul 2025','$76,000']]},
+ {a:'640 N 6th St',     p:143000,sf:1180,bd:3,ba:2,yr:1984,lat:44.78650,lng:-94.98200,st:'off',days:190,d:0.9,
+  cond:'unknown', why:'only 3 photos and all exterior — not enough to call it',
+  hist:[['Sold','Feb 2026','$143,000']]},
+];
+C.forEach(c=>c.psf=Math.round(c.p/c.sf));
+
+const SUBJECT='#2563c9',ACTIVE='#d97706',OFFMKT='#475569';
+const SANS="Inter,-apple-system,'Segoe UI',system-ui,sans-serif";
+const pillOpacity=d=>{const t=Math.max(0,Math.min(1,d/360));return 1-(t*t*(3-2*t))*0.68};
+const priceShort=n=>n>=1000?'$'+Math.round(n/1000)+'k':'$'+n;
+const money=n=>'$'+Math.round(n).toLocaleString('en-US');
+const moneyK=n=>'$'+Math.round(n/1000)+'K';
+const parseN=s=>Number(String(s).replace(/[^0-9.]/g,''))||0;
+const grp=n=>Math.round(n).toLocaleString('en-US');
+const ageTxt=d=>d<60?`${d} days`:d<365?`${Math.round(d/30)} months`:`${(d/365).toFixed(1)} years`;
+const shortA=a=>a.replace(/ (Ave|St|Dr|Ln|Rd)$/,'');
+/* An ARV carried to the dollar claims precision comps can't support. */
+const round1k=n=>Math.round(n/1000)*1000;
+const impliedARV=c=>round1k(c.psf*S.sqft);
+
+const LV=[{id:'smooth',v:[20000,30000,40000,50000]},{id:'shiver',v:[35000,45000,65000,85000]},
+          {id:'abandon',v:[50000,70000,85000,110000]}];
+const MJ=['Roof','Foundation','Plumbing','HVAC','Electrical'];
+const bIdx=sf=>sf<1500?0:sf<2000?1:sf<2500?2:3;
+const QUAD={'Y|Y':'send','Y|N':'educate','N|Y':'scam','N|N':'dead'};
+const QN={send:'Send offer',educate:'Educate',scam:'Scam?',dead:'Dead'};
+const MAX_COMPS=7;
+
+const ACT=[
+ {t:'Tue',k:'note',x:'Lead created'},
+ {t:'9:14a',k:'out',x:'Hi Janice — Lance with Groundwork about 906 W Walnut. Still available?'},
+ {t:'9:31a',k:'in',x:'Yes it is. Call me after 2 today.'},
+];
+const VERDICTS=[
+ {heard:'My sister and I inherited it — neither of us is out there anymore.',
+  kind:'sup',tag:'Motivation',text:'Inherited, both owners out of state.',
+  acts:[{l:'Motivation ✓',a:'mY'}]},
+ {heard:'I was thinking one-thirty.',
+  kind:'against',tag:'Doesn’t hold',
+  text:'Nothing at this size has sold near $130k in a year. The only comp above it is 640 N 6th at $143k — 33% bigger, a 3/2, and I couldn’t read its condition.',
+  acts:[{l:'Set they-want $130k',a:'ask130'},{l:'Price ✕',a:'pN'}]},
+ {heard:'The one down the block went for around ninety last spring.',
+  kind:'sup',tag:'Backs it up',
+  text:'That’s 815 W Walnut — $97k, 28 days ago, renovated. Already carrying your number.',
+  acts:[]},
+ {heard:'We put a new roof on it in 2019.',
+  kind:'sup',tag:'Worth money',
+  text:'Not an ARV move — it comes off the repair side. Roof is currently costing you $10k.',
+  acts:[{l:'Drop roof from repairs',a:'noroof'},{l:'Ignore',a:'x'}]},
+];
+const PARKED=['Needs to clear the furniture before closing.','Asked how fast we can close.'];
+
+const D={m:null,p:null,lv:'shiver',mj:new Set(),arvManual:120000,fee:10000,margin:90,showWhy:true,
+  repOverride:null,ask:130000,mode:'ai',media:'map',act:[...ACT],convo:[],secs:0,
+  picked:new Set([0,2,5]),filters:{st:'',age:'',d:'',cond:''},showParked:false,actOpen:false,
+  cdOpen:null,cdPhoto:0,vdDone:new Set(),sort:'d',sortDesc:false,saved:null,
+  onCall:false,focusIdx:null};
+
+
+/* One entry per input the analyzer filled. Written to be READ ALOUD to a
+   seller -- that is the whole requirement -- so no jargon and no bare numbers
+   without the reason attached to them. */
+const AI={
+ lv:`<b>Shiver, not Smooth.</b> The interior photos on her own old listing show
+     the original kitchen and bath, and she said the furnace “makes a noise”.
+     Smooth is the cosmetic column — $20,000 at this size — and I do not believe
+     it here.`,
+ mj:`<b>No majors ticked.</b> She told you the roof went on in 2019, so I took it
+     back off. If the walkthrough disagrees, tick it and every number below
+     re-runs.`,
+ rep:`<b>$35,000 is the sheet's figure, not mine.</b> I did not override it —
+     nothing she described falls outside what Shiver already covers. Type over it
+     if the walkthrough finds foundation or plumbing.`,
+ arv:`<b>$120,000 — not the $117,000 the $/sf average gives.</b> All three comps I
+     ticked are <b>2 bed / 1 bath, renovated</b>: your house, fixed up.
+     <b>720 W Lincoln</b> (880 sf) went $118,000 and <b>96 Cedar</b> (900 sf) went
+     $121,500. Yours is 890 sf, so it sits between them — that is the number.
+     The $131/sf average is dragged down by Walnut being 12% smaller; square
+     footage is the adjustment here, not the method.`,
+};
+
+/* Per-comp notes. Ticked comps say why they are in; the one exclusion that
+   would have flattered the number says why it is out, because that is the comp
+   a seller points at. */
+const AIC={
+ 0:['in',`<b>In.</b> 2/1 renovated, 0.1 mi, sold <b>28 days</b> ago — the freshest
+    read on this street. 12% smaller than yours, so it sets the floor rather than
+    the number.`],
+ 2:['in',`<b>In.</b> 2/1 renovated at <b>880 sf</b> — ten feet off yours. This is
+    the comp the ARV rests on.`],
+ 5:['in',`<b>In.</b> 2/1 renovated at <b>900 sf</b>, sold two months ago. Brackets
+    Lincoln from above. The 1.1 mi is the only thing against it.`],
+ 7:['out',`<b>Left out</b>, and this is the one she may raise: $143,000 is the
+    biggest number nearby. It is a <b>3/2</b> and <b>33% bigger</b>, and there were
+    too few interior photos to call its condition. Different house.`],
+};
+
+const quad=()=>(D.m&&D.p)?QUAD[D.m+'|'+D.p]:null;
+const baseRep=()=>LV.find(l=>l.id===D.lv).v[bIdx(S.sqft)];
+const rep=()=>D.repOverride!==null?D.repOverride:baseRep()+D.mj.size*10000;
+const pickedArr=()=>[...D.picked].map(i=>C[i]).sort((a,b)=>a.d-b.d);
+const avgPsf=()=>{const a=pickedArr();return a.length?a.reduce((s,c)=>s+c.psf,0)/a.length:0};
+const arv=()=>D.arvManual!==null?D.arvManual:round1k(avgPsf()*S.sqft);
+/* 90% of ARV, minus TWICE the repairs, minus the fee. */
+const REPAIR_MULT=2;
+const gross=()=>arv()*(D.margin/100);
+const repTotal=()=>rep()*REPAIR_MULT;
+const offer=()=>Math.max(0,gross()-repTotal()-D.fee);
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+
+function photoSVG(k,n){
+  const h=((String(k).charCodeAt(0)||65)*13+n*47)%360, W=900, H=560, ext=n%3===0;
+  const body = ext ? `
+    <defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="hsl(${(h+200)%360},48%,74%)"/>
+      <stop offset="1" stop-color="hsl(${(h+200)%360},34%,90%)"/></linearGradient></defs>
+    <rect width="${W}" height="${H}" fill="url(#s)"/>
+    <rect y="${H*.72}" width="${W}" height="${H*.28}" fill="hsl(96,26%,${56+(n%3)*5}%)"/>
+    <polygon points="${W*.18},${H*.44} ${W*.5},${H*.19} ${W*.82},${H*.44}" fill="hsl(${h},24%,30%)"/>
+    <rect x="${W*.25}" y="${H*.44}" width="${W*.5}" height="${H*.3}" fill="hsl(${h},30%,${64+(n%2)*8}%)"/>
+    <rect x="${W*.46}" y="${H*.57}" width="${W*.08}" height="${H*.17}" fill="hsl(${h},32%,26%)"/>
+    <rect x="${W*.30}" y="${H*.51}" width="${W*.09}" height="${H*.11}" fill="hsl(202,48%,82%)"/>
+    <rect x="${W*.61}" y="${H*.51}" width="${W*.09}" height="${H*.11}" fill="hsl(202,48%,82%)"/>` : `
+    <rect width="${W}" height="${H}" fill="hsl(${h},14%,${88-(n%3)*6}%)"/>
+    <rect y="${H*.68}" width="${W}" height="${H*.32}" fill="hsl(${(h+30)%360},24%,${54+(n%2)*8}%)"/>
+    <rect x="${W*.07}" y="${H*.17}" width="${W*.27}" height="${H*.41}" fill="hsl(202,44%,86%)"/>
+    <rect x="${W*.07}" y="${H*.17}" width="${W*.27}" height="${H*.41}" fill="none"
+      stroke="hsl(${h},12%,72%)" stroke-width="7"/>
+    <rect x="${W*.46}" y="${H*.41}" width="${W*.35}" height="${H*.25}" rx="12"
+      fill="hsl(${(h+180)%360},22%,${58+(n%2)*10}%)"/>
+    <rect x="${W*.51}" y="${H*.28}" width="${W*.25}" height="${H*.1}" fill="hsl(${h},18%,74%)"/>`;
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`
+    +body+`<text x="20" y="${H-18}" font-family="Inter,system-ui,sans-serif" font-size="17"
+      fill="rgba(255,255,255,.8)">Photo ${n+1}</text></svg>`;
+  return 'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
+}
+const photosFor=k=>Array.from({length:8},(_,n)=>photoSVG(k,n));
+
+function passes(c){const f=D.filters;
+  if(f.st&&c.st!==f.st)return false;
+  if(f.age&&c.days>+f.age)return false;
+  if(f.d&&c.d>+f.d)return false;
+  if(f.cond&&c.cond!==f.cond)return false;
+  return true}
+function vs(cv,sv,unit,pct){
+  const a=Number(cv),b=Number(sv);
+  if(!isFinite(a)||!isFinite(b)||!b||a===b)return '';
+  const d=a-b,n=pct?Math.round(d/b*100):Math.round(d);
+  if(!n)return '';
+  return `<span class="d ${d>0?'up':'dn'}">${n>0?'+':''}${n}${pct?'%':(unit||'')}</span>`}
+function similarity(c){const dsf=Math.abs(c.sf-S.sqft)/S.sqft;
+  if(c.bd===S.beds&&dsf<.1)return `same ${c.bd} bed and nearly the same size`;
+  if(c.bd===S.beds)return `same ${c.bd} bed`;
+  if(dsf<.1)return 'almost exactly the same size';
+  if(Math.abs(c.yr-S.year)<=12)return 'built around the same time';
+  return 'same neighbourhood'}
+function difference(c){const dsf=(c.sf-S.sqft)/S.sqft;
+  if(c.st==='active')return 'it’s still listed, so that’s an ask not a sale';
+  if(Math.abs(dsf)>.12)return `it’s ${Math.abs(Math.round(dsf*100))}% ${dsf>0?'bigger':'smaller'}`;
+  if(c.days>180)return `it sold ${ageTxt(c.days)} ago`;
+  if(c.bd!==S.beds)return `it’s a ${c.bd} bed`;
+  if(c.d>=0.8)return `it’s ${c.d} miles out`;
+  if(Math.abs(c.yr-S.year)>20)return `it was built in ${c.yr}`;
+  return `it went for ${money(c.p)}`}
+function readingLine(){
+  const sel=pickedArr(); if(!sel.length)return 'Pick a couple of comps and I’ll give you the words.';
+  /* ARV is what this sells for HGTV-ready, so the key is the configuration —
+     2/1 renovated — and size is the adjustment inside that group, not the
+     method. Measured on our own 92,655 comps: bed/bath explains 0.44 of
+     neighbourhood price variance and sqft 0.47, so neither leads alone; what
+     a rep can actually SAY is the bed/bath bracket. */
+  return `I priced it as a <b>2 bed / 1 bath, fixed up</b> — that is what yours
+    becomes. Three sales in the last five months match that exactly:
+    <b>815 W Walnut</b> at $97,000, <b>720 W Lincoln</b> at $118,000 and
+    <b>96 Cedar</b> at $121,500. Lincoln and Cedar are 880 and 900 sf against
+    your 890, so they bracket you almost perfectly.`;
+  /* eslint-disable no-unreachable */
+  const near=sel[0].d;
+  const lead=near<=.15?'There’s a sale right down the block.'
+            :near<=.45?`Nothing right next door — the closest sale is ${near} of a mile away.`
+            :`There’s nothing really close by. The nearest one is ${near} miles out.`;
+  return `${lead} ${sel.slice(0,3).map(c=>
+    `<b>${shortA(c.a)}</b> went ${money(c.p)} — ${similarity(c)}, but ${difference(c)}`).join('. ')}.`}
+/* Redfin gis/avm over a bbox round the subject (lux/redfin_client.fetch_avm).
+   Estimates, not sales: it frames the street, it doesn't price the house. */
+function hoodRange(){
+  const v=C.map(c=>c.p).sort((a,b)=>a-b);
+  return [v[Math.floor(v.length*0.15)],v[Math.ceil(v.length*0.85)-1]]}
+function conditionLine(){
+  const n={renovated:0,retail_ready:0,as_is:0,unknown:0};
+  C.forEach(c=>n[c.cond]++);
+  const asis=C.find(c=>c.cond==='as_is');
+  let s=`I read the photos and listing text on all ${C.length}: `
+    +`${n.renovated} renovated, ${n.retail_ready} retail-ready, ${n.as_is} as-is`
+    +(n.unknown?`, ${n.unknown} I couldn’t call (too few interior photos)`:'')+'.';
+  if(asis)s+=` <b>${shortA(asis.a)}</b> went at $${asis.psf}/sf in as-is shape — that’s closer to`
+    +` what yours is worth today than to a fixed-up number, so it isn’t an ARV comp.`;
+  return s}
+
+/* ── map ── */
+function pillBox(l1,l2){const w=Math.ceil(Math.max(l1.length*6.3,l2.length*5))+16;return [Math.max(w,60),32]}
+let map,subjMarker,markers=[];
+function drawMap(){
+  map=L.map('map',{zoomControl:false,scrollWheelZoom:false,attributionControl:false}).setView([S.lat,S.lng],14);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{maxZoom:19}).addTo(map);
+  [[0.5,'½ mi'],[1,'1 mi'],[2,'2 mi']].forEach(([mi,label])=>{
+    L.circle([S.lat,S.lng],{radius:mi*1609.344,color:'#161614',weight:1,opacity:.3,
+      dashArray:'4 4',fill:false,interactive:false}).addTo(map);
+    L.marker([S.lat+mi/69,S.lng],{interactive:false,icon:L.divIcon({className:'',iconSize:[0,0],
+      html:`<div style="display:inline-block;transform:translate(-50%,-50%);background:rgba(255,255,255,.88);
+        padding:0 3px;border-radius:3px;font:500 8.5px/13px ${SANS};color:#62636a;white-space:nowrap">${label}</div>`})}).addTo(map);
+  });
+  C.forEach((c,i)=>markers.push(L.marker([c.lat,c.lng]).addTo(map).on('click',()=>openComp(i))));
+  subjMarker=L.marker([S.lat,S.lng],{zIndexOffset:1000}).addTo(map).on('click',()=>openComp(SUBJ));
+  paintPins();
+  map.fitBounds(L.latLngBounds(C.map(c=>[c.lat,c.lng]).concat([[S.lat,S.lng]])).pad(.26));
+  setTimeout(()=>map.invalidateSize(),60);
+}
+function paintPins(){
+  C.forEach((c,i)=>{
+    const on=D.picked.has(i),act=c.st==='active';
+    const op=(on?1:pillOpacity(c.days)).toFixed(3);
+    const bg=act?ACTIVE:OFFMKT,bd=act?'#b45309':'#334155';
+    const ring=on?'box-shadow:0 0 0 2px #fff,0 0 0 4px #2563c9;':'';
+    const l1=`${priceShort(c.p)} ${c.yr}`,l2=`${c.bd}/${c.ba} · ${c.sf}sf`;
+    const [w,h]=pillBox(l1,l2);
+    markers[i].setZIndexOffset((on?600:act?200:100)+Math.round((1-c.days/360)*50));
+    markers[i].setOpacity(passes(c)?1:.25);
+    markers[i].setIcon(L.divIcon({className:'',iconSize:[w,h],iconAnchor:[w/2,h/2],
+      html:`<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
+        box-sizing:border-box;width:${w}px;height:${h}px;background:${bg};color:#fff;border-radius:5px;
+        border:1px solid ${bd};${ring}white-space:nowrap;line-height:1;opacity:${op};
+        font-family:${SANS};cursor:pointer">
+        <span style="font-size:10.5px;font-weight:600">${priceShort(c.p)}
+          <span style="font-size:8.5px;font-weight:400;opacity:.72">${c.yr}</span></span>
+        <span style="font-size:8.5px;opacity:.72;margin-top:2px">${l2}</span></div>`}));
+  });
+  const l1=`Subject ${S.year}`,l2=`${S.beds}/${S.baths} · ${S.sqft}sf`;
+  const [w,h]=pillBox(l1,l2);
+  subjMarker.setIcon(L.divIcon({className:'',iconSize:[w,h],iconAnchor:[w/2,h/2],
+    html:`<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
+      box-sizing:border-box;width:${w}px;height:${h}px;background:${SUBJECT};color:#fff;border-radius:5px;
+      border:2px solid #fff;white-space:nowrap;line-height:1;font-family:${SANS};cursor:pointer;
+      box-shadow:0 1px 5px rgba(37,99,201,.45)">
+      <span style="font-size:10.5px;font-weight:600">Subject
+        <span style="font-size:8.5px;font-weight:400;opacity:.85">${S.year}</span></span>
+      <span style="font-size:8.5px;opacity:.85;margin-top:2px">${l2}</span></div>`}));
+}
+
+/* ── detail modal: comps AND the subject ── */
+const SUBJ='subject';
+/* The subject gets the same sheet, but it is not a comp: no condition grade (its
+   condition is whatever repair level you set), and nothing to add to an ARV set. */
+function subjectRecord(){
+  return {a:S.addr, p:S.zest, sf:S.sqft, bd:S.beds, ba:S.baths, yr:S.year,
+    psf:Math.round(S.zest/S.sqft), st:'subject', d:0, days:0,
+    hist:S.lastSale?[['Sold',S.lastSale.when,money(S.lastSale.p)]]:[]};
+}
+function openComp(i){D.cdOpen=i;D.cdPhoto=0;$('#ovl').classList.add('on');paintCD()}
+function paintCD(){try{paintCDInner()}catch(err){
+  const b=$('.cdbody'); if(b)b.innerHTML=`<div class="cderr">Couldn't render this listing.\n\n${err&&err.message||err}</div>`}}
+function paintCDInner(){
+  const i=D.cdOpen; if(i===null)return;
+  const sub=i===SUBJ;
+  const c=sub?subjectRecord():C[i];
+  if(!c)throw new Error('No comp at index '+i);
+  const ph=photosFor(i), cd=COND[c.cond]||COND.unknown;
+  $('#cdA').textContent=c.a;
+  $('#cdSt').textContent=sub?'Subject':(c.st==='active'?'For sale':'Off-market');
+  $('#cdSt').className='badge'+(sub?' subj':(c.st==='active'?' act':''));
+  $('#cdDist').textContent=sub?'The house you’re buying'
+    :`${c.d} mi from subject · ${ageTxt(c.days)} ago`;
+  const im=$('#cdImg'); im.style.visibility=''; im.src=ph[D.cdPhoto];
+  $('#cdNoImg').hidden=true;
+  $('#cdCnt').textContent=`${D.cdPhoto+1} / ${ph.length}`;
+  $('#cdThumbs').innerHTML=ph.map((p,n)=>
+    `<button class="${n===D.cdPhoto?'on':''}" data-cth="${n}"><img src="${p}" alt=""></button>`).join('');
+  $('#cdWhy').innerHTML=sub
+    ? `Not graded. This is the house you’re buying — its condition is whatever repair
+       level you set on the right, not something read off a listing.`
+    : `<b>${cd[0]}.</b> ${c.why}`;
+  const rows = sub ? [
+    ['Zestimate',money(S.zest)],
+    ['Rent Zestimate',money(S.rentZest)+' /mo'],
+    ['Tax assessed',money(S.taxAssessed)],
+    ['Beds / baths',`${c.bd} / ${c.ba}`],
+    ['Living area',`${c.sf.toLocaleString()} sf`],
+    ['Lot size',S.lot],
+    ['Year built',c.yr],
+    ['Home type',S.ptype],
+    ['On Zillow now',S.homeStatus==='FOR_SALE'
+      ?'<span style="color:var(--amber);font-weight:600">Listed for sale</span>':'Off-market'],
+    ['Zestimate $ / sf','$'+c.psf],
+    ['Your ARV',`<span style="color:var(--accent);font-weight:600">${money(arv())}</span>`],
+  ] : [
+    [c.st==='active'?'Asking':'Last sold for',money(c.p)],
+    ['Beds / baths',`${c.bd} / ${c.ba}${vs(c.bd,S.beds,' bd')}`],
+    ['Living area',`${c.sf.toLocaleString()} sf${vs(c.sf,S.sqft,'',true)}`],
+    ['Year built',`${c.yr}${vs(c.yr,S.year,'y')}`],
+    ['$ / sf','$'+c.psf],
+    ['ARV at this $/sf',`<span style="color:var(--accent);font-weight:600">${money(impliedARV(c))}</span>`],
+    ['Condition <span style="color:var(--t3)">(AI)</span>',`<span class="cnd ${cd[1]}">${cd[0]}</span>`],
+    ['In your ARV set',D.picked.has(i)?'Yes':'No'],
+  ];
+  $('#cdFacts').innerHTML=rows
+    .map(([k,v])=>`<div class="row"><span class="k"><span>${k}</span></span><span class="v">${v}</span></div>`).join('')
+   +(sub?'':`<div style="font-size:10.5px;color:var(--t3);margin-top:7px;line-height:1.45">
+      <span class="d up" style="margin:0">Red</span> = better than the subject, so it flatters our ARV.
+      <span class="d dn" style="margin:0">Green</span> = worse, so the subject holds up.</div>`);
+  $('#cdHist').innerHTML=(c.hist||[]).map(([w,when,p])=>
+    `<div class="hr"><span>${w} · ${when}</span><b>${p}</b></div>`).join('')
+    ||`<div class="hr"><span style="color:var(--t3)">Zillow holds no recorded sale</span></div>`;
+  $('#cdUse').hidden=sub;                     // the subject is not a comparable for itself
+  $('#cdUse').textContent=D.picked.has(i)?'✓ In the ARV set':'Add to ARV set';
+  $('#cdUse').className='usebtn'+(D.picked.has(i)?'':' off');
+  // with a zpid we can link the real listing; otherwise fall back to a search URL
+  $('#cdZ').href = sub && S.zpid
+    ? `https://www.zillow.com/homedetails/${S.zpid}_zpid/`
+    : `https://www.zillow.com/homes/${encodeURIComponent(c.a+', Olivia MN')}_rb/`;
+}
+
+function setMedia(v){
+  D.media=v;
+  $$('[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+  $('#sv').classList.toggle('on',v==='street');
+  $('#leg').style.display=v==='map'?'':'none';
+  $('#mediaLb').textContent=v==='street'?'Street view':'Comps map';
+  // Maps Embed API key: project claude-code-486305, restricted to the Maps Embed
+  // API and to crm.groundworkpro.com + localhost:8080/8477 referrers.
+  if(v==='street'&&!$('#svFrame').src){
+    // A cold rural panorama can take 20-30s to first paint, so the fallback says
+    // "Loading" and only claims failure once the load event has had its chance.
+    const f=$('#svFrame');
+    f.addEventListener('load',()=>{$('#svMsg').textContent='';},{once:true});
+    setTimeout(()=>{if($('#svMsg').textContent==='Loading\u2026')
+      $('#svMsg').textContent='Still loading \u2014 or no Street View at this address.';},30000);
+    f.src=`https://www.google.com/maps/embed/v1/streetview?key=AIzaSyBAIpb09ornAPq4nWMhCQqsuk46AjrErFo`+
+      `&location=${S.lat},${S.lng}&heading=0&pitch=0&fov=90`;
+  }
+  if(v==='map')setTimeout(()=>map.invalidateSize(),50);
+}
+function setAct(o){
+  D.actOpen=o;
+  $('#actCol').classList.toggle('on',o);
+  $('#actBtn').classList.toggle('on',o);
+}
+
+function render(){
+  const bi=bIdx(S.sqft),r=rep(),o=offer(),q=quad(),A=arv();
+  LV.forEach(l=>{const e=$(`[data-lp="${l.id}"]`);if(e)e.textContent=money(l.v[bi])});
+  $('#lvSeg').title=`Fix & Flip sheet, ${['under 1,500','1,500–2,000','2,000–2,500','2,500+'][bi]} sqft column`;
+  $$('[data-l]').forEach(b=>b.classList.toggle('on',b.dataset.l===D.lv));
+  $$('.q').forEach(b=>b.classList.toggle('on',b.dataset.q===q));
+  $('#mj').innerHTML=MJ.map(m=>`<div class="row pick ${D.mj.has(m)?'on':''}" data-m="${m}">
+    <span class="k"><span class="op">+</span><span class="chk">✓</span><span>${m}</span></span>
+    <span class="v mut">${money(10000)}</span></div>`).join('');
+  $$('[data-why]').forEach(el=>{
+    el.innerHTML = D.showWhy ? (AI[el.dataset.why]||'') : '';
+  });
+  $('#whyBtn').classList.toggle('on',D.showWhy);
+  $$('.ai').forEach(el=>el.style.setProperty('--dot',D.showWhy?'1':'0'));
+  $('#grossV').textContent=money(gross());
+  $('#rep2V').textContent=money(repTotal());
+  $('#offer').textContent=money(o);
+  $('#gapV').textContent=D.ask?money(Math.max(0,D.ask-o)):'—';
+  const setIf=(s_,v)=>{const e=$(s_);if(e&&document.activeElement!==e)e.value=v};
+  setIf('[data-in="rep"]',money(r));setIf('[data-in="fee"]',money(D.fee));
+  setIf('[data-in="mg"]',D.margin+'%');
+  setIf('[data-in="arv"]',money(A));setIf('#askIn',D.ask?money(D.ask):'');
+  $('#cta').className='go'+(q==='send'?' hot':(q&&q!=='educate')?' quiet':'');
+
+  const list=C.map((c,i)=>({c,i})).filter(x=>passes(x.c)).sort((x,y)=>{
+    const k=D.sort;
+    const rr=(k==='a'||k==='st'||k==='cond')?String(x.c[k]).localeCompare(String(y.c[k])):x.c[k]-y.c[k];
+    return D.sortDesc?-rr:rr});
+  $('#ctbody').innerHTML=list.map(({c,i})=>{const cd=COND[c.cond]||COND.unknown;return `
+    <tr class="${D.picked.has(i)?'on':''}" data-open="${i}">
+      <td><span class="cchk" data-pick="${i}"
+        style="${D.picked.has(i)?'background:#2563c9;border-color:#2563c9;color:#fff':''}">✓</span></td>
+      <td class="adr"><span class="dotst" style="display:inline-block;margin-right:6px;
+        background:${c.st==='active'?ACTIVE:OFFMKT};opacity:${pillOpacity(c.days).toFixed(2)}"
+        title="${c.st==='active'?'For sale (an ask)':'Off-market'}"></span>${c.a}</td>
+      <td class="pp">${money(c.p)}</td>
+      <td class="psf">$${c.psf}</td>
+      <td class="arvh">${money(impliedARV(c))}</td>
+      <td><span class="cnd ${cd[1]}" title="${c.why}">${cd[0]}</span></td>
+      <td>${c.bd}/${c.ba}${vs(c.bd,S.beds,' bd')}</td>
+      <td>${c.sf.toLocaleString()}${vs(c.sf,S.sqft,'',true)}</td>
+      <td>${c.yr}${vs(c.yr,S.year,'y')}</td>
+      <td>${c.d} mi</td><td>${ageTxt(c.days)}</td>
+    </tr>` + (D.showWhy && AIC[i] ? `<tr class="whyrow"><td colspan="11">
+      <div class="why ${AIC[i][0]==='out'?'mut':''}">${AIC[i][1]}</div></td></tr>` : '')}).join('');
+  $$('table.ct th[data-sort]').forEach(th=>{
+    const on=th.dataset.sort===D.sort;
+    th.innerHTML=th.textContent.replace(/ [▲▼]$/,'')+(on?` <span class="ar">${D.sortDesc?'▼':'▲'}</span>`:'')});
+  $('#ctfoot').innerHTML=`<span>${list.length} shown of ${C.length}</span>
+    <span class="sp"><b>${D.picked.size}</b> in ARV set · avg <b>$${Math.round(avgPsf())}/sf</b>
+    × ${S.sqft.toLocaleString()} sf = <b>${money(A)}</b></span>`;
+
+  /* copilot: sticky comp read, then the conversation */
+  const [lo,hi]=hoodRange();
+  $('#feed').innerHTML=
+    `<div class="stickypost"><div class="say">
+      <div class="sh"><span>How I comped it</span><span>${D.picked.size} comps · 2/1 renovated</span></div>
+      <div class="line">${readingLine()}</div>
+      <div class="arvline"><span class="ak">Puts it around</span><span class="av">${money(A)}</span></div>
+      <div class="hood">Neighbourhood range <b>${money(lo)} – ${money(hi)}</b>
+        <span class="src2">Redfin estimates, ½ mi</span></div>
+    </div></div>`
+    + `<div class="sig"><div class="st">${conditionLine()}</div></div>`
+    + VERDICTS.map((v,i)=>`
+      <div class="vd ${v.kind}">
+        <div class="heard">“${v.heard}”</div>
+        <div class="verdict"><span class="tag">${v.tag}.</span> ${v.text}</div>
+        ${v.acts.length?`<div class="row2">${v.acts.map((a,j)=>{const k=i+':'+j,dn=D.vdDone.has(k);
+          return `<button class="cmd ${j?'ghost':''} ${dn?'done':''}" data-vd="${k}" data-a="${a.a}">${dn?'✓ '+a.l:a.l}</button>`
+        }).join('')}</div>`:''}
+      </div>`).join('')
+    + D.convo.map(x=>x.k==='me'
+        ?`<div class="utt me"><span class="who">You</span><span class="t">${x.x}</span></div>`
+        :`<div class="sig"><div class="st">${x.x}</div></div>`).join('')
+    + `<div class="parked">Everything else is parked.
+        <button id="pkBtn">${D.showParked?'hide':`${PARKED.length} notes`}</button>
+        ${D.showParked?PARKED.map(p=>`<div class="pk">${p}</div>`).join(''):''}</div>`;
+
+  /* saved state: say what was saved, and admit when it has since drifted */
+  const sl=$('#savedLine');
+  if(!D.saved) sl.innerHTML='Nothing saved for this lead yet.';
+  else if(sameAsSaved()) sl.innerHTML=`Saved <b>${D.saved.at}</b> · offer <b>${money(D.saved.snap.offer)}</b>`;
+  else sl.innerHTML=`Saved <b>${D.saved.at}</b> at <b>${money(D.saved.snap.offer)}</b> — changed since.`;
+  $('#saveBtn').textContent = D.saved && !sameAsSaved() ? 'Re-save' : 'Save';
+  $('#saveBtn').disabled = !!(D.saved && sameAsSaved());
+  $('#saveBtn').style.opacity = $('#saveBtn').disabled ? .45 : 1;
+
+  $('#actCount').textContent=D.act.length;
+  $('#act').innerHTML=D.act.map(e=>e.k==='note'
+    ?`<div class="ev"><span class="tm">${e.t}</span><div class="bd note">${e.x}</div></div>`
+    :`<div class="ev ${e.k==='out'?'out':''}"><span class="tm">${e.t}</span>
+       <div class="bd"><span class="msg ${e.k}">${e.x}</span></div></div>`).join('');
+  $('#act').scrollTop=1e6;
+  paintPins(); if(D.cdOpen!==null)paintCD();
+}
+
+/* A saved determination is a lead-record event, so it lands on the activity
+   timeline rather than in a private store — and it snapshots the INPUTS as well
+   as the number, because "we said $35,300" is useless without the comps and the
+   repair level that produced it. */
+function snapshot(){
+  return {arv:arv(), rep:rep(), lvl:D.lv, majors:[...D.mj], margin:D.margin, fee:D.fee,
+    offer:offer(), ask:D.ask, read:quad(),
+    comps:pickedArr().map(c=>c.a), psf:Math.round(avgPsf())};
+}
+function sameAsSaved(){
+  if(!D.saved)return false;
+  const a=D.saved.snap, b=snapshot();
+  return JSON.stringify(a)===JSON.stringify(b);
+}
+function saveDetermination(){
+  const snap=snapshot();
+  const t=new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})
+    .replace(' ','').toLowerCase();
+  D.saved={snap,at:t};
+  D.act.push({t,k:'note',x:
+    `<b>Price determination saved</b> — ARV ${money(snap.arv)} · repairs ${money(snap.rep)}`+
+    ` · max offer <b>${money(snap.offer)}</b><br>`+
+    `<span style="color:var(--t3)">${snap.comps.length} comps at $${snap.psf}/sf: `+
+    `${snap.comps.map(shortA).join(', ')} · ${snap.lvl}`+
+    `${snap.majors.length?' + '+snap.majors.join(', '):''}`+
+    `${snap.read?' · read '+QN[snap.read]:''}</span>`});
+  render();
+}
+
+function togglePick(i){
+  if(D.picked.has(i))D.picked.delete(i);
+  else{if(D.picked.size>=MAX_COMPS)return;D.picked.add(i)}
+  D.arvManual=null;render()}
+
+document.addEventListener('click',e=>{
+  if(e.target.closest('#usend')){const el=$('#ui'),v=el.value.trim();
+    if(v){D.convo.push({k:'me',x:v});D.convo.push({k:'ai',x:'On it — that would run against this lead in the real build.'});el.value='';render()}
+    return}
+  const v=e.target.closest('[data-v]'); if(v)return setMedia(v.dataset.v);
+  if(e.target.closest('#actHide'))return setAct(false);
+  if(e.target.closest('#actBtn'))return setAct(!D.actOpen);
+  if(e.target.closest('#saveBtn'))return saveDetermination();
+  if(e.target.closest('#pkBtn')){D.showParked=!D.showParked;return render()}
+  if(e.target.closest('#svOpen')){e.preventDefault();
+    window.open(`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${S.lat},${S.lng}`,'_blank','noopener');return}
+  if(e.target.closest('#cdClose')||e.target.id==='ovl'){$('#ovl').classList.remove('on');D.cdOpen=null;return}
+  if(e.target.closest('#cdUse'))return togglePick(D.cdOpen);
+  const cth=e.target.closest('[data-cth]'); if(cth){D.cdPhoto=+cth.dataset.cth;return paintCD()}
+  const cph=e.target.closest('[data-cph]');
+  if(cph){const n=photosFor(D.cdOpen).length;D.cdPhoto=(D.cdPhoto+ +cph.dataset.cph+n)%n;return paintCD()}
+  const so=e.target.closest('th[data-sort]');
+  if(so){const k=so.dataset.sort;
+    if(D.sort===k)D.sortDesc=!D.sortDesc;else{D.sort=k;D.sortDesc=false}return render()}
+  const pk=e.target.closest('[data-pick]'); if(pk){e.stopPropagation();return togglePick(+pk.dataset.pick)}
+  const op=e.target.closest('[data-open]'); if(op)return openComp(+op.dataset.open);
+  const q=e.target.closest('.q');
+  if(q){const cur=quad();
+    if(cur===q.dataset.q){D.m=D.p=null}
+    else{const k=Object.keys(QUAD).find(x=>QUAD[x]===q.dataset.q);[D.m,D.p]=k.split('|')}
+    return render()}
+  const l=e.target.closest('[data-l]'); if(l){D.lv=l.dataset.l;D.repOverride=null;return render()}
+  const mj=e.target.closest('.row.pick');
+  if(mj){const k=mj.dataset.m;D.mj.has(k)?D.mj.delete(k):D.mj.add(k);D.repOverride=null;return render()}
+  const vd=e.target.closest('[data-vd]');
+  if(vd){const a=vd.dataset.a;
+    if(a==='mY')D.m='Y'; if(a==='pN')D.p='N';
+    if(a==='ask130')D.ask=130000;
+    if(a==='noroof'){D.mj.delete('Roof');D.repOverride=null}
+    if(a!=='x')D.vdDone.add(vd.dataset.vd);
+    return render()}
+});
+document.addEventListener('click',e=>{
+  if(e.target.id==='whyBtn'){D.showWhy=!D.showWhy;render()}
+});
+document.addEventListener('change',e=>{
+  if(e.target.dataset.fl){D.filters[e.target.dataset.fl]=e.target.value;render()}});
+document.addEventListener('input',e=>{
+  const t=e.target;
+  if(t.id==='askIn'){D.ask=parseN(t.value);return render()}
+  if(t.dataset.in){const v=parseN(t.value);
+    if(t.dataset.in==='rep')D.repOverride=v;
+    if(t.dataset.in==='arv')D.arvManual=v||null;
+    if(t.dataset.in==='fee')D.fee=v;
+    if(t.dataset.in==='mg')D.margin=Math.min(100,v);
+    return render()}
+  if(t.dataset.f){const v=parseN(t.value);if(v>0){S[t.dataset.f]=v;D.repOverride=null;render()}}
+});
+/* ══════════ keyboard ══════════
+   Keys the app ALREADY owns (GlobalModals.vue / CompsView.vue):
+     ⌘K palette · [ sidebar · ] detail panel · ⌘, settings · d / h / u on comps
+   So this screen reuses rather than reinvents:
+     · the activity rail should register itself AS the detail panel, so `]` keeps
+       one meaning app-wide — an earlier build here had stolen it for a second;
+     · h / u keep exactly the meaning they have on the comps map;
+     · destructive things take a modifier (⌘↵ sends an agreement);
+     · one-per-call choices (the 2×2 read) live in the palette only. Not every
+       action deserves a key, and the palette is the discovery path. */
+const SHORTCUTS = [
+  { sec: 'Working the call' },
+  { k: 'C', label: 'Start / end the call',
+    run: () => (D.onCall ? $('#endBtn') : $('#callBtn')).click() },
+  { k: '/', label: 'Jump to the copilot box', run: () => $('#ui').focus() },
+  { k: 'P', label: 'Jump to "they want"',
+    run: () => { $('#askIn').focus(); $('#askIn').select() } },
+  { k: 'S', label: 'Save the price determination',
+    run: () => { if (!$('#saveBtn').disabled) saveDetermination() } },
+  { k: '⌘↵', label: 'Send the purchase agreement', run: null },
+
+  { sec: 'Comps' },
+  { k: '↑ ↓', label: 'Move through the comp table', run: null },
+  { k: '↵', label: 'Open the focused comp', run: null },
+  { k: 'U', label: 'Use the focused comp in the ARV set', run: null },
+  { k: 'H', label: 'Hide the focused comp', run: null },
+  { k: 'M', label: 'Map / Street view',
+    run: () => setMedia(D.media === 'map' ? 'street' : 'map') },
+
+  { sec: 'Repairs' },
+  { k: '1', label: 'Smooth sailing', run: () => pickLevel('smooth') },
+  { k: '2', label: 'Shiver me timbers', run: () => pickLevel('shiver') },
+  { k: '3', label: 'Abandon ship', run: () => pickLevel('abandon') },
+
+  { sec: 'Everywhere — already in the CRM' },
+  { k: '⌘K', label: 'Command palette', run: null },
+  { k: ']', label: 'Activity panel', run: null },
+  { k: '[', label: 'App sidebar', run: null },
+  { k: '?', label: 'This list', run: null },
+  { k: 'Esc', label: 'Close whatever is open', run: null },
+];
+
+function pickLevel(id) { D.lv = id; D.repOverride = null; render() }
+function focusRow(delta) {
+  const rows = [...document.querySelectorAll('#ctbody tr')];
+  if (!rows.length) return;
+  let i = rows.findIndex(r => r.classList.contains('focus'));
+  i = i < 0 ? (delta > 0 ? 0 : rows.length - 1) : (i + delta + rows.length) % rows.length;
+  rows.forEach(r => r.classList.remove('focus'));
+  rows[i].classList.add('focus');
+  rows[i].scrollIntoView({ block: 'nearest' });
+  D.focusIdx = Number(rows[i].dataset.open);
+}
+const focused = () => (D.focusIdx === undefined || D.focusIdx === null ? null : D.focusIdx);
+
+/* ══════════ command palette ══════════
+   Same shape as the app's CommandPalette.vue: {key, label, meta, group,
+   keywords, run}. These would be contributed by the lead desk while mounted. */
+function paletteCommands() {
+  const lead = [
+    { key: 'lead:save', label: 'Save price determination', meta: 'S',
+      kw: 'arv offer snapshot comps determination',
+      run: () => { if (!$('#saveBtn').disabled) saveDetermination() } },
+    { key: 'lead:agree', label: 'Send purchase agreement', meta: '⌘↵',
+      kw: 'contract docuseal esign paper', run: () => $('#cta').click() },
+    { key: 'lead:call', label: (D.onCall ? 'End' : 'Start') + ' call', meta: 'C',
+      kw: 'phone dial quo record',
+      run: () => (D.onCall ? $('#endBtn') : $('#callBtn')).click() },
+    { key: 'lead:street', label: 'Street view', meta: 'M',
+      kw: 'google outside kerb curb', run: () => setMedia('street') },
+    { key: 'lead:act', label: 'Toggle activity', meta: ']',
+      kw: 'texts calls notes history timeline', run: () => setAct(!D.actOpen) },
+    { key: 'lead:zillow', label: 'Open the subject on Zillow',
+      kw: 'listing zpid photos record',
+      run: () => window.open('https://www.zillow.com/homedetails/' + S.zpid + '_zpid/', '_blank', 'noopener') },
+  ].map(x => ({ ...x, group: 'This lead' }));
+
+  const read = [['educate', 'Educate'], ['send', 'Send offer'], ['dead', 'Dead'], ['scam', 'Scam?']]
+    .map(([q, l]) => ({
+      key: 'read:' + q, label: 'Read: ' + l, group: 'Set the read',
+      kw: 'motivation price quadrant 2x2 classify',
+      run: () => { const k = Object.keys(QUAD).find(x => QUAD[x] === q);
+        [D.m, D.p] = k.split('|'); render() },
+    }));
+
+  const names = ['Smooth sailing', 'Shiver me timbers', 'Abandon ship'];
+  const reps = LV.map((l, i) => ({
+    key: 'rep:' + l.id, label: 'Repairs: ' + names[i], meta: String(i + 1),
+    group: 'Repairs', kw: 'rehab level cheat sheet fix flip',
+    run: () => pickLevel(l.id),
+  }));
+
+  const comps = C.map((c, i) => ({
+    key: 'comp:' + i, label: c.a, group: 'Comps',
+    sub: money(c.p) + ' · $' + c.psf + '/sf · ' + COND[c.cond][0],
+    kw: c.a + ' comp comparable', run: () => openComp(i),
+  }));
+
+  return [...lead, ...read, ...reps, ...comps];
+}
+
+let palSel = 0, palAll = [];
+function renderPalette() {
+  const q = $('#palIn').value.trim().toLowerCase();
+  palAll = paletteCommands().filter(c =>
+    !q || (c.label + ' ' + (c.kw || '') + ' ' + (c.sub || '')).toLowerCase().includes(q));
+  if (palSel >= palAll.length) palSel = Math.max(0, palAll.length - 1);
+  if (!palAll.length) { $('#palList').innerHTML = '<div class="palempty">Nothing matches that.</div>'; return }
+  let html = '', grp = null;
+  palAll.forEach((c, i) => {
+    if (c.group !== grp) { grp = c.group; html += '<div class="palgrp">' + grp + '</div>' }
+    html += '<div class="palrow ' + (i === palSel ? 'sel' : '') + '" data-pal="' + i + '">' +
+      '<span>' + c.label + (c.sub ? ' <span class="psub">' + c.sub + '</span>' : '') + '</span>' +
+      (c.meta ? '<span class="pmeta">' + c.meta + '</span>' : '') + '</div>';
+  });
+  $('#palList').innerHTML = html;
+  const sel = $('#palList .palrow.sel'); if (sel) sel.scrollIntoView({ block: 'nearest' });
+}
+const palOpen = () => $('#pal').classList.contains('on');
+function openPal() { $('#pal').classList.add('on'); $('#palIn').value = ''; palSel = 0; renderPalette(); $('#palIn').focus() }
+function closePal() { $('#pal').classList.remove('on') }
+function runPal(i) { const c = palAll[i]; if (!c) return; closePal(); if (c.run) c.run() }
+
+function renderKeys() {
+  let h = '', open = false;
+  SHORTCUTS.forEach(s => {
+    if (s.sec) { if (open) h += '</div>'; h += '<div class="ksec">' + s.sec + '</div><div class="keysgrid">'; open = true; return }
+    h += '<div class="krow"><kbd>' + s.k + '</kbd><span>' + s.label + '</span></div>';
+  });
+  $('#keysBody').innerHTML = h + (open ? '</div>' : '');
+}
+
+document.addEventListener('keydown', e => {
+  const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName) || e.target.isContentEditable;
+  const mod = e.metaKey || e.ctrlKey;
+
+  // ⌘K fires even mid-typing — the rule the app already uses
+  if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); return palOpen() ? closePal() : openPal() }
+
+  if (palOpen()) {
+    const n = palAll.length;
+    if (e.key === 'Escape') { e.preventDefault(); return closePal() }
+    if (e.key === 'ArrowDown') { e.preventDefault(); palSel = (palSel + 1) % n; return renderPalette() }
+    if (e.key === 'ArrowUp') { e.preventDefault(); palSel = (palSel - 1 + n) % n; return renderPalette() }
+    if (e.key === 'Enter') { e.preventDefault(); return runPal(palSel) }
+    return;
+  }
+
+  // destructive, so it keeps a modifier
+  if (mod && e.key === 'Enter') { e.preventDefault(); return $('#cta').click() }
+  if (typing) { if (e.key === 'Enter' && e.target.id === 'ui') { e.preventDefault(); $('#usend').click() } return }
+
+  if ($('#keysOvl').classList.contains('on')) {
+    if (e.key === 'Escape' || e.key === '?') $('#keysOvl').classList.remove('on');
+    return;
+  }
+  if (D.cdOpen !== null) {
+    if (e.key === 'Escape') { $('#ovl').classList.remove('on'); D.cdOpen = null }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      const n = photosFor(D.cdOpen).length;
+      D.cdPhoto = (D.cdPhoto + (e.key === 'ArrowRight' ? 1 : -1) + n) % n; paintCD();
+    }
+    return;
+  }
+
+  if (e.key === '?') { e.preventDefault(); renderKeys(); return $('#keysOvl').classList.add('on') }
+  if (e.key === ']') return setAct(!D.actOpen);
+  if (e.key === 'ArrowDown') { e.preventDefault(); return focusRow(1) }
+  if (e.key === 'ArrowUp') { e.preventDefault(); return focusRow(-1) }
+  if (e.key === 'Enter' && focused() !== null) return openComp(focused());
+  if ((e.key === 'u' || e.key === 'U') && focused() !== null) return togglePick(focused());
+  if ((e.key === 'h' || e.key === 'H') && focused() !== null) {
+    D.picked.delete(focused());
+    const row = document.querySelector('#ctbody tr[data-open="' + focused() + '"]');
+    if (row) row.style.opacity = .35;
+    return render();
+  }
+  if (e.key === 'Escape') {
+    document.querySelectorAll('#ctbody tr').forEach(r => r.classList.remove('focus'));
+    D.focusIdx = null; return;
+  }
+  const hit = SHORTCUTS.find(s => s.k && s.run && s.k.toLowerCase() === e.key.toLowerCase());
+  if (hit) { e.preventDefault(); hit.run() }
+});
+
+$('#palIn').addEventListener('input', () => { palSel = 0; renderPalette() });
+$('#pal').addEventListener('click', e => {
+  if (e.target.id === 'pal') return closePal();
+  const r = e.target.closest('[data-pal]'); if (r) runPal(Number(r.dataset.pal));
+});
+$('#keysClose').addEventListener('click', () => $('#keysOvl').classList.remove('on'));
+
+
+let timer;
+$('#callBtn').onclick=()=>{D.secs=0;D.onCall=true;$('#callBtn').hidden=true;$('#liveTag').hidden=false;
+  $('#endBtn').hidden=false;$('#copState').textContent='Listening';
+  timer=setInterval(()=>{D.secs++;$('#timer').textContent=
+    String(Math.floor(D.secs/60)).padStart(2,'0')+':'+String(D.secs%60).padStart(2,'0')},1000)};
+$('#endBtn').onclick=()=>{clearInterval(timer);D.onCall=false;$('#callBtn').hidden=false;$('#liveTag').hidden=true;
+  $('#endBtn').hidden=true;$('#copState').textContent='Idle';
+  D.act.push({t:'now',k:'note',x:`Outgoing call · <b>${Math.floor(D.secs/60)}m ${D.secs%60}s</b> · recorded`});render()};
+
+const BUILD='v2 · analyzer';
+$('#stamp').textContent=BUILD;
+drawMap(); setMedia('map'); render();
+window.addEventListener('resize',()=>map&&map.invalidateSize());
+</script>
+</body>
+</html>

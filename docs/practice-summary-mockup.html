@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Practice summary — header mockup</title>
+  <style>
+    :root {
+      --ink-8: #383838;
+      --ink-7: #525252;
+      --ink-6: #7c7c7c;
+      --ink-5: #a6a6a6;
+      --ink-4: #c4c4c4;
+      --line: #ebebeb;
+      --bg: #fff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #f4f4f4;
+      color: var(--ink-8);
+      font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    .page { max-width: 980px; margin: 0 auto; padding: 28px 20px 64px; }
+    h1 { font-size: 15px; font-weight: 600; margin: 0 0 6px; }
+    .lede { color: var(--ink-6); font-size: 13px; margin: 0 0 22px; max-width: 42rem; }
+    .grid { display: grid; gap: 20px; }
+    @media (min-width: 900px) { .grid { grid-template-columns: 1fr 1fr; } }
+    .card {
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px 18px 18px;
+    }
+    .tag {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: var(--ink-5);
+      margin-bottom: 10px;
+    }
+    .tag.now { color: #b45309; }
+    .tag.go { color: #0f766e; }
+    h2 { font-size: 16px; font-weight: 500; margin: 0 0 12px; color: var(--ink-8); }
+    .person {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--ink-8);
+      margin: 0 0 4px;
+    }
+    .meta { font-size: 12px; color: var(--ink-5); margin: 0 0 6px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th {
+      text-align: left;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--ink-5);
+      padding: 4px 12px 4px 0;
+    }
+    td {
+      border-top: 1px solid var(--line);
+      padding: 6px 12px 6px 0;
+      vertical-align: baseline;
+    }
+    td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+    td.offer { font-weight: 500; }
+    td.muted { color: var(--ink-4); }
+    td.house { color: var(--ink-7); }
+    td.formula { color: var(--ink-6); }
+    .block + .block { margin-top: 20px; }
+    .why { margin-top: 18px; font-size: 13px; color: var(--ink-6); }
+    .why b { color: var(--ink-8); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>Practice set summary — header</h1>
+    <p class="lede">
+      Summing five different offers into “$356,000 offered” isn’t a number anyone uses.
+      “4 of 5 priced” is already visible as the em-dash row. Proposed: the name is the header; the table is the summary.
+    </p>
+
+    <div class="grid">
+      <section class="card">
+        <div class="tag now">Now</div>
+        <h2>Summary</h2>
+        <div class="block">
+          <div class="person">German Haikazounian</div>
+          <div class="meta">4 of 5 priced · $356,000 offered</div>
+          <table>
+            <thead>
+              <tr>
+                <th>House</th><th>ARV</th><th>Repair</th><th>Offer</th><th>Formula</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="house">2538 N Talbott St</td>
+                <td class="num">$180,000</td>
+                <td class="num">$37,800</td>
+                <td class="num offer">$92,000</td>
+                <td class="formula">2× repairs · 90%</td>
+              </tr>
+              <tr>
+                <td class="house">1842 W 10th Ave</td>
+                <td class="num">$210,000</td>
+                <td class="num">$50,400</td>
+                <td class="num offer">$88,000</td>
+                <td class="formula">2× repairs · 90%</td>
+              </tr>
+              <tr>
+                <td class="house">419 S Rural St</td>
+                <td class="num">$165,000</td>
+                <td class="num">$63,000</td>
+                <td class="num offer">$75,000</td>
+                <td class="formula">Classic · 70%</td>
+              </tr>
+              <tr>
+                <td class="house">900 Oak Dr</td>
+                <td class="num">$198,000</td>
+                <td class="num">$37,800</td>
+                <td class="num offer">$101,000</td>
+                <td class="formula">2× repairs · 90%</td>
+              </tr>
+              <tr>
+                <td class="house">12 Maple Ct</td>
+                <td class="muted" colspan="4">—</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="tag go">Proposed</div>
+        <h2>Summary</h2>
+        <div class="block">
+          <div class="person">German Haikazounian</div>
+          <table>
+            <thead>
+              <tr>
+                <th>House</th><th>ARV</th><th>Repair</th><th>Offer</th><th>Formula</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="house">2538 N Talbott St</td>
+                <td class="num">$180,000</td>
+                <td class="num">$37,800</td>
+                <td class="num offer">$92,000</td>
+                <td class="formula">2× repairs · 90%</td>
+              </tr>
+              <tr>
+                <td class="house">1842 W 10th Ave</td>
+                <td class="num">$210,000</td>
+                <td class="num">$50,400</td>
+                <td class="num offer">$88,000</td>
+                <td class="formula">2× repairs · 90%</td>
+              </tr>
+              <tr>
+                <td class="house">419 S Rural St</td>
+                <td class="num">$165,000</td>
+                <td class="num">$63,000</td>
+                <td class="num offer">$75,000</td>
+                <td class="formula">Classic · 70%</td>
+              </tr>
+              <tr>
+                <td class="house">900 Oak Dr</td>
+                <td class="num">$198,000</td>
+                <td class="num">$37,800</td>
+                <td class="num offer">$101,000</td>
+                <td class="formula">2× repairs · 90%</td>
+              </tr>
+              <tr>
+                <td class="house">12 Maple Ct</td>
+                <td class="muted" colspan="4">—</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="block">
+          <div class="person">Exe Ortiz</div>
+          <table>
+            <thead>
+              <tr>
+                <th>House</th><th>ARV</th><th>Repair</th><th>Offer</th><th>Formula</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="house">2538 N Talbott St</td>
+                <td class="num">$175,000</td>
+                <td class="num">$37,800</td>
+                <td class="num offer">$88,400</td>
+                <td class="formula">2× repairs · 90%</td>
+              </tr>
+              <tr>
+                <td class="house">1842 W 10th Ave</td>
+                <td class="num">$205,000</td>
+                <td class="num">$50,400</td>
+                <td class="num offer">$84,000</td>
+                <td class="formula">2× repairs · 90%</td>
+              </tr>
+              <tr>
+                <td class="house">419 S Rural St</td>
+                <td class="num">$170,000</td>
+                <td class="num">$37,800</td>
+                <td class="num offer">$91,000</td>
+                <td class="formula">2× repairs · 90%</td>
+              </tr>
+              <tr>
+                <td class="house">900 Oak Dr</td>
+                <td class="num">$190,000</td>
+                <td class="num">$37,800</td>
+                <td class="num offer">$96,000</td>
+                <td class="formula">2× repairs · 90%</td>
+              </tr>
+              <tr>
+                <td class="house">12 Maple Ct</td>
+                <td class="num">$142,000</td>
+                <td class="num">$30,000</td>
+                <td class="num offer">$72,000</td>
+                <td class="formula">Classic · 70%</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+    <p class="why">
+      <b>Proposed:</b> name only. No “priced” count, no summed offer.
+      By-house compare stays below this, unchanged.
+    </p>
+  </div>
+</body>
+</html>
