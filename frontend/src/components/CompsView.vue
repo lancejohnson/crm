@@ -460,8 +460,10 @@
                 ref="subjectCardEl"
                 :subject="data.subject"
                 :address="data?.address || address"
+                :can-edit-sqft="!isPractice"
                 @open="openSubjectDetail"
                 @street="openStreetView(null)"
+                @save-sqft="saveSubjectSqft"
               />
 
               <CompTrayCard
@@ -2084,9 +2086,14 @@ function subjectPopupHtml(s) {
       ? __('Details from Zillow')
       : sources.includes('listing')
         ? __('Details from this property’s own listing record')
-        : __('Details as reported by the seller')
+        : sources.includes('manual')
+          ? __('Details set manually')
+          : __('Details as reported by the seller')
+    // The one fact a rep corrected by hand outranks the scraped label above it,
+    // and saying so is the point of labelling sources at all.
+    const manual = s.source?.sqft === 'manual' ? ` · ${__('sqft set manually')}` : ''
     rows.push(
-      `<div style="margin-top:6px;font-size:10px;color:#8a877e">${label}</div>`,
+      `<div style="margin-top:6px;font-size:10px;color:#8a877e">${label}${manual}</div>`,
     )
   }
 
@@ -2525,6 +2532,29 @@ async function setCompState(comp, state) {
 function toggleUse(name) {
   const c = comps.value.find((x) => x.name === name) || discarded.value.find((x) => x.name === name)
   setCompState(name, c?.selected ? 'none' : 'selected')
+}
+
+/**
+ * Save (or clear, with null) the subject's manual square footage, then reload:
+ * the ladder's tolerances, the ± deltas and the repair totals are all derived
+ * server-side from the subject facts, so a full re-derive is the point.
+ */
+async function saveSubjectSqft(sqft) {
+  if (!props.lead || isPractice.value) return
+  try {
+    const res = await call('crm.api.comps.set_subject_sqft', {
+      lead: props.lead,
+      sqft: sqft == null ? '' : sqft,
+    })
+    if (res?.ok === false) {
+      toast.error(__('Manual square footage is not set up on this site yet.'))
+      return
+    }
+    toast.success(sqft ? __('Square footage updated') : __('Back to Zillow/listing square footage'))
+    await load()
+  } catch (e) {
+    toast.error(e.messages?.[0] || __('Could not update the square footage.'))
+  }
 }
 
 async function load({ explicit = userTouched.value } = {}) {

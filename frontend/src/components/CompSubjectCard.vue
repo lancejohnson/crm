@@ -49,7 +49,46 @@
       <div class="truncate text-sm font-semibold text-ink-gray-9" :title="address">
         {{ address }}
       </div>
-      <div class="mt-0.5 text-xs text-ink-gray-7">{{ facts }}</div>
+      <div class="mt-0.5 flex flex-wrap items-center gap-x-1 text-xs text-ink-gray-7">
+        <span>{{ facts }}</span>
+        <!-- Zillow's sqft is sometimes simply wrong about the one house being
+             priced, and everything downstream (filter ladder, ± deltas, repair
+             totals) keys off it — so the correction lives right on the fact.
+             Hover-quiet pencil, same grammar as the kanban field edits. -->
+        <button
+          v-if="canEditSqft && !editingSqft"
+          class="rounded p-0.5 text-ink-gray-4 transition hover:bg-surface-gray-2 hover:text-ink-gray-8"
+          :title="manualSqft ? __('Edit square footage (set manually)') : __('Edit square footage')"
+          @click.stop="startSqftEdit"
+        >
+          <FeatherIcon name="edit-2" class="size-3" />
+        </button>
+        <span v-if="manualSqft && !editingSqft" class="rounded bg-surface-gray-2 px-1 text-2xs text-ink-gray-6" :title="__('Square footage was set manually and overrides Zillow/listing data')">
+          {{ __('Manual sqft') }}
+        </span>
+      </div>
+      <div v-if="editingSqft" class="mt-1 flex items-center gap-1" @click.stop>
+        <input
+          ref="sqftInput"
+          v-model="sqftDraft"
+          type="text"
+          inputmode="numeric"
+          :placeholder="__('sqft')"
+          class="h-6 w-20 rounded border border-outline-gray-2 bg-surface-white px-1.5 text-xs text-ink-gray-9 focus:border-outline-gray-4 focus:outline-none"
+          @keydown.enter.prevent="saveSqft"
+          @keydown.esc.prevent="cancelSqftEdit"
+        />
+        <Button size="sm" variant="solid" :label="__('Save')" @click.stop="saveSqft" />
+        <Button
+          v-if="manualSqft"
+          size="sm"
+          variant="subtle"
+          :label="__('Reset')"
+          :title="__('Clear the manual value and go back to Zillow/listing data')"
+          @click.stop="clearSqft"
+        />
+        <Button size="sm" variant="ghost" icon="x" @click.stop="cancelSqftEdit" />
+      </div>
       <!-- What it actually SOLD for is a verified transaction and outranks every
            other number here, so it is stated separately rather than folded in
            with the estimates. -->
@@ -73,15 +112,48 @@
  * it — so "is this one bigger or smaller than mine" is a glance rather than a
  * memory test. Blue and heavier-bordered so it never reads as one of them.
  */
-import { FeatherIcon } from 'frappe-ui'
-import { computed, ref, watch } from 'vue'
+import { Button, FeatherIcon } from 'frappe-ui'
+import { computed, nextTick, ref, watch } from 'vue'
 import { COMP_COLORS, formatLotSize } from '@/utils/comps'
 
 const props = defineProps({
   subject: { type: Object, default: null },
   address: { type: String, default: '' },
+  // Off in practice runs: the override is a team-wide fact write on the lead.
+  canEditSqft: { type: Boolean, default: false },
 })
-defineEmits(['open', 'street'])
+const emit = defineEmits(['open', 'street', 'saveSqft'])
+
+// --- manual sqft override ------------------------------------------------
+const editingSqft = ref(false)
+const sqftDraft = ref('')
+const sqftInput = ref(null)
+const manualSqft = computed(() => props.subject?.source?.sqft === 'manual')
+
+function startSqftEdit() {
+  const s = props.subject || {}
+  // Seed with the exact number when there is one; a band seeds blank rather
+  // than a midpoint the source never named.
+  sqftDraft.value = s.sqft_exact && s.sqft ? String(Math.round(s.sqft)) : ''
+  editingSqft.value = true
+  nextTick(() => sqftInput.value?.focus())
+}
+
+function cancelSqftEdit() {
+  editingSqft.value = false
+}
+
+function saveSqft() {
+  const n = Math.round(Number(String(sqftDraft.value).replace(/[^0-9.]/g, '')))
+  if (!Number.isFinite(n) || n <= 0) return
+  editingSqft.value = false
+  emit('saveSqft', n)
+}
+
+function clearSqft() {
+  editingSqft.value = false
+  emit('saveSqft', null)
+}
 
 const SUBJECT = COMP_COLORS.subject.bg
 const broken = ref(false)

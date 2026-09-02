@@ -110,6 +110,13 @@ DETAIL_CACHE_VERSION = 3  # v3 retries thin Zillow galleries via Realtor
 HIDDEN_FIELD = "comps_hidden"
 SELECTED_FIELD = "comps_selected"
 
+#: A rep-entered subject square footage. Zillow is sometimes simply wrong about
+#: the house being priced ("the square footage is off from what it actually is"),
+#: and every downstream number — the preset ladder, the tray deltas, the repair
+#: $/sf totals — keys off the subject's sqft. Team-wide like the comp picks: a
+#: corrected measurement is correct for everyone.
+SQFT_FIELD = "sqft_override"
+
 CENSUS_URL = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
 UA = {"User-Agent": "groundwork-crm/1.0 (+groundworkpro.com; comps map)"}
 
@@ -383,6 +390,21 @@ def _subject_facts(doc):
 	take("sqft", "square_footage", zillow_key="sqft", group=True)
 	take("year_built", "year_built")
 
+	# A rep's manual sqft outranks every scraped source. Applied HERE, at the one
+	# place subject facts are derived, so the ladder's tolerances, the tray's ±
+	# deltas and the calc's repair totals all read the corrected number without any
+	# of them knowing an override exists. 0 means "no override" (the column is NOT
+	# NULL, so clearing writes 0 — same Int-coercion rule the importer documents).
+	override = _sqft_override(doc)
+	if override:
+		facts["sqft_band"] = [override, override]
+		facts["sqft_exact"] = True
+		facts["sqft"] = override
+		facts["sqft_label"] = _band_label((override, override, True), "", True)
+		facts["source"]["sqft"] = "manual"
+	facts["sqft_override"] = override or None
+	facts["sqft_override_supported"] = _sqft_override_supported()
+
 	z_type = (zillow or {}).get("property_type")
 	ptype = z_type or (listing or {}).get("property_type") or None
 	facts["property_type"] = ptype
@@ -622,6 +644,47 @@ def _state_supported() -> bool:
 	return frappe.db.has_column("CRM Lead", HIDDEN_FIELD) and frappe.db.has_column(
 		"CRM Lead", SELECTED_FIELD
 	)
+
+
+def _sqft_override_supported() -> bool:
+	"""False until the ops script adds `sqft_override`; facts fall back to Zillow."""
+	return frappe.db.has_column("CRM Lead", SQFT_FIELD)
+
+
+def _sqft_override(doc):
+	"""The rep-entered subject sqft, or None. 0/blank/garbage all mean none."""
+	if not _sqft_override_supported():
+		return None
+	val = _num(doc.get(SQFT_FIELD))
+	return int(val) if val and val > 0 else None
+
+
+@frappe.whitelist()
+def set_subject_sqft(lead, sqft=None):
+	"""Set (or clear) the subject's manual square footage. Team-wide, like picks.
+
+	Blank/0 clears the override, reverting the facts to Zillow/listing/lead. The
+	column is an Int and Frappe declares those NOT NULL, so "cleared" is stored as
+	0 — which is falsy and never a real square footage, so nothing downstream can
+	mistake it for a measurement.
+	"""
+	_guard()
+	if not frappe.db.exists("CRM Lead", lead):
+		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)
+	if not _sqft_override_supported():
+		return {"ok": False, "error": "sqft_override field is missing"}
+
+	val = 0
+	if sqft not in (None, ""):
+		n = _num(sqft)
+		if n is None or n < 0 or n > 100000:
+			frappe.throw(_("Square footage must be a positive number."))
+		val = int(n)
+
+	# db.set_value, not doc.save: same reasoning as set_comp_state — a fact
+	# correction must not run SLA/assignment hooks or read as a lead edit.
+	frappe.db.set_value("CRM Lead", lead, SQFT_FIELD, val, update_modified=False)
+	return {"ok": True, "sqft": val or None}
 
 
 def _load_list(doc, field):
