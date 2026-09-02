@@ -89,6 +89,9 @@
         />
         <Button size="sm" variant="ghost" icon="x" @click.stop="cancelSqftEdit" />
       </div>
+      <!-- Sources disagreeing about the house is exactly what a rep about to
+           price off these numbers needs shoved in front of them. -->
+      <CompDiscrepancyFlag :check="subject?.redfin_check || null" />
       <!-- What it actually SOLD for is a verified transaction and outranks every
            other number here, so it is stated separately rather than folded in
            with the estimates. -->
@@ -114,6 +117,7 @@
  */
 import { Button, FeatherIcon } from 'frappe-ui'
 import { computed, nextTick, ref, watch } from 'vue'
+import CompDiscrepancyFlag from '@/components/CompDiscrepancyFlag.vue'
 import { COMP_COLORS, formatLotSize } from '@/utils/comps'
 
 const props = defineProps({

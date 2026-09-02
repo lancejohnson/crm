@@ -1967,6 +1967,13 @@ function fmtMoney(v) {
   return '$' + Math.round(n).toLocaleString()
 }
 
+/** Plain number for the discrepancy rows: baths keep their half, the rest are whole. */
+function fmtNum(v) {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return escapeHtml(String(v ?? ''))
+  return Number.isInteger(n) ? n.toLocaleString() : String(n)
+}
+
 /**
  * The subject's own card. This is the property everything else is compared to, so
  * it earns the same facts a comp shows plus what it last listed for.
@@ -2004,6 +2011,27 @@ function subjectPopupHtml(s) {
   if (!facts && !s.property_type && !s.condition) {
     rows.push(
       `<div style="margin-top:3px;color:#8a877e">${__('No property details on this lead yet.')}</div>`,
+    )
+  }
+
+  // Zillow vs Redfin disagreeing about the house the rep is pricing. Amber, not
+  // red -- a "verify before pricing" nudge. Null in the common case (check did
+  // not run / no Redfin row / the sources agree), so nothing renders.
+  const rc = s.redfin_check
+  if (rc?.fields?.length) {
+    const lines = rc.fields
+      .map(
+        (f) =>
+          `${__('Zillow')} ${fmtNum(f.zillow)} · ${__('Redfin')} ${fmtNum(f.redfin)} ${escapeHtml(f.label || '')}`,
+      )
+      .join('<br>')
+    rows.push(
+      `<div style="margin-top:6px;padding:6px 8px;border-radius:6px;background:#fef3c7;
+        border:1px solid #fcd34d;color:#92400e">
+        <div style="font-weight:700">⚠ ${__('Zillow ≠ Redfin')}</div>
+        <div>${lines}</div>
+        <div style="margin-top:2px;font-size:10px">${__('The sources disagree — verify before pricing.')}</div>
+      </div>`,
     )
   }
 
