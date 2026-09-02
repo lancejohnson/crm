@@ -1064,15 +1064,20 @@ function fmtDate(v) {
   if (isNaN(d)) return '—'
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
+/** The rate fields DISPLAY whole percents (`Math.round(pct*100)`), so what is
+ *  typed is a percent too: 1 means 1%, never 100%. The old `n > 1 ? n/100 : n`
+ *  guess treated anything ≤1 as an already-converted fraction, so typing 1
+ *  into concessions read as 100% and wiped the takeaway. Storage stays
+ *  fraction-denominated — only the keyboard side changes. */
 function setPct(col, e) {
   const n = parseMoney(e.target.value)
   const fallback =
     kind.value === 'novation' ? DEFAULT_NOVATION_PCT : col ? 0.65 : 0.7
-  S()[col].pct = (n > 1 ? n / 100 : n) || fallback
+  S()[col].pct = n / 100 || fallback
 }
 function setRate(col, key, e) {
   const n = parseMoney(e.target.value)
-  S()[col][key] = n > 1 ? n / 100 : n || 0
+  S()[col][key] = n / 100
 }
 function listCutPct(col) {
   const x = S()[col]
