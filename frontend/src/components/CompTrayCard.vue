@@ -144,6 +144,30 @@
           >{{ d.text }}</span>
         </div>
 
+        <!-- Condition tag on a PICKED comp: what state the house was in, which
+             the numbers cannot say ("square footage says nothing about a gutted
+             shell beside a renovated flip"). A native select, not frappe-ui's —
+             reka-ui silently drops an empty-string item value, and '' here IS
+             the honest "untagged" state. Optional on purpose: picking stays one
+             click and this row only appears after it. -->
+        <div v-if="selected && (canTag || comp.comp_type)" class="mt-1" @click.stop>
+          <select
+            v-if="canTag"
+            class="h-5 cursor-pointer rounded border-0 bg-surface-gray-2 py-0 pl-1 pr-5 text-2xs font-medium focus:ring-1 focus:ring-outline-gray-3"
+            :class="comp.comp_type ? 'text-ink-gray-8' : 'text-ink-gray-5'"
+            :value="comp.comp_type || ''"
+            :title="__('Condition of this comp')"
+            @change="$emit('setType', comp.name, $event.target.value)"
+          >
+            <option value="">{{ __('Condition…') }}</option>
+            <option v-for="t in COMP_CONDITION_TYPES" :key="t" :value="t">{{ t }}</option>
+          </select>
+          <span
+            v-else
+            class="rounded bg-surface-gray-2 px-1 py-0.5 text-2xs font-medium text-ink-gray-7"
+          >{{ comp.comp_type }}</span>
+        </div>
+
         <div class="mt-0.5 truncate text-xs font-medium text-ink-gray-8" :title="comp.address">
           {{ street }}
         </div>
@@ -232,6 +256,7 @@
 import { Button, FeatherIcon } from 'frappe-ui'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
+  COMP_CONDITION_TYPES,
   PROPERTY_TYPE_KINDS,
   compColor,
   compState,
@@ -253,8 +278,11 @@ const props = defineProps({
   discarded: { type: Boolean, default: false },
   // The resolved subject facts from `get_lead_comps`, for the +/- comparison.
   subject: { type: Object, default: null },
+  // Condition tagging is a team-wide write on the lead, so hosts turn it off
+  // in practice mode / on pre-provision sites; a stored tag still renders.
+  canTag: { type: Boolean, default: false },
 })
-defineEmits(['hover', 'open', 'use', 'discard', 'undiscard', 'street'])
+defineEmits(['hover', 'open', 'use', 'discard', 'undiscard', 'street', 'setType'])
 
 // Shared with the map pills and the legend, so a card and its pin can never
 // disagree about what "sold" looks like. Passed the whole comp, not just the

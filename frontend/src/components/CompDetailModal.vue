@@ -38,6 +38,23 @@
                 :label="__('{0}/{1} fit', [fit.matched, fit.total])"
               />
               <Badge v-if="comp?.selected" variant="subtle" theme="blue" :label="__('Using')" />
+              <!-- Same condition tag as the tray card. Native select (reka-ui
+                   drops an empty-string item value, and '' is "untagged"). -->
+              <select
+                v-if="comp?.selected && canTag && !subjectMode"
+                class="h-6 cursor-pointer rounded border-0 bg-surface-gray-2 py-0 pl-1.5 pr-6 text-xs font-medium focus:ring-1 focus:ring-outline-gray-3"
+                :class="comp.comp_type ? 'text-ink-gray-8' : 'text-ink-gray-5'"
+                :value="comp.comp_type || ''"
+                :title="__('Condition of this comp')"
+                @change="$emit('setType', comp.name, $event.target.value)"
+              >
+                <option value="">{{ __('Condition…') }}</option>
+                <option v-for="t in COMP_CONDITION_TYPES" :key="t" :value="t">{{ t }}</option>
+              </select>
+              <span
+                v-else-if="comp?.comp_type && !subjectMode"
+                class="rounded bg-surface-gray-2 px-1.5 py-0.5 text-xs font-medium text-ink-gray-7"
+              >{{ comp.comp_type }}</span>
             </div>
             <h2 class="truncate text-xl font-semibold text-ink-gray-9">
               {{ comp?.address || __('Comparable property') }}
@@ -234,17 +251,19 @@
 </template>
 
 <script setup>
-import { compColor, compFit, compState, compStateLabel, daysToSell, formatCompMoney } from '@/utils/comps'
+import { COMP_CONDITION_TYPES, compColor, compFit, compState, compStateLabel, daysToSell, formatCompMoney } from '@/utils/comps'
 import { zillowUrl } from '@/utils/propertyLinks'
 import { Badge, Button, Dialog, FeatherIcon, call } from 'frappe-ui'
 import { computed, ref, watch } from 'vue'
 
-defineEmits(['use', 'street'])
+defineEmits(['use', 'street', 'setType'])
 
 const props = defineProps({
   lead: { type: String, required: true },
   comp: { type: Object, default: null },
   subject: { type: Object, default: null },
+  // Condition tagging is a team-wide write; hosts turn it off in practice mode.
+  canTag: { type: Boolean, default: false },
   // The same panel, showing the SUBJECT rather than a comp. Only two things
   // actually differ -- which endpoint supplies the photos, and the handful of
   // comp-only affordances below -- so this is a flag rather than a second

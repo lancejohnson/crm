@@ -473,12 +473,14 @@
                 :lead="lead"
                 :subject="data?.subject || null"
                 :active="hoveredComp === c.name"
+                :can-tag="canTagTypes"
                 :ref="(el) => setCardRef(c.name, el)"
                 @hover="hoverFromCard"
                 @open="openCompDetail"
                 @use="toggleUse"
                 @discard="setCompState($event, 'hidden')"
                 @street="openStreetView"
+                @set-type="setCompType"
               />
 
               <!-- Discards live at the BOTTOM of the same tray, not behind a
@@ -591,8 +593,10 @@
     :comp="detailComp"
     :subject="data?.subject || null"
     :subject-mode="subjectDetail"
+    :can-tag="canTagTypes"
     @use="toggleUse"
     @street="openStreetView(subjectDetail ? null : detailComp?.name)"
+    @set-type="setCompType"
   />
 </template>
 
@@ -2532,6 +2536,43 @@ async function setCompState(comp, state) {
 function toggleUse(name) {
   const c = comps.value.find((x) => x.name === name) || discarded.value.find((x) => x.name === name)
   setCompState(name, c?.selected ? 'none' : 'selected')
+}
+
+// Team-wide writes, so off in practice mode; `types_supported` is false on a
+// site the ops script has not reached, where a stored tag still renders read-only.
+const canTagTypes = computed(
+  () => !isPractice.value && data.value?.types_supported !== false,
+)
+
+/** Optimistic in-memory tag, same immutable-replace pattern as applyCompState. */
+function applyCompType(name, type) {
+  if (!data.value) return
+  const next = (list) =>
+    (list || []).map((c) => (c.name === name ? { ...c, comp_type: type || null } : c))
+  data.value.comps = next(data.value.comps)
+  data.value.discarded = next(data.value.discarded)
+  if (detailComp.value?.name === name) {
+    detailComp.value = { ...detailComp.value, comp_type: type || null }
+  }
+}
+
+async function setCompType(name, type) {
+  if (!props.lead || !name || isPractice.value) return
+  applyCompType(name, type)
+  try {
+    const res = await call('crm.api.comps.set_comp_type', {
+      lead: props.lead,
+      comp: name,
+      comp_type: type || '',
+    })
+    if (res?.ok === false) {
+      toast.error(__('Comp condition tags are not set up on this site yet.'))
+      await load()
+    }
+  } catch (e) {
+    toast.error(e.messages?.[0] || __('Could not tag that comp.'))
+    await load()
+  }
 }
 
 /**
