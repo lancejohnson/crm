@@ -848,6 +848,41 @@ duplicating. Work substantial features in a worktree of your own.
       machine decides what LANDS and the human owns it afterwards;
     - the two are mutually exclusive, so picking a comp you hid un-hides it.
     Shortcuts **U** / **H** act on the open popup.
+  - **Picked comps take an optional condition tag** (gw433): Move-in ready /
+    Fixed up / New build / Full rehab-as-is / Full gut / Teardown, via a native
+    `<select>` chip on the tray card + detail modal (native on purpose — the
+    reka-ui empty-value trap). `set_comp_type`; `CRM Lead.comps_types` JSON map
+    (docname → label), team-wide, ops `setup_comp_selection.py`, has_column-
+    guarded. Optional by design — picking stays one click; a tag survives
+    un-picking and re-renders on re-pick (forgiving). CompOfferCalc's status
+    cell reads "Sold · Full gut".
+  - **The subject's sqft is editable** (gw433, German's ask — Zillow is
+    sometimes simply wrong about the one house being priced). Pencil on the
+    subject tray card → `set_subject_sqft` → `CRM Lead.sqft_override` (Int,
+    0 = none, ops `setup_comp_selection.py`). Applied at the ONE derivation
+    point (`_subject_facts`, which relabels `source.sqft` to "manual"), so the
+    card/pill, the ladder's sqft tiers, tray ± deltas and the calc's repair
+    $/sf totals all read it with zero per-consumer changes. Reset reverts to
+    Zillow/listing.
+  - **Redfin cross-check on the subject** (gw433/gw434): `get_lead_comps` joins
+    a pure-requests thread (≤1s budget; miss → background `warm_subject_check`,
+    so a cold lead's flag usually appears on the SECOND fetch) that fetches the
+    subject's Redfin record from redfin-scraper-api and compares beds/baths/
+    sqft/year vs the Zillow facts (`crm/api/redfin.py`; sqft >5%, baths >0.25,
+    year >1). Material disagreement → `subject.redfin_check` → amber
+    `CompDiscrepancyFlag` on the subject card + pin popup ("Zillow 1,144 ·
+    Redfin 1,694 sqft"). Only facts sourced "zillow" AND exact compare, so a
+    manual sqft override drops the flag — a settled question is not reopened.
+    **GOTCHA (gw434): cache the RECORD, never the verdict** — v1 cached the
+    computed comparison and a later override kept serving the stale flag for
+    14 days; `redfin_subject:v2` stores the record and recomputes per request
+    (pure, microseconds). Prefix declared in `persistent_cache_keys`.
+    Config-gated on `redfin_scraper_url`; absent → silently no flag.
+  - **Calc rate inputs read whole percents** (gw433): typing 1 into List It
+    concessions means 1%, not 100% (`setPct`/`setRate` divide by 100; storage
+    stays fraction-denominated so saved calcs render unchanged). The saved-calc
+    timeline card also owns its ink now (`CashOfferComment.vue` — body was
+    inheriting UA-default black on the dark bubble; theme tokens throughout).
   - **GOTCHA — `useKeyboardShortcuts` defaults to `skipWhenDialogOpen: true`**,
     and every modal in this app IS a Dialog, so shortcuts registered the obvious
     way silently never fire. Pass `skipWhenDialogOpen: false` and gate on the
@@ -1250,7 +1285,14 @@ duplicating. Work substantial features in a worktree of your own.
     make concurrent runs safe. New scheduler method
     `crm.api.today_board.run_today_sync` requires `sync_jobs` after deploy.
     Existing Done/Skipped state and manual ordering are never touched.
-  - **The board CLOSES to new cards at 5pm CT** (`BOARD_CLOSE_HOUR`, gw316).
+  - **The board CLOSES to new cards at 4pm CT** (`BOARD_CLOSE_HOUR`, gw316;
+    17→16 in gw433 at Lance's ask — note 9/1's actual streak-breakers arrived
+    3:52pm, so the earlier close alone would not have caught them; Dennis had
+    worked both leads and simply never ticked the cards).
+    `cleanup_late_cards(day, dry_run=1, close_hour=None)` (gw433) is the
+    bench/whitelisted repair for late-added orphan cards: deletes only cards
+    created at/after the cutoff, never touched, whose lead is on a LATER board
+    day (lossless); `close_hour` overrides the cutoff for one-off repairs.
     Working a card after 5pm is fine and always was — what is not fine is the
     board growing after everyone has gone home, because a card added at 11pm is
     unresolvable and silently reads as a rep who did not finish. Measured: German
