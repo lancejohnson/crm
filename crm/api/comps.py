@@ -110,6 +110,26 @@ DETAIL_CACHE_VERSION = 3  # v3 retries thin Zillow galleries via Realtor
 HIDDEN_FIELD = "comps_hidden"
 SELECTED_FIELD = "comps_selected"
 
+#: A rep-entered subject square footage. Zillow is sometimes simply wrong about
+#: the house being priced ("the square footage is off from what it actually is"),
+#: and every downstream number — the preset ladder, the tray deltas, the repair
+#: $/sf totals — keys off the subject's sqft. Team-wide like the comp picks: a
+#: corrected measurement is correct for everyone.
+SQFT_FIELD = "sqft_override"
+
+#: Per-lead, TEAM-WIDE condition tag on a picked comp (comp docname -> label).
+#: Optional on purpose — picking stays one click; the tag is what a rep adds when
+#: the photos told them something the numbers do not carry.
+TYPES_FIELD = "comps_types"
+COMP_CONDITION_TYPES = (
+	"Move-in ready",
+	"Fixed up",
+	"New build",
+	"Full rehab / as-is",
+	"Full gut",
+	"Teardown",
+)
+
 CENSUS_URL = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
 UA = {"User-Agent": "groundwork-crm/1.0 (+groundworkpro.com; comps map)"}
 
@@ -383,6 +403,21 @@ def _subject_facts(doc):
 	take("sqft", "square_footage", zillow_key="sqft", group=True)
 	take("year_built", "year_built")
 
+	# A rep's manual sqft outranks every scraped source. Applied HERE, at the one
+	# place subject facts are derived, so the ladder's tolerances, the tray's ±
+	# deltas and the calc's repair totals all read the corrected number without any
+	# of them knowing an override exists. 0 means "no override" (the column is NOT
+	# NULL, so clearing writes 0 — same Int-coercion rule the importer documents).
+	override = _sqft_override(doc)
+	if override:
+		facts["sqft_band"] = [override, override]
+		facts["sqft_exact"] = True
+		facts["sqft"] = override
+		facts["sqft_label"] = _band_label((override, override, True), "", True)
+		facts["source"]["sqft"] = "manual"
+	facts["sqft_override"] = override or None
+	facts["sqft_override_supported"] = _sqft_override_supported()
+
 	z_type = (zillow or {}).get("property_type")
 	ptype = z_type or (listing or {}).get("property_type") or None
 	facts["property_type"] = ptype
@@ -622,6 +657,101 @@ def _state_supported() -> bool:
 	return frappe.db.has_column("CRM Lead", HIDDEN_FIELD) and frappe.db.has_column(
 		"CRM Lead", SELECTED_FIELD
 	)
+
+
+def _sqft_override_supported() -> bool:
+	"""False until the ops script adds `sqft_override`; facts fall back to Zillow."""
+	return frappe.db.has_column("CRM Lead", SQFT_FIELD)
+
+
+def _sqft_override(doc):
+	"""The rep-entered subject sqft, or None. 0/blank/garbage all mean none."""
+	if not _sqft_override_supported():
+		return None
+	val = _num(doc.get(SQFT_FIELD))
+	return int(val) if val and val > 0 else None
+
+
+@frappe.whitelist()
+def set_subject_sqft(lead, sqft=None):
+	"""Set (or clear) the subject's manual square footage. Team-wide, like picks.
+
+	Blank/0 clears the override, reverting the facts to Zillow/listing/lead. The
+	column is an Int and Frappe declares those NOT NULL, so "cleared" is stored as
+	0 — which is falsy and never a real square footage, so nothing downstream can
+	mistake it for a measurement.
+	"""
+	_guard()
+	if not frappe.db.exists("CRM Lead", lead):
+		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)
+	if not _sqft_override_supported():
+		return {"ok": False, "error": "sqft_override field is missing"}
+
+	val = 0
+	if sqft not in (None, ""):
+		n = _num(sqft)
+		if n is None or n < 0 or n > 100000:
+			frappe.throw(_("Square footage must be a positive number."))
+		val = int(n)
+
+	# db.set_value, not doc.save: same reasoning as set_comp_state — a fact
+	# correction must not run SLA/assignment hooks or read as a lead edit.
+	frappe.db.set_value("CRM Lead", lead, SQFT_FIELD, val, update_modified=False)
+	return {"ok": True, "sqft": val or None}
+
+
+def _types_supported() -> bool:
+	"""False until the ops script adds `comps_types`; tags degrade quietly."""
+	return frappe.db.has_column("CRM Lead", TYPES_FIELD)
+
+
+def _load_types(doc) -> dict:
+	"""comp docname -> condition label for this lead. Unknown labels are dropped
+	on read, so a bad historical write can never render an off-vocabulary chip."""
+	if not _types_supported():
+		return {}
+	raw = doc.get(TYPES_FIELD)
+	if not raw:
+		return {}
+	try:
+		val = json.loads(raw)
+	except Exception:
+		return {}
+	if not isinstance(val, dict):
+		return {}
+	return {str(k): str(v) for k, v in val.items() if str(v) in COMP_CONDITION_TYPES}
+
+
+@frappe.whitelist()
+def set_comp_type(lead, comp, comp_type=None):
+	"""Tag one picked comp's condition (Move-in ready … Teardown), or clear it.
+
+	Optional by design — picking a comp stays one click and this is a second,
+	separate judgement. Team-wide for the same reason the picks are: "the comps we
+	priced off, and what state they were in" is a deal artifact, not a view setting.
+	"""
+	_guard()
+	if not frappe.db.exists("CRM Lead", lead):
+		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)
+	if not _types_supported():
+		return {"ok": False, "error": "comps_types field is missing"}
+
+	ct = (comp_type or "").strip()
+	if ct and ct not in COMP_CONDITION_TYPES:
+		frappe.throw(_("Unknown comp condition {0}").format(ct))
+
+	doc = frappe.get_doc("CRM Lead", lead)
+	types = _load_types(doc)
+	comp = str(comp)
+	if ct:
+		types[comp] = ct
+	else:
+		types.pop(comp, None)
+
+	frappe.db.set_value(
+		"CRM Lead", lead, TYPES_FIELD, json.dumps(types, sort_keys=True), update_modified=False
+	)
+	return {"ok": True, "comp": comp, "comp_type": ct or None}
 
 
 def _load_list(doc, field):
@@ -1290,6 +1420,15 @@ def get_lead_comps(
 		base["fallback"] = _batchdata_fallback(doc, base, merge_into=out)
 		base["fallback"]["had_pins"] = had_pins
 		out.sort(key=lambda r: r["distance_mi"])
+
+	# Condition tags, stamped once over the final pool (ISTL + Zillow + BatchData
+	# rows alike) so every surface — tray, gallery, discard drawer — reads the same
+	# value. Practice runs pass a state override and get none: the tags are a
+	# judgement about the REAL deal, not part of a training rerun.
+	comp_types = {} if override is not None else _load_types(doc)
+	base["types_supported"] = _types_supported()
+	for row in out:
+		row["comp_type"] = comp_types.get(row["name"])
 
 	base["total_in_radius"] = len(out)
 

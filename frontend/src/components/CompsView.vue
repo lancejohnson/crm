@@ -460,8 +460,10 @@
                 ref="subjectCardEl"
                 :subject="data.subject"
                 :address="data?.address || address"
+                :can-edit-sqft="!isPractice"
                 @open="openSubjectDetail"
                 @street="openStreetView(null)"
+                @save-sqft="saveSubjectSqft"
               />
 
               <CompTrayCard
@@ -471,12 +473,14 @@
                 :lead="lead"
                 :subject="data?.subject || null"
                 :active="hoveredComp === c.name"
+                :can-tag="canTagTypes"
                 :ref="(el) => setCardRef(c.name, el)"
                 @hover="hoverFromCard"
                 @open="openCompDetail"
                 @use="toggleUse"
                 @discard="setCompState($event, 'hidden')"
                 @street="openStreetView"
+                @set-type="setCompType"
               />
 
               <!-- Discards live at the BOTTOM of the same tray, not behind a
@@ -589,8 +593,10 @@
     :comp="detailComp"
     :subject="data?.subject || null"
     :subject-mode="subjectDetail"
+    :can-tag="canTagTypes"
     @use="toggleUse"
     @street="openStreetView(subjectDetail ? null : detailComp?.name)"
+    @set-type="setCompType"
   />
 </template>
 
@@ -2084,9 +2090,14 @@ function subjectPopupHtml(s) {
       ? __('Details from Zillow')
       : sources.includes('listing')
         ? __('Details from this property’s own listing record')
-        : __('Details as reported by the seller')
+        : sources.includes('manual')
+          ? __('Details set manually')
+          : __('Details as reported by the seller')
+    // The one fact a rep corrected by hand outranks the scraped label above it,
+    // and saying so is the point of labelling sources at all.
+    const manual = s.source?.sqft === 'manual' ? ` · ${__('sqft set manually')}` : ''
     rows.push(
-      `<div style="margin-top:6px;font-size:10px;color:#8a877e">${label}</div>`,
+      `<div style="margin-top:6px;font-size:10px;color:#8a877e">${label}${manual}</div>`,
     )
   }
 
@@ -2525,6 +2536,66 @@ async function setCompState(comp, state) {
 function toggleUse(name) {
   const c = comps.value.find((x) => x.name === name) || discarded.value.find((x) => x.name === name)
   setCompState(name, c?.selected ? 'none' : 'selected')
+}
+
+// Team-wide writes, so off in practice mode; `types_supported` is false on a
+// site the ops script has not reached, where a stored tag still renders read-only.
+const canTagTypes = computed(
+  () => !isPractice.value && data.value?.types_supported !== false,
+)
+
+/** Optimistic in-memory tag, same immutable-replace pattern as applyCompState. */
+function applyCompType(name, type) {
+  if (!data.value) return
+  const next = (list) =>
+    (list || []).map((c) => (c.name === name ? { ...c, comp_type: type || null } : c))
+  data.value.comps = next(data.value.comps)
+  data.value.discarded = next(data.value.discarded)
+  if (detailComp.value?.name === name) {
+    detailComp.value = { ...detailComp.value, comp_type: type || null }
+  }
+}
+
+async function setCompType(name, type) {
+  if (!props.lead || !name || isPractice.value) return
+  applyCompType(name, type)
+  try {
+    const res = await call('crm.api.comps.set_comp_type', {
+      lead: props.lead,
+      comp: name,
+      comp_type: type || '',
+    })
+    if (res?.ok === false) {
+      toast.error(__('Comp condition tags are not set up on this site yet.'))
+      await load()
+    }
+  } catch (e) {
+    toast.error(e.messages?.[0] || __('Could not tag that comp.'))
+    await load()
+  }
+}
+
+/**
+ * Save (or clear, with null) the subject's manual square footage, then reload:
+ * the ladder's tolerances, the ± deltas and the repair totals are all derived
+ * server-side from the subject facts, so a full re-derive is the point.
+ */
+async function saveSubjectSqft(sqft) {
+  if (!props.lead || isPractice.value) return
+  try {
+    const res = await call('crm.api.comps.set_subject_sqft', {
+      lead: props.lead,
+      sqft: sqft == null ? '' : sqft,
+    })
+    if (res?.ok === false) {
+      toast.error(__('Manual square footage is not set up on this site yet.'))
+      return
+    }
+    toast.success(sqft ? __('Square footage updated') : __('Back to Zillow/listing square footage'))
+    await load()
+  } catch (e) {
+    toast.error(e.messages?.[0] || __('Could not update the square footage.'))
+  }
 }
 
 async function load({ explicit = userTouched.value } = {}) {

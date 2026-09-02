@@ -111,6 +111,20 @@ export const PROPERTY_TYPE_KIND_ORDER = [
   'land',
 ]
 
+/**
+ * Condition tags a rep can put on a PICKED comp ("what state was it in").
+ * Must match COMP_CONDITION_TYPES in crm/api/comps.py exactly — the server
+ * validates against its copy and rejects anything else.
+ */
+export const COMP_CONDITION_TYPES = [
+  'Move-in ready',
+  'Fixed up',
+  'New build',
+  'Full rehab / as-is',
+  'Full gut',
+  'Teardown',
+]
+
 export function propertyTypeKind(type) {
   const t = String(type || '').toLowerCase()
   if (!t) return null

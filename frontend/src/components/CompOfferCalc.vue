@@ -1038,7 +1038,9 @@ const rows = computed(() =>
       price: price ? money(price) : '—',
       psf: psf ? money(psf) : '—',
       onThis: psf && sqft.value ? money(Math.round(psf * sqft.value)) : '—',
-      status: active ? __('Listed') : __('Sold'),
+      // The rep's condition tag rides with the status — "Sold · Full gut" is
+      // exactly the context that explains an outlier $/sf in this table.
+      status: (active ? __('Listed') : __('Sold')) + (c.comp_type ? ` · ${c.comp_type}` : ''),
     }
   }),
 )
