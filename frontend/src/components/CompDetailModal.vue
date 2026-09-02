@@ -87,11 +87,17 @@
         <div class="grid min-h-0 flex-1 md:grid-cols-[minmax(0,1.55fr)_minmax(18rem,0.85fr)]">
           <div class="flex min-h-0 flex-col border-b bg-surface-gray-2 md:border-b-0 md:border-r">
             <div class="relative flex min-h-[12rem] flex-1 items-center justify-center overflow-hidden bg-black/90 sm:min-h-[16rem]">
+              <!-- no-referrer matches CompTrayCard/CompSubjectCard: Zillow's
+                   imgSrc for photo-less/land homes is a Google staticmap URL
+                   signed with THEIR referer-restricted key — 200 with no
+                   Referer, 403 with ours — so the tray thumbnail loaded while
+                   this, the first gallery frame, broke on click. -->
               <img
                 v-if="photos.length && !photoBroken"
                 :src="photoSrc"
                 :alt="comp?.address"
                 class="size-full object-contain"
+                referrerpolicy="no-referrer"
                 @error="onPhotoError"
                 @load="onPhotoLoad"
               />
@@ -141,7 +147,7 @@
                 :class="index === photoIndex ? 'border-outline-blue-2' : 'border-transparent opacity-70 hover:opacity-100'"
                 @click="photoIndex = index"
               >
-                <img :src="photo" :alt="__('Photo {0}', [index + 1])" class="size-full object-cover" loading="lazy" />
+                <img :src="photo" :alt="__('Photo {0}', [index + 1])" class="size-full object-cover" loading="lazy" referrerpolicy="no-referrer" />
               </button>
             </div>
           </div>
