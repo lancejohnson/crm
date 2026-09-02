@@ -50,6 +50,9 @@
         {{ address }}
       </div>
       <div class="mt-0.5 text-xs text-ink-gray-7">{{ facts }}</div>
+      <!-- Sources disagreeing about the house is exactly what a rep about to
+           price off these numbers needs shoved in front of them. -->
+      <CompDiscrepancyFlag :check="subject?.redfin_check || null" />
       <!-- What it actually SOLD for is a verified transaction and outranks every
            other number here, so it is stated separately rather than folded in
            with the estimates. -->
@@ -75,6 +78,7 @@
  */
 import { FeatherIcon } from 'frappe-ui'
 import { computed, ref, watch } from 'vue'
+import CompDiscrepancyFlag from '@/components/CompDiscrepancyFlag.vue'
 import { COMP_COLORS, formatLotSize } from '@/utils/comps'
 
 const props = defineProps({

@@ -1196,6 +1196,19 @@ def get_lead_comps(
 		limit_page_length=5000,
 	)
 
+	# Does Redfin agree with Zillow about this house? Started HERE so the fetch
+	# rides the same wall-clock as the Zillow refresh below; collected after it
+	# with a small join budget, so a slow or absent service costs the map nothing
+	# (a miss lands in Redis via a background job for the next fetch instead).
+	redfin_check_job = None
+	if subject is not None:
+		try:
+			from crm.api import redfin
+
+			redfin_check_job = redfin.start_subject_check(doc, subject)
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), "Comps: Redfin check start failed")
+
 	today = frappe.utils.today()
 	self_key = (subject or {}).get("self_comp_key")
 	override = _parse_state_override(state)
@@ -1261,6 +1274,18 @@ def get_lead_comps(
 	# billed lookup, so an unmatched subject simply shows no photo.
 	if base.get("subject") is not None and not base["subject"].get("cover_photo"):
 		base["subject"]["cover_photo"] = (base.get("zillow") or {}).get("subject_photo") or ""
+
+	# Redfin cross-check, started above. None when it does not apply, was not
+	# ready in time, or the two sources agree — the flag only exists to disagree.
+	if redfin_check_job is not None:
+		try:
+			from crm.api import redfin
+
+			base["subject"]["redfin_check"] = redfin.finish_subject_check(
+				redfin_check_job, base["subject"]
+			)
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), "Comps: Redfin check failed")
 
 	for row in out:
 		row["selected"] = row["name"] in selected
