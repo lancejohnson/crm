@@ -594,9 +594,11 @@
     :subject="data?.subject || null"
     :subject-mode="subjectDetail"
     :can-tag="canTagTypes"
+    :can-edit-sqft="!isPractice"
     @use="toggleUse"
     @street="openStreetView(subjectDetail ? null : detailComp?.name)"
     @set-type="setCompType"
+    @save-sqft="saveSubjectSqft"
   />
 </template>
 

@@ -181,7 +181,53 @@
             <div class="mt-5 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
               <div v-for="fact in facts" :key="fact.label">
                 <div class="text-xs text-ink-gray-5">{{ fact.label }}</div>
-                <div class="mt-0.5 font-medium text-ink-gray-8">{{ fact.value }}</div>
+                <!-- The subject's living area is the one fact a rep can correct
+                     from here: Zillow is sometimes plainly wrong about the house
+                     being priced, and this panel is where they are looking when
+                     they notice. Same write as the tray card's pencil. -->
+                <template v-if="fact.editable">
+                  <div v-if="editingSqft" class="mt-0.5 flex flex-wrap items-center gap-1">
+                    <input
+                      ref="sqftInput"
+                      v-model="sqftDraft"
+                      type="text"
+                      inputmode="numeric"
+                      :placeholder="__('sqft')"
+                      class="h-7 w-24 rounded border border-outline-gray-2 bg-surface-white px-2 text-sm text-ink-gray-9 focus:border-outline-gray-4 focus:outline-none"
+                      @keydown.enter.prevent="saveSqft"
+                      @keydown.esc.prevent="editingSqft = false"
+                    />
+                    <Button size="sm" variant="solid" :label="__('Save')" @click="saveSqft" />
+                    <Button
+                      v-if="manualSqft"
+                      size="sm"
+                      variant="subtle"
+                      :label="__('Reset')"
+                      :title="__('Clear the manual value and go back to Zillow/listing data')"
+                      @click="clearSqft"
+                    />
+                    <Button size="sm" variant="ghost" icon="x" @click="editingSqft = false" />
+                  </div>
+                  <div v-else class="mt-0.5 flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      class="group flex items-center gap-1 rounded font-medium text-ink-gray-8 hover:text-ink-gray-9"
+                      :title="manualSqft ? __('Edit square footage (set manually)') : __('Edit square footage')"
+                      @click="startSqftEdit"
+                    >
+                      {{ fact.value }}
+                      <FeatherIcon name="edit-2" class="size-3 text-ink-gray-4 group-hover:text-ink-gray-8" />
+                    </button>
+                    <span
+                      v-if="manualSqft"
+                      class="rounded bg-surface-gray-2 px-1 text-2xs text-ink-gray-6"
+                      :title="__('Square footage was set manually and overrides Zillow/listing data')"
+                    >
+                      {{ __('Manual') }}
+                    </span>
+                  </div>
+                </template>
+                <div v-else class="mt-0.5 font-medium text-ink-gray-8">{{ fact.value }}</div>
               </div>
             </div>
 
@@ -260,9 +306,9 @@
 import { COMP_CONDITION_TYPES, compColor, compFit, compState, compStateLabel, daysToSell, formatCompMoney } from '@/utils/comps'
 import { zillowUrl } from '@/utils/propertyLinks'
 import { Badge, Button, Dialog, FeatherIcon, call } from 'frappe-ui'
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 
-defineEmits(['use', 'street', 'setType'])
+const emit = defineEmits(['use', 'street', 'setType', 'saveSqft'])
 
 const props = defineProps({
   lead: { type: String, required: true },
@@ -275,9 +321,45 @@ const props = defineProps({
   // comp-only affordances below -- so this is a flag rather than a second
   // component that would drift away from this one.
   subjectMode: { type: Boolean, default: false },
+  // Subject-mode only: the sqft override is a team-wide fact write on the
+  // lead, so hosts turn it off in practice runs (same flag CompSubjectCard takes).
+  canEditSqft: { type: Boolean, default: false },
 })
 
 const show = defineModel({ type: Boolean })
+
+// --- manual subject sqft (mirrors CompSubjectCard) ------------------------
+const editingSqft = ref(false)
+const sqftDraft = ref('')
+const sqftInput = ref(null)
+const manualSqft = computed(() => props.subjectMode && props.subject?.source?.sqft === 'manual')
+// The subject's OWN facts win over the Zillow detail blob here: an override
+// lives on props.subject, and the detail call is exactly the source it overrides.
+const subjectSqft = computed(() =>
+  props.subjectMode && props.subject?.sqft_exact && props.subject?.sqft ? props.subject.sqft : null,
+)
+
+function startSqftEdit() {
+  sqftDraft.value = subjectSqft.value ? String(Math.round(subjectSqft.value)) : ''
+  editingSqft.value = true
+  nextTick(() => sqftInput.value?.focus())
+}
+
+function saveSqft() {
+  const n = Math.round(Number(String(sqftDraft.value).replace(/[^0-9.]/g, '')))
+  if (!Number.isFinite(n) || n <= 0) return
+  editingSqft.value = false
+  emit('saveSqft', n)
+}
+
+function clearSqft() {
+  editingSqft.value = false
+  emit('saveSqft', null)
+}
+
+watch(show, (v) => {
+  if (!v) editingSqft.value = false
+})
 const loading = ref(false)
 const error = ref('')
 const response = ref(null)
@@ -423,7 +505,11 @@ const facts = computed(() => {
   return [
     { label: __('Beds'), value: decimal(d.beds || c.bedrooms) },
     { label: __('Baths'), value: decimal(d.baths || c.bathrooms) },
-    { label: __('Living area'), value: area(d.sqft || c.square_footage) },
+    {
+      label: __('Living area'),
+      value: area(subjectSqft.value || d.sqft || c.square_footage),
+      editable: props.subjectMode && props.canEditSqft,
+    },
     {
       label: __('Lot size'),
       value:
