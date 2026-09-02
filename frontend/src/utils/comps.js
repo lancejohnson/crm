@@ -117,11 +117,11 @@ export const PROPERTY_TYPE_KIND_ORDER = [
  * validates against its copy and rejects anything else.
  */
 export const COMP_CONDITION_TYPES = [
-  'Move-in ready',
-  'Fixed up',
-  'New build',
-  'Full rehab / as-is',
-  'Full gut',
+  'New Build',
+  'Fix and Flip',
+  'Move-in Ready',
+  'Remodel',
+  'Full Gut',
   'Teardown',
 ]
 

@@ -122,13 +122,23 @@ SQFT_FIELD = "sqft_override"
 #: the photos told them something the numbers do not carry.
 TYPES_FIELD = "comps_types"
 COMP_CONDITION_TYPES = (
-	"Move-in ready",
-	"Fixed up",
-	"New build",
-	"Full rehab / as-is",
-	"Full gut",
+	"New Build",
+	"Fix and Flip",
+	"Move-in Ready",
+	"Remodel",
+	"Full Gut",
 	"Teardown",
 )
+
+#: The first cut shipped a different vocabulary for a few hours (gw433-gw437);
+#: anything stored under it reads back as its nearest current label.
+LEGACY_CONDITION_TYPES = {
+	"Move-in ready": "Move-in Ready",
+	"Fixed up": "Fix and Flip",
+	"New build": "New Build",
+	"Full rehab / as-is": "Remodel",
+	"Full gut": "Full Gut",
+}
 
 CENSUS_URL = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
 UA = {"User-Agent": "groundwork-crm/1.0 (+groundworkpro.com; comps map)"}
@@ -719,12 +729,17 @@ def _load_types(doc) -> dict:
 		return {}
 	if not isinstance(val, dict):
 		return {}
-	return {str(k): str(v) for k, v in val.items() if str(v) in COMP_CONDITION_TYPES}
+	out = {}
+	for k, v in val.items():
+		label = LEGACY_CONDITION_TYPES.get(str(v), str(v))
+		if label in COMP_CONDITION_TYPES:
+			out[str(k)] = label
+	return out
 
 
 @frappe.whitelist()
 def set_comp_type(lead, comp, comp_type=None):
-	"""Tag one picked comp's condition (Move-in ready … Teardown), or clear it.
+	"""Tag one picked comp's condition (New Build … Teardown), or clear it.
 
 	Optional by design — picking a comp stays one click and this is a second,
 	separate judgement. Team-wide for the same reason the picks are: "the comps we

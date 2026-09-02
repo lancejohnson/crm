@@ -848,14 +848,17 @@ duplicating. Work substantial features in a worktree of your own.
       machine decides what LANDS and the human owns it afterwards;
     - the two are mutually exclusive, so picking a comp you hid un-hides it.
     Shortcuts **U** / **H** act on the open popup.
-  - **Picked comps take an optional condition tag** (gw433): Move-in ready /
-    Fixed up / New build / Full rehab-as-is / Full gut / Teardown, via a native
-    `<select>` chip on the tray card + detail modal (native on purpose — the
+  - **Picking a comp ASKS what kind it is** (gw433/gw437/gw438): New Build /
+    Fix and Flip / Move-in Ready / Remodel / Full Gut / Teardown (Lance's
+    order and wording — the gw433 vocabulary lasted hours; `LEGACY_CONDITION_
+    TYPES` maps anything stored under it on read). `CompConditionModal` opens
+    on every pick from any surface (tray, pin, gallery, `U`) with "Skip for
+    now"; not on un-pick or when already tagged. The native `<select>` chip on
+    the tray card + detail modal edits it later (native on purpose — the
     reka-ui empty-value trap). `set_comp_type`; `CRM Lead.comps_types` JSON map
     (docname → label), team-wide, ops `setup_comp_selection.py`, has_column-
-    guarded. Optional by design — picking stays one click; a tag survives
-    un-picking and re-renders on re-pick (forgiving). CompOfferCalc's status
-    cell reads "Sold · Full gut".
+    guarded. A tag survives un-picking and re-renders on re-pick (forgiving).
+    CompOfferCalc's status cell reads "Sold · Full Gut".
   - **The subject's sqft is editable** (gw433, German's ask — Zillow is
     sometimes simply wrong about the one house being priced). Pencil on the
     subject tray card → `set_subject_sqft` → `CRM Lead.sqft_override` (Int,
