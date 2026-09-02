@@ -600,6 +600,14 @@
     @set-type="setCompType"
     @save-sqft="saveSubjectSqft"
   />
+
+  <!-- Asked on every pick; stacks above the gallery when the pick came from
+       there, so the rep answers without losing the photos. -->
+  <CompConditionModal
+    v-model="showConditionModal"
+    :comp="conditionComp"
+    @choose="setCompType"
+  />
 </template>
 
 <script setup>
@@ -642,6 +650,7 @@ import {
   propertyTypeKind,
 } from '@/utils/comps'
 import CompDetailModal from '@/components/CompDetailModal.vue'
+import CompConditionModal from '@/components/Modals/CompConditionModal.vue'
 import CompTrayCard from '@/components/CompTrayCard.vue'
 import CompSubjectCard from '@/components/CompSubjectCard.vue'
 import CompHelpKey from '@/components/CompHelpKey.vue'
@@ -2565,8 +2574,20 @@ async function setCompState(comp, state) {
 
 function toggleUse(name) {
   const c = comps.value.find((x) => x.name === name) || discarded.value.find((x) => x.name === name)
-  setCompState(name, c?.selected ? 'none' : 'selected')
+  const picking = !c?.selected
+  setCompState(name, picking ? 'selected' : 'none')
+  // Ask what KIND of comp this is at the moment it is added (Lance's ask) --
+  // the rep has just looked at the photos, which is when they know. Only
+  // when the site can store it and nothing is tagged yet; "Skip for now"
+  // keeps the pick and the chip on the card takes the tag later.
+  if (picking && canTagTypes.value && !c?.comp_type) {
+    conditionComp.value = c
+    showConditionModal.value = true
+  }
 }
+
+const showConditionModal = ref(false)
+const conditionComp = ref(null)
 
 // Team-wide writes, so off in practice mode; `types_supported` is false on a
 // site the ops script has not reached, where a stored tag still renders read-only.
@@ -2839,7 +2860,9 @@ watch(show, (v) => {
 // it is a Dialog stacked on top of this one, and without the guard `h` would hide
 // the very comp whose photos the user is looking at.
 useKeyboardShortcuts({
-  active: () => !!show.value && !showCompDetail.value,
+  // The condition prompt is a Dialog too: with it open, `U` on the pin popup
+  // would un-pick the comp being asked about.
+  active: () => !!show.value && !showCompDetail.value && !showConditionModal.value,
   skipWhenDialogOpen: false,
   shortcuts: [
     { keys: ['d', 'D'], action: () => (showDetail.value = !showDetail.value) },
