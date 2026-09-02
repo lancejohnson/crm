@@ -337,14 +337,19 @@ function onSaved() {
 </script>
 
 <style scoped>
+/* No ancestor of the comment bubble sets a text color, so anything that
+   inherits lands on the UA default — pure black — which is invisible on the
+   dark theme's #232323 bubble (verified computed rgb(0,0,0) in dark mode).
+   The card owns its ink instead: theme tokens, same in both modes. */
 .offer {
   overflow-wrap: break-word;
   word-break: normal;
   font-variant-numeric: tabular-nums;
+  color: var(--ink-gray-8, #383838);
 }
 .title {
   font-weight: 650;
-  color: inherit;
+  color: var(--ink-gray-9, #171717);
 }
 .scene {
   margin-top: 0.45em;
@@ -352,10 +357,12 @@ function onSaved() {
 }
 .scene-h {
   font-weight: 600;
+  color: var(--ink-gray-9, #171717);
 }
 .scene-offer {
   font-weight: 650;
   white-space: nowrap;
+  color: var(--ink-gray-9, #171717);
 }
 .block {
   margin-top: 0.7em;
@@ -363,6 +370,7 @@ function onSaved() {
 .lab {
   font-weight: 600;
   margin-bottom: 0.15em;
+  color: var(--ink-gray-9, #171717);
 }
 .comps {
   margin: 0;
@@ -373,7 +381,7 @@ function onSaved() {
   gap: 0.45em;
 }
 .comps a {
-  color: #2563c9;
+  color: var(--ink-blue-3, #2563c9);
   font-weight: 600;
   text-decoration: underline;
   text-underline-offset: 2px;
@@ -397,7 +405,7 @@ function onSaved() {
   padding: 0;
   font: inherit;
   font-weight: 600;
-  color: #2563c9;
+  color: var(--ink-blue-3, #2563c9);
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;
