@@ -34,7 +34,7 @@ from datetime import timedelta
 import frappe
 from bs4 import BeautifulSoup
 from frappe import _
-from frappe.utils import escape_html, getdate, now_datetime
+from frappe.utils import cint, escape_html, getdate, now_datetime
 
 from crm.api.daily_standup import (
 	CADENCE_PHASES,
@@ -153,7 +153,7 @@ def _log_outcome_comment(card, state, outcome="", outcome_note="", corrected=Fal
 	The board is where the judgement gets made, but the lead page is where anyone
 	later asks "what happened when we called this person?" — so the answer has to
 	live there too, not only on a card that scrolls out of the day and is never
-	seen again. This is what makes a skip reason survive past 5pm.
+	seen again. This is what makes a skip reason survive past 4pm.
 
 	Best-effort by design: a timeline entry is never worth failing a rep's click
 	over, so every failure is logged and swallowed.
@@ -427,7 +427,7 @@ def generate_today(for_date=None):
 	return _generate_today(getdate(for_date or now_datetime()))
 
 
-#: The board's working day ends at 5pm CT. Cards are only ever added to an OPEN
+#: The board's working day ends at 4pm CT. Cards are only ever added to an OPEN
 #: board: work that arrives after the close belongs to the next list, not to a
 #: day nobody is working any more.
 #:
@@ -438,13 +438,15 @@ def generate_today(for_date=None):
 #: entire unresolved remainder of both days. Nothing is lost by holding them
 #: back, either: all 20 and all 4 of those leads appeared on the NEXT day's board
 #: anyway, so the late add was pure duplication that only cost the streak.
-BOARD_CLOSE_HOUR = 17
+#: Moved 17 -> 16 (2026-09-02): 2026-09-01's streak broke the same way on leads
+#: that arrived between 4pm and 5pm — after the setters had wrapped the day.
+BOARD_CLOSE_HOUR = 16
 
 
 def _board_is_closed(day, now=None):
 	"""Has this board's working day already ended?
 
-	True after 5pm on the day itself, and for any day already past — materialising
+	True after 4pm on the day itself, and for any day already past — materialising
 	fresh work onto a board nobody will look at again is the same mistake either
 	way. A future day is open: generation for tomorrow is exactly what the nightly
 	job does.
@@ -593,7 +595,7 @@ def run_today_sync():
 		# what the notes say about business hours. Without this it is the other half
 		# of the late-night card problem, alongside the new-lead hook.
 		#
-		# Warming still runs: a card added at 4:55pm is worked at 5:10, and a rep
+		# Warming still runs: a card added at 3:55pm is worked at 4:10, and a rep
 		# finishing the day's list after hours deserves the same fast map.
 		enqueue_comps_warm(day)
 		return {"created": 0, "available": _available(), "skipped": "board closed"}
@@ -605,6 +607,111 @@ def run_today_sync():
 	# After generation, never before: the cards this run just created are exactly
 	# the ones most likely to be cold.
 	enqueue_comps_warm(day)
+	return result
+
+
+@frappe.whitelist()
+def cleanup_late_cards(day, dry_run=1, close_hour=None):
+	"""Delete a past day's late-added, never-touched cards — the streak repair.
+
+	Mirrors the manual gw316 cleanup that restored Aug 10/11 to 100%: a card
+	materialised at/after the board close is unresolvable by design (nobody is
+	working that board any more), so it only ever reads as a rep who did not
+	finish. A card is deleted ONLY when all three hold:
+
+	  * created at/after BOARD_CLOSE_HOUR on its own board day (`creation` is
+	    stored in the site timezone, America/Chicago, so a plain string compare
+	    against the day's close is the right clock);
+	  * never touched — still To Call, no outcome, no resolved/done stamp — so a
+	    human judgement is never thrown away, however late it was made;
+	  * its lead appears on a LATER board day, so deleting loses nothing: the
+	    next generation already re-materialised the work.
+
+	Dry-run by default; `dry_run=0` deletes and reports. Deliberately tighter
+	than `_guard()`: this rewrites history (the streak), so it is Lance/System
+	Manager only.
+
+	`close_hour` overrides the cutoff for repairing days that predate a close-hour
+	change (2026-09-01's breakers were materialised at 3:52/3:57pm — before even
+	the 4pm close — so sweeping them needs an explicit, human-chosen cutoff). The
+	never-touched + later-board invariants still apply in full.
+	"""
+	if "System Manager" not in frappe.get_roles() and frappe.session.user != "lance.johnson@groundworkpro.com":
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	if not _available():
+		return {"available": False, "candidates": 0}
+
+	dry_run = cint(dry_run)
+	day = getdate(day)
+	hour = cint(close_hour) if close_hour is not None else BOARD_CLOSE_HOUR
+	cutoff = f"{day} {hour:02d}:00:00"
+
+	fields = ["name", "lead", "state", "creation", "done_at"]
+	if _supports_call_slots():
+		fields.append("call_number")
+	if _supports_outcome():
+		fields.append("outcome")
+	if _supports_resolved_stamp():
+		fields.append("resolved_at")
+
+	late = frappe.get_all(
+		DOCTYPE,
+		filters={"for_date": day, "creation": [">=", cutoff]},
+		fields=fields,
+		order_by="creation asc",
+	)
+
+	deletable, kept_touched, kept_no_later_board = [], [], []
+	for row in late:
+		touched = (
+			row.state != "To Call"
+			or row.get("done_at")
+			or row.get("resolved_at")
+			or (row.get("outcome") or "").strip()
+		)
+		if touched:
+			kept_touched.append(row)
+			continue
+		# The later board is what makes deletion lossless — without it the lead's
+		# owed call would vanish with the card.
+		if not frappe.db.exists(DOCTYPE, {"lead": row.lead, "for_date": [">", day]}):
+			kept_no_later_board.append(row)
+			continue
+		deletable.append(row)
+
+	def _shape(rows):
+		return [
+			{
+				"name": r.name,
+				"lead": r.lead,
+				"state": r.state,
+				"created": str(r.creation),
+				"call_number": r.get("call_number"),
+			}
+			for r in rows
+		]
+
+	result = {
+		"available": True,
+		"day": str(day),
+		"cutoff": cutoff,
+		"dry_run": bool(dry_run),
+		"late_cards": len(late),
+		"deletable": _shape(deletable),
+		"kept_touched": _shape(kept_touched),
+		"kept_no_later_board": _shape(kept_no_later_board),
+	}
+
+	if dry_run or not deletable:
+		return result
+
+	deleted = 0
+	for row in deletable:
+		frappe.delete_doc(DOCTYPE, row.name, ignore_permissions=True)
+		deleted += 1
+	frappe.db.commit()
+	_publish(day)
+	result["deleted"] = deleted
 	return result
 
 

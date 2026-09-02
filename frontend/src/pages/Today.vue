@@ -1103,7 +1103,7 @@ async function syncList() {
   try {
     const r = await call('crm.api.today_board.generate_today')
     await Promise.all([board.reload(), todayReport.reload()])
-    // `closed` has to be said out loud: after 5pm the sync deliberately adds
+    // `closed` has to be said out loud: after 4pm the sync deliberately adds
     // nothing, and "List is up to date" would read as a lie to anyone who knows
     // a lead just came in.
     // Kept short: this renders as a Badge in an already-crowded header row.
