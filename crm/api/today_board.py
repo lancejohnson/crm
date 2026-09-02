@@ -153,7 +153,7 @@ def _log_outcome_comment(card, state, outcome="", outcome_note="", corrected=Fal
 	The board is where the judgement gets made, but the lead page is where anyone
 	later asks "what happened when we called this person?" — so the answer has to
 	live there too, not only on a card that scrolls out of the day and is never
-	seen again. This is what makes a skip reason survive past 5pm.
+	seen again. This is what makes a skip reason survive past 4pm.
 
 	Best-effort by design: a timeline entry is never worth failing a rep's click
 	over, so every failure is logged and swallowed.
@@ -427,7 +427,7 @@ def generate_today(for_date=None):
 	return _generate_today(getdate(for_date or now_datetime()))
 
 
-#: The board's working day ends at 5pm CT. Cards are only ever added to an OPEN
+#: The board's working day ends at 4pm CT. Cards are only ever added to an OPEN
 #: board: work that arrives after the close belongs to the next list, not to a
 #: day nobody is working any more.
 #:
@@ -438,13 +438,15 @@ def generate_today(for_date=None):
 #: entire unresolved remainder of both days. Nothing is lost by holding them
 #: back, either: all 20 and all 4 of those leads appeared on the NEXT day's board
 #: anyway, so the late add was pure duplication that only cost the streak.
-BOARD_CLOSE_HOUR = 17
+#: Moved 17 -> 16 (2026-09-02): 2026-09-01's streak broke the same way on leads
+#: that arrived between 4pm and 5pm — after the setters had wrapped the day.
+BOARD_CLOSE_HOUR = 16
 
 
 def _board_is_closed(day, now=None):
 	"""Has this board's working day already ended?
 
-	True after 5pm on the day itself, and for any day already past — materialising
+	True after 4pm on the day itself, and for any day already past — materialising
 	fresh work onto a board nobody will look at again is the same mistake either
 	way. A future day is open: generation for tomorrow is exactly what the nightly
 	job does.
@@ -593,7 +595,7 @@ def run_today_sync():
 		# what the notes say about business hours. Without this it is the other half
 		# of the late-night card problem, alongside the new-lead hook.
 		#
-		# Warming still runs: a card added at 4:55pm is worked at 5:10, and a rep
+		# Warming still runs: a card added at 3:55pm is worked at 4:10, and a rep
 		# finishing the day's list after hours deserves the same fast map.
 		enqueue_comps_warm(day)
 		return {"created": 0, "available": _available(), "skipped": "board closed"}
