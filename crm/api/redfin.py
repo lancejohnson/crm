@@ -40,11 +40,15 @@ FACTS_TIMEOUT = 8
 #: house or two off still contains the subject, tight enough to stay tens of rows.
 FACTS_RADIUS_M = 150
 
-#: Bump when the cached comparison's shape changes — the version in the key is
-#: the ONLY invalidation path, same rule as the zillow_area caches.
-CHECK_CACHE_VERSION = 1
+#: Bump when the cached record's shape changes — the version in the key is
+#: the ONLY invalidation path, same rule as the zillow_area caches. v2: the
+#: cache holds the fetched Redfin RECORD, not the computed comparison — the
+#: comparison is recomputed per request (it is pure and microseconds), so a
+#: subject-sqft override applied AFTER the first fetch drops the flag on the
+#: very next load instead of serving a stale verdict for 14 days.
+CHECK_CACHE_VERSION = 2
 
-#: A comparison (agree, disagree or no-match) holds for days — beds and square
+#: A record (matched or no-match) holds for days — beds and square
 #: footage do not move. An ERROR is cached briefly so a service outage costs one
 #: slow probe per window instead of one per filter change, and recovers itself.
 CHECK_TTL_MATCHED = 14 * 86400
@@ -253,7 +257,7 @@ def compare_subject_facts(subject, rec):
 def start_subject_check(doc, subject):
 	"""Kick off the Redfin fetch for get_lead_comps, or answer from cache.
 
-	Returns None (not applicable), {"cached": value} (Redis already knows), or a
+	Returns None (not applicable), {"cached_rec": record} (Redis already knows), or a
 	job dict holding the running thread. Everything frappe — config, cache read —
 	happens HERE, on the request thread, because the thread body cannot.
 	"""
@@ -274,7 +278,9 @@ def start_subject_check(doc, subject):
 	except Exception:
 		cached = None
 	if isinstance(cached, dict):
-		return {"cached": cached.get("v")}
+		# The RECORD is cached; the comparison is recomputed against the subject
+		# on every request, so a later human override takes effect immediately.
+		return {"cached_rec": cached.get("rec")}
 
 	holder = {}
 	thread = threading.Thread(
@@ -295,8 +301,8 @@ def finish_subject_check(job, subject, budget=1.0):
 
 	if not job:
 		return None
-	if "cached" in job:
-		return job["cached"]
+	if "cached_rec" in job:
+		return compare_subject_facts(subject, job["cached_rec"])
 
 	job["thread"].join(timeout=max(0.05, float(budget)))
 	holder = job["holder"]
@@ -315,14 +321,13 @@ def finish_subject_check(job, subject, budget=1.0):
 	if "result" not in holder:
 		# The fetch errored. Cached briefly so an outage is one probe per window,
 		# not one per filter change; the short TTL is the retry schedule.
-		frappe.cache().set_value(job["key"], {"v": None, "error": holder.get("error")},
+		frappe.cache().set_value(job["key"], {"rec": None, "error": holder.get("error")},
 		                         expires_in_sec=CHECK_TTL_ERROR)
 		return None
 
-	value = compare_subject_facts(subject, holder["result"])
 	ttl = CHECK_TTL_MATCHED if holder["result"].get("matched") else CHECK_TTL_UNMATCHED
-	frappe.cache().set_value(job["key"], {"v": value}, expires_in_sec=ttl)
-	return value
+	frappe.cache().set_value(job["key"], {"rec": holder["result"]}, expires_in_sec=ttl)
+	return compare_subject_facts(subject, holder["result"])
 
 
 def warm_subject_check(lead):
