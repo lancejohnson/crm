@@ -110,11 +110,16 @@ def _sender_mm_user(base, token):
 
 
 def _lead_summary(doc) -> dict:
-	phone = doc.get("mobile_no") or ""
+	try:
+		from crm.api.lead_phones import iter_phones
+
+		phones = iter_phones(doc)
+	except Exception:
+		phones = [doc.get("mobile_no") or ""]
 	return {
 		"name": doc.get("lead_name") or doc.name,
 		"address": doc.get("property_address") or "",
-		"phone": phone,
+		"phones": [p for p in phones if p],
 		"status": doc.get("status") or "",
 	}
 
@@ -130,22 +135,39 @@ def _site_url() -> str:
 	return site
 
 
+def _phone_link(raw: str) -> str:
+	"""`(618) 794-8139` as a Quo deep link. Same `openphone://dial` URL the
+	CRM's own Call button uses on a phone (`utils/phoneFormat.js`); Mattermost
+	renders any scheme that is not javascript/vbscript/data, and the OS hands
+	it to the Quo app on desktop and mobile alike."""
+	from urllib.parse import urlencode
+
+	from crm.api.lead_phones import _to_e164
+
+	e164 = _to_e164(raw)
+	if not e164:
+		return raw
+	digits = e164[2:] if e164.startswith("+1") and len(e164) == 12 else ""
+	label = f"({digits[:3]}) {digits[3:6]}-{digits[6:]}" if digits else e164
+	return f"[{label}](openphone://dial?{urlencode({'number': e164, 'action': 'call'})})"
+
+
 def _message(sender_name, lead, summary, note, mention):
+	"""The lead name IS the comps link — one click, no separate link line
+	(Lance: the comps screen is the destination; the lead page is one click
+	further from there anyway)."""
 	site = _site_url()
 	comps = f"{site}/crm/leads/{lead}/comps"
-	page = f"{site}/crm/leads/{lead}"
-	lines = [f"🔥 {mention} **{sender_name}** has a live one: **{summary['name']}**"]
+	lines = [f"🔥 {mention} **{sender_name}** has a live one: [**{summary['name']}**]({comps})"]
 	if summary["address"]:
 		lines.append(f"📍 {summary['address']}")
-	if summary["phone"]:
-		lines.append(f"📞 {summary['phone']}")
+	for phone in summary["phones"]:
+		lines.append(f"📞 {_phone_link(phone)}")
 	if summary["status"]:
 		lines.append(f"Status: {summary['status']}")
 	if note:
 		lines.append("")
 		lines.append("> " + note.strip().replace("\n", "\n> "))
-	lines.append("")
-	lines.append(f"[Open comps]({comps}) · [Open lead]({page})")
 	return "\n".join(lines)
 
 

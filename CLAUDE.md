@@ -76,8 +76,11 @@ duplicating. Work substantial features in a worktree of your own.
   bot + rep + closer** — so Dennis's reply lands with the rep who asked —
   falling back to a bot→closer DM when the rep IS the closer or has no
   Mattermost account (matched by CRM login email). Message: `@closer`
-  mention, rep name, lead, address, phone, status, note, **Open comps** +
-  Open lead links (forced `https://` — `get_url()` off a worker says http).
+  mention, rep name, **lead name linked to the comps page** (no separate
+  link line — Lance's call), address, every phone as a **Quo deep link**
+  (`openphone://dial?number=&action=call`, the CRM's own mobile Call-button
+  URL; Mattermost renders any scheme but javascript/vbscript/data), status,
+  note. Site URL forced `https://` — `get_url()` off a worker says http.
   Also a Comment on the lead timeline. Recipient = site_config
   `live_one_user` (default `dennisszafran`); token/base shared with the
   standup. `get_target` names the button ("Send to Dennis") — via the CRM
