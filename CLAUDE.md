@@ -69,24 +69,33 @@ duplicating. Work substantial features in a worktree of your own.
   creates a real Drive sheet). Guarded on the doctypes existing, so the app
   deploys before the ops script.
 
-- **"Got a live one" → Mattermost** (gw446) — a zap button on the Lead /
-  MobileLead header rows and a **Live one** button on `CompsView` (comps page +
-  Today modal; off in practice) opens `LiveOneModal` (optional note) and
-  `crm.api.live_one.alert` posts as the `pi` bot into a **GROUP channel of
-  bot + rep + closer** — so Dennis's reply lands with the rep who asked —
-  falling back to a bot→closer DM when the rep IS the closer or has no
-  Mattermost account (matched by CRM login email). Message: `@closer`
-  mention, rep name, **lead name linked to the comps page** (no separate
-  link line — Lance's call), address, every phone as a **Quo deep link**
-  (`openphone://dial?number=&action=call`, the CRM's own mobile Call-button
-  URL; Mattermost renders any scheme but javascript/vbscript/data), status,
-  note. Site URL forced `https://` — `get_url()` off a worker says http.
-  Also a Comment on the lead timeline. Recipient = site_config
-  `live_one_user` (default `dennisszafran`); token/base shared with the
-  standup. `get_target` names the button ("Send to Dennis") — via the CRM
-  User's full name, because **Dennis's Mattermost profile has no first/last
-  name** and the raw username read as "dennisszafran". Group path verified
-  live with the `calls` bot as a stand-in third member.
+- **"Got a live one" → Mattermost** (gw446/gw447) — a zap button on the
+  Lead / MobileLead header rows and a **Live one** button on `CompsView`
+  (comps page + Today modal; off in practice) opens `LiveOneModal` (optional
+  note) and `crm.api.live_one.alert` **posts AS THE REP into their own DM with
+  Dennis** (Lance: he has to be able to reply to them). That runs on a
+  Mattermost personal access token per rep: site_config
+  `mattermost_user_tokens` = `{crm_login_email: token}`, minted on the
+  Mattermost box with `cd /opt/mattermost && docker compose exec mattermost
+  mmctl --local token generate <username> "CRM live-one alerts" --json`
+  (`EnableUserAccessTokens` is on via compose env — config.json still says
+  false, the env wins; no per-user role needed; the user gets a "token added"
+  email). Minted for Lance/Dennis/German/Exe 2026-09-03. Adding a rep = mint +
+  `bench set-config mattermost_user_tokens '<json>' --parse`. **Fallback**
+  (no token, or the rep IS the closer): the `pi` bot posts into a group of
+  bot + rep + closer, naming the rep and @mentioning the closer; no
+  Mattermost account at all → bot→closer DM. Message: **lead name linked to
+  the comps page** (no separate link line), address, every phone as a **Quo
+  deep link** (`openphone://dial?number=&action=call`, the CRM's own mobile
+  Call-button URL; Mattermost renders any scheme but javascript/vbscript/
+  data), status, note. Site URL forced `https://` — `get_url()` off a worker
+  says http. Also a Comment on the lead timeline naming the path taken.
+  Recipient = site_config `live_one_user` (default `dennisszafran`); bot
+  token/base shared with the standup. `get_target` names the button ("Send to
+  Dennis") via the CRM User's full name, because **Dennis's Mattermost profile
+  has no first/last name** and the raw username read as "dennisszafran".
+  GOTCHA: a freshly minted PAT answered 401 on its first request and 200
+  seconds later — retry before concluding it is bad.
 
 - **Call-history export for refund requests** (gw446) — `crm/api/call_export.py`
   `get_call_history` / `export_call_history?lead=&fmt=csv|txt`. Every call

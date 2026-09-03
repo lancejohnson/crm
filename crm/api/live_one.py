@@ -9,18 +9,23 @@ with the lead, the address, the phone, an optional note from the rep, and a
 link straight to the lead's COMPS screen (the page Dennis prices from), plus
 the lead page.
 
-**Delivered as a GROUP message — the `pi` bot, the rep, and the closer** —
-rather than a bot→closer DM, so the closer's reply lands with the rep who
-asked and the conversation carries on between the two humans. Mattermost
-needs three distinct members for a group channel, which the bot supplies;
-when the rep IS the closer, or has no Mattermost account, it degrades to a
-bot→closer DM that names the rep. The closer is mentioned by @username in
-either case so a muted group still notifies.
+**Posted AS THE REP, into their own DM with the closer** (Lance: Dennis
+has to be able to reply to *them*). That needs a Mattermost personal access
+token per rep: site_config `mattermost_user_tokens` is `{crm_login_email:
+token}`, minted server-side with `mmctl --local token generate <username>
+"CRM live-one alerts"` on the Mattermost box (`EnableUserAccessTokens` is on;
+no per-user role is needed — the token is valid a moment after creation).
+Adding a rep = mint a token, add the pair, `bench set-config … --parse`.
+
+Fallback when the rep has no token (or IS the closer): the `pi` bot posts
+into a GROUP of bot + rep + closer, naming the rep — the closer's reply still
+lands with the rep, just in a three-way channel. No Mattermost account at
+all → bot→closer DM. The closer is @mentioned in the fallback paths.
 
 The recipient is site_config `live_one_user` (a Mattermost username,
-default `dennisszafran`); the token/base are the same `mattermost_token` /
-`mattermost_base` the standup uses. Absent a token the endpoint refuses with
-a readable error rather than silently no-oping — a rep who clicked this
+default `dennisszafran`); the bot token/base are the same `mattermost_token`
+/ `mattermost_base` the standup uses. Absent a bot token the endpoint refuses
+with a readable error rather than silently no-oping — a rep who clicked this
 needs to know it did not go out.
 
 Every alert is also written onto the lead's timeline as a Comment, because
@@ -28,6 +33,8 @@ Every alert is also written onto the lead's timeline as a Comment, because
 """
 
 from __future__ import annotations
+
+import json
 
 import frappe
 from frappe import _
@@ -152,13 +159,28 @@ def _phone_link(raw: str) -> str:
 	return f"[{label}](openphone://dial?{urlencode({'number': e164, 'action': 'call'})})"
 
 
-def _message(sender_name, lead, summary, note, mention):
+def _user_token() -> str:
+	"""The session user's own Mattermost PAT, or ''."""
+	tokens = frappe.conf.get("mattermost_user_tokens") or {}
+	if isinstance(tokens, str):
+		try:
+			tokens = json.loads(tokens)
+		except ValueError:
+			tokens = {}
+	return (tokens.get((frappe.session.user or "").lower()) or "").strip()
+
+
+def _message(sender_name, lead, summary, note, mention, as_self=False):
 	"""The lead name IS the comps link — one click, no separate link line
 	(Lance: the comps screen is the destination; the lead page is one click
-	further from there anyway)."""
+	further from there anyway). `as_self`: the rep is speaking, so no
+	third-person attribution and no @mention (a DM notifies by itself)."""
 	site = _site_url()
 	comps = f"{site}/crm/leads/{lead}/comps"
-	lines = [f"🔥 {mention} **{sender_name}** has a live one: [**{summary['name']}**]({comps})"]
+	if as_self:
+		lines = [f"🔥 Got a live one: [**{summary['name']}**]({comps})"]
+	else:
+		lines = [f"🔥 {mention} **{sender_name}** has a live one: [**{summary['name']}**]({comps})"]
 	if summary["address"]:
 		lines.append(f"📍 {summary['address']}")
 	for phone in summary["phones"]:
@@ -175,7 +197,9 @@ def _log_comment(lead, recipient_name, note, mode):
 	try:
 		head = _("Flagged as a live one to {0} on Mattermost").format(recipient_name)
 		if mode == "direct":
-			head += " " + _("(direct message)")
+			head += " " + _("(via the pi bot)")
+		elif mode == "group":
+			head += " " + _("(group chat with the pi bot)")
 		content = "<div><b>{0}</b>{1}</div>".format(
 			escape_html(head), "<br>{0}".format(escape_html(note)) if note else ""
 		)
@@ -209,11 +233,29 @@ def alert(lead: str, note: str = ""):
 		frappe.throw(_("Mattermost is not configured on this site, so the alert was not sent."))
 
 	username = _recipient_username()
-	me = _mm("/users/me", token, base)
 	target = _mm(f"/users/username/{username}", token, base)
-	sender = _sender_mm_user(base, token)
 	sender_name = frappe.utils.get_fullname(frappe.session.user) or frappe.session.user
+	summary = _lead_summary(doc)
+	recipient_name = _display_name(target) or username
 
+	# Preferred: the rep's own DM with the closer, posted as the rep.
+	user_token = _user_token()
+	if user_token:
+		try:
+			as_user = _mm("/users/me", user_token, base)
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), "Live one: rep's Mattermost token rejected")
+			as_user = None
+		if as_user and as_user["id"] != target["id"]:
+			ch = _mm("/channels/direct", user_token, base, "POST", [as_user["id"], target["id"]])
+			text = _message(sender_name, lead, summary, note, "", as_self=True)
+			post = _mm("/posts", user_token, base, "POST", {"channel_id": ch["id"], "message": text})
+			_log_comment(lead, recipient_name, note, "self")
+			return {"ok": True, "mode": "self", "to": recipient_name, "post_id": post.get("id")}
+
+	# Fallback: the bot speaks, in a group with the rep where possible.
+	me = _mm("/users/me", token, base)
+	sender = _sender_mm_user(base, token)
 	mode = "direct"
 	if sender and sender["id"] not in (target["id"], me["id"]):
 		try:
@@ -224,8 +266,7 @@ def alert(lead: str, note: str = ""):
 	else:
 		ch = _mm("/channels/direct", token, base, "POST", [me["id"], target["id"]])
 
-	text = _message(sender_name, lead, _lead_summary(doc), note, f"@{username}")
+	text = _message(sender_name, lead, summary, note, f"@{username}")
 	post = _mm("/posts", token, base, "POST", {"channel_id": ch["id"], "message": text})
-	recipient_name = _display_name(target) or username
 	_log_comment(lead, recipient_name, note, mode)
 	return {"ok": True, "mode": mode, "to": recipient_name, "post_id": post.get("id")}
