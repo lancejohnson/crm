@@ -130,7 +130,9 @@
             {{ e.label }} <b class="text-ink-gray-8">{{ money(e.value) }}</b>
           </a>
           <span v-else :title="e.title">
-            {{ e.label }} <b class="text-ink-gray-8">{{ money(e.value) }}</b>
+            {{ e.label }}
+            <b v-if="e.value" class="text-ink-gray-8">{{ money(e.value) }}</b>
+            <span v-else class="text-ink-gray-4">{{ __('none') }}</span>
           </span>
         </template>
       </div>
@@ -228,6 +230,14 @@ const estimates = computed(() => {
       value: s.zestimate,
       title: __('Zestimate {0}', [money(s.zestimate)]),
     })
+  } else if (s.has_zillow) {
+    // Zillow knows the house but publishes no Zestimate for it (rural / odd
+    // parcels, often). Said out loud: an absent label reads as "not fetched".
+    out.push({
+      label: __('Zillow'),
+      value: null,
+      title: __('Zillow has no Zestimate for this property'),
+    })
   }
   if (Number(s.redfin_estimate) > 0) {
     out.push({
@@ -246,6 +256,15 @@ const estimates = computed(() => {
     }
     if (r.as_of) lines.push(__('As of {0}', [fmtDate(r.as_of)]))
     out.push({ label: __('Realtor'), value: r.value, title: lines.join('\n'), href: r.href || '' })
+  }
+  // Not an estimate, but the number a rep reaches for when the models are
+  // silent -- and it was only in the pin popup before.
+  if (Number(s.assessed_value) > 0) {
+    out.push({
+      label: __('Assessed'),
+      value: s.assessed_value,
+      title: __('Tax assessed value {0}', [money(s.assessed_value)]),
+    })
   }
   return out
 })

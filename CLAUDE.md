@@ -938,7 +938,14 @@ duplicating. Work substantial features in a worktree of your own.
     thread + 1s join budget + background warm shape as Redfin, so a cold lead
     shows it on the SECOND open; cached 30d (miss 7d) under
     `crm:realtor-estimate` (declared in `persistent_cache_keys`). Street-key
-    match required — the neighbour's estimate is worse than none.
+    match required — the neighbour's estimate is worse than none — but
+    LOOSE on a trailing directional/suffix (`_same_street`: same house number
+    + prefix): Realtor answered "4205 NC 210 S" for "4205 NC-210" and the
+    exact test threw the right house away (cache v2). **Zillow has no
+    Zestimate for plenty of rural parcels** (NC-210: `zestimate: null` with a
+    rent Zestimate present) — the tile says `Zillow none` rather than
+    omitting the label, and carries **Assessed** (tax assessed value) at the
+    end of the line, since that was popup-only before.
   - **Calc rate inputs read whole percents** (gw433): typing 1 into List It
     concessions means 1%, not 100% (`setPct`/`setRate` divide by 100; storage
     stays fraction-denominated so saved calcs render unchanged). The saved-calc

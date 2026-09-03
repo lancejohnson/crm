@@ -30,6 +30,7 @@ Key: site_config `apivex_api_key`. Absent, everything here is a silent no-op.
 """
 
 import json
+import re
 import threading
 import urllib.error
 import urllib.parse
@@ -43,7 +44,7 @@ CONF_KEY = "apivex_api_key"
 
 #: Bump when the cached estimate record's shape changes — the version in the
 #: key is the ONLY invalidation path (same rule as the zillow_area caches).
-ESTIMATE_CACHE_VERSION = 1
+ESTIMATE_CACHE_VERSION = 2  # v2: looser street match (directional suffix)
 ESTIMATE_TTL_HIT = 30 * 86400
 ESTIMATE_TTL_MISS = 7 * 86400
 ESTIMATE_TTL_ERROR = 15 * 60
@@ -132,6 +133,22 @@ def _pick_current(current_values):
 	return best
 
 
+def _same_street(a: str, b: str) -> bool:
+	"""Street keys match, allowing one side to carry a trailing directional
+	or suffix the other lacks ("4205 NC 210 S" vs our "4205 NC-210" — Realtor
+	answered the right house and the exact-key test threw it away). The house
+	number must agree; a prefix relationship covers the rest."""
+	if not a or not b:
+		return False
+	if a == b:
+		return True
+	na = re.match(r"\d+", a)
+	nb = re.match(r"\d+", b)
+	if not na or not nb or na.group(0) != nb.group(0):
+		return False
+	return a.startswith(b) or b.startswith(a)
+
+
 def _fetch_estimate(key, address, street_key_fn, holder):
 	"""THREAD BODY — pure urllib, NOTHING frappe (`frappe.local` is a
 	thread-local; see redfin._fetch_subject_record)."""
@@ -144,7 +161,7 @@ def _fetch_estimate(key, address, street_key_fn, holder):
 		# Realtor resolves by fuzzy address search; the neighbour's estimate
 		# would be worse than none, so the street line has to match ours.
 		line = ((data.get("location") or {}).get("address") or {}).get("line") or ""
-		if street_key_fn(line) != street_key_fn(address):
+		if not _same_street(street_key_fn(line), street_key_fn(address)):
 			holder["result"] = {"matched": False, "status": status, "resolved": line}
 			return
 		pid = str(data["property_id"])
