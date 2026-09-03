@@ -235,11 +235,20 @@
         </div>
         <div
           v-else-if="getRow(itemName, titleField).label"
-          class="truncate text-base"
+          class="min-w-0 truncate text-base"
         >
           {{ getRow(itemName, titleField).label }}
         </div>
         <div v-else class="text-ink-gray-4">{{ __('No Title') }}</div>
+        <!-- owner initials: who is working this lead, readable at a glance
+             without spending a card row on a full-name avatar field -->
+        <span
+          v-if="ownerInitials(itemName)"
+          class="ml-auto flex size-5 shrink-0 items-center justify-center rounded-full bg-surface-gray-3 text-[10px] font-semibold uppercase leading-none tracking-wide text-ink-gray-7"
+          :title="getRow(itemName, 'lead_owner').full_name"
+        >
+          {{ ownerInitials(itemName) }}
+        </span>
       </div>
     </template>
     <template #fields="{ fieldName, fieldLabel, showBlank, itemName }">
@@ -956,6 +965,19 @@ function clearDrill() {
 // The results are memoized as well, because getRow allocated a fresh
 // `{ label }` wrapper on every call. Returning a stable object also lets Vue
 // skip patching a child whose props haven't actually changed.
+// "Dennis Szafran" → DS; a single-word name → its first two letters. Reads
+// the parsed lead_owner row (get_data always fetches it for CRM Lead), so it
+// works whether or not Lead Owner is a configured card field.
+function ownerInitials(name) {
+  const owner = getRow(name, 'lead_owner')
+  const full = (owner?.full_name || owner?.label || '').trim()
+  if (!full) return ''
+  const words = full.split(/\s+/).filter((w) => /[a-z]/i.test(w[0]))
+  if (words.length >= 2) return words[0][0] + words[words.length - 1][0]
+  if (words.length == 1) return words[0].slice(0, 2)
+  return ''
+}
+
 function getRow(name, field) {
   const cache = rowValueCache.value
   const key = name + '\u0000' + field

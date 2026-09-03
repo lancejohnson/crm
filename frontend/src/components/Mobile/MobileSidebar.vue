@@ -19,6 +19,15 @@
           <div class="flex-1 overflow-y-auto">
             <div class="mb-3 flex flex-col">
               <SidebarLink
+                :label="__('Search')"
+                class="mx-2 my-0.5"
+                @click="openSearch"
+              >
+                <template #icon>
+                  <FeatherIcon name="search" class="h-4 w-4" />
+                </template>
+              </SidebarLink>
+              <SidebarLink
                 id="notifications-btn"
                 :label="__('Notifications')"
                 :icon="NotificationsIcon"
@@ -125,6 +134,8 @@ import { unreadNotificationsCount } from '@/stores/notifications'
 import { sessionStore } from '@/stores/session'
 import { computed, h, nextTick, ref } from 'vue'
 import { mobileSidebarOpened as sidebarOpened } from '@/composables/settings'
+import { showCommandPalette } from '@/composables/modals'
+import { FeatherIcon } from 'frappe-ui'
 
 const ACTIVITY_PROGRESS_USER = 'lance.johnson@groundworkpro.com'
 const { user } = sessionStore()
@@ -145,6 +156,13 @@ async function openActivityProgress() {
   sidebarOpened.value = false
   await nextTick()
   showActivityProgress.value = true
+}
+
+// close the drawer first so the palette's input gets focus, not the Dialog
+async function openSearch() {
+  sidebarOpened.value = false
+  await nextTick()
+  showCommandPalette.value = true
 }
 
 const allViews = computed(() => {

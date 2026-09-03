@@ -544,6 +544,11 @@ def get_data(
 			if fieldname not in rows:
 				rows.append(fieldname)
 
+		# every lead card carries its owner's initials (rendered in the title
+		# row, not as a configurable card field), so the column is always fetched
+		if doctype == "CRM Lead" and "lead_owner" not in rows:
+			rows.append("lead_owner")
+
 		# computed pseudo-fields (filled per-card in apply_counts) — not DB columns,
 		# so they must never reach frappe.get_list
 		rows = [row for row in rows if row not in PSEUDO_FIELDS]

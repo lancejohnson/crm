@@ -3,11 +3,14 @@
        blurred backdrop. Squared card + slightly-rounded rows is the signature. -->
   <Teleport to="body">
     <div
-      class="fixed inset-0 z-[100] flex justify-center bg-black/40 px-4 pt-[14vh] backdrop-blur-sm"
+      class="fixed inset-0 z-[100] flex justify-center bg-black/40 px-3 pt-3 backdrop-blur-sm sm:px-4 sm:pt-[14vh]"
       @click.self="close"
     >
+      <!-- phone: hug the top and size against the DYNAMIC viewport, so the
+           on-screen keyboard shrinks the list instead of pushing results
+           (and the input) out of reach -->
       <div
-        class="flex max-h-[68vh] w-[min(640px,92vw)] flex-col overflow-hidden rounded-none bg-surface-white shadow-2xl ring-1 ring-outline-gray-2"
+        class="flex max-h-[calc(100dvh-1.5rem)] w-[min(640px,96vw)] flex-col overflow-hidden rounded-none bg-surface-white shadow-2xl ring-1 ring-outline-gray-2 sm:max-h-[68vh] sm:w-[min(640px,92vw)]"
         @keydown="onKey"
       >
         <!-- input -->
@@ -21,7 +24,15 @@
             class="w-full border-none bg-transparent py-4 text-base text-ink-gray-9 placeholder:text-ink-gray-4 focus:outline-none focus:ring-0"
             spellcheck="false"
             autocomplete="off"
+            enterkeyhint="go"
           />
+          <button
+            type="button"
+            class="shrink-0 rounded px-1.5 py-1 text-sm text-ink-gray-5 sm:hidden"
+            @click="close"
+          >
+            {{ __('Cancel') }}
+          </button>
           <LoadingIndicator v-if="records.loading" class="size-4 shrink-0 text-ink-gray-4" />
         </div>
 
@@ -73,9 +84,9 @@
           </div>
         </div>
 
-        <!-- footer hint -->
+        <!-- footer hint (keyboard only — meaningless on a phone) -->
         <div
-          class="flex items-center gap-4 border-t border-outline-gray-2 px-4 py-2 font-mono text-[11px] text-ink-gray-4"
+          class="hidden items-center gap-4 border-t border-outline-gray-2 px-4 py-2 font-mono text-[11px] text-ink-gray-4 sm:flex"
         >
           <span><kbd>↑↓</kbd> {{ __('navigate') }}</span>
           <span><kbd>↵</kbd> {{ __('open') }}</span>
@@ -93,6 +104,7 @@ import {
   sidebarCollapsed,
   activeDetailPanel,
   showSettings,
+  isMobileView,
 } from '@/composables/settings'
 import {
   compsFocusMap,
@@ -149,6 +161,8 @@ const actionCommands = computed(() => [
     group: __('Actions'),
     keywords: 'collapse expand navigation menu',
     run: () => (sidebarCollapsed.value = !sidebarCollapsed.value),
+    // the phone drawer is not the collapsible desktop rail
+    disabled: () => isMobileView.value,
   },
   {
     type: 'command',
