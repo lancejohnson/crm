@@ -45,8 +45,9 @@ FACTS_RADIUS_M = 150
 #: cache holds the fetched Redfin RECORD, not the computed comparison — the
 #: comparison is recomputed per request (it is pure and microseconds), so a
 #: subject-sqft override applied AFTER the first fetch drops the flag on the
-#: very next load instead of serving a stale verdict for 14 days.
-CHECK_CACHE_VERSION = 2
+#: very next load instead of serving a stale verdict for 14 days. v3: the
+#: record carries `estimate` (the Redfin Estimate) for the subject tile.
+CHECK_CACHE_VERSION = 3
 
 #: A record (matched or no-match) holds for days — beds and square
 #: footage do not move. An ERROR is cached briefly so a service outage costs one
@@ -292,17 +293,22 @@ def start_subject_check(doc, subject):
 	return {"thread": thread, "holder": holder, "key": key, "lead": doc.name}
 
 
-def finish_subject_check(job, subject, budget=1.0):
-	"""Collect the started check. Never waits more than `budget` past whatever
-	wall-clock the Zillow refresh already spent — a slow or down service costs
-	the map nothing, and the answer lands in Redis via the background job for
-	the next fetch (every filter change is one) instead."""
+def finish_subject_record(job, budget=1.0):
+	"""Collect the started fetch -> the Redfin RECORD (or None). Never waits
+	more than `budget` past whatever wall-clock the Zillow refresh already
+	spent — a slow or down service costs the map nothing, and the answer lands
+	in Redis via the background job for the next fetch (every filter change is
+	one) instead.
+
+	The record is what gets cached; both consumers (the Zillow-vs-Redfin
+	discrepancy flag and the Redfin Estimate on the subject tile) derive from
+	it per request, so neither can go stale independently of the other."""
 	import frappe
 
 	if not job:
 		return None
 	if "cached_rec" in job:
-		return compare_subject_facts(subject, job["cached_rec"])
+		return job["cached_rec"]
 
 	job["thread"].join(timeout=max(0.05, float(budget)))
 	holder = job["holder"]
@@ -327,7 +333,21 @@ def finish_subject_check(job, subject, budget=1.0):
 
 	ttl = CHECK_TTL_MATCHED if holder["result"].get("matched") else CHECK_TTL_UNMATCHED
 	frappe.cache().set_value(job["key"], {"rec": holder["result"]}, expires_in_sec=ttl)
-	return compare_subject_facts(subject, holder["result"])
+	return holder["result"]
+
+
+def finish_subject_check(job, subject, budget=1.0):
+	"""Collect the started check -> discrepancy block or None. Thin wrapper
+	kept for callers that only want the flag (the background warm)."""
+	return compare_subject_facts(subject, finish_subject_record(job, budget))
+
+
+def subject_estimate(rec):
+	"""The Redfin Estimate out of a matched record, or None. Only a MATCHED
+	record counts: the neighbour's estimate would be worse than none."""
+	if not rec or not rec.get("matched"):
+		return None
+	return _num(rec.get("estimate"))
 
 
 def warm_subject_check(lead):

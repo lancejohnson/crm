@@ -2093,6 +2093,10 @@ function subjectPopupHtml(s) {
 
   const extras = [
     fmtMoney(s.zestimate) ? `${__('Zestimate')} ${fmtMoney(s.zestimate)}` : '',
+    fmtMoney(s.redfin_estimate) ? `${__('Redfin')} ${fmtMoney(s.redfin_estimate)}` : '',
+    fmtMoney(s.realtor_estimate?.value)
+      ? `${__('Realtor')} ${fmtMoney(s.realtor_estimate.value)}`
+      : '',
     fmtMoney(s.assessed_value) ? `${__('Assessed')} ${fmtMoney(s.assessed_value)}` : '',
     fmtMoney(s.annual_tax) ? `${__('Tax')} ${fmtMoney(s.annual_tax)}/yr` : '',
     fmtMoney(s.asking_price) ? `${__('Asking')} ${fmtMoney(s.asking_price)}` : '',

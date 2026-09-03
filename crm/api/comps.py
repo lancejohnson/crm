@@ -1346,6 +1346,7 @@ def get_lead_comps(
 	# with a small join budget, so a slow or absent service costs the map nothing
 	# (a miss lands in Redis via a background job for the next fetch instead).
 	redfin_check_job = None
+	realtor_job = None
 	if subject is not None:
 		try:
 			from crm.api import redfin
@@ -1353,6 +1354,13 @@ def get_lead_comps(
 			redfin_check_job = redfin.start_subject_check(doc, subject)
 		except Exception:
 			frappe.log_error(frappe.get_traceback(), "Comps: Redfin check start failed")
+		# Third AVM for the subject tile, same thread-beside-the-refresh shape.
+		try:
+			from crm.api import apivex
+
+			realtor_job = apivex.start_realtor_estimate(doc)
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), "Comps: Realtor estimate start failed")
 
 	today = frappe.utils.today()
 	self_key = (subject or {}).get("self_comp_key")
@@ -1422,15 +1430,25 @@ def get_lead_comps(
 
 	# Redfin cross-check, started above. None when it does not apply, was not
 	# ready in time, or the two sources agree — the flag only exists to disagree.
+	# The same record also carries the Redfin Estimate for the subject tile.
 	if redfin_check_job is not None:
 		try:
 			from crm.api import redfin
 
-			base["subject"]["redfin_check"] = redfin.finish_subject_check(
-				redfin_check_job, base["subject"]
-			)
+			rec = redfin.finish_subject_record(redfin_check_job)
+			base["subject"]["redfin_check"] = redfin.compare_subject_facts(base["subject"], rec)
+			base["subject"]["redfin_estimate"] = redfin.subject_estimate(rec)
 		except Exception:
 			frappe.log_error(frappe.get_traceback(), "Comps: Redfin check failed")
+	if realtor_job is not None:
+		try:
+			from crm.api import apivex
+
+			base["subject"]["realtor_estimate"] = apivex.subject_estimate(
+				apivex.finish_realtor_estimate(realtor_job)
+			)
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), "Comps: Realtor estimate failed")
 
 	for row in out:
 		row["selected"] = row["name"] in selected

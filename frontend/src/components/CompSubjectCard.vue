@@ -105,6 +105,35 @@
         <template v-if="lastSale.price && lastSale.date"> · </template>
         <template v-if="lastSale.date">{{ fmtDate(lastSale.date) }}</template>
       </div>
+      <!-- Three independent AVMs on one line. None of them is the price; the
+           point is seeing where the models DISAGREE, so a rep does not anchor
+           on whichever one they happened to open first. Each is labelled by
+           source, and a missing one is simply absent rather than "—", because
+           Redfin/Realtor legitimately have no model for many rural houses. -->
+      <div
+        v-if="estimates.length"
+        class="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs text-ink-gray-6"
+      >
+        <span class="text-2xs font-semibold uppercase tracking-wide text-ink-gray-5">
+          {{ __('Estimates') }}
+        </span>
+        <template v-for="e in estimates" :key="e.label">
+          <a
+            v-if="e.href"
+            :href="e.href"
+            target="_blank"
+            rel="noopener"
+            class="hover:underline"
+            :title="e.title"
+            @click.stop
+          >
+            {{ e.label }} <b class="text-ink-gray-8">{{ money(e.value) }}</b>
+          </a>
+          <span v-else :title="e.title">
+            {{ e.label }} <b class="text-ink-gray-8">{{ money(e.value) }}</b>
+          </span>
+        </template>
+      </div>
     </div>
   </div>
 </template>
@@ -186,6 +215,40 @@ const facts = computed(() => {
 })
 
 const lastSale = computed(() => props.subject?.last_sale || null)
+
+// Zillow / Redfin / Realtor, in the order the team says them. Realtor links
+// out because its page shows the spread across its own three AVMs; the
+// tooltip carries the same detail for a hover.
+const estimates = computed(() => {
+  const s = props.subject || {}
+  const out = []
+  if (Number(s.zestimate) > 0) {
+    out.push({
+      label: __('Zillow'),
+      value: s.zestimate,
+      title: __('Zestimate {0}', [money(s.zestimate)]),
+    })
+  }
+  if (Number(s.redfin_estimate) > 0) {
+    out.push({
+      label: __('Redfin'),
+      value: s.redfin_estimate,
+      title: __('Redfin Estimate {0}', [money(s.redfin_estimate)]),
+    })
+  }
+  const r = s.realtor_estimate
+  if (r && Number(r.value) > 0) {
+    const lines = [__('Realtor estimate {0}', [money(r.value)])]
+    if (r.low && r.high) lines.push(__('Range {0} – {1}', [money(r.low), money(r.high)]))
+    if (r.source) lines.push(__('Model: {0}', [r.source]))
+    for (const a of r.all || []) {
+      if (a?.estimate && a.name !== r.source) lines.push(`${a.name}: ${money(a.estimate)}`)
+    }
+    if (r.as_of) lines.push(__('As of {0}', [fmtDate(r.as_of)]))
+    out.push({ label: __('Realtor'), value: r.value, title: lines.join('\n'), href: r.href || '' })
+  }
+  return out
+})
 
 function money(v) {
   const n = Number(v)
