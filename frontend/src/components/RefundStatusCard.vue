@@ -21,7 +21,7 @@
             class="flex h-7 items-center gap-1 rounded-md bg-surface-gray-2 px-2.5 text-sm font-medium text-ink-gray-7 hover:bg-surface-gray-3"
             :disabled="saving"
           >
-            {{ __(localStatus || 'To Request') }}
+            {{ refundDot(localStatus || 'To Request') }} {{ __(localStatus || 'To Request') }}
             <FeatherIcon name="chevron-down" class="size-3 text-ink-gray-5" />
           </button>
         </Dropdown>
@@ -85,7 +85,7 @@
 import { Badge, Button, Dropdown, FeatherIcon, FormControl, call, toast } from 'frappe-ui'
 import { computed, ref, watch } from 'vue'
 
-const STATUSES = ['To Request', 'Requested', 'Waiting on us', 'Waiting on them', 'Complete']
+import { REFUND_STATUSES as STATUSES, refundDot } from '@/utils/refunds'
 
 const props = defineProps({
   lead: { type: String, required: true },
@@ -105,7 +105,7 @@ watch(
 
 const statusOptions = computed(() =>
   STATUSES.map((value) => ({
-    label: __(value),
+    label: `${refundDot(value)} ${__(value)}`,
     onClick: () => setStatus(value),
   })),
 )

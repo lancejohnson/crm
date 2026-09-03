@@ -15,7 +15,10 @@
         class="flex w-72 min-w-72 flex-col gap-2 rounded-lg p-2.5 hover:bg-surface-gray-2"
       >
         <div class="flex items-center justify-between px-1 text-base text-ink-gray-9">
-          <span class="font-medium">{{ __(col.name) }}</span>
+          <span class="font-medium">
+            <span class="mr-1" aria-hidden="true">{{ refundDot(col.name) }}</span>
+            {{ __(col.name) }}
+          </span>
           <span class="text-ink-gray-5">{{ col.items.length }}</span>
         </div>
         <Draggable
@@ -100,6 +103,7 @@ import Draggable from 'vuedraggable'
 import { Badge, createListResource, call, toast, dayjs } from 'frappe-ui'
 import { usersStore } from '@/stores/users'
 import { formatDate, timeAgo } from '@/utils'
+import { REFUND_STATUSES as STATUSES, refundDot } from '@/utils/refunds'
 import { computed } from 'vue'
 
 const { getUser } = usersStore()
@@ -114,14 +118,6 @@ function ownerName(email) {
   if (!email) return __('Unassigned')
   return getUser(email).full_name || email
 }
-
-const STATUSES = [
-  'To Request',
-  'Requested',
-  'Waiting on us',
-  'Waiting on them',
-  'Complete',
-]
 
 const list = createListResource({
   doctype: 'CRM Lead',
