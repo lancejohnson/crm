@@ -112,6 +112,18 @@
   @click="createUnderwriting"
 />
 
+<!-- "Got a live one" -- the comps screen is where a rep is when the seller
+     turns out to be real, so the ping to the closer lives here as well as
+     on the lead header. Off in practice: nobody needs a drill flagged. -->
+<Button
+  v-if="!isPractice"
+  :label="__('Live one')"
+  variant="subtle"
+  :title="__('Got a live one? Send the closer a Mattermost message with a link to these comps')"
+  iconLeft="zap"
+  @click="showLiveOne = true"
+/>
+
 <!-- Details toggle: the pills carry beds/baths/sqft/year, but on a
                  dense board the overview is sometimes worth more than the facts.
                  A checkbox rather than a button because it reports its own state
@@ -586,6 +598,12 @@
 
   <!-- Photos + Zillow facts for one comp. Mounted here rather than in each host
        so the map, the list and the Today modal all reach the same gallery. -->
+  <LiveOneModal
+    v-if="!isPractice"
+    v-model="showLiveOne"
+    :lead="lead"
+    :leadName="address || data?.subject?.address || lead"
+  />
   <CompDetailModal
     v-if="detailComp"
     v-model="showCompDetail"
@@ -651,6 +669,7 @@ import {
 } from '@/utils/comps'
 import CompDetailModal from '@/components/CompDetailModal.vue'
 import CompConditionModal from '@/components/Modals/CompConditionModal.vue'
+import LiveOneModal from '@/components/Modals/LiveOneModal.vue'
 import CompTrayCard from '@/components/CompTrayCard.vue'
 import CompSubjectCard from '@/components/CompSubjectCard.vue'
 import CompHelpKey from '@/components/CompHelpKey.vue'
@@ -691,6 +710,7 @@ const props = defineProps({
 // watcher and keyboard-shortcut gate working exactly as before.
 const emit = defineEmits(['subject', 'picked', 'zillowMatch'])
 const show = ref(true)
+const showLiveOne = ref(false)
 
 // Only consulted in `fill` mode. Starts closed: the preset ladder has already
 // chosen a sensible filter set by the time anyone looks, and the desk exists to

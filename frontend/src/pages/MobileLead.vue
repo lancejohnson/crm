@@ -209,6 +209,11 @@
                   icon="map-pin"
                   @click="openComps()"
                 />
+                <Button
+                  :tooltip="__('Got a live one? Alert the closer')"
+                  icon="zap"
+                  @click="showLiveOne = true"
+                />
               </div>
             </div>
           </div>
@@ -315,6 +320,12 @@
     :lead="leadId"
     :address="doc.property_address"
   />
+  <LiveOneModal
+    v-model="showLiveOne"
+    :lead="leadId"
+    :leadName="doc.lead_name"
+    :address="doc.property_address"
+  />
 </template>
 <script setup>
 import DeleteLinkedDocModal from '@/components/DeleteLinkedDocModal.vue'
@@ -346,6 +357,7 @@ import RefundStatusCard from '@/components/RefundStatusCard.vue'
 import LeadPhonesCard from '@/components/LeadPhonesCard.vue'
 import PhotosCard from '@/components/PhotosCard.vue'
 import PhotoGalleryModal from '@/components/Modals/PhotoGalleryModal.vue'
+import LiveOneModal from '@/components/Modals/LiveOneModal.vue'
 import TaxInfoCard from '@/components/TaxInfoCard.vue'
 import AgreementsCard from '@/components/AgreementsCard.vue'
 import UnderwritingCard from '@/components/UnderwritingCard.vue'
@@ -397,6 +409,7 @@ const showDeleteLinkedDocModal = ref(false)
 // Property photos (shared Google Drive). Mobile Details renders its own copy of
 // the sidebar cards, so the gallery modal is mounted here too — see Lead.vue.
 const showPhotoGallery = ref(false)
+const showLiveOne = ref(false)
 // Same as desktop: comps is a page, opened in a new tab.
 const activities = ref(null)
 const showFilesUploader = ref(false)

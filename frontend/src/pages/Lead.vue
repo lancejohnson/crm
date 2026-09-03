@@ -293,6 +293,15 @@
                   @click="openResearchTabs"
                 />
 
+                <!-- "Got a live one" -- pings the closer in Mattermost with a
+                     link to this lead's comps. On the header row, not in More,
+                     because the moment it is needed is mid-call. -->
+                <Button
+                  :tooltip="__('Got a live one? Alert the closer')"
+                  icon="zap"
+                  @click="showLiveOne = true"
+                />
+
                 <!-- Secondary actions live in a single menu so the row stays
                      uncluttered: email / website / attach / tax / agreement. -->
                 <Dropdown :options="moreActions" placement="bottom-start">
@@ -413,6 +422,12 @@
     :lead="leadId"
     :address="doc.property_address"
   />
+  <LiveOneModal
+    v-model="showLiveOne"
+    :lead="leadId"
+    :leadName="doc.lead_name"
+    :address="doc.property_address"
+  />
 </template>
 <script setup>
 import DeleteLinkedDocModal from '@/components/DeleteLinkedDocModal.vue'
@@ -448,6 +463,7 @@ import RefundStatusCard from '@/components/RefundStatusCard.vue'
 import LeadPhonesCard from '@/components/LeadPhonesCard.vue'
 import PhotosCard from '@/components/PhotosCard.vue'
 import PhotoGalleryModal from '@/components/Modals/PhotoGalleryModal.vue'
+import LiveOneModal from '@/components/Modals/LiveOneModal.vue'
 import TaxInfoCard from '@/components/TaxInfoCard.vue'
 import AgreementsCard from '@/components/AgreementsCard.vue'
 import UnderwritingCard from '@/components/UnderwritingCard.vue'
@@ -518,6 +534,7 @@ const errorTitle = ref('')
 const errorMessage = ref('')
 const showDeleteLinkedDocModal = ref(false)
 const showFilesUploader = ref(false)
+const showLiveOne = ref(false)
 
 const {
   triggerOnChange,
