@@ -84,9 +84,21 @@
           </div>
         </div>
 
-        <div class="grid min-h-0 flex-1 md:grid-cols-[minmax(0,1.55fr)_minmax(18rem,0.85fr)]">
-          <div class="flex min-h-0 flex-col border-b bg-surface-gray-2 md:border-b-0 md:border-r">
-            <div class="relative flex min-h-[12rem] flex-1 items-center justify-center overflow-hidden bg-black/90 sm:min-h-[16rem]">
+        <!-- GOTCHA — the stacked (phone) column MUST be `minmax(0,1fr)`, not the
+             implicit `auto` track. A scroll container's overflow does not shrink
+             its min-content CONTRIBUTION to the grid, so the 25-thumbnail strip
+             sized the whole column to ~2,600px (measured at 390px: 2616). The
+             dialog's overflow-hidden clipped it, the aside text ran off the right
+             edge, and the `object-contain` hero centred itself ~1,300px
+             off-screen — a black frame with working arrows and a working thumb
+             strip, i.e. "the pictures aren't loading on mobile". Same reason the
+             md columns already carried minmax(0,…). -->
+        <div class="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] md:grid-cols-[minmax(0,1.55fr)_minmax(18rem,0.85fr)]">
+          <div class="flex min-h-0 min-w-0 flex-col border-b bg-surface-gray-2 md:border-b-0 md:border-r">
+            <!-- Stacked, the frame takes a definite 4:3 height (flex-1 has nothing
+                 to fill in an auto row) and the hero is absolute so its size never
+                 depends on percentage-height resolution inside a min-h flex box. -->
+            <div class="relative flex aspect-[4/3] min-h-[12rem] items-center justify-center overflow-hidden bg-black/90 sm:min-h-[16rem] md:aspect-auto md:flex-1">
               <!-- no-referrer matches CompTrayCard/CompSubjectCard: Zillow's
                    imgSrc for photo-less/land homes is a Google staticmap URL
                    signed with THEIR referer-restricted key — 200 with no
@@ -96,7 +108,7 @@
                 v-if="photos.length && !photoBroken"
                 :src="photoSrc"
                 :alt="comp?.address"
-                class="size-full object-contain"
+                class="absolute inset-0 size-full object-contain"
                 referrerpolicy="no-referrer"
                 @error="onPhotoError"
                 @load="onPhotoLoad"
