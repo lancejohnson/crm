@@ -69,6 +69,36 @@ duplicating. Work substantial features in a worktree of your own.
   creates a real Drive sheet). Guarded on the doctypes existing, so the app
   deploys before the ops script.
 
+- **"Got a live one" → Mattermost** (gw446) — a zap button on the Lead /
+  MobileLead header rows and a **Live one** button on `CompsView` (comps page +
+  Today modal; off in practice) opens `LiveOneModal` (optional note) and
+  `crm.api.live_one.alert` posts as the `pi` bot into a **GROUP channel of
+  bot + rep + closer** — so Dennis's reply lands with the rep who asked —
+  falling back to a bot→closer DM when the rep IS the closer or has no
+  Mattermost account (matched by CRM login email). Message: `@closer`
+  mention, rep name, lead, address, phone, status, note, **Open comps** +
+  Open lead links (forced `https://` — `get_url()` off a worker says http).
+  Also a Comment on the lead timeline. Recipient = site_config
+  `live_one_user` (default `dennisszafran`); token/base shared with the
+  standup. `get_target` names the button ("Send to Dennis") — via the CRM
+  User's full name, because **Dennis's Mattermost profile has no first/last
+  name** and the raw username read as "dennisszafran". Group path verified
+  live with the `calls` bot as a stand-in third member.
+
+- **Call-history export for refund requests** (gw446) — `crm/api/call_export.py`
+  `get_call_history` / `export_call_history?lead=&fmt=csv|txt`. Every call
+  linked to the lead plus unlinked logs matching its numbers, oldest first:
+  date/time (CT), direction, from/to, status, duration, classifier outcome,
+  rep, **recording URL**. The URLs are the Quo share links already on the
+  call log (`share.quo.com/…?sig=`, older ones `storage.googleapis.com/
+  opstatics/…`) — both verified publicly playable with no login, which is
+  what iSpeedToLead needs; the CRM's `get_recording_url` proxy needs a session
+  and is useless to them. Refund card on the lead (both states — the export
+  is how a rep decides it IS refundable) has **Download CSV** + **Copy list**
+  (numbered plain text with a summary line, for pasting into the provider
+  form; copies synchronously in the click, Safari drops a post-fetch write);
+  every Refunds-board card has a **Calls** download shortcut. No ops piece.
+
 - **Refunds board** — sidebar **Refunds** (`/refunds`) is a kanban of
   `custom_refundable=1` leads (To Request / Requested / Waiting on us /
   Waiting on them / Complete). Marking Dead does not queue a refund; the
@@ -881,6 +911,22 @@ duplicating. Work substantial features in a worktree of your own.
     14 days; `redfin_subject:v2` stores the record and recomputes per request
     (pure, microseconds). Prefix declared in `persistent_cache_keys`.
     Config-gated on `redfin_scraper_url`; absent → silently no flag.
+  - **Three estimates on the subject tile** (gw446): `Estimates · Zillow $X ·
+    Redfin $Y · Realtor $Z` under Last sold on `CompSubjectCard` (and the pin
+    popup). Zestimate was already on the facts; the **Redfin Estimate** rides
+    on the same `/facts` record the discrepancy flag uses (redfin-scraper-api
+    now returns `avm.estimate` — `price` there is the last SALE, not the AVM;
+    `redfin_subject` cache key bumped to v3); the **Realtor estimate** is
+    `crm/api/apivex.py` `start/finish_realtor_estimate` — Apivex
+    `/realtor/property/details?address=` → `property_id` →
+    `/property/estimates` (the estimates endpoint does NOT resolve an address;
+    both calls are billed, ~1.5s total, 4/4 hits measured incl. off-market).
+    Realtor's `isbest_homevalue` model is the headline; the other two AVMs +
+    range sit in the tooltip and the label links to the Realtor page. Same
+    thread + 1s join budget + background warm shape as Redfin, so a cold lead
+    shows it on the SECOND open; cached 30d (miss 7d) under
+    `crm:realtor-estimate` (declared in `persistent_cache_keys`). Street-key
+    match required — the neighbour's estimate is worse than none.
   - **Calc rate inputs read whole percents** (gw433): typing 1 into List It
     concessions means 1%, not 100% (`setPct`/`setRate` divide by 100; storage
     stays fraction-denominated so saved calcs render unchanged). The saved-calc
