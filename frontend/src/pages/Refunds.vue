@@ -63,14 +63,18 @@
                   </span>
                 </div>
               </div>
-              <div
-                v-if="
-                  lead.custom_refund_manual_ticket ||
-                  lead.custom_refund_not_in_provider ||
-                  lead.custom_refund_requested
-                "
-                class="mt-2 flex items-center gap-1.5"
-              >
+              <div class="mt-2 flex items-center gap-1.5">
+                <!-- The refund proof, one click from the board. A plain
+                     button inside the router-link: stop + prevent so it does
+                     not also open the lead. -->
+                <button
+                  class="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-ink-gray-5 hover:bg-surface-gray-2 hover:text-ink-gray-8"
+                  :title="__('Download this lead\'s call history with recording links (CSV)')"
+                  @click.stop.prevent="downloadCalls(lead)"
+                >
+                  <FeatherIcon name="download" class="size-3" />
+                  {{ __('Calls') }}
+                </button>
                 <Badge
                   v-if="lead.custom_refund_manual_ticket"
                   variant="subtle"
@@ -100,7 +104,7 @@
 
 <script setup>
 import Draggable from 'vuedraggable'
-import { Badge, createListResource, call, toast, dayjs } from 'frappe-ui'
+import { Badge, FeatherIcon, createListResource, call, toast, dayjs } from 'frappe-ui'
 import { usersStore } from '@/stores/users'
 import { formatDate, timeAgo } from '@/utils'
 import { REFUND_STATUSES as STATUSES, refundDot } from '@/utils/refunds'
@@ -112,6 +116,13 @@ const { getUser } = usersStore()
 // status change or a note). Falls back until the ops field is provisioned.
 function updatedAt(lead) {
   return lead.custom_refund_updated_on || lead.modified
+}
+
+function downloadCalls(lead) {
+  window.open(
+    `/api/method/crm.api.call_export.export_call_history?lead=${encodeURIComponent(lead.name)}&fmt=csv`,
+    '_blank',
+  )
 }
 
 function ownerName(email) {
