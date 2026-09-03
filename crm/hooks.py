@@ -351,6 +351,9 @@ doc_events = {
 			# owned it, and its open tasks keep pointing at a rep who can no longer
 			# see it. See crm/api/lead_owner_change.py.
 			"crm.api.lead_owner_change.on_lead_update",
+			# A refund field changed via doc.save (mail poller PUT, lead-page toggle)
+			# → stamp custom_refund_updated_on, the Refunds board's "Updated".
+			"crm.api.refunds.on_lead_update",
 			# Side-panel / import edits of mobile_no/phone/extra_phones — the
 			# dedicated add-phone API uses set_value (no hook) and backfills itself.
 			"crm.api.lead_phones.on_lead_phones_changed",

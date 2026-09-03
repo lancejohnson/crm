@@ -49,8 +49,8 @@
                 </div>
                 <div class="flex items-center gap-1.5">
                   <span class="w-14 shrink-0">{{ __('Updated') }}</span>
-                  <span class="text-ink-gray-8" :title="formatDate(lead.modified)">
-                    {{ timeAgo(lead.modified) }}
+                  <span class="text-ink-gray-8" :title="formatDate(updatedAt(lead))">
+                    {{ timeAgo(updatedAt(lead)) }}
                   </span>
                 </div>
                 <div class="flex items-center gap-1.5">
@@ -104,6 +104,12 @@ import { computed } from 'vue'
 
 const { getUser } = usersStore()
 
+// Last refund ACTION, not the lead's whole-doc `modified` (which moves for a
+// status change or a note). Falls back until the ops field is provisioned.
+function updatedAt(lead) {
+  return lead.custom_refund_updated_on || lead.modified
+}
+
 function ownerName(email) {
   if (!email) return __('Unassigned')
   return getUser(email).full_name || email
@@ -130,11 +136,12 @@ const list = createListResource({
     'custom_refund_status',
     'custom_refund_not_in_provider',
     'custom_refund_manual_ticket',
+    'custom_refund_updated_on',
     'modified',
     'creation',
   ],
   filters: { custom_refundable: 1 },
-  orderBy: 'modified desc',
+  orderBy: 'custom_refund_updated_on desc, modified desc',
   pageLength: 500,
   auto: true,
 })
@@ -164,7 +171,7 @@ async function onChange(evt, toStatus) {
     })
     lead.custom_refund_status = toStatus
     if (toStatus !== 'To Request') lead.custom_refund_requested = 1
-    lead.modified = dayjs().format('YYYY-MM-DD HH:mm:ss')
+    lead.custom_refund_updated_on = dayjs().format('YYYY-MM-DD HH:mm:ss')
   } catch (e) {
     toast.error(e.messages?.[0] || __('Could not move lead'))
     list.reload()
