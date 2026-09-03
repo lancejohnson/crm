@@ -123,8 +123,10 @@
       </div>
     </div>
 
-    <!-- One explicit flow: say what the task is, choose when, then Add. Due
-         chips select a date instead of silently creating a generic task. -->
+    <!-- Say what the task is, choose when, then Add. A due chip with a typed
+         title selects the date; with an EMPTY title it creates a "Follow up"
+         task at that time in one tap (Lance, 2026-09-03 — the common case is
+         "bump this lead", and typing a title first was friction). -->
     <div v-else class="border-t border-outline-gray-1 px-3 pt-2 pb-2.5">
       <div class="flex items-center gap-2">
         <LucidePlus class="size-4 shrink-0 text-ink-gray-4" />
@@ -294,8 +296,17 @@ function dueTooltip(f) {
 }
 
 function selectPreset(f, index) {
+  const due = formatDueStamp(dueFromPreset(f))
+  if (!newTitle.value.trim()) {
+    // Nothing typed: one tap = a "Follow up" task at that time.
+    newDue.value = ''
+    showDatePicker.value = false
+    selectedPresetIndex.value = -1
+    props.modalRef.addTask(__('Follow up'), snapMidnightToMorning(due))
+    return
+  }
   selectedPresetIndex.value = index
-  newDue.value = formatDueStamp(dueFromPreset(f))
+  newDue.value = due
   showDatePicker.value = false
 }
 

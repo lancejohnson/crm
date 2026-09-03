@@ -2003,8 +2003,10 @@ duplicating. Work substantial features in a worktree of your own.
   Activity feed lists every open task with an explicit **What + When + Add**
   flow: title first, then No date / 2h / 3d / 1wk / 1mo / calendar, then Add in
   both visual AND keyboard order; nothing is created until Add/Enter. A due chip
-  SELECTS the date (and exposes `aria-pressed`); it no longer silently creates a
-  generic “Follow up” when the title is blank. Inserts default to the current
+  SELECTS the date (and exposes `aria-pressed`) when a title is typed; with a
+  BLANK title a chip creates a “Follow up” task at that time in one tap
+  (Lance, 2026-09-03 — reversed the earlier select-only rule, since "bump this
+  lead" is the common case). The calendar button still only selects. Inserts default to the current
   user + `Todo`. The full Task modal opens as a compact **Schedule a Task** form
   (title + when, advanced fields behind More options on create AND edit), a
   touch-sized hover circle → click-to-complete checkbox, and a trash action that
