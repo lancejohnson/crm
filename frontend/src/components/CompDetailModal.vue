@@ -318,7 +318,7 @@
 import { COMP_CONDITION_TYPES, compColor, compFit, compState, compStateLabel, daysToSell, formatCompMoney } from '@/utils/comps'
 import { zillowUrl } from '@/utils/propertyLinks'
 import { Badge, Button, Dialog, FeatherIcon, call } from 'frappe-ui'
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
 const emit = defineEmits(['use', 'street', 'setType', 'saveSqft'])
 
@@ -641,6 +641,7 @@ async function load(force = false) {
   }
 }
 
+// Both wrap: past the last photo lands on the first and vice versa.
 function previousPhoto() {
   photoIndex.value = (photoIndex.value - 1 + photos.value.length) % photos.value.length
 }
@@ -648,6 +649,32 @@ function previousPhoto() {
 function nextPhoto() {
   photoIndex.value = (photoIndex.value + 1) % photos.value.length
 }
+
+// ← / → page the gallery while the panel is open. A plain window listener,
+// not useKeyboardShortcuts: this IS a Dialog, so that helper's
+// skipWhenDialogOpen default would silently never fire (the CompsView trap),
+// and CompsView's own U/H shortcuts already stand down while this is up.
+// Skipped when the focus is in a field (the sqft input, the condition select)
+// so the caret keeps its arrows.
+function onGalleryKey(e) {
+  if (!show.value || photos.value.length < 2) return
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+  if (e.altKey || e.ctrlKey || e.metaKey) return
+  const t = e.target
+  if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
+  e.preventDefault()
+  e.key === 'ArrowLeft' ? previousPhoto() : nextPhoto()
+}
+
+watch(
+  show,
+  (v) => {
+    if (v) window.addEventListener('keydown', onGalleryKey)
+    else window.removeEventListener('keydown', onGalleryKey)
+  },
+  { immediate: true },
+)
+onBeforeUnmount(() => window.removeEventListener('keydown', onGalleryKey))
 
 function decimal(value) {
   const n = Number(value)
