@@ -109,7 +109,9 @@ def set_refund_state(
 				updates["custom_refund_requested_on"] = now_datetime()
 
 	if updates:
-		frappe.db.set_value("CRM Lead", doc.name, updates, update_modified=False)
+		# A refund move is a human action, and the Refunds board reads
+		# `modified` as "last updated" — so it must bump, unlike cache writes.
+		frappe.db.set_value("CRM Lead", doc.name, updates)
 	return {"ok": True, **updates}
 
 
@@ -154,7 +156,7 @@ def send_draft(lead: str):
 		updates["custom_refund_status"] = "Waiting on them"
 	if doc.meta.has_field("custom_refund_requested"):
 		updates["custom_refund_requested"] = 1
-	frappe.db.set_value("CRM Lead", doc.name, updates, update_modified=False)
+	frappe.db.set_value("CRM Lead", doc.name, updates)
 	return {"ok": True, "status": updates.get("custom_refund_status")}
 
 

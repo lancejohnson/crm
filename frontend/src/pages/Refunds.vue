@@ -40,7 +40,34 @@
                   · {{ lead.lost_reason }}
                 </template>
               </div>
-              <div class="mt-2 flex items-center gap-1.5">
+              <div class="mt-2 flex flex-col gap-0.5 text-xs text-ink-gray-5">
+                <div class="flex items-center gap-1.5">
+                  <span class="w-14 shrink-0">{{ __('Owner') }}</span>
+                  <span class="truncate text-ink-gray-8">
+                    {{ ownerName(lead.lead_owner) }}
+                  </span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                  <span class="w-14 shrink-0">{{ __('Updated') }}</span>
+                  <span class="text-ink-gray-8" :title="formatDate(lead.modified)">
+                    {{ timeAgo(lead.modified) }}
+                  </span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                  <span class="w-14 shrink-0">{{ __('Created') }}</span>
+                  <span class="text-ink-gray-8" :title="formatDate(lead.creation)">
+                    {{ formatDate(lead.creation, 'MMM D, YYYY') }}
+                  </span>
+                </div>
+              </div>
+              <div
+                v-if="
+                  lead.custom_refund_manual_ticket ||
+                  lead.custom_refund_not_in_provider ||
+                  lead.custom_refund_requested
+                "
+                class="mt-2 flex items-center gap-1.5"
+              >
                 <Badge
                   v-if="lead.custom_refund_manual_ticket"
                   variant="subtle"
@@ -70,8 +97,17 @@
 
 <script setup>
 import Draggable from 'vuedraggable'
-import { Badge, createListResource, call, toast } from 'frappe-ui'
+import { Badge, createListResource, call, toast, dayjs } from 'frappe-ui'
+import { usersStore } from '@/stores/users'
+import { formatDate, timeAgo } from '@/utils'
 import { computed } from 'vue'
+
+const { getUser } = usersStore()
+
+function ownerName(email) {
+  if (!email) return __('Unassigned')
+  return getUser(email).full_name || email
+}
 
 const STATUSES = [
   'To Request',
@@ -95,6 +131,7 @@ const list = createListResource({
     'custom_refund_not_in_provider',
     'custom_refund_manual_ticket',
     'modified',
+    'creation',
   ],
   filters: { custom_refundable: 1 },
   orderBy: 'modified desc',
@@ -127,6 +164,7 @@ async function onChange(evt, toStatus) {
     })
     lead.custom_refund_status = toStatus
     if (toStatus !== 'To Request') lead.custom_refund_requested = 1
+    lead.modified = dayjs().format('YYYY-MM-DD HH:mm:ss')
   } catch (e) {
     toast.error(e.messages?.[0] || __('Could not move lead'))
     list.reload()
