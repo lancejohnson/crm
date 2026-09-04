@@ -227,7 +227,6 @@ import LucidePencil from '~icons/lucide/pencil'
 import LucidePlus from '~icons/lucide/plus'
 import LucideTrash2 from '~icons/lucide/trash-2'
 import {
-  DEFAULT_TASK_DUE_PRESETS,
   TASK_DUE_UNITS,
   dueFromPreset,
   dueLabel,
@@ -236,6 +235,7 @@ import {
 } from '@/utils/taskDue'
 import { formatDate, dueColor, parseColor, getFormat } from '@/utils'
 import { usersStore } from '@/stores/users'
+import { useTaskDuePresets } from '@/composables/taskDuePresets'
 import { Button, Tooltip, DateTimePicker, call, toast } from 'frappe-ui'
 import { ref, computed } from 'vue'
 
@@ -251,21 +251,8 @@ const newDue = ref('')
 const showDatePicker = ref(false)
 const selectedPresetIndex = ref(-1)
 
-
-const savedPresets = computed(() => {
-  const raw = getUser('sessionUser')?.custom_task_due_presets
-  if (!raw) return null
-  try {
-    const arr = typeof raw === 'string' ? JSON.parse(raw) : raw
-    return Array.isArray(arr) ? arr : null
-  } catch {
-    return null
-  }
-})
-
-const presets = computed(
-  () => savedPresets.value ?? DEFAULT_TASK_DUE_PRESETS,
-)
+// Shared with the Today board's follow-up strip.
+const { presets } = useTaskDuePresets()
 
 const sortedTasks = computed(() =>
   [...props.tasks].sort((a, b) => {

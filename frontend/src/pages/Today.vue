@@ -145,6 +145,8 @@
         :group="'today'"
         item-key="name"
         :disabled="selecting"
+        filter="[data-no-drag]"
+        :prevent-on-filter="false"
         class="flex min-h-[6rem] flex-1 flex-col gap-2 overflow-y-auto px-2 pb-3"
         @change="onChange($event, col)"
       >
@@ -371,6 +373,131 @@
               </button>
             </div>
 
+            <!-- Follow-up strip: a To Call card with no open task offers the rep's
+                 own due chips right on the card. One tap = a "Follow up" task at
+                 that time, the same rule as the lead-page composer; "+ other"
+                 swaps the strip for a title box with the same chips. Always
+                 visible rather than behind a menu (Lance, 2026-09-04 — mockup B):
+                 the rep works the column top to bottom and should never hunt.
+                 `data-no-drag` keeps typing/tapping here from starting a drag. -->
+            <div
+              v-if="showFollowUpStrip(item)"
+              data-no-drag
+              class="followup-strip mt-2 rounded-md border px-2 py-1.5 text-xs"
+              :class="
+                composerFor === item.name
+                  ? 'border-outline-gray-2 bg-surface-gray-1'
+                  : 'border-dashed border-outline-gray-2'
+              "
+              @click.stop
+            >
+              <template v-if="composerFor !== item.name">
+                <div class="flex flex-wrap items-center gap-1">
+                  <span
+                    class="mr-0.5 flex items-center gap-1 text-ink-gray-5"
+                    :title="__('Follow up in…')"
+                  >
+                    <FeatherIcon name="clock" class="size-3.5" />
+                    <span class="strip-label">{{ __('Follow up') }}</span>
+                  </span>
+                  <Tooltip v-for="(f, i) in duePresets" :key="i" :text="presetTooltip(f)">
+                    <button
+                      type="button"
+                      class="rounded-md border border-outline-gray-1 bg-surface-white px-1.5 py-0.5 text-xs text-ink-gray-7 hover:bg-surface-gray-2 disabled:cursor-wait disabled:opacity-60"
+                      :disabled="addingTaskFor.includes(item.name)"
+                      @click.stop="quickFollowUp(item, f)"
+                    >
+                      {{ f.label }}
+                    </button>
+                  </Tooltip>
+                  <Tooltip :text="__('Pick a date')">
+                    <button
+                      type="button"
+                      class="flex items-center rounded-md border border-outline-gray-1 bg-surface-white px-1.5 py-1 text-ink-gray-7 hover:bg-surface-gray-2"
+                      :aria-label="__('Pick a date')"
+                      @click.stop="openComposer(item, { picker: true })"
+                    >
+                      <FeatherIcon name="calendar" class="size-3" />
+                    </button>
+                  </Tooltip>
+                  <button
+                    type="button"
+                    class="ml-auto whitespace-nowrap text-ink-gray-5 hover:text-ink-gray-8"
+                    :title="__('Add a different task')"
+                    @click.stop="openComposer(item)"
+                  >
+                    +<span class="strip-label"> {{ __('other') }}</span>
+                  </button>
+                </div>
+              </template>
+              <template v-else>
+                <div class="flex items-center gap-1.5">
+                  <FeatherIcon name="plus" class="size-3.5 shrink-0 text-ink-gray-4" />
+                  <input
+                    ref="composerInput"
+                    v-model="composerTitle"
+                    type="text"
+                    :placeholder="__('Follow up')"
+                    autocomplete="off"
+                    class="min-w-0 flex-1 rounded-md border border-outline-gray-2 bg-surface-white px-2 py-1 text-sm text-ink-gray-8 placeholder:text-ink-gray-4 focus:border-outline-gray-3 focus:outline-none"
+                    @keydown.enter.prevent="submitComposer(item)"
+                    @keydown.esc.prevent="closeComposer"
+                  />
+                </div>
+                <div class="mt-1.5 flex flex-wrap items-center gap-1.5 pl-5">
+                  <span class="text-ink-gray-4">{{ __('When') }}</span>
+                  <button
+                    type="button"
+                    class="rounded-md border px-2 py-0.5 text-xs"
+                    :class="composerChoiceClass(!composerDue)"
+                    @click.stop="composerDue = ''; composerPreset = -1; composerPicker = false"
+                  >
+                    {{ __('No date') }}
+                  </button>
+                  <Tooltip v-for="(f, i) in duePresets" :key="i" :text="presetTooltip(f)">
+                    <button
+                      type="button"
+                      class="rounded-md border px-2 py-0.5 text-xs"
+                      :class="composerChoiceClass(composerPreset === i)"
+                      @click.stop="pickComposerPreset(f, i)"
+                    >
+                      {{ f.label }}
+                    </button>
+                  </Tooltip>
+                  <button
+                    type="button"
+                    class="flex items-center rounded-md border px-1.5 py-1"
+                    :class="composerChoiceClass(composerPicker && composerPreset < 0)"
+                    :aria-label="__('Pick a date')"
+                    @click.stop="composerPreset = -1; composerPicker = !composerPicker"
+                  >
+                    <FeatherIcon name="calendar" class="size-3" />
+                  </button>
+                  <span class="ml-auto flex items-center gap-1">
+                    <Button variant="ghost" size="sm" :label="__('Cancel')" @click.stop="closeComposer" />
+                    <Button
+                      variant="solid"
+                      size="sm"
+                      :label="__('Add')"
+                      :loading="addingTaskFor.includes(item.name)"
+                      @click.stop="submitComposer(item)"
+                    />
+                  </span>
+                </div>
+                <div v-if="composerPicker" class="mt-1.5 flex items-center gap-2 pl-5">
+                  <span class="shrink-0 text-ink-gray-4">{{ __('Due') }}</span>
+                  <DateTimePicker
+                    v-model="composerDue"
+                    class="flex-1"
+                    :placeholder="__('Due date')"
+                    :format="getFormat('', '', true, true, false)"
+                    input-class="text-xs"
+                    @update:modelValue="composerPreset = -1"
+                  />
+                </div>
+              </template>
+            </div>
+
             <!-- What the rep said when they resolved the card, kept on the card so
                  a wrong answer is visible (and fixable) rather than write-only. -->
             <div v-if="item.outcome || item.outcome_note" class="mt-2 flex flex-wrap items-center gap-1.5">
@@ -457,11 +584,14 @@ import TodayOutcomeModal from '@/components/Modals/TodayOutcomeModal.vue'
 import { globalStore } from '@/stores/global'
 import { sessionStore } from '@/stores/session'
 import { statusesStore } from '@/stores/statuses'
-import { formatDate, timeAgo } from '@/utils'
+import { formatDate, getFormat, timeAgo } from '@/utils'
 import { callHref, formatPhone } from '@/utils/phoneFormat'
+import { dueFromPreset, formatDueStamp, snapMidnightToMorning } from '@/utils/taskDue'
+import { useTaskDuePresets } from '@/composables/taskDuePresets'
 import {
   Badge,
   Button,
+  DateTimePicker,
   Dropdown,
   FeatherIcon,
   Tooltip,
@@ -470,7 +600,7 @@ import {
   toast,
 } from 'frappe-ui'
 import Draggable from 'vuedraggable'
-import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 const { $socket } = globalStore()
 const { statusOptions, getLeadStatus } = statusesStore()
@@ -969,6 +1099,122 @@ async function toggleTask(item) {
   }
 }
 
+// ---- Follow-up strip -------------------------------------------------------
+// Chips are the rep's own (shared with the lead-page composer). Creation goes
+// through the same CRM Task insert the to-do block uses, so `crm_task_update`
+// fires and every other open surface — the lead page, the kanban badge — sees
+// it. The card is patched optimistically and the board reloaded for the
+// canonical row (has_task, priority), so the strip gives way to the task row
+// without waiting on the round trip.
+const { presets: duePresets } = useTaskDuePresets()
+const addingTaskFor = ref([])
+const composerFor = ref(null)
+const composerTitle = ref('')
+const composerDue = ref('')
+const composerPreset = ref(-1)
+const composerPicker = ref(false)
+const composerInput = ref(null)
+
+function showFollowUpStrip(item) {
+  return item.state === 'To Call' && !item.has_task && !selecting.value
+}
+
+function presetTooltip(f) {
+  return __('Follow up') + ' · ' + formatDate(dueFromPreset(f), 'ddd, MMM D, YYYY | hh:mm a')
+}
+
+function composerChoiceClass(selected) {
+  return selected
+    ? 'border-outline-gray-3 bg-surface-gray-3 font-medium text-ink-gray-8'
+    : 'border-outline-gray-1 bg-surface-white text-ink-gray-6 hover:bg-surface-gray-2'
+}
+
+function openComposer(item, { picker = false } = {}) {
+  composerFor.value = item.name
+  composerTitle.value = ''
+  composerDue.value = ''
+  composerPreset.value = -1
+  composerPicker.value = picker
+  nextTick(() => {
+    const el = composerInput.value
+    const input = Array.isArray(el) ? el[0] : el
+    if (!picker) input?.focus?.()
+  })
+}
+
+function closeComposer() {
+  composerFor.value = null
+  composerTitle.value = ''
+  composerDue.value = ''
+  composerPreset.value = -1
+  composerPicker.value = false
+}
+
+function pickComposerPreset(f, i) {
+  composerPreset.value = i
+  composerDue.value = formatDueStamp(dueFromPreset(f))
+  composerPicker.value = false
+}
+
+async function quickFollowUp(item, preset) {
+  const due = formatDueStamp(dueFromPreset(preset))
+  await createFollowUp(item, __('Follow up'), due)
+}
+
+async function submitComposer(item) {
+  // Blank title = "Follow up", the same shorthand the chips use; the composer
+  // exists for the WHEN (a picked date) as much as for the WHAT.
+  const title = composerTitle.value.trim() || __('Follow up')
+  const due = snapMidnightToMorning(composerDue.value)
+  const ok = await createFollowUp(item, title, due)
+  if (ok) closeComposer()
+}
+
+async function createFollowUp(item, title, due) {
+  if (addingTaskFor.value.includes(item.name)) return false
+  addingTaskFor.value = [...addingTaskFor.value, item.name]
+  try {
+    const doc = await call('frappe.client.insert', {
+      doc: {
+        doctype: 'CRM Task',
+        title,
+        status: 'Todo',
+        due_date: due || null,
+        reference_doctype: 'CRM Lead',
+        reference_docname: item.lead,
+        assigned_to: sessionUser,
+      },
+    })
+    const task = {
+      name: doc?.name,
+      title,
+      due_date: due || null,
+      is_completed: false,
+    }
+    // A lead can hold two call cards; both should show the new task.
+    for (const col of columns.value) {
+      for (const card of col.items) {
+        if (card.lead === item.lead && !card.has_task) {
+          card.task = task
+          card.has_task = true
+        }
+      }
+    }
+    toast.success(
+      due
+        ? __('{0} · {1}', [title, formatDate(due, 'ddd, MMM D | hh:mm a')])
+        : __('{0} added', [title]),
+    )
+    board.reload()
+    return true
+  } catch (e) {
+    toast.error(e.messages?.[0] || __('Could not add the task'))
+    return false
+  } finally {
+    addingTaskFor.value = addingTaskFor.value.filter((n) => n !== item.name)
+  }
+}
+
 function openText(item) {
   selectedTextItem.value = item
   showTextModal.value = true
@@ -1134,3 +1380,19 @@ onBeforeUnmount(() => {
   $socket.off('crm_today', onRealtime)
 })
 </script>
+
+<style scoped>
+/* The strip has to fit ONE line in a ~245px card (three columns at 1200px with
+   the nav open) and still read as a sentence in a wide one. The words are what
+   give way: the clock icon and the chips are the control; "Follow up" / "other"
+   are captions (kept as titles). Container query, not a viewport breakpoint —
+   column width depends on how many columns are open, not on the window. */
+.followup-strip {
+  container-type: inline-size;
+}
+@container (max-width: 270px) {
+  .followup-strip .strip-label {
+    display: none;
+  }
+}
+</style>

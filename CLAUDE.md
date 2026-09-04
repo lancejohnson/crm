@@ -1543,6 +1543,23 @@ duplicating. Work substantial features in a worktree of your own.
       intraday pulse and a rep who works by dragging read as idle. Both paths now
       share `_state_stamps(state)`, and `reorder_today` also clears the outcome
       when a card is dragged back to To Call.
+  - **Follow-up strip on every To Call card without an open task** (gw450,
+    Lance picked mockup B of three): a dashed row `⏰ Follow up · 2h · 3d ·
+    1wk · 1mo · 📅 · + other`. One tap on a chip creates a **"Follow up"**
+    `CRM Task` at that time (same 9am-CT snap as the lead-page composer);
+    📅 or `+ other` swaps the strip for an inline title box + the same chips
+    + a DateTimePicker (blank title still means "Follow up"). Chips are the
+    rep's own `crm_task_due_presets`, now read through
+    `composables/taskDuePresets.js` so the to-do composer and the board
+    cannot drift. Insert is the plain `frappe.client.insert` the to-do block
+    uses (assigned to the CREATOR, like the composer), so `crm_task_update`
+    fires for every other surface; both call cards of the lead are patched
+    optimistically and the board reloads for the canonical row. Hidden on
+    Done/Skipped, in Reassign mode, and once a task exists (the task row takes
+    its place). `data-no-drag` + Sortable `filter` so typing in the box
+    cannot start a drag. Words hide under a **container query** at ≤270px so
+    the strip stays one line in a three-column board at 1200px — the
+    control is the chips, the captions are titles.
   - **The card's task row is two hit targets.** The circle ticks the task
     complete **and back** without leaving the board (`frappe.client.set_value`,
     optimistic, both directions); the rest of the row opens the lead's **to-do
