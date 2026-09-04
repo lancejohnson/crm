@@ -145,6 +145,34 @@ duplicating. Work substantial features in a worktree of your own.
   `db.set_value` on the add/remove API so it does not fire lead save hooks;
   `after_insert`/`on_update` cover side-panel / import / webhook writes.
 
+- **Text presets with lead tokens** (gw453, Dennis's ask; Lance picked mockup A
+  of three — `docs/mockups/text-presets-mockups.html`) — a **Presets** chip
+  row above every lead composer: the header **Text** modal (`SendTextModal`,
+  which is also what the Today card's 💬 opens) and the **Text Messages** tab
+  (`SMSBox`, also the `/texts` inbox). Tapping a chip fills the message from
+  the lead — `{{first_name}}` `{{street}}` ("Maple Ave") `{{address}}` ("412
+  Maple Ave") `{{city}}` `{{my_name}}` — and drops the rep in the editor with
+  the cursor at the end; nothing sends without the normal Send click. **Two
+  lists**: **team** (global Frappe default `crm_text_presets`, everyone reads,
+  Sales Manager / System Manager write) and **mine** (user default
+  `crm_my_text_presets`, dashed chip with a person icon). Same
+  no-doctype/no-ops-script trick as Lead Assignment and the task due chips.
+  Pencil → `TextPresetsModal` (both lists, token-insert-at-caret buttons,
+  team rows read-only for non-managers). **Rendering is server-side**
+  (`crm.api.text_presets.render_text_preset`, one `get_value` per tap) so the
+  tokens are defined once and the Today card — which carries only
+  `lead_name` — needs no extra fields. **A token the lead can't fill renders
+  as a visible `[first name?]` marker, the cursor lands on it, and Send is
+  disabled until it is replaced** (`hasUnfilled`) — "Hi , this is German" is
+  the text a seller reads as a robot. City is re-cased when the import left
+  it all-lower/upper. GOTCHA: a literal `}}` inside a Vue template
+  interpolation closes it early and fails the build — the editor's
+  `{{token}}` labels are built in script (`display`). `SMSBox` no longer
+  collapses to one row on blur while it holds a draft. One seed team preset
+  ("Intro") was saved during verification. `crm/api/text_presets.py` +
+  `composables/textPresets.js` + `TextPresetChips.vue` +
+  `Modals/TextPresetsModal.vue`.
+
 - **Open Research tabs (Lead header)** — a one-click button on the Lead page
   header row (Call · Text · **Research** · ⋯ · Delete) that opens **two Zillow
   tabs + one Google Maps tab** for the lead's `property_address`. Reuses the

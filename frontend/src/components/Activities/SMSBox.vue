@@ -13,22 +13,35 @@
         @click="showSelectNumber = true"
       />
     </div>
+    <TextPresetChips
+      class="px-3 pt-2.5 sm:px-10"
+      :lead="leadName()"
+      @pick="applyPreset"
+    />
     <div class="flex items-end gap-2 px-3 py-2.5 sm:px-10">
-      <Textarea
-        ref="textareaRef"
-        v-model="content"
-        type="textarea"
-        class="min-h-8 w-full"
-        :rows="rows"
-        :placeholder="placeholder"
-        @focus="rows = 6"
-        @blur="rows = 1"
-        @keydown.enter.stop="(e) => sendOnCmdEnter(e)"
-      />
+      <div class="flex w-full flex-col">
+        <Textarea
+          ref="textareaRef"
+          v-model="content"
+          type="textarea"
+          class="min-h-8 w-full"
+          :rows="rows"
+          :placeholder="placeholder"
+          @focus="rows = 6"
+          @blur="onBlur"
+          @keydown.enter.stop="(e) => sendOnCmdEnter(e)"
+        />
+        <div
+          v-if="unfilled"
+          class="mt-1 text-xs font-medium text-ink-amber-3"
+        >
+          {{ __('Fill in the [ ? ] parts before sending — the lead is missing that detail.') }}
+        </div>
+      </div>
       <Button
         variant="solid"
         :loading="sending"
-        :disabled="!content.trim() || !fromNumber"
+        :disabled="!content.trim() || !fromNumber || unfilled"
         :label="__('Send')"
         @click="sendSMS()"
       />
@@ -42,9 +55,11 @@
 
 <script setup>
 import SelectQuoNumberModal from '@/components/Modals/SelectQuoNumberModal.vue'
+import TextPresetChips from '@/components/TextPresetChips.vue'
+import { hasUnfilled } from '@/composables/textPresets'
 import { myQuoNumber } from '@/composables/quoSender'
 import { call, Textarea, Button, toast } from 'frappe-ui'
-import { ref, onMounted } from 'vue'
+import { computed, nextTick, ref, onMounted } from 'vue'
 
 const props = defineProps({
   doctype: { type: String, default: '' },
@@ -82,6 +97,29 @@ function show() {
   if (textareaRef.value?.el) textareaRef.value.el.focus()
 }
 
+const unfilled = computed(() => hasUnfilled(content.value))
+
+// keep the composer open while it holds a draft — collapsing a filled preset
+// to one line the moment focus moves to the Send button reads as losing it
+function onBlur() {
+  if (!content.value.trim()) rows.value = 1
+}
+
+// A preset chip replaces the draft with the filled-in text, opens the composer
+// and parks the cursor on the first [ ? ] marker if the lead lacked a detail.
+function applyPreset(text) {
+  content.value = text
+  rows.value = 6
+  nextTick(() => {
+    const el = textareaRef.value?.el
+    if (!el) return
+    el.focus()
+    const m = text.match(/\[[a-z ]+\?\]/)
+    if (m) el.setSelectionRange(m.index, m.index + m[0].length)
+    else el.setSelectionRange(text.length, text.length)
+  })
+}
+
 // Texts are lead-scoped. On a deal, send to the originating lead.
 function leadName() {
   if (props.doctype === 'CRM Deal') return doc.value.lead || ''
@@ -98,7 +136,7 @@ function sendOnCmdEnter(event) {
 
 async function sendSMS() {
   const message = content.value.trim()
-  if (!message || sending.value) return
+  if (!message || sending.value || unfilled.value) return
   if (!fromNumber.value) {
     toast.error(__('Select a Quo number to send from.'))
     return

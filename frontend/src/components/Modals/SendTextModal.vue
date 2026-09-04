@@ -39,6 +39,7 @@
             @click="showSelectNumber = true"
           />
         </div>
+        <TextPresetChips :lead="leadName()" @pick="applyPreset" />
         <div>
           <div class="mb-1.5 text-xs text-ink-gray-5">{{ __('Message') }}</div>
           <Textarea
@@ -48,6 +49,12 @@
             :placeholder="__('Type your message here...')"
             @keydown.enter.stop="(e) => sendOnCmdEnter(e)"
           />
+          <div
+            v-if="unfilled"
+            class="mt-1.5 text-xs font-medium text-ink-amber-3"
+          >
+            {{ __('Fill in the [ ? ] parts before sending — the lead is missing that detail.') }}
+          </div>
         </div>
         <ErrorMessage :message="error" />
       </div>
@@ -93,6 +100,8 @@
 
 <script setup>
 import SelectQuoNumberModal from '@/components/Modals/SelectQuoNumberModal.vue'
+import TextPresetChips from '@/components/TextPresetChips.vue'
+import { hasUnfilled } from '@/composables/textPresets'
 import { myQuoNumber, formatPhone } from '@/composables/quoSender'
 import { listLeadPhones, primaryLeadPhone } from '@/utils/leadPhones'
 import {
@@ -152,9 +161,30 @@ const toLast10 = computed(() =>
   String(to.value || '').replace(/\D/g, '').slice(-10),
 )
 
+const unfilled = computed(() => hasUnfilled(content.value))
 const canSend = computed(
-  () => !sending.value && !!content.value.trim() && !!to.value.trim(),
+  () =>
+    !sending.value &&
+    !!content.value.trim() &&
+    !!to.value.trim() &&
+    !unfilled.value,
 )
+
+// A preset chip replaces the draft with the filled-in text and puts the cursor
+// at the end (or on the first [ ? ] marker, which is what needs fixing).
+function applyPreset(text) {
+  content.value = text
+  nextTick(() => {
+    const el =
+      messageInput.value?.el ||
+      messageInput.value?.$el?.querySelector?.('textarea')
+    if (!el) return
+    el.focus()
+    const m = text.match(/\[[a-z ]+\?\]/)
+    if (m) el.setSelectionRange(m.index, m.index + m[0].length)
+    else el.setSelectionRange(text.length, text.length)
+  })
+}
 
 function onNumberSaved(number) {
   linkedNumber.value = number
@@ -183,7 +213,7 @@ function skip() {
 
 async function sendSMS(markFinished = false) {
   const message = content.value.trim()
-  if (!message || sending.value) return
+  if (!message || sending.value || unfilled.value) return
   const lead = leadName()
   if (!lead) {
     error.value = __('No lead linked to text.')

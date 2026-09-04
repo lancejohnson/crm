@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Preset text messages — three ideas</title>
+<style>
+  :root {
+    --ink-9: #171717; --ink-8: #383838; --ink-7: #525252; --ink-6: #7c7c7c; --ink-5: #a6a6a6; --ink-4: #c4c4c4;
+    --line: #ebebeb; --line-2: #e2e2e2; --line-3: #cfcfcf; --bg: #fff; --gray-1: #f8f8f8; --gray-2: #f3f3f3;
+    --blue: #2d6fd1; --blue-1: #eef4fc; --green: #15803d; --green-1: #ecfdf3; --amber: #b45309; --amber-1: #fef6e7; --violet: #6d28d9; --violet-1: #f3eefc;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #ededed; color: var(--ink-8); font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .page { max-width: 1180px; margin: 0 auto; padding: 28px 24px 60px; }
+  h1 { font-size: 17px; font-weight: 600; margin: 0 0 4px; color: var(--ink-9); }
+  .lede { color: var(--ink-6); font-size: 13px; margin: 0 0 22px; max-width: 60rem; }
+  .lede code, .note code { background: #e3e3e3; border-radius: 4px; padding: 0 4px; font-size: 12px; }
+  section { margin: 0 0 34px; }
+  .sec-head { display: flex; align-items: baseline; gap: 12px; margin: 0 0 12px; }
+  .sec-head h2 { font-size: 15px; font-weight: 600; margin: 0; color: var(--ink-9); }
+  .sec-head .badge { font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: #fff; background: var(--ink-8); border-radius: 4px; padding: 2px 7px; }
+  .sec-head .sub { color: var(--ink-6); font-size: 13px; }
+  .row { display: grid; grid-template-columns: 300px 1fr; gap: 20px; align-items: start; }
+  .frame { background: var(--bg); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: 0 1px 2px rgba(0,0,0,.05); overflow: hidden; }
+  .frame-label { font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-5); margin: 0 0 6px; }
+  .note { color: var(--ink-6); font-size: 12px; margin: 8px 0 0; line-height: 1.5; }
+  .note b { color: var(--ink-7); font-weight: 600; }
+
+  /* ---- Today card ---- */
+  .card { padding: 10px 12px 10px; }
+  .card .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .card .name { font-weight: 600; font-size: 14px; color: var(--ink-9); }
+  .card .phase { font-size: 11px; color: var(--ink-6); background: var(--gray-2); border-radius: 4px; padding: 1px 6px; }
+  .card .addr { font-size: 12px; color: var(--ink-7); margin-top: 2px; }
+  .card .phone { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--blue); margin-top: 3px; }
+  .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 4px; color: var(--blue); }
+  .icon-btn.hot { background: var(--blue-1); }
+  .icon-btn svg { width: 13px; height: 13px; }
+  .strip { margin-top: 8px; border: 1px dashed var(--line-3); border-radius: 6px; padding: 5px 7px; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; font-size: 12px; color: var(--ink-6); }
+  .chip { display: inline-flex; align-items: center; border: 1px solid var(--line-2); border-radius: 6px; padding: 2px 7px; font-size: 12px; color: var(--ink-7); background: #fff; white-space: nowrap; }
+  .chip.on { border-color: var(--blue); color: var(--blue); background: var(--blue-1); }
+  .chip.more { border-style: dashed; color: var(--ink-5); }
+
+  /* ---- Modal ---- */
+  .modal { padding: 16px 18px 14px; }
+  .modal .title { font-weight: 600; font-size: 15px; color: var(--ink-9); margin: 0 0 12px; }
+  .label { font-size: 11px; color: var(--ink-6); margin: 0 0 4px; }
+  .input { border: 1px solid var(--line-2); border-radius: 6px; padding: 6px 9px; font-size: 13px; color: var(--ink-8); background: var(--gray-1); }
+  .from { font-size: 11px; color: var(--ink-6); margin: 8px 0 12px; } .from b { color: var(--ink-7); font-weight: 500; }
+  .ta { border: 1px solid var(--line-2); border-radius: 6px; padding: 8px 10px; font-size: 13px; line-height: 1.5; min-height: 88px; color: var(--ink-8); background: #fff; white-space: pre-wrap; }
+  .ta .tok { background: var(--green-1); color: var(--green); border-radius: 3px; padding: 0 3px; }
+  .ta .miss { background: var(--amber-1); color: var(--amber); border-radius: 3px; padding: 0 3px; border-bottom: 1px dashed var(--amber); }
+  .actions { display: flex; gap: 8px; margin-top: 14px; }
+  .btn { border: 1px solid var(--line-2); border-radius: 6px; padding: 5px 11px; font-size: 13px; color: var(--ink-8); background: #fff; }
+  .btn.solid { background: var(--ink-9); color: #fff; border-color: var(--ink-9); }
+  .btn.ghost { border-color: transparent; color: var(--ink-6); }
+  .ml { margin-left: auto; }
+  .chips-head { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; }
+  .chips-head .label { margin: 0; }
+  .pencil { margin-left: auto; color: var(--ink-4); font-size: 12px; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .hint { font-size: 11px; color: var(--ink-5); margin-top: 6px; }
+
+  /* ---- Lead header ---- */
+  .lead-head { padding: 14px 18px; }
+  .lead-head .name { font-size: 16px; font-weight: 600; color: var(--ink-9); }
+  .lead-head .sub { font-size: 12px; color: var(--ink-6); margin-top: 2px; }
+  .hbtns { display: flex; gap: 6px; margin-top: 10px; align-items: center; }
+  .hbtn { border: 1px solid var(--line-2); border-radius: 6px; padding: 4px 10px; font-size: 13px; color: var(--ink-8); background: #fff; display: inline-flex; align-items: center; gap: 4px; }
+  .hbtn .caret { color: var(--ink-5); font-size: 10px; }
+  .hbtn.split { padding: 0; overflow: hidden; }
+  .hbtn.split span { padding: 4px 10px; }
+  .hbtn.split span + span { border-left: 1px solid var(--line-2); padding: 4px 7px; color: var(--ink-6); }
+
+  /* ---- Dropdown menu ---- */
+  .menu { position: relative; width: 340px; border: 1px solid var(--line-2); border-radius: 8px; background: #fff; box-shadow: 0 8px 24px rgba(0,0,0,.12); padding: 4px; margin-top: 6px; }
+  .menu .mh { font-size: 11px; color: var(--ink-5); padding: 6px 8px 4px; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+  .mi { display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border-radius: 6px; }
+  .mi:hover, .mi.hl { background: var(--gray-2); }
+  .mi .t { font-size: 13px; font-weight: 500; color: var(--ink-9); display: flex; gap: 6px; align-items: center; }
+  .mi .t .kb { margin-left: auto; font-size: 10px; color: var(--ink-5); border: 1px solid var(--line-2); border-radius: 3px; padding: 0 4px; }
+  .mi .p { font-size: 12px; color: var(--ink-6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mi .p em { font-style: normal; color: var(--green); }
+  .msep { border-top: 1px solid var(--line); margin: 4px 0; }
+  .mi.dim .t { color: var(--ink-6); font-weight: 400; }
+
+  /* ---- Activity feed block ---- */
+  .feed { padding: 12px 14px; background: var(--gray-1); }
+  .block { border: 1px solid var(--line); border-radius: 8px; background: #fff; margin-bottom: 8px; }
+  .block .bh { display: flex; align-items: center; gap: 6px; padding: 8px 12px 4px; font-size: 13px; font-weight: 500; color: var(--ink-6); }
+  .block .bb { padding: 4px 12px 10px; }
+  .preview { margin-top: 8px; border: 1px solid var(--line-2); border-radius: 6px; padding: 8px 10px; background: var(--gray-1); }
+  .preview .to { font-size: 11px; color: var(--ink-5); margin-bottom: 4px; }
+  .preview .msg { font-size: 13px; color: var(--ink-8); line-height: 1.5; }
+  .preview .msg .tok { background: var(--green-1); color: var(--green); border-radius: 3px; padding: 0 3px; }
+  .preview .pa { display: flex; gap: 6px; margin-top: 8px; align-items: center; }
+  .preview .pa .btn { padding: 3px 9px; font-size: 12px; }
+
+  /* ---- Settings editor ---- */
+  .settings { padding: 16px 18px; }
+  .settings h3 { margin: 0 0 2px; font-size: 14px; font-weight: 600; color: var(--ink-9); }
+  .settings .d { color: var(--ink-6); font-size: 12px; margin: 0 0 12px; }
+  .trow { display: grid; grid-template-columns: 150px 1fr 24px; gap: 8px; align-items: start; margin-bottom: 8px; }
+  .trow .input { background: #fff; }
+  .trow .ta { min-height: 0; padding: 6px 9px; }
+  .trow .x { color: var(--ink-4); text-align: center; padding-top: 6px; }
+  .tokens { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 12px; align-items: center; font-size: 12px; color: var(--ink-6); }
+  .tokens code { background: var(--green-1); color: var(--green); border-radius: 4px; padding: 1px 6px; font-size: 12px; }
+  .cmp { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 8px; }
+  .cmp .c { background: #fff; border: 1px solid var(--line-2); border-radius: 8px; padding: 12px 14px; font-size: 12px; color: var(--ink-7); }
+  .cmp .c h4 { margin: 0 0 6px; font-size: 13px; color: var(--ink-9); }
+  .cmp .c ul { margin: 0; padding-left: 16px; } .cmp .c li { margin: 2px 0; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Preset text messages that fill in the seller's first name + street</h1>
+  <p class="lede">
+    Three ways to put presets on the <b>Lead page</b> and the <b>Today card</b>. All three share the same plumbing: a saved list of templates
+    with tokens — <code>{{first_name}}</code> · <code>{{street}}</code> (e.g. “Maple Ave”) · <code>{{address}}</code> (“412 Maple Ave”) · <code>{{my_name}}</code> —
+    rendered from the lead the moment you pick one. The rep always sees the filled-in text before it goes out; a token the lead can't fill
+    (no first name on file) is highlighted amber instead of silently sending “Hi ,”. Same tokens the buyer bulk-texter already uses.
+  </p>
+
+  <!-- ================= IDEA A ================= -->
+  <section>
+    <div class="sec-head"><span class="badge">A</span><h2>Template chips inside the Send Text box</h2><span class="sub">— smallest change; works everywhere the composer already is</span></div>
+    <div class="row">
+      <div>
+        <div class="frame-label">Today card — unchanged, the 💬 opens the modal →</div>
+        <div class="frame card">
+          <div class="top"><span class="name">Priscilla Diaz</span><span class="phase">Call 1 of 2</span></div>
+          <div class="addr">412 Maple Ave, Aurora, IL 60505</div>
+          <div class="phone">(630) 555-0142 <span class="icon-btn hot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span></div>
+        </div>
+        <p class="note"><b>Lead page:</b> identical chips row appears above the composer on the <b>Text Messages</b> tab and in the header <b>Text</b> modal.</p>
+      </div>
+      <div>
+        <div class="frame-label">Send Text modal (from Today card)</div>
+        <div class="frame modal" style="max-width: 520px">
+          <div class="title">Send Text</div>
+          <div class="label">To</div>
+          <div class="input">+16305550142</div>
+          <div class="from">Sending from <b>(952) 395-3833</b></div>
+          <div class="chips-head"><div class="label">Presets</div><span class="pencil">✎ edit</span></div>
+          <div class="chips">
+            <span class="chip on">Intro</span><span class="chip">Missed you</span><span class="chip">Still interested?</span><span class="chip">Offer sent</span><span class="chip">Appt reminder</span>
+          </div>
+          <div class="label">Message</div>
+          <div class="ta">Hi <span class="tok">Priscilla</span>, this is <span class="tok">German</span> with Groundwork — I just tried calling about your house on <span class="tok">Maple Ave</span>. Still thinking about selling? Happy to make a cash offer, no obligation.</div>
+          <div class="hint">Filled in from the lead · edit anything before sending</div>
+          <div class="actions"><span class="btn ghost">Skip</span><span class="btn ml">Send</span><span class="btn solid">Send &amp; finish</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= IDEA B ================= -->
+  <section>
+    <div class="sec-head"><span class="badge">B</span><h2>Pick the preset first, from a menu that shows the filled-in text</h2><span class="sub">— one click fewer, and you read the message before the modal even opens</span></div>
+    <div class="row">
+      <div>
+        <div class="frame-label">Today card — 💬 becomes a menu</div>
+        <div class="frame card" style="overflow: visible">
+          <div class="top"><span class="name">Priscilla Diaz</span><span class="phase">Call 1 of 2</span></div>
+          <div class="addr">412 Maple Ave, Aurora, IL 60505</div>
+          <div class="phone">(630) 555-0142 <span class="icon-btn hot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span></div>
+          <div class="menu">
+            <div class="mh">Text Priscilla</div>
+            <div class="mi hl"><div class="t">Intro <span class="kb">1</span></div><div class="p">Hi <em>Priscilla</em>, this is <em>German</em> with Groundwork — I just tried calling about your house on <em>Maple Ave</em>…</div></div>
+            <div class="mi"><div class="t">Missed you <span class="kb">2</span></div><div class="p">Hey <em>Priscilla</em>, sorry I missed you — still happy to talk about <em>412 Maple Ave</em> whenever…</div></div>
+            <div class="mi"><div class="t">Still interested? <span class="kb">3</span></div><div class="p"><em>Priscilla</em>, quick check-in on <em>Maple Ave</em> — are you still looking to sell this year?</div></div>
+            <div class="mi"><div class="t">Offer sent <span class="kb">4</span></div><div class="p">Hi <em>Priscilla</em>, our offer on <em>412 Maple Ave</em> is on its way — let me know if…</div></div>
+            <div class="msep"></div>
+            <div class="mi dim"><div class="t">Write my own…</div></div>
+          </div>
+        </div>
+        <p class="note">Picking one opens the normal Send Text modal <b>pre-filled</b> (Skip / Send / Send &amp; finish stay). Number keys pick without the mouse.</p>
+      </div>
+      <div>
+        <div class="frame-label">Lead page header — Text becomes a split button</div>
+        <div class="frame lead-head" style="overflow: visible">
+          <div class="name">Priscilla Diaz</div>
+          <div class="sub">412 Maple Ave, Aurora, IL 60505 · New · iSpeedToLead</div>
+          <div class="hbtns">
+            <span class="hbtn">📞 Call</span>
+            <span class="hbtn split"><span>💬 Text</span><span>▾</span></span>
+            <span class="hbtn">Research</span>
+            <span class="hbtn">More <span class="caret">▾</span></span>
+            <span class="hbtn" style="color:#b91c1c">🗑</span>
+          </div>
+          <div class="menu" style="margin-left: 66px">
+            <div class="mh">Presets</div>
+            <div class="mi"><div class="t">Intro</div><div class="p">Hi <em>Priscilla</em>, this is <em>German</em> with Groundwork — I just tried calling about your house on <em>Maple Ave</em>…</div></div>
+            <div class="mi"><div class="t">Missed you</div><div class="p">Hey <em>Priscilla</em>, sorry I missed you — still happy to talk about <em>412 Maple Ave</em>…</div></div>
+            <div class="mi"><div class="t">Still interested?</div><div class="p"><em>Priscilla</em>, quick check-in on <em>Maple Ave</em> — are you still looking to sell this year?</div></div>
+            <div class="mi"><div class="t">Offer sent</div><div class="p">Hi <em>Priscilla</em>, our offer on <em>412 Maple Ave</em> is on its way…</div></div>
+            <div class="mi"><div class="t">Appt reminder</div><div class="p">Reminder: we're set to talk about <em>Maple Ave</em> tomorrow — does that still work?</div></div>
+            <div class="msep"></div>
+            <div class="mi dim"><div class="t">✎ Edit presets</div></div>
+          </div>
+          <p class="note" style="margin-top: 10px">Clicking the left half (“Text”) still opens a blank composer exactly as today. Only the ▾ is new.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= IDEA C ================= -->
+  <section>
+    <div class="sec-head"><span class="badge">C</span><h2>Quick-text strip on the card + a Quick text block in the feed</h2><span class="sub">— tap → preview → send, no modal; mirrors the Follow-up strip and Quick comments</span></div>
+    <div class="row">
+      <div>
+        <div class="frame-label">Today card — strip under the phone (like the ⏰ Follow-up strip)</div>
+        <div class="frame card">
+          <div class="top"><span class="name">Priscilla Diaz</span><span class="phase">Call 1 of 2</span></div>
+          <div class="addr">412 Maple Ave, Aurora, IL 60505</div>
+          <div class="phone">(630) 555-0142</div>
+          <div class="strip">💬 Text · <span class="chip on">Intro</span><span class="chip">Missed you</span><span class="chip">Still interested?</span><span class="chip more">+ other</span></div>
+          <div class="preview">
+            <div class="to">To (630) 555-0142 · from (952) 395-3833</div>
+            <div class="msg">Hi <span class="tok">Priscilla</span>, this is <span class="tok">German</span> with Groundwork — I just tried calling about your house on <span class="tok">Maple Ave</span>. Still thinking about selling? Happy to make a cash offer, no obligation.</div>
+            <div class="pa"><span class="btn ghost">Edit</span><span class="btn ml">Send</span><span class="btn solid">Send &amp; finish</span></div>
+          </div>
+          <div class="strip" style="margin-top:6px">⏰ Follow up · <span class="chip">2h</span><span class="chip">3d</span><span class="chip">1wk</span><span class="chip">1mo</span></div>
+        </div>
+        <p class="note">Preview appears in place; <b>Send &amp; finish</b> resolves the card as Done · Sent a Text (same as the modal does now). “Edit” drops into the composer with the text loaded.</p>
+      </div>
+      <div>
+        <div class="frame-label">Lead page — Activity tab, a sibling of Quick comments</div>
+        <div class="frame feed">
+          <div class="block">
+            <div class="bh">☑ To-do</div>
+            <div class="bb" style="color:var(--ink-5);font-size:12px">Follow up · Thu 9am</div>
+          </div>
+          <div class="block">
+            <div class="bh">💭 Quick comment <span class="pencil">✎</span></div>
+            <div class="bb"><div class="chips" style="margin:0"><span class="chip">Call 3x's, voicemail, sent text</span><span class="chip">Called</span><span class="chip">Voicemail</span><span class="chip">Sent text</span></div></div>
+          </div>
+          <div class="block" style="border-color: var(--blue)">
+            <div class="bh">💬 Quick text <span class="pencil">✎</span></div>
+            <div class="bb">
+              <div class="chips" style="margin:0"><span class="chip">Intro</span><span class="chip on">Missed you</span><span class="chip">Still interested?</span><span class="chip">Offer sent</span><span class="chip">Appt reminder</span></div>
+              <div class="preview">
+                <div class="to">To (630) 555-0142 · from (952) 395-3833</div>
+                <div class="msg">Hey <span class="tok">Priscilla</span>, sorry I missed you — still happy to talk about <span class="tok">412 Maple Ave</span> whenever works for you. Would a quick call this afternoon be OK?</div>
+                <div class="pa"><span class="btn ghost">Edit</span><span class="btn solid ml">Send</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="block"><div class="bh" style="color:var(--ink-5)">↑ newest activity …</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SHARED: editor ================= -->
+  <section>
+    <div class="sec-head"><span class="badge" style="background:var(--ink-6)">Shared</span><h2>Where the presets get written</h2><span class="sub">— same editor whichever idea we pick</span></div>
+    <div class="row" style="grid-template-columns: 1fr 1fr">
+      <div>
+        <div class="frame-label">Settings → Text Presets (or the ✎ pencil on any of the above)</div>
+        <div class="frame settings">
+          <h3>Text presets</h3>
+          <p class="d">Used by everyone on the team. Tokens fill in from the lead when a preset is picked.</p>
+          <div class="tokens">Insert: <code>{{first_name}}</code><code>{{street}}</code><code>{{address}}</code><code>{{city}}</code><code>{{my_name}}</code></div>
+          <div class="trow"><div class="input">Intro</div><div class="ta">Hi {{first_name}}, this is {{my_name}} with Groundwork — I just tried calling about your house on {{street}}. Still thinking about selling? Happy to make a cash offer, no obligation.</div><div class="x">✕</div></div>
+          <div class="trow"><div class="input">Missed you</div><div class="ta">Hey {{first_name}}, sorry I missed you — still happy to talk about {{address}} whenever works for you. Would a quick call this afternoon be OK?</div><div class="x">✕</div></div>
+          <div class="trow"><div class="input">Still interested?</div><div class="ta">{{first_name}}, quick check-in on {{street}} — are you still looking to sell this year?</div><div class="x">✕</div></div>
+          <div class="trow"><div class="input" style="color:var(--ink-5)">Name…</div><div class="ta" style="color:var(--ink-5)">Message…</div><div class="x"></div></div>
+          <div class="actions"><span class="btn ghost">Preview on a lead</span><span class="btn ml">Cancel</span><span class="btn solid">Save</span></div>
+        </div>
+        <p class="note"><b>Decision needed:</b> <b>team-wide</b> list (Dennis writes them once, everyone gets them — managers edit) vs <b>per-person</b> like Quick comments (each rep tunes their own, seeded with team defaults). Mockups assume team-wide + a personal “my extras” could be added later.</p>
+      </div>
+      <div>
+        <div class="frame-label">How they compare</div>
+        <div class="cmp">
+          <div class="c"><h4>A · Chips in composer</h4><ul><li>Fewest new parts — one chips row, reused in 3 places</li><li>Rep always lands in the editor before sending</li><li>Still 3 clicks from the Today card (💬 → chip → Send)</li></ul></div>
+          <div class="c"><h4>B · Preview menu</h4><ul><li>Read the filled-in text before opening anything</li><li>Keyboard 1–5 for speed on the board</li><li>Header Text button gains a ▾; menu can get long past ~6 presets</li></ul></div>
+          <div class="c"><h4>C · Strip + feed block</h4><ul><li>Fastest: tap → Send, never leaves the board</li><li>Matches the Follow-up strip + Quick comments the reps already know</li><li>Adds height to every card; preview needs room on a 390px phone</li></ul></div>
+        </div>
+        <p class="note" style="margin-top: 12px"><b>Under the hood (all three):</b> presets stored as one JSON list (Frappe default, no new doctype — same trick as Lead Assignment rules); <code>{{street}}</code> = property address with the house number stripped, <code>{{address}}</code> = full street line; the send still goes through the existing <code>send-text</code> path so it lands on the lead's timeline like any other text. Bulk-texting buyers keeps its own per-message confirm.</p>
+      </div>
+    </div>
+  </section>
+</div>
+</body>
+</html>
