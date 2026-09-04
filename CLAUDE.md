@@ -923,69 +923,29 @@ duplicating. Work substantial features in a worktree of your own.
     14 days; `redfin_subject:v2` stores the record and recomputes per request
     (pure, microseconds). Prefix declared in `persistent_cache_keys`.
     Config-gated on `redfin_scraper_url`; absent → silently no flag.
-  - **Three estimates on the subject tile** (gw446): `Estimates · Zillow $X ·
-    Redfin $Y · Realtor $Z` under Last sold on `CompSubjectCard` (and the pin
-    popup). Zestimate was already on the facts; the **Redfin Estimate** rides
-    on the same `/facts` record the discrepancy flag uses (redfin-scraper-api
-    now returns `avm.estimate` — `price` there is the last SALE, not the AVM;
-    `redfin_subject` cache key bumped to v3); the **Realtor estimate** is
-    `crm/api/apivex.py` `start/finish_realtor_estimate` — Apivex
-    `/realtor/property/details?address=` → `property_id` →
-    `/property/estimates` (the estimates endpoint does NOT resolve an address;
-    both calls are billed, ~1.5s total, 4/4 hits measured incl. off-market).
-    Realtor's `isbest_homevalue` model is the headline; the other two AVMs +
-    range sit in the tooltip and the label links to the Realtor page. Same
-    thread + 1s join budget + background warm shape as Redfin, so a cold lead
-    shows it on the SECOND open; cached 30d (miss 7d) under
-    `crm:realtor-estimate` (declared in `persistent_cache_keys`). Street-key
-    match required — the neighbour's estimate is worse than none — but
-    LOOSE on a trailing directional/suffix (`_same_street`: same house number
-    + prefix): Realtor answered "4205 NC 210 S" for "4205 NC-210" and the
-    exact test threw the right house away (cache v2). **Zillow has no
-    Zestimate for plenty of rural parcels** (NC-210: `zestimate: null` with a
-    rent Zestimate present) — the tile says `Zillow none` rather than
-    omitting the label, and carries **Assessed** (tax assessed value) at the
-    end of the line, since that was popup-only before.
-  - **Calc rate inputs read whole percents** (gw433): typing 1 into List It
-    concessions means 1%, not 100% (`setPct`/`setRate` divide by 100; storage
-    stays fraction-denominated so saved calcs render unchanged). The saved-calc
-    timeline card also owns its ink now (`CashOfferComment.vue` — body was
-    inheriting UA-default black on the dark bubble; theme tokens throughout).
-  - **GOTCHA — `useKeyboardShortcuts` defaults to `skipWhenDialogOpen: true`**,
-    and every modal in this app IS a Dialog, so shortcuts registered the obvious
-    way silently never fire. Pass `skipWhenDialogOpen: false` and gate on the
-    modal's own `show` instead.
-  - **GOTCHA — `chrome_key` does not deliver plain letter keys** through the
-    pi-chrome bridge: a window-level *capture* probe logged ZERO events for `d`,
-    and the same is true of `Escape` (which is why a popover would not close
-    earlier the same session). A shortcut verified that way looks broken when it
-    is fine — dispatch a `KeyboardEvent` instead, which confirmed the toggle
-    end-to-end (button label, pill text, 113x33 → 54x24, localStorage).
-  - **GOTCHA — reka-ui forbids an empty-string Select item value.** frappe-ui's
-    `Select` wraps reka-ui, which reserves `''` for the placeholder and silently
-    **drops** any item declared with it. `{label:'Any time', value:''}` simply
-    never rendered, leaving no way to lift the recency filter from the dropdown
-    at all — the control looked complete and was missing an option. Use a
-    non-empty sentinel (`ANY = 'any'`) mapped back to "unconstrained". NOTE
-    `CallReview.vue`'s `{label:'All reps', value:''}` is the same latent bug.
-  - **GOTCHA — `Date.parse('YYYY-MM-DD')` is UTC MIDNIGHT**, so
-    `toLocaleDateString` renders the PREVIOUS day everywhere west of Greenwich:
-    every comp date in this modal read a day early in Chicago (a sale on Oct 9
-    showed as Oct 8). Date-only values are calendar dates with no timezone —
-    build them as local (`new Date(y, m-1, d)`) and only send timestamped values
-    through `Date.parse`.
-  - **GOTCHA — a Leaflet `divIcon` with `iconSize:[0,0]` is not centred and has
-    no hit area.** `transform:translate(-50%,-50%)` on a BLOCK child of a
-    zero-width icon resolves to `0px` horizontally, so the subject dot was drawn
-    ~9px RIGHT of the parcel it claims to mark and could not be clicked at all —
-    on the one pin now expected to be clicked for the subject's details. Give an
-    interactive marker a real `iconSize`/`iconAnchor`; for the non-interactive
-    ring labels `display:inline-block` gives the transform a width to halve.
-  - **GOTCHA — the filter popover needs a `max-w`.** Without one it takes its
-    content's preferred width (480px) inside a 390px phone, pushing every "max"
-    input, all three dropdowns and Clear all off-screen; `min-w-0` children only
-    shrink once the container is capped. `MobileLead.vue` opens this same modal
-    from its **Details** tab, so the panel genuinely renders at 390px.
+  - **ONE unlabelled value on the subject tile** (gw446–gw449, Lance):
+    the first of **Zestimate → Realtor → Redfin → tax assessed** that exists,
+    under Last sold on `CompSubjectCard`; nothing if none. They are FALLBACKS,
+    not a comparison panel (a labelled three-up line was built and pulled the
+    same day). The tooltip names the source (Realtor's carries range + its
+    other two AVMs) and the Realtor value links to the Realtor page. The pin
+    popup still lists all of them labelled. Sources: Zestimate is on the
+    Zillow facts; the **Redfin Estimate** rides on the same `/facts` record
+    the discrepancy flag uses (redfin-scraper-api returns `avm.estimate` —
+    `price` there is the last SALE; `redfin_subject` cache v3); the
+    **Realtor estimate** is `crm/api/apivex.py` `start/finish_realtor_estimate`
+    — Apivex `/realtor/property/details?address=` → `property_id` →
+    `/property/estimates` (does NOT resolve an address itself; both calls
+    billed, ~1.5s, 4/4 hits measured incl. off-market), `isbest_homevalue`
+    model wins. Same thread + 1s join budget + background warm shape as
+    Redfin, so a cold lead shows it on the SECOND open; cached 30d (miss 7d)
+    under `crm:realtor-estimate` (in `persistent_cache_keys`). Street-key
+    match required — the neighbour's estimate is worse than none — but LOOSE
+    on a trailing directional/suffix (`_same_street`: same house number +
+    prefix): Realtor answered "4205 NC 210 S" for "4205 NC-210" and the exact
+    test threw the right house away (cache v2). **Zillow has no Zestimate for
+    plenty of rural parcels** (NC-210: null, with a rent Zestimate present) —
+    that is what the fallback chain is for.
 
 - **Every lead view reads newest-first** (gw303) — only the Activity timeline was
   most-recent-first; Comments, Calls, Tasks, Notes and Attachments made you

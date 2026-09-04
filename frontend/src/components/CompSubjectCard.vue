@@ -105,36 +105,19 @@
         <template v-if="lastSale.price && lastSale.date"> · </template>
         <template v-if="lastSale.date">{{ fmtDate(lastSale.date) }}</template>
       </div>
-      <!-- Three independent AVMs on one line. None of them is the price; the
-           point is seeing where the models DISAGREE, so a rep does not anchor
-           on whichever one they happened to open first. Each is labelled by
-           source, and a missing one is simply absent rather than "—", because
-           Redfin/Realtor legitimately have no model for many rural houses. -->
-      <div
-        v-if="estimates.length"
-        class="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs text-ink-gray-6"
-      >
-        <span class="text-2xs font-semibold uppercase tracking-wide text-ink-gray-5">
-          {{ __('Estimates') }}
-        </span>
-        <template v-for="e in estimates" :key="e.label">
-          <a
-            v-if="e.href"
-            :href="e.href"
-            target="_blank"
-            rel="noopener"
-            class="hover:underline"
-            :title="e.title"
-            @click.stop
-          >
-            {{ e.label }} <b class="text-ink-gray-8">{{ money(e.value) }}</b>
-          </a>
-          <span v-else :title="e.title">
-            {{ e.label }}
-            <b v-if="e.value" class="text-ink-gray-8">{{ money(e.value) }}</b>
-            <span v-else class="text-ink-gray-4">{{ __('none') }}</span>
-          </span>
-        </template>
+      <!-- ONE value, unlabelled (Lance): the first of Zestimate → Realtor →
+           Redfin → assessed value that exists. They are fallbacks for each
+           other, not a panel to compare; the source rides in the tooltip. -->
+      <div v-if="estimate" class="mt-1 text-xs text-ink-gray-6" :title="estimate.title">
+        <a
+          v-if="estimate.href"
+          :href="estimate.href"
+          target="_blank"
+          rel="noopener"
+          class="font-semibold text-ink-gray-8 hover:underline"
+          @click.stop
+        >{{ money(estimate.value) }}</a>
+        <b v-else class="text-ink-gray-8">{{ money(estimate.value) }}</b>
       </div>
     </div>
   </div>
@@ -218,33 +201,13 @@ const facts = computed(() => {
 
 const lastSale = computed(() => props.subject?.last_sale || null)
 
-// Zillow / Redfin / Realtor, in the order the team says them. Realtor links
-// out because its page shows the spread across its own three AVMs; the
-// tooltip carries the same detail for a hover.
-const estimates = computed(() => {
+// First available of Zestimate → Realtor → Redfin → assessed. One number on
+// the card; the tooltip says which it is (and, for Realtor, the range and the
+// other two AVMs).
+const estimate = computed(() => {
   const s = props.subject || {}
-  const out = []
   if (Number(s.zestimate) > 0) {
-    out.push({
-      label: __('Zillow'),
-      value: s.zestimate,
-      title: __('Zestimate {0}', [money(s.zestimate)]),
-    })
-  } else if (s.has_zillow) {
-    // Zillow knows the house but publishes no Zestimate for it (rural / odd
-    // parcels, often). Said out loud: an absent label reads as "not fetched".
-    out.push({
-      label: __('Zillow'),
-      value: null,
-      title: __('Zillow has no Zestimate for this property'),
-    })
-  }
-  if (Number(s.redfin_estimate) > 0) {
-    out.push({
-      label: __('Redfin'),
-      value: s.redfin_estimate,
-      title: __('Redfin Estimate {0}', [money(s.redfin_estimate)]),
-    })
+    return { value: s.zestimate, title: __('Zestimate {0}', [money(s.zestimate)]) }
   }
   const r = s.realtor_estimate
   if (r && Number(r.value) > 0) {
@@ -255,18 +218,22 @@ const estimates = computed(() => {
       if (a?.estimate && a.name !== r.source) lines.push(`${a.name}: ${money(a.estimate)}`)
     }
     if (r.as_of) lines.push(__('As of {0}', [fmtDate(r.as_of)]))
-    out.push({ label: __('Realtor'), value: r.value, title: lines.join('\n'), href: r.href || '' })
+    lines.push(__('(no Zestimate for this property)'))
+    return { value: r.value, title: lines.join('\n'), href: r.href || '' }
   }
-  // Not an estimate, but the number a rep reaches for when the models are
-  // silent -- and it was only in the pin popup before.
+  if (Number(s.redfin_estimate) > 0) {
+    return {
+      value: s.redfin_estimate,
+      title: __('Redfin Estimate {0} (no Zestimate or Realtor estimate)', [money(s.redfin_estimate)]),
+    }
+  }
   if (Number(s.assessed_value) > 0) {
-    out.push({
-      label: __('Assessed'),
+    return {
       value: s.assessed_value,
-      title: __('Tax assessed value {0}', [money(s.assessed_value)]),
-    })
+      title: __('Tax assessed value {0} (no Zillow / Realtor / Redfin estimate)', [money(s.assessed_value)]),
+    }
   }
-  return out
+  return null
 })
 
 function money(v) {
