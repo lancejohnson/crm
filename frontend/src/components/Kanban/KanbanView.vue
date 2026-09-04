@@ -55,8 +55,15 @@
             <div class="flex">
               <Dropdown :options="actions(column)">
                 <template #default>
+                  <!--
+                    data-[state=open]: reka-ui sets pointer-events:none on <body>
+                    while the menu is open, so the column loses :hover and a
+                    hover-only trigger collapses to display:none — Popper then
+                    anchors the menu to a 0x0 box at the window origin. Keep the
+                    trigger rendered for as long as its own menu is open.
+                  -->
                   <Button
-                    class="hidden group-hover:flex"
+                    class="hidden group-hover:flex data-[state=open]:flex"
                     icon="more-horizontal"
                     variant="ghost"
                   />
