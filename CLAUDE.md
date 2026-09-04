@@ -2640,7 +2640,10 @@ duplicating. Work substantial features in a worktree of your own.
     its menu is. This is the second time this bug has appeared here:
     `KanbanCardFieldAction` already carries an `editorOpen` ref and a comment
     saying the same thing about its Popover. Any hover-revealed control that
-    OPENS something needs one of the two.
+    OPENS something needs one of the two. **Third time (2026-09-04): the
+    column header's `⋯` → Delete menu** in `KanbanView.vue` had the identical
+    `hidden group-hover:flex` trigger and landed at (0,0); fixed with
+    `data-[state=open]:flex` on the button itself.
   - The counters were also made to fit rather than be clipped: gaps went
     `gap-1.5 → gap-1` between groups and `gap-1 → gap-0.5` inside them, which
     recovers ~20px.
