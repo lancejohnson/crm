@@ -931,6 +931,23 @@ function resizeShowingAccess() {
   el.style.height = `${el.scrollHeight}px`
 }
 
+// The height is a function of the WIDTH: measured while the sidebar is
+// collapsed (~0px wide) the placeholder wraps one character per line and
+// scrollHeight comes out at hundreds of px, and that stale value used to
+// survive the panel being expanded again -- a huge blank gap between the key
+// row and the action buttons. Re-measure whenever the textarea's box changes.
+let showingAccessRO = null
+watch(showingAccessInput, (el) => {
+  showingAccessRO?.disconnect()
+  showingAccessRO = null
+  if (!el || typeof ResizeObserver === 'undefined') return
+  showingAccessRO = new ResizeObserver(() => {
+    requestAnimationFrame(resizeShowingAccess)
+  })
+  showingAccessRO.observe(el)
+})
+onBeforeUnmount(() => showingAccessRO?.disconnect())
+
 function saveShowingAccess() {
   showingAccessFocused.value = false
   const value = showingAccessDraft.value.trim()

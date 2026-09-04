@@ -386,7 +386,14 @@ import {
   usePageMeta,
   toast,
 } from 'frappe-ui'
-import { ref, computed, watch, nextTick, onMounted } from 'vue'
+import {
+  ref,
+  computed,
+  watch,
+  nextTick,
+  onMounted,
+  onBeforeUnmount,
+} from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import FilesUploader from '@/components/FilesUploader/FilesUploader.vue'
 import { mapsUrl, zillowUrl } from '@/utils/propertyLinks'
@@ -674,6 +681,20 @@ function resizeShowingAccess() {
   el.style.height = 'auto'
   el.style.height = `${el.scrollHeight}px`
 }
+
+// Height depends on width (see Lead.vue): re-measure whenever the textarea's
+// box changes, or a value measured while hidden/narrow sticks as a tall gap.
+let showingAccessRO = null
+watch(showingAccessInput, (el) => {
+  showingAccessRO?.disconnect()
+  showingAccessRO = null
+  if (!el || typeof ResizeObserver === 'undefined') return
+  showingAccessRO = new ResizeObserver(() => {
+    requestAnimationFrame(resizeShowingAccess)
+  })
+  showingAccessRO.observe(el)
+})
+onBeforeUnmount(() => showingAccessRO?.disconnect())
 
 function saveShowingAccess() {
   showingAccessFocused.value = false
