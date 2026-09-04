@@ -103,6 +103,21 @@ DEFAULT_WITHIN_DAYS = 365
 DETAIL_CACHE_SECONDS = 30 * 24 * 60 * 60
 DETAIL_RETRY_SECONDS = 60 * 60
 DETAIL_CACHE_VERSION = 3  # v3 retries thin Zillow galleries via Realtor
+#: The two BILLED calls behind a gallery (`/property` + `/photos`) are cached on
+#: their own, for the full month, the moment Zillow ANSWERS -- even when the
+#: answer is one leftover frame. The thin-gallery retry above exists so the
+#: Realtor/Redfin rungs get another go; it used to re-bill Zillow every hour
+#: too, for a house Zillow had already said has one photo. Off-market solds are
+#: mostly one-photo houses, so that was most galleries, every hour, forever.
+#: Only a FAILED call (no body at all) gets the short window. Shares the
+#: `crm:comp-detail` prefix so `persistent_cache_keys` already keeps it.
+DETAIL_ZILLOW_CACHE_VERSION = 1
+#: Older gallery generations that can be served as the current one without a
+#: refetch. {from_version: fn(cached) -> cached | None}; None refuses. v2->v3 only
+#: changed what happens to a THIN gallery, so a full v2 gallery is still the answer.
+DETAIL_MIGRATIONS = {
+	2: lambda c: c if len((c or {}).get("photos") or []) > 1 else None,
+}
 
 #: Per-lead, TEAM-WIDE record of which comps a human hid or picked. Not per-user:
 #: a junk comp is junk for everyone, and "the comps we used" is a deal artifact
@@ -853,8 +868,84 @@ def set_comp_state(lead, comp, state):
 # ---------------------------------------------------------------------------------
 # Read API
 # ---------------------------------------------------------------------------------
-def _detail_cache_key(comp):
-	return f"crm:comp-detail:v{DETAIL_CACHE_VERSION}:{comp}"
+def _detail_cache_key(comp, version=None):
+	return f"crm:comp-detail:v{version or DETAIL_CACHE_VERSION}:{comp}"
+
+
+def _detail_cached(comp):
+	"""The current-version gallery, or an older generation carried forward.
+
+	Same idea as `zillow_comps._cache_get_migrated`: a version bump should not
+	re-bill every gallery anyone has opened when the old blob still answers. A
+	migrated entry is re-written under the current key for the retry window only,
+	not the full month, because Redis owns these TTLs and the old one is unknown.
+	"""
+	cache = frappe.cache()
+	cached = cache.get_value(_detail_cache_key(comp))
+	if isinstance(cached, dict):
+		return cached
+	steps, v = [], DETAIL_CACHE_VERSION
+	while (v - 1) in DETAIL_MIGRATIONS:
+		v -= 1
+		steps.append(DETAIL_MIGRATIONS[v])
+		old = cache.get_value(_detail_cache_key(comp, v))
+		if not isinstance(old, dict):
+			continue
+		for step in reversed(steps):
+			old = step(old)
+			if old is None:
+				return None
+		try:
+			cache.set_value(_detail_cache_key(comp), old, expires_in_sec=DETAIL_RETRY_SECONDS)
+		except Exception:
+			pass
+		return old
+	return None
+
+
+def _zillow_detail(row, zpid):
+	"""`(details, zillow_photos)` for one house -- the billed half of a gallery.
+
+	Cached for the month as soon as Zillow answers; a failed CALL (no body) is
+	remembered for the retry window only, so a timeout does not lock the house
+	out for 30 days. Keyed on the comp name plus zpid so the subject (whose zpid
+	comes from its cached facts) and a `zillow::` pin cannot collide.
+	"""
+	from crm.api import zillow as zillow_api
+
+	name = str(row.get("name") or "")
+	key = f"crm:comp-detail:zillow:v{DETAIL_ZILLOW_CACHE_VERSION}:{name}|{zpid or ''}"
+	cached = frappe.cache().get_value(key)
+	if isinstance(cached, dict) and "details" in cached:
+		return cached.get("details"), list(cached.get("photos") or [])
+
+	if zpid:
+		raw = zillow_api._request("/property", {"zpid": zpid}, "Zillow: zpid lookup failed")
+	else:
+		raw = zillow_api.property_details(row.get("address"))
+	answered = raw is not None
+	details = zillow_api.normalize_detail(raw) if raw else None
+	# Zillow's /property returns an EMPTY SHELL (every field null, even zpid) for
+	# some listings its own /search happily returned — observed on a pending Philly
+	# row, by zpid AND by address. When the zpid path came back hollow and we know
+	# the address, one address retry is worth the spend before giving up on Zillow.
+	if not details and zpid and (row.get("address") or "").strip():
+		raw = zillow_api.property_details(row.get("address"))
+		answered = answered or raw is not None
+		details = zillow_api.normalize_detail(raw) if raw else None
+	photo_raw = zillow_api.property_photos(details.get("zpid")) if details else None
+	photos = zillow_api.photo_urls(photo_raw)
+	if details and details.get("cover_photo") and not photos:
+		photos = [details["cover_photo"]]
+	try:
+		frappe.cache().set_value(
+			key,
+			{"details": details, "photos": photos},
+			expires_in_sec=DETAIL_CACHE_SECONDS if answered else DETAIL_RETRY_SECONDS,
+		)
+	except Exception:
+		pass
+	return details, photos
 
 
 def _detail_address(row, details=None):
@@ -885,27 +976,10 @@ def _shape_detail(row, zpid=None):
 	address string is a guess Zillow has to re-resolve, so it is both cheaper and
 	more reliable when available.
 	"""
-	from crm.api import zillow as zillow_api
-
 	name = str(row.get("name") or "")
 	if not zpid and name.startswith("zillow::"):
 		zpid = name.split("::", 1)[1]
-	if zpid:
-		raw = zillow_api._request("/property", {"zpid": zpid}, "Zillow: zpid lookup failed")
-	else:
-		raw = zillow_api.property_details(row.get("address"))
-	details = zillow_api.normalize_detail(raw) if raw else None
-	# Zillow's /property returns an EMPTY SHELL (every field null, even zpid) for
-	# some listings its own /search happily returned — observed on a pending Philly
-	# row, by zpid AND by address. When the zpid path came back hollow and we know
-	# the address, one address retry is worth the spend before giving up on Zillow.
-	if not details and zpid and (row.get("address") or "").strip():
-		raw = zillow_api.property_details(row.get("address"))
-		details = zillow_api.normalize_detail(raw) if raw else None
-	photo_raw = zillow_api.property_photos(details.get("zpid")) if details else None
-	photos = zillow_api.photo_urls(photo_raw)
-	if details and details.get("cover_photo") and not photos:
-		photos = [details["cover_photo"]]
+	details, photos = _zillow_detail(row, zpid)
 	# Dedupe BEFORE the thin-gallery check: a photo-less home whose "gallery" is
 	# two sizes of the same synthesized Street View frame is really ONE photo, and
 	# counting it as two suppressed the Realtor fallback that could do better.
@@ -1058,7 +1132,7 @@ def get_comp_details(lead, comp, address=None, lat=None, lng=None):
 		frappe.throw(_("Comparable property {0} does not exist.").format(comp), frappe.DoesNotExistError)
 
 	key = _detail_cache_key(comp)
-	cached = frappe.cache().get_value(key)
+	cached = _detail_cached(comp)
 	if isinstance(cached, dict):
 		# A remembered MISS written before the caller supplied an address is worth
 		# one address-armed retry — otherwise Retry serves the same failure for the
@@ -1186,7 +1260,7 @@ def get_subject_details(lead):
 	# lookup, and on the lead otherwise — never on the raw address, which changes
 	# whenever somebody tidies up the punctuation on a lead.
 	key = _detail_cache_key(f"subject::{zpid or lead}")
-	cached = frappe.cache().get_value(key)
+	cached = _detail_cached(f"subject::{zpid or lead}")
 	if isinstance(cached, dict):
 		# Same read-side dedupe as get_comp_details — pre-fix cached subjects hold
 		# the same Street View shot twice.

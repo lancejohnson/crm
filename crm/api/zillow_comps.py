@@ -34,7 +34,18 @@ import frappe
 from crm.api import sale_history
 from crm.api import zillow as zillow_api
 
+#: How long a COMPLETE circle is served before it is re-bought.
+#:
+#: Two clocks, because the two halves age differently and cost differently. An
+#: ask moves weekly, so ForSale stays at 7. A closed sale is still evidence a
+#: month later, and the RecentlySold circle is the bigger half (two years of
+#: solds pages further than the live inventory does) -- so 14 days there halves
+#: the weekly re-buy of the whole board's most expensive query. Measured on the
+#: cycle this was tuned for: ~500 calls a night of scheduled re-warming, most of
+#: it solds that had not changed. A sale recorded inside the window still shows
+#: up within two weeks, which is well inside how long a lead sits on the board.
 AREA_HIT_DAYS = 7
+AREA_SOLD_HIT_DAYS = 14
 AREA_MISS_DAYS = 1
 PIN_CACHE_DAYS = 30
 #: DELIBERATELY UNCHANGED at 12, even though these are no longer sequential.
@@ -66,6 +77,31 @@ MAX_SEARCH_CALLS = 40
 AREA_CACHE_VERSION = 8  # v5 price-splits past 800; v6 imgSrc; v7 pending; v8 DOM fix
 PIN_CACHE_VERSION = 4  # v2 cover_photo; v3 parsed history (dropped); v4 raw price_history
 
+
+#: A version bump used to mean re-buying every cached circle -- v7->v8 alone was
+#: ~300 circles at ~3 calls each on a shared key that ran dry a week later. Most
+#: bumps are a READ-TIME fix in disguise (v8 was "blank one field on sold rows"),
+#: so before spending, an older generation of the same key is carried forward
+#: through this ladder and re-written under the current version with its
+#: ORIGINAL timestamp, so migrating never extends a TTL. Bump the version AND add
+#: an entry here; leave the entry out only when the old blob genuinely cannot
+#: answer the new question (a field the old fetch never kept).
+#:
+#: {from_version: fn(data) -> data | None}. Returning None refuses the migration
+#: and the circle is fetched as before.
+def _migrate_area_v7(data):
+	"""v8 stopped writing days-since-sale into `days_on_market` on sold rows."""
+	rows = data.get("rows") if isinstance(data, dict) else data
+	for row in rows or []:
+		if isinstance(row, dict) and row.get("status") != "Active":
+			row["days_on_market"] = None
+	return data
+
+
+AREA_MIGRATIONS = {7: _migrate_area_v7}
+#: v3 dropped the raw priceHistory that v4 is built on; nothing to carry forward.
+PIN_MIGRATIONS = {}
+
 #: Zillow's own words for a home that is spoken for but has not closed. We have
 #: to ask for these explicitly (`isPendingUnderContract=1`) because the default
 #: ForSale search hides them: measured on prod, Davenport 97 -> 156 listings and
@@ -95,8 +131,8 @@ _SUFFIXES = {
 }
 
 
-def _cache_get(key, ttl_days):
-	"""Read a `{t, data}` blob. No Redis TTL — see zillow.py's cache GOTCHA."""
+def _cache_rec(key):
+	"""Raw `(t, data)` for a `{t, data}` blob, or None. No TTL judgement here."""
 	try:
 		rec = frappe.cache().get_value(key)
 	except Exception:
@@ -104,12 +140,55 @@ def _cache_get(key, ttl_days):
 	if not isinstance(rec, dict) or "data" not in rec:
 		return None
 	try:
-		age = time.time() - float(rec.get("t") or 0)
+		return float(rec.get("t") or 0), rec["data"]
 	except (TypeError, ValueError):
 		return None
-	if age > float(ttl_days) * 86400:
+
+
+def _cache_get(key, ttl_days):
+	"""Read a `{t, data}` blob. No Redis TTL — see zillow.py's cache GOTCHA."""
+	rec = _cache_rec(key)
+	if rec is None:
 		return None
-	return rec["data"]
+	t, data = rec
+	if time.time() - t > float(ttl_days) * 86400:
+		return None
+	return data
+
+
+def _cache_get_migrated(key_for, version, migrations, ttl_days):
+	"""`_cache_get` for the current version, else an older generation carried forward.
+
+	`key_for(version)` names the key for any generation. Walks down one version at
+	a time while a migrator exists for the step, applies the chain oldest-first, and
+	re-writes the result under the current key with the OLD entry's timestamp --
+	so a migrated circle expires exactly when the original would have.
+	"""
+	data = _cache_get(key_for(version), ttl_days)
+	if data is not None:
+		return data
+	steps = []
+	v = version
+	while (v - 1) in migrations:
+		v -= 1
+		steps.append(migrations[v])
+		rec = _cache_rec(key_for(v))
+		if rec is None:
+			continue
+		t, data = rec
+		if time.time() - t > float(ttl_days) * 86400:
+			# Anything older still is older still.
+			return None
+		for step in reversed(steps):
+			data = step(data)
+			if data is None:
+				return None
+		try:
+			frappe.cache().set_value(key_for(version), {"t": t, "data": data})
+		except Exception:
+			pass
+		return data
+	return None
 
 
 def _cache_set(key, data):
@@ -472,17 +551,28 @@ def _search(coordinates, status_type, sold_in_last=None):
 #: and the free "is this circle already warm?" probe cannot drift apart — a warmer
 #: that checked a different pair of keys than the reader populates would report
 #: everything warm and prewarm nothing.
+#: (out key, RapidAPI status_type, soldInLast, days a complete circle is served).
 AREA_QUERIES = (
-	("sold", "RecentlySold", SOLD_IN_LAST),
-	("for_sale", "ForSale", None),
+	("sold", "RecentlySold", SOLD_IN_LAST, AREA_SOLD_HIT_DAYS),
+	("for_sale", "ForSale", None, AREA_HIT_DAYS),
 )
 
 
-def _area_key(coordinates, status_type, sold_in_last=None):
+def _area_key(coordinates, status_type, sold_in_last=None, version=None):
 	digest = hashlib.md5(
 		f"{coordinates}|{status_type}|{sold_in_last or ''}".encode()
 	).hexdigest()[:12]
-	return f"zillow_area:v{AREA_CACHE_VERSION}:{digest}"
+	return f"zillow_area:v{version or AREA_CACHE_VERSION}:{digest}"
+
+
+def _area_get(coordinates, status_type, sold_in_last, ttl_days):
+	"""Current-version circle, or an older generation migrated forward."""
+	return _cache_get_migrated(
+		lambda v: _area_key(coordinates, status_type, sold_in_last, v),
+		AREA_CACHE_VERSION,
+		AREA_MIGRATIONS,
+		ttl_days,
+	)
 
 
 def area_is_cached(lat, lng, radius_mi):
@@ -499,12 +589,12 @@ def area_is_cached(lat, lng, radius_mi):
 	except (TypeError, ValueError):
 		return False
 	return all(
-		_cache_get(_area_key(coords, status_type, sold_in_last), AREA_HIT_DAYS) is not None
-		for _, status_type, sold_in_last in AREA_QUERIES
+		_area_get(coords, status_type, sold_in_last, hit_days) is not None
+		for _, status_type, sold_in_last, hit_days in AREA_QUERIES
 	)
 
 
-def _area_cached(coordinates, status_type, sold_in_last=None):
+def _area_cached(coordinates, status_type, sold_in_last=None, hit_days=AREA_HIT_DAYS):
 	"""One circle, from cache when we can. -> (rows, complete).
 
 	A PARTIAL answer is cached too, just not for as long. It used to be thrown
@@ -523,7 +613,7 @@ def _area_cached(coordinates, status_type, sold_in_last=None):
 			return rec["rows"] or [], bool(rec.get("complete"))
 		return rec or [], True
 
-	hit = _cache_get(key, AREA_HIT_DAYS)
+	hit = _area_get(coordinates, status_type, sold_in_last, hit_days)
 	if hit is not None:
 		rows, complete = unpack(hit)
 		# A complete circle is good for the full week. A partial one is only served
@@ -547,15 +637,15 @@ def area_comps(lat, lng, radius_mi):
 	coords = _coordinates(float(lat), float(lng), float(radius_mi))
 	# Driven off AREA_QUERIES so this and `area_is_cached` are the same question.
 	out = {"location": f"{radius_mi:.2f}mi", "cached": True}
-	for key, status_type, sold_in_last in AREA_QUERIES:
-		rows, complete = _area_cached(coords, status_type, sold_in_last)
+	for key, status_type, sold_in_last, hit_days in AREA_QUERIES:
+		rows, complete = _area_cached(coords, status_type, sold_in_last, hit_days)
 		out[key] = rows or []
 		out["cached"] = out["cached"] and bool(complete)
 	return out
 
 
-def _pin_key(address):
-	return f"zillow_pin:v{PIN_CACHE_VERSION}:{_comps().address_key(address)}"
+def _pin_key(address, version=None):
+	return f"zillow_pin:v{version or PIN_CACHE_VERSION}:{_comps().address_key(address)}"
 
 
 def _pin_facts(address):
@@ -578,7 +668,9 @@ def _pin_facts_many(addresses):
 	for address in addresses:
 		if not address or address in out or address in misses:
 			continue
-		hit = _cache_get(_pin_key(address), PIN_CACHE_DAYS)
+		hit = _cache_get_migrated(
+			lambda v, a=address: _pin_key(a, v), PIN_CACHE_VERSION, PIN_MIGRATIONS, PIN_CACHE_DAYS
+		)
 		if hit is not None:
 			# `{}` is a remembered negative and stays cheap; None means never asked.
 			out[address] = hit or None

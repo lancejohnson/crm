@@ -353,6 +353,45 @@ duplicating. Work substantial features in a worktree of your own.
       (`AREA_CACHE_VERSION` etc.) are now the ONLY invalidation path — changing
       the shape of a cached row means bumping the matching constant; a deploy no
       longer papers over forgetting.
+    - **A version bump no longer re-buys the world** (2026-09-04). Bumping
+      `AREA_CACHE_VERSION` v7→v8 re-bought ~300 circles on a key that ran dry a
+      week later, for a change that was "blank one field on sold rows". Each
+      cache now has a **migration ladder** (`AREA_MIGRATIONS` /
+      `PIN_MIGRATIONS` in `zillow_comps.py`, `DETAIL_MIGRATIONS` in `comps.py`):
+      `{from_version: fn(data) -> data | None}`. On a current-version miss,
+      `_cache_get_migrated` walks down while a step exists, applies the chain,
+      and re-writes under the current key **with the old timestamp** (a migrated
+      circle expires when the original would have). **Bump AND add a step**;
+      omit the step only when the old blob genuinely cannot answer (pin v3
+      dropped the raw priceHistory v4 is built on — nothing to carry). Verified
+      on prod against a synthetic v7 blob: sold rows lose `days_on_market`,
+      active rows keep it, `t` preserved, expired generations not resurrected.
+    - **Sold circles are served 14 days, for-sale 7** (`AREA_SOLD_HIT_DAYS` /
+      `AREA_HIT_DAYS`, carried on `AREA_QUERIES` as a 4th field). The nightly
+      prewarm was ~500 calls re-buying week-old solds that had not changed; at
+      the moment of the change **301** complete sold circles were 7–14 days old.
+  - **RapidAPI spend audit (2026-09-04) — read this before adding a Zillow
+    call.** The key ran DRY: 485 of 57,000 left ten days before the Sep 14
+    renewal, both apps pinned on their reserves. Neither app keeps a call
+    ledger; the numbers were reconstructed from the `X-RateLimit-Remaining`
+    header leadmarket logs every 10 min (`/var/log/istl-zillow-api.log*` on
+    the app box), minus its own counts. Cycle Aug 14→Sep 4: ~56.5k spent,
+    **leadmarket ~14.5k, CRM ~42k**. CRM was 0–300/day until Aug 18, then
+    **~2,600 per business day, zero on weekends** — i.e. reps opening comps,
+    not the scheduler (prewarm is the ~500/night off-hours band). Biggest
+    line by far is **`attach_sale_history`: one `/property` per comp on the
+    final board, `MAX_COMPS = 50`**, keyed on the FILTERED set so every
+    filter change bills the newly-visible comps — **left at 50 deliberately
+    (Lance, 2026-09-04)**; the calls are the feature. Also fixed that day:
+    thin galleries re-billing Zillow hourly (below), the version-bump re-buy
+    (above), the 7-day sold TTL (above), and leadmarket spending 2 calls per
+    10-min run *past* its own reserve (620 in two days — it now persists the
+    last reading and re-probes at most every 6h). Verified NOT the problem:
+    Redis (no eviction), failed-but-billed calls (a handful), devproppy
+    (dormant since July), leadmarket's zolo comps (~350 total). Aug 24's
+    8.6k was the pre-gw365 `clear-cache`-on-deploy bug. A per-`(day, path,
+    caller)` `INCR` in the request-thread caller of `_raw_get` would make
+    this a five-second question next time; it does not exist yet.
   - **Pending / under contract is asked for explicitly** (gw352):
     `isPendingUnderContract=1` on the ForSale search. Default ForSale **hides**
     them — measured Davenport **97 → 156** listings, Indianapolis **281 → 359**.
@@ -643,7 +682,12 @@ duplicating. Work substantial features in a worktree of your own.
       then asks Apivex `/realtor/property/photos` by address and hotlinks
       `ap.rdcpix.com`. Tray stays on Zillow `imgSrc`. Key: site_config
       `apivex_api_key` (Apivex Plus). Cache v3 retries ≤1 photo rather than
-      freezing a thin gallery for 30 days.
+      freezing a thin gallery for 30 days — **but only the Realtor/Redfin rungs
+      retry** (2026-09-04). The two BILLED Zillow calls behind a gallery live in
+      their own sub-cache (`crm:comp-detail:zillow:v1:{name}|{zpid}`, 30 days
+      the moment Zillow ANSWERS, retry-window only on a failed call). Before
+      that, every re-click on a one-photo off-market sold — most of them —
+      re-bought `/property` + `/photos` every hour, forever.
     - `_merge_one` also stamps the photo/zpid onto a matched ISTL pin, because a
       photo is not "newer" data — it is data the pooled index never had — so it
       rides along on ANY match instead of waiting for a price to change. Comps with
