@@ -1116,6 +1116,47 @@ duplicating. Work substantial features in a worktree of your own.
     the whitelisted read-only "who's up next and why" (it now takes the source,
     because rules are per-source — see **Lead Assignment settings** below).
 
+- **Lead owner reservations (LeadMarket names the owner BEFORE the vendor
+  webhook creates the lead)** — `crm/api/lead_reservation.py` (**new**) +
+  a `reserved_owner_for(doc)` check at the top of the round-robin
+  `before_insert` hook + `stamp_matched_lead` on `after_insert`. LeadMarket's
+  Buy button says "this one is Dennis's" at click time; iSpeedToLead's webhook
+  then creates the lead **already owned** by him — no post-hoc reassign, no
+  double `_assign`, no sequence auto-enroll under the wrong setter, and
+  LeadMarket being down at webhook time just means the rotation decides.
+  Rotate = no reservation (the CRM's own per-source rule decides).
+  - **Match key is the marketplace `published_date` (epoch ms)** — the ONE
+    pre-purchase datum both systems share (the feed exposes no address/phone
+    before you buy). iSTL's webhook sends it as `lead_published_date`, verified
+    identical to the millisecond on prod; the ops webhook script copies it to
+    `CRM Lead.vendor_published_date` (Custom Field, hidden). ZIP is a guard
+    when both sides have one. Both sides normalise to an epoch-ms string.
+  - **Whitelisted**: `reserve(source, lead_owner, marketplace_lead_id,
+    published_date, zip?, requested_by?, ttl_hours=24)` upserts on the
+    marketplace id; `release(id)`; `status(ids)`. Sales roles.
+  - **Races** (all verified on staging 2026-09-05 with guest webhook POSTs):
+    reservation first → lead born with the owner + `matched_lead` stamped;
+    webhook first → `reserve()` moves the lead via
+    `lead_owner_backfill._reassign` (old ToDo Cancelled, new one Open) and
+    records `previous_owner`; ZIP mismatch → rotation; `release` → rotation;
+    release of a matched reservation is **refused** (it would not un-own the
+    lead); vendor retry/duplicate insert → same person, because a reservation
+    is **never consumed** — it stays live for its TTL.
+  - A reservation applies even while the rotation is paused: it is an explicit
+    human choice. Hard skips (owner already set / bulk import / migrate) still
+    win. Nothing in the insert path raises.
+  - Guarded on the doctype + column existing. Ops:
+    `scripts/setup_lead_owner_reservation.py` (doctype `CRM Lead Owner
+    Reservation` + the lead column) then
+    `scripts/sync_server_scripts.py ispeedtolead_webhook`. Unmatched rows are
+    pruned after 14 days on the next `reserve()`; matched rows are the audit
+    trail. GOTCHA: a matched reservation Links the lead, so deleting a test
+    lead needs the reservation gone first (or `frappe.delete_doc(force=1)`).
+  - Consumer: `../leadmarket` `src/assign.py` (calls production via bench
+    regardless of its staging `CRM_HTTP_BASE` override; mirrors the rows
+    locally so cards can show "→ Dennis" / "✓ Dennis · CRM-LEAD-…" / "⚠ CRM
+    gave it to Germán" without a round-trip per page).
+
 - **Lead Assignment settings page (per-source rules)** — Settings → Automation &
   Rules → **Lead Assignment**: one row per lead source, in plain language
   (*iSpeedToLead → rotate between German, Exe* · *Leadzolo → always Lance*), plus

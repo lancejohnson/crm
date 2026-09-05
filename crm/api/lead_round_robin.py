@@ -335,8 +335,9 @@ def preview_for_rule(rule: dict | None) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _skip_reason(doc) -> str | None:
-	"""Why this lead is not part of the rotation, or None if it is."""
+def _not_ours(doc) -> str | None:
+	"""Why this lead is nobody's to assign automatically — neither by a
+	reservation nor by the rotation — or None if it is."""
 	if doc.get("lead_owner"):
 		# Hand-created in the UI, or an importer that already chose. Respect it.
 		return "owner already set"
@@ -344,6 +345,11 @@ def _skip_reason(doc) -> str | None:
 		return "bulk import"
 	if frappe.flags.in_migrate or frappe.flags.in_install or frappe.flags.in_patch:
 		return "migration"
+	return None
+
+
+def _rotation_off(doc) -> str | None:
+	"""Why the rotation specifically is not running, or None if it is."""
 	if not is_enabled():
 		return "disabled"
 	if not lead_assignment.is_enabled():
@@ -351,16 +357,36 @@ def _skip_reason(doc) -> str | None:
 	return None
 
 
+def _skip_reason(doc) -> str | None:
+	"""Why this lead is not part of the rotation, or None if it is."""
+	return _not_ours(doc) or _rotation_off(doc)
+
+
 def assign_round_robin_owner(doc, method=None):
-	"""`CRM Lead` before_insert hook: hand an ownerless new lead to the next
-	setter in the rotation.
+	"""`CRM Lead` before_insert hook: hand an ownerless new lead to whoever
+	reserved it, else to the next setter in the rotation.
+
+	A reservation (crm.api.lead_reservation — the desk said "this one is
+	Dennis's" before the vendor's webhook created it) is an explicit human
+	choice, so it applies even while the rotation is paused. It is checked
+	first and short-circuits the rotation entirely.
 
 	Deliberately swallows every error. If anything here goes wrong the lead
 	still saves and the `Lead Default Owner` server script stamps the old
 	default — a lost lead is far worse than a misrouted one.
 	"""
 	try:
-		if _skip_reason(doc):
+		if _not_ours(doc):
+			return
+
+		from crm.api import lead_reservation
+
+		reserved = lead_reservation.reserved_owner_for(doc)
+		if reserved:
+			doc.lead_owner = reserved
+			return
+
+		if _rotation_off(doc):
 			return
 
 		owner = _apply_rule(lead_assignment.rule_for(doc.get("source")))
