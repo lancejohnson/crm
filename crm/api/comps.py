@@ -19,7 +19,8 @@ coordinates, so the importer ships them pre-geocoded.
 On every map open we then ask Zillow whether anything is more recent: a ZIP-level
 RecentlySold + ForSale search (A), and `/property` on the nearest ISTL pins (B).
 See `crm.api.zillow_comps`. BatchData remains the last resort when the pooled
-index is empty even after that.
+index is empty even after that. A ForRent circle is a separate inventory
+(`inventory=rentals`) and never mixed into the sale map.
 
 Two layers, because exact-per-lead coverage is thin:
   * a lead we BOUGHT and whose marketplace record we still hold has its own comps
@@ -670,6 +671,43 @@ def _preset_tiers(facts, radius):
 		"key": "all",
 		"label": _("Everything nearby"),
 		"filters": {"status": "all", "radius_mi": radius},
+	})
+	return tiers
+
+
+def _rental_preset_tiers(facts, radius):
+	"""Rental ladder: similarity only. Recency is for sales; these are live asks."""
+	beds, baths = facts.get("beds_band"), facts.get("baths_band")
+	sqft, year = facts.get("sqft_band"), facts.get("year_built_band")
+	ptype = facts.get("property_type")
+	has_shape = any((beds, baths, sqft, year))
+
+	tiers = []
+
+	def tier(key, label, b_pad, ba_pad, sq_pct, yr_pad, use_type):
+		f = {"status": "active", "radius_mi": radius}
+		if b_pad is not None:
+			f["beds_min"], f["beds_max"] = _widen(beds, flat=b_pad, floor=0)
+		if ba_pad is not None:
+			f["baths_min"], f["baths_max"] = _widen(baths, flat=ba_pad, floor=0)
+		if sq_pct is not None:
+			f["sqft_min"], f["sqft_max"] = _widen(sqft, pct=sq_pct, floor=0)
+		if yr_pad is not None:
+			f["year_min"], f["year_max"] = _widen(year, flat=yr_pad)
+		if use_type and ptype:
+			f["property_types"] = [ptype]
+		tiers.append({"key": key, "label": label, "filters": f})
+
+	if has_shape:
+		tier("similar", _("Similar rentals"), 1, 1, 0.25, 20, True)
+		tier("wider", _("Wider rentals"), 1, 1, 0.35, 30, True)
+		tier("loose", _("Loosely similar rentals"), 2, None, 0.50, None, False)
+	else:
+		tier("nearby", _("Nearby rentals"), None, None, None, None, False)
+	tiers.append({
+		"key": "all",
+		"label": _("Every rental nearby"),
+		"filters": {"status": "active", "radius_mi": radius},
 	})
 	return tiers
 
@@ -1333,8 +1371,15 @@ def _zillow_match(doc, subject=None):
 
 
 @frappe.whitelist()
+def _is_rentals(inventory):
+	return str(inventory or "sale").strip().lower() in (
+		"rent", "rental", "rentals", "for_rent",
+	)
+
+
 def get_lead_comps(
-	lead, radius_mi=None, limit=None, filters=None, auto=0, include_hidden=0, state=None
+	lead, radius_mi=None, limit=None, filters=None, auto=0, include_hidden=0, state=None,
+	inventory=None,
 ):
 	"""Comps near a lead, nearest first, with the subject's real position.
 
@@ -1385,7 +1430,11 @@ def get_lead_comps(
 		"available": _available(),
 		"zillow_match": _zillow_match(doc, subject),
 	}
-	if not base["available"]:
+	rental = _is_rentals(inventory)
+	base["inventory"] = "rentals" if rental else "sale"
+	# Rentals are a Zillow ForRent circle. They do not need the ISTL pooled
+	# index, so an unprovisioned CRM Comp doctype must not block the map.
+	if not rental and not base["available"]:
 		base["message"] = _("Comps have not been imported yet.")
 		return base
 	if lat is None:
@@ -1399,21 +1448,23 @@ def get_lead_comps(
 	# Explicit >=/<= rather than `between`: Frappe's `between` operator routes
 	# through get_between_date_filter and treats its bounds as DATES, which turns a
 	# numeric bounding box into malformed SQL.
-	rows = frappe.get_all(
-		DOCTYPE,
-		filters=[
-			[DOCTYPE, "lat", ">=", lat - dlat],
-			[DOCTYPE, "lat", "<=", lat + dlat],
-			[DOCTYPE, "lng", ">=", lng - dlng],
-			[DOCTYPE, "lng", "<=", lng + dlng],
-		],
-		fields=[
-			"name", "address", "city", "state", "zip", "lat", "lng", "price", "status",
-			"listed_date", "removed_date", "days_on_market", "days_old",
-			"bedrooms", "bathrooms", "square_footage", "year_built", "property_type",
-		],
-		limit_page_length=5000,
-	)
+	rows = []
+	if not rental:
+		rows = frappe.get_all(
+			DOCTYPE,
+			filters=[
+				[DOCTYPE, "lat", ">=", lat - dlat],
+				[DOCTYPE, "lat", "<=", lat + dlat],
+				[DOCTYPE, "lng", ">=", lng - dlng],
+				[DOCTYPE, "lng", "<=", lng + dlng],
+			],
+			fields=[
+				"name", "address", "city", "state", "zip", "lat", "lng", "price", "status",
+				"listed_date", "removed_date", "days_on_market", "days_old",
+				"bedrooms", "bathrooms", "square_footage", "year_built", "property_type",
+			],
+			limit_page_length=5000,
+		)
 
 	# Does Redfin agree with Zillow about this house? Started HERE so the fetch
 	# rides the same wall-clock as the Zillow refresh below; collected after it
@@ -1488,10 +1539,14 @@ def get_lead_comps(
 	# ISTL asks go stale. Check Zillow for newer sales/listings around the
 	# subject, and refresh the nearest ISTL pins' sale dates, before we count
 	# or filter. Soft: an outage leaves `out` as the pooled index.
+	# Rentals skip the sale circle entirely — ForRent is a different number.
 	try:
 		from crm.api import zillow_comps
 
-		base["zillow"] = zillow_comps.apply(doc, out, lat, lng, radius)
+		if rental:
+			base["zillow"] = zillow_comps.apply_rentals(doc, out, lat, lng, radius)
+		else:
+			base["zillow"] = zillow_comps.apply(doc, out, lat, lng, radius)
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Comps: Zillow refresh failed")
 		base["zillow"] = {"used": False, "reason": "error"}
@@ -1536,22 +1591,29 @@ def get_lead_comps(
 	# labelled off-market, and treating them as solds is how LA maps went yellow
 	# without a single Sold pin. Pin-refreshed ISTL rows keep their ISTL name even
 	# after `source` flips to zillow, so only `zillow::` solds are real search hits.
-	zillow_solds = [
-		r for r in out
-		if r.get("price")
-		and str(r.get("name") or "").startswith("zillow::")
-		and r.get("listing_state") == "sold"
-	]
 	had_pins = bool(out)
-	if zillow_solds:
+	if rental:
+		# BatchData is recorded sales. A rent is not a sale.
 		base["fallback"] = {
 			"source": "batchdata", "used": False,
-			"reason": "zillow_has_prices", "had_pins": had_pins,
+			"reason": "rentals", "had_pins": had_pins,
 		}
 	else:
-		base["fallback"] = _batchdata_fallback(doc, base, merge_into=out)
-		base["fallback"]["had_pins"] = had_pins
-		out.sort(key=lambda r: r["distance_mi"])
+		zillow_solds = [
+			r for r in out
+			if r.get("price")
+			and str(r.get("name") or "").startswith("zillow::")
+			and r.get("listing_state") == "sold"
+		]
+		if zillow_solds:
+			base["fallback"] = {
+				"source": "batchdata", "used": False,
+				"reason": "zillow_has_prices", "had_pins": had_pins,
+			}
+		else:
+			base["fallback"] = _batchdata_fallback(doc, base, merge_into=out)
+			base["fallback"]["had_pins"] = had_pins
+			out.sort(key=lambda r: r["distance_mi"])
 
 	# Condition tags, stamped once over the final pool (ISTL + Zillow + BatchData
 	# rows alike) so every surface — tray, gallery, discard drawer — reads the same
@@ -1588,7 +1650,11 @@ def get_lead_comps(
 		base["preset"] = None
 		base["relaxed"] = False
 	elif int(auto or 0):
-		tiers = _preset_tiers(base["subject"] or {}, radius)
+		tiers = (
+			_rental_preset_tiers(base["subject"] or {}, radius)
+			if rental
+			else _preset_tiers(base["subject"] or {}, radius)
+		)
 		matched, chosen = [], tiers[-1]
 		for t in tiers:
 			hits = [r for r in out if _matches(r, t["filters"], today)]
@@ -1635,19 +1701,25 @@ def get_lead_comps(
 	# Best-effort by construction: `attach_sale_history` marks a row it could not
 	# resolve rather than raising, because a comps map that renders without flip
 	# warnings beats a lead page that 500s.
-	try:
-		# Imported again rather than relying on the binding from the refresh block
-		# above: that one lives inside a `try` whose `except` swallows an ImportError,
-		# so the name is not guaranteed to exist down here.
-		from crm.api import zillow_comps as _zc
+	if rental:
+		# Sale history is billed `/property` per pin and answers a sale question.
+		base["sale_history"] = {
+			"checked": 0, "with_history": 0, "flips": 0, "missing": 0,
+		}
+	else:
+		try:
+			# Imported again rather than relying on the binding from the refresh block
+			# above: that one lives inside a `try` whose `except` swallows an ImportError,
+			# so the name is not guaranteed to exist down here.
+			from crm.api import zillow_comps as _zc
 
-		base["sale_history"] = _zc.attach_sale_history(base["comps"], today)
-	except Exception:
-		frappe.log_error(frappe.get_traceback(), "Comps: sale history failed")
-		base["sale_history"] = {"checked": 0, "with_history": 0, "flips": 0, "missing": len(base["comps"])}
-		for row in base["comps"]:
-			row.setdefault("sale_history", None)
-			row.setdefault("sale_history_missing", True)
+			base["sale_history"] = _zc.attach_sale_history(base["comps"], today)
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), "Comps: sale history failed")
+			base["sale_history"] = {"checked": 0, "with_history": 0, "flips": 0, "missing": len(base["comps"])}
+			for row in base["comps"]:
+				row.setdefault("sale_history", None)
+				row.setdefault("sale_history_missing", True)
 	return base
 
 

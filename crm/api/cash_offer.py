@@ -6,8 +6,9 @@ ARV × % − (mult × repairs) − assignment fee per scenario, where `mult` is
 1 (the classic 70% rule) or 2 (the same shape the rail uses). Novation is
 Current value − 10% − fee ($40k default) — no repairs. List it is as-is
 − 6% commission − 2% closing − 2% concessions, and the number it produces
-is the seller's takeaway if they listed the house themselves. They must not
-write the same field or a re-price on one surface silently rewrites the other.
+is the seller's takeaway if they listed the house themselves. Rental is
+MAO = MIR × 80% − repairs − fee. They must not write the same field or
+a re-price on one surface silently rewrites the other.
 
 The numbers are recomputed here rather than trusted from the client, so the
 timeline card and the calculator cannot disagree about what an offer was. A
@@ -59,7 +60,7 @@ def _zillow(addr):
 
 def _kind(raw):
 	k = (raw.get("kind") or "cash") if isinstance(raw, dict) else "cash"
-	if k in ("novation", "list"):
+	if k in ("novation", "list", "rental"):
 		return k
 	return "cash"
 
@@ -108,6 +109,26 @@ def _scene(raw, sqft):
 			"concessions": concessions,
 			"after": after,
 			"offer": after,
+		}
+	if kind == "rental":
+		pct = _pct(raw, 0.80)
+		if pct <= 0 or pct >= 1:
+			return None
+		rehab_psf = _num(raw.get("rehabPsf") or raw.get("rehab_psf"))
+		after = round(arv * pct)
+		repairs = round(rehab_psf * _num(sqft))
+		wholesale = after - repairs
+		return {
+			"kind": "rental",
+			"arv": arv,
+			"pct": pct,
+			"rehab_psf": rehab_psf,
+			"fee": fee,
+			"after": after,
+			"repairs": repairs,
+			"rehab": repairs,
+			"wholesale": wholesale,
+			"offer": wholesale - fee,
 		}
 	if kind == "novation":
 		pct = _pct(raw, 0.10)
@@ -200,6 +221,18 @@ def _scene_payload(sc):
 			"after": sc["after"],
 			"offer": sc["offer"],
 		}
+	if sc.get("kind") == "rental":
+		return {
+			"kind": "rental",
+			"arv": sc["arv"],
+			"pct": sc["pct"],
+			"rehab_psf": sc["rehab_psf"],
+			"fee": sc["fee"],
+			"after": sc["after"],
+			"repairs": sc["repairs"],
+			"rehab": sc["rehab"],
+			"offer": sc["offer"],
+		}
 	if sc.get("kind") == "novation":
 		return {
 			"kind": "novation",
@@ -262,6 +295,8 @@ def _html(lead, scenes, comps, sqft, notes=""):
 		title = _("Novation offer")
 	elif kind == "list":
 		title = _("List it")
+	elif kind == "rental":
+		title = _("Rental MAO")
 	else:
 		title = _("Cash offer")
 	parts = [
@@ -292,6 +327,24 @@ def _html(lead, scenes, comps, sqft, notes=""):
 					conc=_money(sc["concessions"]),
 					offer=_money(sc["offer"]),
 					take=escape_html(_("takeaway")),
+				)
+			)
+			continue
+		if sc.get("kind") == "rental":
+			parts.append(
+				"<div>{label} ({pct:.0f}%)</div>"
+				"<div>{arv} × {pct:.0f}% = {after}</div>"
+				"<div>− {repairs_l} {repairs}</div>"
+				'<div>− fee {fee} = <b style="white-space:nowrap">{offer}</b> {mao}</div>'.format(
+					label=escape_html(label),
+					pct=sc["pct"] * 100,
+					arv=_money(sc["arv"]),
+					after=_money(sc["after"]),
+					repairs_l=escape_html(_("repairs")),
+					repairs=_money(sc["repairs"]),
+					fee=_money(sc["fee"]),
+					offer=_money(sc["offer"]),
+					mao=escape_html(_("MAO")),
 				)
 			)
 			continue
@@ -374,7 +427,7 @@ def _html(lead, scenes, comps, sqft, notes=""):
 
 @frappe.whitelist()
 def save_cash_offer(lead, scenarios=None, comps=None, subject_sqft=None, notes=None):
-	"""Write the current cash, novation, or list-it calc onto the lead timeline. Does not touch the desk rail."""
+	"""Write the current cash, novation, list-it, or rental calc onto the lead timeline. Does not touch the desk rail."""
 	_guard()
 	if not frappe.db.exists("CRM Lead", lead):
 		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)

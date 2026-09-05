@@ -60,6 +60,7 @@
         :seed="practiceSeed"
         @remove="setCompState($event, 'none')"
         @open="openCompDetail"
+        @kind="onCalcKind"
       />
     </div>
   </template>
@@ -90,7 +91,9 @@
           </template>
           <template v-if="zillowLine"> · {{ zillowLine }}</template>
               </template>
-              <template v-else>{{ emptyMessage }}</template>
+              <template v-else>
+                <span :title="emptyMessage">{{ emptyMessage }}</span>
+              </template>
             </span>
           </div>
           <!-- Wraps: at 390px this row holds the underwrite button, two
@@ -102,7 +105,7 @@
      selected, and the label carries the count so "up to 4" is visible
      before the click rather than as an error after it. -->
 <Button
-  v-if="pageMode && !practiceAttempt"
+  v-if="pageMode && !practiceAttempt && !isRentals"
   :label="underwritingLabel"
   :variant="selectedNames.length ? 'solid' : 'subtle'"
   :disabled="!selectedNames.length || creatingSheet"
@@ -129,6 +132,24 @@
                  A checkbox rather than a button because it reports its own state
                  — a button reading "Details off" is ambiguous about whether that
                  is the current state or what clicking will do. -->
+            <div class="flex items-center rounded-md border border-outline-gray-2 bg-surface-gray-1 p-px text-xs" role="group" :aria-label="__('Map listings')">
+              <button
+                type="button"
+                class="rounded px-2 py-0.5 font-medium"
+                :class="isRentals ? 'text-ink-gray-6' : 'bg-surface-white text-ink-gray-9 shadow-sm'"
+                @click="setInventory('sale')"
+              >
+                {{ __('For sale') }}
+              </button>
+              <button
+                type="button"
+                class="rounded px-2 py-0.5 font-medium"
+                :class="isRentals ? 'bg-surface-white text-ink-gray-9 shadow-sm' : 'text-ink-gray-6'"
+                @click="setInventory('rentals')"
+              >
+                {{ __('Rentals') }}
+              </button>
+            </div>
             <label
               class="flex cursor-pointer select-none items-center gap-1.5 whitespace-nowrap text-xs text-ink-gray-7"
               :title="__('Show beds/baths/sqft/year on pills') + ' (D)'"
@@ -237,7 +258,7 @@
           v-show="!filtersCollapsible || filtersOpen"
           class="flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg border border-outline-gray-2 bg-surface-gray-1 px-2 py-1"
         >
-          <div class="flex min-w-0 items-center gap-1">
+          <div v-if="!isRentals" class="flex min-w-0 items-center gap-1">
             <span class="shrink-0 text-xs font-medium text-ink-gray-5">{{ __('Status') }}</span>
             <FormControl
               type="select"
@@ -247,6 +268,7 @@
             />
           </div>
           <div
+            v-if="!isRentals"
             class="flex min-w-0 items-center gap-1"
             :title="
               __(
@@ -528,6 +550,13 @@
             <span class="size-2.5 rounded-full" :style="{ background: SUBJECT }" />
             {{ __('This property') }}
           </span>
+          <template v-if="isRentals">
+            <span class="flex items-center gap-1.5">
+              <span class="size-2.5 rounded-full" :style="{ background: COMP_COLORS.rent.bg }" />
+              {{ __('For rent') }}
+            </span>
+          </template>
+          <template v-else>
           <span class="flex items-center gap-1.5">
             <span
               class="size-2.5 rounded-full ring-1 ring-inset"
@@ -546,6 +575,7 @@
             {{ __('Pending ({0})', [pendingCount]) }}
           </span>
           <span class="text-ink-gray-5">{{ __('Fainter = older sale') }}</span>
+          </template>
           <span
             v-if="hasFlipOnBoard"
             class="flex items-center gap-1.5"
@@ -663,6 +693,7 @@ import {
   daysToSell,
   finiteDays,
   isPending,
+  isRentalComp,
   propertyTypeGlyphHtml,
   propertyTypeGlyphSvg,
   propertyTypeKind,
@@ -1048,6 +1079,8 @@ const PENDING = COMP_COLORS.pending.bg // spoken for = an AGREED price, still li
 const mapEl = ref(null)
 const data = ref(null)
 const loading = ref(false)
+const inventory = ref('sale')
+const isRentals = computed(() => inventory.value === 'rentals')
 // Half a mile first: that is the market that actually prices this house.
 // load() walks 0.5 → 1 → 2 → 5 if the tight circle is empty, so a rural
 // lead still gets a set without opening at a two-mile dump of irrelevants.
@@ -1313,7 +1346,13 @@ function scrollSubjectIntoView() {
   if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' })
 }
 
-const comps = computed(() => data.value?.comps || [])
+// Prod-backed `yarn dev` (and a frontend-before-backend deploy window) talks to
+// a get_lead_comps that ignores `inventory`. Painting those sale pins under a
+// For-rent legend is worse than empty. Require the server to echo the inventory.
+const rentalReady = computed(
+  () => !isRentals.value || data.value?.inventory === 'rentals',
+)
+const comps = computed(() => (rentalReady.value ? data.value?.comps || [] : []))
 
 const streetViewPoint = computed(() => {
   const name = focusedComp.value
@@ -1419,7 +1458,9 @@ const hasFlipOnBoard = computed(() => comps.value.some((c) => c?.sale_history?.f
 // Comps a person threw out. They arrive in their own list precisely so they can
 // be shown without ever re-entering the pool: a discarded comp must not keep a
 // preset tier "usable" and suppress the widening the rep actually needs.
-const discarded = computed(() => data.value?.discarded || [])
+const discarded = computed(() =>
+  rentalReady.value ? data.value?.discarded || [] : [],
+)
 const showDiscarded = ref(false)
 
 // `fill` sizes the map to the container. `pageMode` is the calculator. The
@@ -1468,9 +1509,14 @@ function setCardRef(name, el) {
   if (el) cardRefs.set(name, el)
   else cardRefs.delete(name)
 }
-const emptyMessage = computed(
-  () => data.value?.message || __('No comps found nearby.'),
-)
+const emptyMessage = computed(() => {
+  if (data.value?.message) return data.value.message
+  if (isRentals.value && !rentalReady.value) {
+    return __('Rental listings need a server update — this site is still serving sale comps.')
+  }
+  if (isRentals.value) return __('No rental listings nearby.')
+  return __('No comps found nearby.')
+})
 const zillowMatch = computed(() => data.value?.zillow_match || null)
 
 function onAddressSaved(address) {
@@ -1620,9 +1666,11 @@ function withAlpha(hex, alpha) {
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha.toFixed(3)})`
 }
 
-function priceShort(p) {
+function priceShort(p, rental = false) {
   const n = Number(p)
   if (!Number.isFinite(n) || n <= 0) return '—'
+  // Rent is monthly. $1,450 must not collapse to "$1k".
+  if (rental) return '$' + Math.round(n).toLocaleString()
   // `>= 999500`, not `>= 1000000`: rounding happens BEFORE the unit is chosen, so
   // the old threshold let $999,500 round up to "$1000k" — four digits, and the
   // widest thing on any pill, for the one price that should have read "$1.0m".
@@ -1885,7 +1933,7 @@ function pillIcon(c) {
   // fade stay deep without the price becoming unreadable, and it is why the ink
   // can differ per colour: white on the red, near-black on the yellow.
   const ink = pal.ink
-  const price = priceShort(c.price)
+  const price = priceShort(c.price, isRentalComp(c))
   const { year, line2 } = pillBits(c)
   // Selected does NOT switch to the tall pill — that resized the icon under the
   // pointer and read as the map jumping. The ring is the selected signal.
@@ -2604,7 +2652,7 @@ function toggleUse(name) {
   // the rep has just looked at the photos, which is when they know. Only
   // when the site can store it and nothing is tagged yet; "Skip for now"
   // keeps the pick and the chip on the card takes the tag later.
-  if (picking && canTagTypes.value && !c?.comp_type) {
+  if (picking && canTagTypes.value && !c?.comp_type && !isRentalComp(c)) {
     conditionComp.value = c
     showConditionModal.value = true
   }
@@ -2673,21 +2721,29 @@ async function saveSubjectSqft(sqft) {
   }
 }
 
+let loadGen = 0
 async function load({ explicit = userTouched.value } = {}) {
   if (!props.lead) return
+  const gen = ++loadGen
+  const want = inventory.value
   loading.value = true
   try {
     // Loop, not recurse: a `return load()` still runs this try's `finally`,
     // which would flip `loading` off while the inner call is in flight.
     for (;;) {
-      const payload = { radius_mi: radius.value, include_hidden: 1 }
+      if (gen !== loadGen) return
+      const payload = {
+        radius_mi: radius.value,
+        include_hidden: 1,
+        inventory: want,
+      }
       if (explicit) {
         payload.filters = JSON.stringify(currentFilters())
         payload.auto = 0
       } else {
         payload.auto = 1
       }
-      data.value = isPractice.value
+      const nextData = isPractice.value
         ? await call('crm.api.practice.get_comps', {
             ...payload,
             attempt: props.practiceAttempt,
@@ -2697,6 +2753,8 @@ async function load({ explicit = userTouched.value } = {}) {
             ...payload,
             lead: props.lead,
           })
+      if (gen !== loadGen) return
+      data.value = nextData
       emit('subject', data.value?.subject || null)
       emit('zillowMatch', data.value?.zillow_match || null)
       syncDraft(data.value?.filters)
@@ -2718,15 +2776,27 @@ async function load({ explicit = userTouched.value } = {}) {
       if (next) detailComp.value = next
     }
   } catch (e) {
-    toast.error(e.messages?.[0] || __('Could not load comps.'))
+    if (gen === loadGen) toast.error(e.messages?.[0] || __('Could not load comps.'))
   } finally {
-    loading.value = false
+    if (gen === loadGen) loading.value = false
   }
 }
 
 function resetToSuggested() {
   userTouched.value = false
   load({ explicit: false })
+}
+
+function setInventory(next) {
+  if (inventory.value === next) return
+  inventory.value = next
+  userTouched.value = false
+  load({ explicit: false })
+}
+
+function onCalcKind(k) {
+  const next = k === 'rental' ? 'rentals' : 'sale'
+  setInventory(next)
 }
 
 const MAX_SHEET_COMPS = 4

@@ -11,6 +11,8 @@ the marketplace lead was scraped. It ages. This module is the freshness layer:
      Pages through `totalPages`; a window over RapidAPI's 800-result ceiling
      binary-splits on price (devproppy `fetch_all_zillow_properties`). Cached 7 days per rounded
      center so two leads on the same block share the spend.
+     ForRent is a SEPARATE inventory (the rental map toggle), never mixed into
+     this circle and never prewarmed — same billed key, different question.
   B. `/property` on the nearest stale ISTL pins (capped) so a house ISTL still
      has as an 8-month-old ask can pick up the sale Zillow recorded last week.
 
@@ -113,6 +115,7 @@ PIN_MIGRATIONS = {}
 #: not a completed transaction, which is why it gets its own label everywhere
 #: rather than being quietly counted as either a listing or a sale.
 PENDING_STATUSES = {"PENDING", "UNDER_CONTRACT", "ACCEPTING_BACKUP_OFFERS", "CONTINGENT"}
+RENT_STATUSES = {"FOR_RENT", "RENTAL", "FOR_RENT_BY_OWNER"}
 
 _SUFFIXES = {
 	"street": "st",
@@ -276,7 +279,7 @@ def _coordinates(lat, lng, radius_mi) -> str:
 
 
 def listing_state(prop, kind):
-	"""What Zillow says this row IS, in three states: sold / pending / for sale.
+	"""What Zillow says this row IS: sold / pending / for sale / for rent.
 
 	Read off the row's own `listingStatus` rather than inferred from which query
 	it arrived in, because the two disagree: a RecentlySold page came back holding
@@ -286,6 +289,8 @@ def listing_state(prop, kind):
 	"""
 	status = str(prop.get("listingStatus") or "").strip().upper()
 	contingent = str(prop.get("contingentListingType") or "").strip().upper()
+	if kind == "rent" or status in RENT_STATUSES:
+		return "for_rent"
 	if status == "RECENTLY_SOLD":
 		return "sold"
 	if status in PENDING_STATUSES or contingent in PENDING_STATUSES:
@@ -294,7 +299,11 @@ def listing_state(prop, kind):
 		return "for_sale"
 	# No usable status on the row: fall back to the query it came from, which is
 	# what this did before the field was read at all.
-	return "for_sale" if kind == "sale" else "sold"
+	if kind == "sale":
+		return "for_sale"
+	if kind == "rent":
+		return "for_rent"
+	return "sold"
 
 
 def _shape_search(prop, kind):
@@ -323,9 +332,12 @@ def _shape_search(prop, kind):
 	# filter, colour and count in this app already keys on. What makes it pending
 	# rides alongside in `listing_state`, which is additive -- nothing that predates
 	# it has to learn a third status to keep working.
-	active = state != "sold"
+	# Rentals use a different name prefix so hide/select/type on a sale pin cannot
+	# collide with the same zpid listed for rent (or the reverse).
+	active = state not in ("sold", "off_market")
+	prefix = "zillow-rent" if state == "for_rent" else "zillow"
 	return {
-		"name": f"zillow::{zpid}",
+		"name": f"{prefix}::{zpid}",
 		"address": addr,
 		"city": "",
 		"state": "",
@@ -451,7 +463,12 @@ def _price_edge(coordinates, status_type, sold_in_last, min_price, max_price, hi
 
 def _collect_pages(coordinates, status_type, sold_in_last, min_price, max_price, first_body, budget):
 	"""Page through one price window that is already known to be ≤800."""
-	kind = "sale" if status_type == "ForSale" else "sold"
+	if status_type == "ForRent":
+		kind = "rent"
+	elif status_type == "ForSale":
+		kind = "sale"
+	else:
+		kind = "sold"
 	rows = []
 	seen = set()
 	try:
@@ -556,6 +573,9 @@ AREA_QUERIES = (
 	("sold", "RecentlySold", SOLD_IN_LAST, AREA_SOLD_HIT_DAYS),
 	("for_sale", "ForSale", None, AREA_HIT_DAYS),
 )
+#: Not in AREA_QUERIES on purpose. Prewarm and the sale map must not buy a
+#: ForRent circle; the rental toggle is the only thing that spends this.
+RENTAL_AREA_QUERIES = (("for_rent", "ForRent", None, AREA_HIT_DAYS),)
 
 
 def _area_key(coordinates, status_type, sold_in_last=None, version=None):
@@ -638,6 +658,19 @@ def area_comps(lat, lng, radius_mi):
 	# Driven off AREA_QUERIES so this and `area_is_cached` are the same question.
 	out = {"location": f"{radius_mi:.2f}mi", "cached": True}
 	for key, status_type, sold_in_last, hit_days in AREA_QUERIES:
+		rows, complete = _area_cached(coords, status_type, sold_in_last, hit_days)
+		out[key] = rows or []
+		out["cached"] = out["cached"] and bool(complete)
+	return out
+
+
+def area_rentals(lat, lng, radius_mi):
+	"""ForRent inside a distance circle. Never mixed into the sale cache."""
+	if lat is None or lng is None or not zillow_api._api_key():
+		return {"for_rent": [], "location": "", "cached": True}
+	coords = _coordinates(float(lat), float(lng), float(radius_mi))
+	out = {"location": f"{radius_mi:.2f}mi", "cached": True}
+	for key, status_type, sold_in_last, hit_days in RENTAL_AREA_QUERIES:
 		rows, complete = _area_cached(coords, status_type, sold_in_last, hit_days)
 		out[key] = rows or []
 		out["cached"] = out["cached"] and bool(complete)
@@ -1013,4 +1046,59 @@ def apply(doc, out, lat, lng, radius):
 	info["pins_checked"] = pins["checked"]
 	info["updated"] += pins["updated"]
 	info["used"] = bool(info["added"] or info["updated"] or info["sold"] or info["for_sale"] or info["pins_checked"])
+	return info
+
+
+def apply_rentals(doc, out, lat, lng, radius):
+	"""Fill `out` with current ForRent listings. No ISTL merge, no pin refresh.
+
+	Sale history / BatchData / the pooled index are last *asks* and last *sales*.
+	A rent is a different number; mixing the two on one map is how $1,450 reads
+	as a $1k sale. This path is Zillow ForRent only, cached on its own key.
+	"""
+	info = {
+		"used": False,
+		"added": 0,
+		"updated": 0,
+		"sold": 0,
+		"for_sale": 0,
+		"for_rent": 0,
+		"pending": 0,
+		"pins_checked": 0,
+		"location": "",
+		"cached": True,
+		"inventory": "rentals",
+		"reason": "",
+		"subject_photo": "",
+	}
+	if lat is None or lng is None:
+		info["reason"] = "no_subject"
+		return info
+	if not zillow_api._api_key():
+		info["reason"] = "not_configured"
+		return info
+
+	today = frappe.utils.today()
+	self_keys = {merge_key(doc.get("property_address") or ""), merge_key(_comps()._full_address(doc))}
+	self_keys.discard(merge_key(""))
+	area = area_rentals(lat, lng, radius)
+	info["location"] = area.get("location") or ""
+	info["cached"] = bool(area.get("cached"))
+	for row in area.get("for_rent") or []:
+		dist = _comps()._haversine_mi(lat, lng, row["lat"], row["lng"])
+		if dist > radius:
+			continue
+		if merge_key(row.get("address") or "") in self_keys:
+			if row.get("photo") and not info["subject_photo"]:
+				info["subject_photo"] = row["photo"]
+			continue
+		row = dict(row)
+		row["distance_mi"] = round(dist, 2)
+		row["selected"] = False
+		row["hidden"] = False
+		row["recency_days"] = _comps()._recency_days(row, today)
+		out.append(row)
+		info["added"] += 1
+		info["for_rent"] += 1
+	info["used"] = bool(info["added"])
 	return info

@@ -454,7 +454,13 @@ const hasStreetView = computed(() => !!streetPoint.value)
 // listing frozen in our cache), and a rep reads that headline as ARV evidence.
 // Only the three definite Zillow statuses carry an opinion; OTHER/null defer
 // to the pin.
-const FRESH_STATES = { RECENTLY_SOLD: 'sold', SOLD: 'sold', FOR_SALE: 'for_sale', PENDING: 'pending' }
+const FRESH_STATES = {
+  RECENTLY_SOLD: 'sold',
+  SOLD: 'sold',
+  FOR_SALE: 'for_sale',
+  PENDING: 'pending',
+  FOR_RENT: 'for_rent',
+}
 const pinState = computed(() => compState(props.comp))
 const freshState = computed(() => {
   if (props.subjectMode) return null
@@ -488,6 +494,8 @@ const displayPrice = computed(() => {
   // neither the pin's stale ask nor a leftover asking_price is the number.
   if (freshState.value === 'sold' && details.value?.last_sale?.price)
     return details.value.last_sale.price
+  // `/property` asking_price is a SALE ask. A rental pin's price is monthly rent.
+  if (state.value === 'for_rent') return props.comp?.price
   return details.value?.asking_price || props.comp?.price || details.value?.zestimate
 })
 const displayPriceLabel = computed(() => {
@@ -498,6 +506,7 @@ const displayPriceLabel = computed(() => {
     const when = details.value?.last_sale?.date
     return when ? __('Sold · {0}', [dateOnly(when)]) : __('Sold')
   }
+  if (state.value === 'for_rent') return __('Monthly rent')
   if (details.value?.asking_price) return __('Current Zillow ask')
   if (state.value === 'pending') return __('Agreed price · under contract')
   // The subject is not on the market, so its headline number is whatever it last

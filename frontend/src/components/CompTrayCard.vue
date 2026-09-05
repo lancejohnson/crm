@@ -372,7 +372,8 @@ const isActive = computed(() => isActiveStatus(props.comp.status))
 const price = computed(() => {
   const p = Number(props.comp.price)
   if (!p) return '—'
-  return '$' + Math.round(p).toLocaleString()
+  const s = '$' + Math.round(p).toLocaleString()
+  return state.value === 'for_rent' ? s + '/mo' : s
 })
 
 const facts = computed(() => {

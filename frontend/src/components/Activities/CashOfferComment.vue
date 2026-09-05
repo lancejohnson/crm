@@ -10,12 +10,24 @@
         </span>
         <span v-else-if="sc.pct || isNovation">
           ({{ Math.round(sc.pct * 100) }}%<template
-            v-if="!isNovation && Number(sc.mult) === 2"
+            v-if="!isNovation && !isRental && Number(sc.mult) === 2"
           >
             · {{ __('2× repairs') }}</template>)
         </span>
       </div>
-      <template v-if="isList">
+      <template v-if="isRental">
+        <div>
+          {{ money(sc.arv) }} × {{ Math.round((sc.pct || 0) * 100) }}% =
+          {{ money(sc.after) }}
+        </div>
+        <div>− {{ __('repairs') }} {{ money(sc.repairs) }}</div>
+        <div>
+          − {{ __('fee') }} {{ money(sc.fee) }} =
+          <b class="scene-offer">{{ money(sc.offer) }}</b>
+          {{ __('MAO') }}
+        </div>
+      </template>
+      <template v-else-if="isList">
         <div>{{ money(sc.arv) }} {{ __('as-is') }}</div>
         <div>
           − {{ __('commission') }} {{ Math.round((sc.commission_pct || 0) * 100) }}%
@@ -279,7 +291,8 @@ const offer = computed(() => {
   const lead = raw.lead || props.lead || ''
   const scenarios = raw.scenarios || []
   const hinted = raw.kind || scenarios[0]?.kind
-  const kind = hinted === 'novation' || hinted === 'list' ? hinted : 'cash'
+  const kind =
+    hinted === 'novation' || hinted === 'list' || hinted === 'rental' ? hinted : 'cash'
   return {
     lead,
     kind,
@@ -292,9 +305,11 @@ const offer = computed(() => {
 
 const isNovation = computed(() => offer.value.kind === 'novation')
 const isList = computed(() => offer.value.kind === 'list')
+const isRental = computed(() => offer.value.kind === 'rental')
 const kindTitle = computed(() => {
   if (isNovation.value) return __('Novation offer')
   if (isList.value) return __('List it')
+  if (isRental.value) return __('Rental MAO')
   return __('Cash offer')
 })
 function listCutPct(sc) {

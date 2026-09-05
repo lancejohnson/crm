@@ -865,10 +865,15 @@ duplicating. Work substantial features in a worktree of your own.
       old calc names itself, and typing 30 into "Other…" IS Kitchen & baths.
       **`mult` IS stored**, because it genuinely cannot be derived: a 70% column
       does not imply a single deduction once the percentage is editable.
-    - **Cash, novation, or list-it**, cash by default. Three independent notebooks — switching
+    - **Cash, novation, list-it, or rental**, cash by default. Independent notebooks — switching
       does not rewrite the other kind's numbers or its comps, and a save writes
-      only the kind on screen. Novation and list-it start empty and only take pins
-      picked while that kind is on; cash still follows the map until edited. The
+      only the kind on screen. Novation, list-it and rental start empty and only take pins
+      picked while that kind is on; cash still follows the sale map until edited.
+      A **For sale / Rentals** map toggle flips the inventory; cash/novation/list-it
+      default the map to for-sale/sold, rental defaults it to Zillow `ForRent`
+      (`inventory=rentals`, names `zillow-rent::{zpid}`, never prewarmed, never
+      mixed into the sale circle or BatchData). Rental calc is **MAO = MIR × 80%
+      − repairs − fee**. Teal pills, `$1,450` not `$1k`. The
       novation 10% has a hover `?` (6% Realtors / 2% closing / 2% minor repairs). Novation is **Current value − 10% − fee ($40k
       default)**; no repairs, because we list the house as-is. **List it** is
       **as-is − 6% commission − 2% closing − 2% concessions** — no fee, no repairs;

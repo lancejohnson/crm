@@ -41,6 +41,14 @@
         >
           {{ __('List it') }}
         </button>
+        <button
+          type="button"
+          :class="{ on: kind === 'rental' }"
+          :title="__('MIR × 80% − repairs − fee')"
+          @click="setKind('rental')"
+        >
+          {{ __('Rental') }}
+        </button>
       </div>
       <span class="head-r">
         <button
@@ -138,7 +146,7 @@
       </template>
       <template v-else>
       <span class="lab">
-        {{ kind === 'novation' ? __('− %') : __('% of ARV') }}
+        {{ pctLabel }}
         <button
           v-if="kind === 'novation'"
           type="button"
@@ -184,7 +192,7 @@
            "Other…" keeps the raw $/sf field one click away — the preset is a
            shortcut, never a cage. Novation lists the house as-is, so none of
            this applies. -->
-      <template v-if="kind === 'cash'">
+      <template v-if="kind === 'cash' || kind === 'rental'">
       <span class="lab">{{ __('Condition') }}</span>
       <div v-for="col in visible" :key="'rep' + col" class="rep">
         <template v-if="isCustom(col)">
@@ -263,6 +271,7 @@
            rep to maintain one. Shown ONLY at 2×, i.e. only when the deduction
            differs from the repairs row above it and the column would otherwise
            stop adding up. -->
+      <template v-if="kind === 'cash'">
       <span class="lab">{{ __('Wholesale') }}</span>
       <span v-for="col in visible" :key="'ws' + col" class="out annot">
         <i
@@ -271,6 +280,7 @@
         >−{{ money(run(col).rehab) }}</i>
         {{ s[col].arv ? money(run(col).wholesale) : '—' }}
       </span>
+      </template>
       </template>
 
       <template v-if="kind !== 'list'">
@@ -286,7 +296,7 @@
       />
       </template>
 
-      <span class="lab offer">{{ kind === 'list' ? __('Takeaway') : __('Offer') }}</span>
+      <span class="lab offer">{{ offerLabel }}</span>
       <label
         v-for="col in visible"
         :key="'offer' + col"
@@ -400,7 +410,7 @@
 
 <script setup>
 /**
- * Offer calculator. Cash, novation, or list-it — cash by default, one kind at a time.
+ * Offer calculator. Cash, novation, list-it, or rental — cash by default, one kind at a time.
  *
  * Cash has two formulas, because the desk uses both:
  *   2× repairs  ARV × 90% − 2×repairs − fee   (default; what OfferRail runs)
@@ -416,7 +426,11 @@
  * repairs: it is what the seller would take home if they listed themselves.
  * The three rates stay editable; the dollars and the takeaway are derived.
  *
- * The three kinds are separate notebooks: switching does not rewrite the
+ * Rental is MAO = MIR × 80% − repairs − fee (1× repairs, fee $25k default).
+ * Switching to it tells the map to show ForRent listings; the other kinds
+ * stay on for-sale/sold. MIR is not filled from rental pin rents.
+ *
+ * The kinds are separate notebooks: switching does not rewrite the
  * other kind's numbers or its comps. Each kind soft-fills its value from the
  * average of ITS comps table (same suggested-ARV the cash column has always
  * used), and every figure in the column is editable — derived rows back-solve.
@@ -441,9 +455,13 @@
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { call, toast } from 'frappe-ui'
-import { streetAddress } from '@/utils/comps'
+import { isRentalComp, streetAddress } from '@/utils/comps'
 
-const emit = defineEmits(['remove', 'open', 'saved'])
+function isRentalRow(c) {
+  return isRentalComp(c)
+}
+
+const emit = defineEmits(['remove', 'open', 'saved', 'kind'])
 
 const props = defineProps({
   lead: { type: String, required: true },
@@ -499,8 +517,10 @@ const TIERS = [
 // the control reads as a named condition rather than an unnamed number.
 const DEFAULT_PSF = 30
 const DEFAULT_FEE = 25000
+const DEFAULT_RENTAL_REPAIRS = 10000
 const DEFAULT_NOVATION_FEE = 40000
 const DEFAULT_NOVATION_PCT = 0.1
+const DEFAULT_RENTAL_PCT = 0.8
 const DEFAULT_COMMISSION_PCT = 0.06
 const DEFAULT_CLOSING_PCT = 0.02
 const DEFAULT_CONCESSIONS_PCT = 0.02
@@ -533,7 +553,7 @@ const LIST_CUTS = [
   },
 ]
 function asKind(k) {
-  return k === 'novation' || k === 'list' ? k : 'cash'
+  return k === 'novation' || k === 'list' || k === 'rental' ? k : 'cash'
 }
 
 function listRates() {
@@ -565,6 +585,16 @@ function fresh(k, f) {
       ...listRates(),
     }
   }
+  if (k === 'rental') {
+    return {
+      arv: 0,
+      pct: DEFAULT_RENTAL_PCT,
+      mult: 1,
+      rehabPsf: DEFAULT_PSF,
+      fee: DEFAULT_FEE,
+      ...listRates(),
+    }
+  }
   const g = f || FORMULAS[0]
   return {
     arv: 0,
@@ -581,8 +611,8 @@ function emptyBook(k) {
     s: [fresh(k), fresh(k)],
     cols: 1,
     notes: '',
-    // Cash follows the map until the rep edits the table. Novation and list-it
-    // start empty — switching kinds must not copy the other notebook's comps.
+    // Cash follows the sale map until the rep edits the table. The other
+    // kinds start empty — switching must not copy the other notebook's comps.
     comps: k === 'cash' ? null : [],
   }
 }
@@ -592,11 +622,23 @@ const books = reactive({
   cash: emptyBook('cash'),
   novation: emptyBook('novation'),
   list: emptyBook('list'),
+  rental: emptyBook('rental'),
 })
 const valueLabel = computed(() => {
   if (kind.value === 'novation') return __('Current value')
   if (kind.value === 'list') return __('As-is')
+  if (kind.value === 'rental') return __('Move-in ready')
   return __('ARV')
+})
+const pctLabel = computed(() => {
+  if (kind.value === 'novation') return __('− %')
+  if (kind.value === 'rental') return __('% of MIR')
+  return __('% of ARV')
+})
+const offerLabel = computed(() => {
+  if (kind.value === 'list') return __('Takeaway')
+  if (kind.value === 'rental') return __('MAO')
+  return __('Offer')
 })
 // Template reads these; script uses S() so a kind switch cannot point at a
 // stale array. Comps live on the book — cash and novation keep their own.
@@ -659,8 +701,11 @@ function removeComp(name) {
 
 const tableComps = computed(() => {
   const own = books[kind.value].comps
-  // Cash may still follow the map (null). Novation never does.
-  if (own == null) return kind.value === 'cash' ? props.comps || [] : []
+  // Cash may still follow the sale map (null). Rentals never ride along.
+  if (own == null) {
+    if (kind.value !== 'cash') return []
+    return (props.comps || []).filter((c) => !isRentalRow(c))
+  }
   return own
 })
 
@@ -681,9 +726,10 @@ function readRate(row, camel, snake, fallback) {
 function applyScene(k, i, row) {
   const base = fresh(k)
   const blank = !row || !Object.keys(row).length
+  const oldRentCap = k === 'rental' && (row.annual != null || Number(row.pct) > 0 && Number(row.pct) < 0.5)
   Object.assign(books[k].s[i], base, {
-    arv: Number(row.arv) || 0,
-    pct: Number(row.pct) || base.pct,
+    arv: oldRentCap ? 0 : Number(row.arv) || 0,
+    pct: oldRentCap ? base.pct : Number(row.pct) || base.pct,
     rehabPsf: Number(row.rehabPsf ?? row.rehab_psf) || DEFAULT_PSF,
     fee: Number(row.fee) || base.fee,
     // A snapshot written before the toggle existed carries no `mult`, and its
@@ -720,6 +766,7 @@ function resetBooks() {
   books.cash = emptyBook('cash')
   books.novation = emptyBook('novation')
   books.list = emptyBook('list')
+  books.rental = emptyBook('rental')
   kind.value = 'cash'
   menuFor.value = -1
   custom[0] = false
@@ -746,10 +793,11 @@ function loadSaved() {
     } catch {
       stored = null
     }
-    if (stored?.cash || stored?.novation || stored?.list) {
+    if (stored?.cash || stored?.novation || stored?.list || stored?.rental) {
       loadBook('cash', stored.cash)
       loadBook('novation', stored.novation)
       loadBook('list', stored.list)
+      loadBook('rental', stored.rental)
       kind.value = asKind(stored.kind)
       // An earlier build copied the cash/map list onto novation at switch.
       // If the two lists are the same names, novation never got its own picks.
@@ -810,6 +858,12 @@ function persist() {
           notes: books.list.notes,
           comps: books.list.comps,
         },
+        rental: {
+          s: books.rental.s,
+          cols: books.rental.cols,
+          notes: books.rental.notes,
+          comps: books.rental.comps,
+        },
       }),
     )
   } catch {
@@ -826,7 +880,8 @@ watch(
   (list) => {
     const added = (list || []).filter((c) => {
       const key = compKey(c)
-      return key && !seenMap.has(key)
+      if (!key || seenMap.has(key)) return false
+      return kind.value === 'rental' ? isRentalRow(c) : !isRentalRow(c)
     })
     rememberMap(list)
     if (hydrating) return
@@ -854,7 +909,9 @@ function setKind(next) {
   menuFor.value = -1
   custom[0] = false
   custom[1] = false
+  emit('kind', next)
 }
+watch(kind, (k) => emit('kind', k), { immediate: true })
 
 const sqft = computed(() => Number(props.subject?.sqft) || 0)
 
@@ -945,7 +1002,8 @@ function run(col) {
   }
   const after = Math.round(x.arv * x.pct)
   const repairs = Math.round((Number(x.rehabPsf) || 0) * sqft.value)
-  const rehab = repairs * multOf(col)
+  // Rental MAO is 1× repairs. Cash still honors the formula toggle.
+  const rehab = repairs * (kind.value === 'rental' ? 1 : multOf(col))
   const wholesale = after - rehab
   return { after, repairs, rehab, wholesale, offer: wholesale - x.fee }
 }
@@ -982,17 +1040,22 @@ const usable = computed(() =>
 const avgPsf = computed(() => {
   if (!usable.value.length) return 0
   const sum = usable.value.reduce((a, c) => a + Number(c.price) / Number(c.square_footage), 0)
-  return Math.round(sum / usable.value.length)
+  const avg = sum / usable.value.length
+  return Math.round(avg)
 })
-const suggestedArv = computed(() =>
-  avgPsf.value && sqft.value ? Math.round((avgPsf.value * sqft.value) / 1000) * 1000 : 0,
-)
+const suggestedArv = computed(() => {
+  // Rental pins are monthly rent — never a MIR. Borrow cash ARV if they already
+  // priced it; otherwise leave MIR blank.
+  if (kind.value === 'rental') return Number(books.cash.s[0]?.arv) || 0
+  if (!avgPsf.value || !sqft.value) return 0
+  return Math.round((avgPsf.value * sqft.value) / 1000) * 1000
+})
 const arvHint = computed(() => (suggestedArv.value ? money(suggestedArv.value) : ''))
 
 // Soft-fill: write the comps-table average into an empty (or still-suggested)
 // value so Current value / ARV starts from the same number the table is
 // pointing at. Per-kind, so editing cash cannot move novation's value.
-const lastSoft = { cash: 0, novation: 0, list: 0 }
+const lastSoft = { cash: 0, novation: 0, list: 0, rental: 0 }
 function applySoft(k) {
   const v = suggestedArv.value
   if (!v) return
@@ -1004,6 +1067,30 @@ function applySoft(k) {
 }
 watch(suggestedArv, () => applySoft(kind.value))
 watch(kind, (k) => applySoft(k))
+
+// Rental defaults the repair BILL to $10k, not a $/sf tier. Keep that total
+// while sqft is still unknown or still the seeded value; a picked tier or a
+// typed bill is a human choice and is left alone.
+const lastRentalPsf = { v: 0 }
+function applyRentalRepairs() {
+  if (!sqft.value) return
+  const psf = DEFAULT_RENTAL_REPAIRS / sqft.value
+  for (const i of [0, 1]) {
+    const col = books.rental.s[i]
+    if (
+      !col.rehabPsf ||
+      col.rehabPsf === lastRentalPsf.v ||
+      (lastRentalPsf.v === 0 && col.rehabPsf === DEFAULT_PSF)
+    ) {
+      col.rehabPsf = psf
+    }
+  }
+  lastRentalPsf.v = psf
+}
+watch(sqft, applyRentalRepairs)
+watch(kind, (k) => {
+  if (k === 'rental') applyRentalRepairs()
+})
 
 const subjectRow = computed(() => {
   const s = props.subject
@@ -1035,12 +1122,21 @@ const rows = computed(() =>
       date: fmtDate(c.removed_date || c.listed_date),
       mi: c.distance_mi != null ? Number(c.distance_mi).toFixed(2) : '—',
       sqft: sf ? sf.toLocaleString() : '—',
-      price: price ? money(price) : '—',
+      price: price
+        ? kind.value === 'rental' || isRentalRow(c)
+          ? money(price) + '/mo'
+          : money(price)
+        : '—',
       psf: psf ? money(psf) : '—',
       onThis: psf && sqft.value ? money(Math.round(psf * sqft.value)) : '—',
       // The rep's condition tag rides with the status — "Sold · Full gut" is
       // exactly the context that explains an outlier $/sf in this table.
-      status: (active ? __('Listed') : __('Sold')) + (c.comp_type ? ` · ${c.comp_type}` : ''),
+      status:
+        (kind.value === 'rental' || isRentalRow(c)
+          ? __('For rent')
+          : active
+            ? __('Listed')
+            : __('Sold')) + (c.comp_type ? ` · ${c.comp_type}` : ''),
     }
   }),
 )
@@ -1074,7 +1170,13 @@ function fmtDate(v) {
 function setPct(col, e) {
   const n = parseMoney(e.target.value)
   const fallback =
-    kind.value === 'novation' ? DEFAULT_NOVATION_PCT : col ? 0.65 : 0.7
+    kind.value === 'novation'
+      ? DEFAULT_NOVATION_PCT
+      : kind.value === 'rental'
+        ? DEFAULT_RENTAL_PCT
+        : col
+          ? 0.65
+          : 0.7
   S()[col].pct = n / 100 || fallback
 }
 function setRate(col, key, e) {
@@ -1192,8 +1294,8 @@ async function save() {
           } else {
             row.pct = x.pct
             row.fee = x.fee
-            if (kind.value === 'cash') {
-              row.mult = multOf(i)
+            if (kind.value === 'cash' || kind.value === 'rental') {
+              row.mult = kind.value === 'rental' ? 1 : multOf(i)
               row.rehabPsf = x.rehabPsf
             }
           }
@@ -1588,7 +1690,7 @@ input.offer.bad {
 }
 .kind button {
   flex: none;
-  padding: 0 8px;
+  padding: 0 6px;
 }
 .cut {
   display: flex;

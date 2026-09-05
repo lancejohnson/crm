@@ -656,6 +656,8 @@ def _formula_label(sc: dict) -> str:
 		return f"Novation{pct_s}"
 	if kind == "list":
 		return "List it"
+	if kind == "rental":
+		return f"Rental MAO{pct_s}"
 	mult = 2 if int(_int_or_none(sc.get("mult")) or 1) == 2 else 1
 	name = "2× repairs" if mult == 2 else "Classic"
 	return f"{name}{pct_s}"
@@ -671,7 +673,7 @@ def _offer_calcs(slot: dict) -> list:
 		if not isinstance(sc, dict):
 			continue
 		kind = sc.get("kind") or off.get("kind") or "cash"
-		if kind not in ("novation", "list"):
+		if kind not in ("novation", "list", "rental"):
 			kind = "cash"
 		row = {
 			"kind": kind,
@@ -1754,6 +1756,7 @@ def get_comps(
 	filters=None,
 	auto: int | str = 0,
 	include_hidden: int | str = 1,
+	inventory=None,
 ) -> dict:
 	"""The real comps map for this property, with THIS run's hides/picks."""
 	_need()
@@ -1781,6 +1784,7 @@ def get_comps(
 		auto=auto,
 		include_hidden=include_hidden,
 		state={"hidden": slot.get("hidden") or [], "selected": slot.get("selected") or []},
+		inventory=inventory,
 	)
 	data["practice"] = True
 	data["practice_locked"] = (not mine) or att.status != "In Progress"

@@ -132,7 +132,7 @@ const isCashOffer = computed(() => {
   const html = props.activity.content || ''
   return (
     /data-cash-offer=/.test(html) ||
-    /<b>(Cash offer|Novation offer|List it)<\/b>/i.test(html)
+    /<b>(Cash offer|Novation offer|List it|Rental calc|Rental MAO)<\/b>/i.test(html)
   )
 })
 

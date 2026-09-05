@@ -34,6 +34,9 @@ export const COMP_COLORS = {
   // (the pill, the tray badge, the pin popup and the detail header), rather than
   // leaving colour to say it alone.
   pending: { bg: '#7c3aed', ink: '#ffffff', border: '#5b21b6', onLight: '#6d28d9' },
+  // For-rent listings. Teal, far from sale red / sold yellow / pending violet
+  // in both hue and lightness. Live listings, so they never recency-fade.
+  rent: { bg: '#0f766e', ink: '#ffffff', border: '#115e59', onLight: '#0f766e' },
 }
 
 /** True when a comp is still listed (an ASK), rather than off-market (a sale). */
@@ -44,8 +47,8 @@ export function isActiveStatus(status) {
 }
 
 /**
- * The four states a comp can be in, resolved once so no surface has to re-derive
- * it: `for_sale`, `pending`, `sold`, `off_market`.
+ * The states a comp can be in, resolved once so no surface has to re-derive
+ * it: `for_sale`, `pending`, `sold`, `off_market`, `for_rent`.
  *
  * The server sends `listing_state` on every row now. The fallback exists because
  * the frontend and backend deploy separately — for the length of a deploy window
@@ -59,8 +62,16 @@ export function isActiveStatus(status) {
 export function compState(comp) {
   const declared = String(comp?.listing_state || '')
   if (declared) return declared
+  if (String(comp?.name || '').startsWith('zillow-rent::')) return 'for_rent'
   if (isActiveStatus(comp?.status)) return 'for_sale'
   return comp?.source === 'zillow' || comp?.zillow_refreshed ? 'sold' : 'off_market'
+}
+
+export function isRentalComp(comp) {
+  return (
+    compState(comp) === 'for_rent' ||
+    String(comp?.name || '').startsWith('zillow-rent::')
+  )
 }
 
 /** True when a comp is spoken for but not closed — an agreed price, still live. */
@@ -72,6 +83,7 @@ export function isPending(comp) {
 export function compStateLabel(state) {
   if (state === 'pending') return __('Pending')
   if (state === 'for_sale') return __('For sale')
+  if (state === 'for_rent') return __('For rent')
   if (state === 'sold') return __('Sold')
   return __('Off-market')
 }
@@ -84,6 +96,7 @@ export function compColor(statusOrComp) {
     statusOrComp && typeof statusOrComp === 'object' ? statusOrComp : { status: statusOrComp }
   const state = compState(comp)
   if (state === 'pending') return COMP_COLORS.pending
+  if (state === 'for_rent') return COMP_COLORS.rent
   return state === 'for_sale' ? COMP_COLORS.active : COMP_COLORS.sold
 }
 
