@@ -11,7 +11,10 @@ MAO = MIR × 80% − repairs − fee. They must not write the same field or
 a re-price on one surface silently rewrites the other.
 
 The numbers are recomputed here rather than trusted from the client, so the
-timeline card and the calculator cannot disagree about what an offer was. A
+timeline card and the calculator cannot disagree about what an offer was.
+A cash save also upserts one FCRM Note on the lead titled with the wholesale
+figure (after − rehab, before fee) so it is on the Notes tab without opening
+comps. Practice writes stay on the attempt. A
 scenario saved before the cash-formula toggle existed carries no `mult` and
 is read as 1 — which is what its numbers meant when they were written. A
 scenario with no `kind` is cash, for the same reason.
@@ -257,6 +260,57 @@ def _scene_payload(sc):
 	}
 
 
+def _wholesale_note(scenes):
+	"""Title + HTML for the lead Notes tab. None when the calc has no wholesale."""
+	rows = [
+		sc for sc in scenes if sc.get("kind") == "cash" and sc.get("wholesale") is not None
+	]
+	if not rows:
+		return None, None
+	amounts = [_money(sc["wholesale"]) for sc in rows]
+	title = _("Wholesale {0}").format(" · ".join(amounts))
+	parts = []
+	for i, sc in enumerate(rows):
+		label = _money(sc["wholesale"])
+		if len(rows) > 1:
+			label = _("Scenario {0}: {1}").format(i + 1, label)
+		parts.append("<div><b>{}</b></div>".format(escape_html(label)))
+	return title, "".join(parts)
+
+
+def _upsert_wholesale_note(lead, scenes):
+	"""Keep one Wholesale note per lead so re-saves do not stack."""
+	title, content = _wholesale_note(scenes)
+	if not title:
+		return
+	existing = frappe.get_all(
+		"FCRM Note",
+		filters={
+			"reference_doctype": "CRM Lead",
+			"reference_docname": lead,
+			"title": ["like", "Wholesale %"],
+		},
+		pluck="name",
+		order_by="modified desc",
+		limit=1,
+	)
+	if existing:
+		doc = frappe.get_doc("FCRM Note", existing[0])
+		doc.title = title
+		doc.content = content
+		doc.save(ignore_permissions=True)
+		return
+	frappe.get_doc(
+		{
+			"doctype": "FCRM Note",
+			"title": title,
+			"content": content,
+			"reference_doctype": "CRM Lead",
+			"reference_docname": lead,
+		}
+	).insert(ignore_permissions=True)
+
+
 def _payload(lead, scenes, comps, sqft, notes=""):
 	kind = scenes[0]["kind"] if scenes else "cash"
 	return {
@@ -457,4 +511,5 @@ def save_cash_offer(lead, scenarios=None, comps=None, subject_sqft=None, notes=N
 			"comment_by": frappe.session.user,
 		}
 	).insert(ignore_permissions=True)
+	_upsert_wholesale_note(lead, scenes)
 	return {"ok": True, "comps": len(used), "scenarios": len(scenes)}
