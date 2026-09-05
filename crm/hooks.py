@@ -320,6 +320,10 @@ doc_events = {
 		# controller rebuilds lead_name/title from the name parts in validate().
 		"before_validate": ["crm.api.name_format.normalize_lead_names"],
 		"after_insert": [
+			# If before_insert took the owner from a LeadMarket reservation, record
+			# which lead it produced so the desk can confirm the purchase landed
+			# where it was pointed. See crm/api/lead_reservation.py.
+			"crm.api.lead_reservation.stamp_matched_lead",
 			"crm.api.sequence_drain.enqueue_for_lead",
 			# A new never-called lead may owe work immediately; add its card after commit.
 			"crm.api.today_board.enqueue_today_sync",
