@@ -227,6 +227,60 @@ def _resolve_template_ids(
 	return template_ids, title
 
 
+def _binding_agreement_date(lead: str) -> str:
+	"""The date the lead's Purchase Agreement went fully signed, as YYYY-MM-DD.
+
+	That is the PSA's effective date ("day 0" in the contract parser's terms) and
+	it is what the Amendment's "Binding Agreement Date of ____" refers to. Newest
+	completed non-archived Purchase Agreement row wins; DocuSeal's `completed_at`
+	for it is the authoritative stamp, with the row's `last_event_at` as the
+	fallback (that column moves on any later webhook event, e.g. a post-signing
+	view, so it is second choice). Empty string when the lead has no signed PSA —
+	the rep then fills the blank as before. Never raises: a prefill must not be
+	why an amendment cannot be drafted.
+	"""
+	try:
+		filters = {"lead": lead, "template_title": ["like", "Purchase Agreement%"]}
+		filters.update(_live_filter())
+		rows = frappe.get_all(
+			AGREEMENT_DOCTYPE, filters=filters,
+			fields=["document_id", "agreement_status", "signed_count", "total_signers", "last_event_at"],
+			order_by="creation desc",
+		)
+		signed = next((r for r in rows if _is_completed(r)), None)
+		if not signed:
+			return ""
+		stamp = None
+		if signed.get("document_id"):
+			try:
+				resp = requests.get(
+					f"{DOCUSEAL_API}/submissions/{signed['document_id']}",
+					headers={"X-Auth-Token": _docuseal_token()}, timeout=10,
+				)
+				if resp.ok:
+					completed = (resp.json() or {}).get("completed_at")
+					if completed:
+						stamp = frappe.utils.convert_utc_to_system_timezone(
+							frappe.utils.get_datetime(completed)
+						)
+			except Exception:
+				stamp = None
+		stamp = stamp or signed.get("last_event_at")
+		return frappe.utils.getdate(stamp).isoformat() if stamp else ""
+	except Exception:
+		frappe.log_error(title="amendment: binding agreement date lookup failed")
+		return ""
+
+
+def _whole_dollars(value) -> str:
+	"""250000.0 -> '250,000' for a '$____' blank; '' when unset."""
+	try:
+		n = float(value or 0)
+	except (TypeError, ValueError):
+		return ""
+	return f"{int(round(n)):,}" if n > 0 else ""
+
+
 def _placeholder_email(given: str, lead: str, idx: int) -> str:
 	"""Signers need an email to complete; nobody is emailed (send_email:false)."""
 	given = (given or "").strip()
@@ -304,13 +358,16 @@ def create_docuseal_agreement(
 	# boilerplate terms (all still editable by the buyer on the signing page).
 	# A termination notice pre-fills today's notice date, owner, phone, property,
 	# and current user's name; contract date and title remain buyer-entered.
-	# The Amendment only carries name/address (+ the rep's printed name, same
-	# `Signer Name` field as the PSA signature page since the Sep-07 rebuild); the
-	# amended price / closing date / other, their checkboxes and the Binding
-	# Agreement Date are the whole point of the document — buyer fills them.
-	# Same for the Cancellation: the contract date, escrow agent and earnest-money
-	# disbursement are per-deal facts the buyer fills on the signing page.
-	# (`Signer Name` is not on the Cancellation template; DocuSeal ignores it.)
+	# The Amendment (Sep-07 rebuild) is prefilled as a TEMPLATE off the lead:
+	# the Binding Agreement Date is the date the PSA went fully signed, and the
+	# amended price / closing date start at the lead's CURRENT terms so the rep
+	# edits one number rather than typing the deal from memory. The checkboxes
+	# stay unticked — which term is actually being amended is the rep's call, and
+	# the "Other" line is free text. `Signer Name` is the PSA signature page's
+	# field name, so the rep's printed name prefills the same way.
+	# The Cancellation shares the branch: the contract date, escrow agent and
+	# earnest-money disbursement are per-deal facts the buyer fills on the signing
+	# page, and the amendment-only keys are ignored by DocuSeal on that template.
 	if want_termination:
 		buyer_values = _clean({
 			"Notice Date": frappe.utils.nowdate(),
@@ -325,6 +382,13 @@ def create_docuseal_agreement(
 			"Property Address": addr,
 			"Signer Name": buyer_name,
 		})
+		if want_amendment:
+			closing = leaddoc.get("closing_date")
+			buyer_values.update(_clean({
+				"Binding Agreement Date": _binding_agreement_date(lead),
+				"Amended Purchase Price": _whole_dollars(leaddoc.get("acq_price")),
+				"Amended Closing Date": frappe.utils.getdate(closing).isoformat() if closing else "",
+			}))
 	else:
 		# The live Purchase Agreement template carries: Agreement Date, Seller
 		# Name(s), Property Address, Sale Price, Due Diligence Days, Earnest Money,

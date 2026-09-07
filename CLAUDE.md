@@ -3394,7 +3394,13 @@ duplicating. Work substantial features in a worktree of your own.
       **Other** (`Amend Purchase Price` / `Amend Closing Date` / `Amend Other`
       checkbox fields + `Other Amendments` text); and the Buyer block gained
       **Printed name / Title** with the PSA's field names (`Signer Name` req,
-      `Title` opt) so the CRM prefills the rep's name. The PDF is now DRAWN by
+      `Title` opt) so the CRM prefills the rep's name. **Prefilled as a
+      template off the lead** (Lance, same day): Binding Agreement Date =
+      the date the lead's newest completed PSA went fully signed (DocuSeal
+      `completed_at`, fallback `last_event_at`; blank when no signed PSA),
+      Amended Purchase Price = `acq_price` as `250,000`, Amended Closing Date
+      = `closing_date` — i.e. the CURRENT terms, so the rep edits one number;
+      checkboxes stay unticked. `_binding_agreement_date` never raises. The PDF is now DRAWN by
       `tmp/build_amendment_templates_v2.py` (PyMuPDF, no DOCX) so the blank
       bboxes are known at draw time; `--pdf-only` writes the PDFs + a red-box
       field preview PNG. Old 4996712/4996713 left unarchived (in-flight
