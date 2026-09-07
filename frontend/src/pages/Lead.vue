@@ -481,10 +481,10 @@ import {
   parseColor,
 } from '@/utils'
 import { getView } from '@/utils/view'
-import { callHref, formatPhone } from '@/utils/phoneFormat'
+import { formatPhone } from '@/utils/phoneFormat'
 import { listLeadPhones, primaryLeadPhone } from '@/utils/leadPhones'
 import { mapsUrl, zillowUrl } from '@/utils/propertyLinks'
-import { myQuoNumber } from '@/composables/quoSender'
+import { clickToCall } from '@/composables/clickToCall'
 import { getSettings } from '@/stores/settings'
 import { globalStore } from '@/stores/global'
 import { statusesStore } from '@/stores/statuses'
@@ -1076,13 +1076,7 @@ function onPhonesSaved() {
 }
 
 function dialNumber(number) {
-  // Desktop: tel: (the Quo desktop app is the registered handler). Mobile:
-  // an OpenPhone deep link so the call places through the user's Quo number.
-  const href = callHref(number, myQuoNumber())
-  if (!href) return
-  // Navigate to the tel:/openphone: URL — the browser hands it to the OS handler
-  // (Quo) without unloading the page. More reliable than a synthetic <a> click.
-  window.location.href = href
+  clickToCall(number, { lead: leadId, name: doc.lead_name || doc.first_name })
 }
 
 function openEmailBox() {

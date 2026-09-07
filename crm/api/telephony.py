@@ -772,10 +772,30 @@ def send_text(to: str, text: str, line: str = None):
 
 
 @frappe.whitelist()
+def hold(call_log: str, held: int = 1):
+	"""Hold or resume the EXTERNAL party in the conference (not the rep)."""
+	from crm.integrations.telnyx import api as telnyx_api
+
+	state = _by_call_log(call_log)
+	if not state or not state.get("conference_id"):
+		frappe.throw(_("That call is not in progress."))
+	peer = desk.external_leg(state)
+	if not peer:
+		frappe.throw(_("There is no other party to hold."))
+	action, body = desk.hold_payload([peer], held=bool(int(held)))
+	telnyx_api.conference_command(state["conference_id"], action, body)
+	state["held"] = bool(int(held))
+	_save(state)
+	publish_call(state)
+	return {"ok": True, "held": state["held"]}
+
+
+
+
+@frappe.whitelist()
 def decline(call_log: str = None, desk_id: str = None):
 	"""Reject an inbound ring. Same hangup on our unanswered leg."""
 	return hangup(call_log=call_log, desk_id=desk_id)
-
 
 @frappe.whitelist()
 def hangup(call_log: str = None, desk_id: str = None):

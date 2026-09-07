@@ -31,7 +31,8 @@ import { mobileSidebarOpened } from '@/composables/settings'
 import TalkNav from '@/components/Talk/TalkNav.vue'
 import TalkKeys from '@/components/Talk/TalkKeys.vue'
 import PhoneDock from '@/components/Telephony/PhoneDock.vue'
-import { ring } from '@/composables/phone'
+import { ring, dial, requestNotifyPermission, notifyLiveOne } from '@/composables/phone'
+import { globalStore } from '@/stores/global'
 
 const emit = defineEmits(['reserve'])
 const props = defineProps({ mobile: Boolean })
@@ -54,8 +55,16 @@ watch(mobileSidebarOpened, async (opened) => {
   mobileNavTarget.value = document.querySelector('.bg-surface-menu-bar') || null
 }, { immediate: true })
 
-onMounted(() => talk.bind($socket, { onIncoming: ring }))
-onBeforeUnmount(() => { talk.unbind($socket); emit('reserve', { bottom: 0, left: 0 }) })
+onMounted(() => {
+  requestNotifyPermission()
+  globalStore().setMakeCall((number) => dial(number))
+  talk.bind($socket, { onIncoming: ring, onLiveOne: notifyLiveOne })
+})
+onBeforeUnmount(() => {
+  talk.unbind($socket)
+  globalStore().setMakeCall(() => {})
+  emit('reserve', { bottom: 0, left: 0 })
+})
 </script>
 <style scoped>
 .next-banner { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 45; display: flex; align-items: center; gap: 12px; max-width: 720px; padding: 10px 14px; border-radius: 8px; background: #1f2a24; color: #e9f1ec; font-size: 12px; line-height: 1.5; box-shadow: 0 8px 24px #0003; }

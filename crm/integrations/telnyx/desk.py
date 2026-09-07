@@ -247,6 +247,20 @@ def tone_payload(rep_leg: str, audio_url: str | None = None, text: str | None = 
 	}
 
 
+def hold_payload(call_control_ids: list[str], held: bool = True) -> tuple[str, dict]:
+	"""(action, body) to hold or unhold specific conference legs.
+
+	Hold the EXTERNAL party so they hear hold treatment; the rep stays in the
+	conference. Empty ids would hold everyone — never do that from here.
+	"""
+	ids = [c for c in (call_control_ids or []) if c]
+	if not ids:
+		raise ValueError("hold needs at least one call_control_id")
+	return ("hold" if held else "unhold"), {"call_control_ids": ids}
+
+
+
+
 def record_payload() -> dict:
 	return {
 		"format": "mp3",

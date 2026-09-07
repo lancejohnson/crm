@@ -128,7 +128,15 @@ class PayloadTests(unittest.TestCase):
 		self.assertEqual(desk.update_mode_payload("s", "barge"), {"call_control_id": "s", "supervisor_role": "barge"})
 		self.assertEqual(desk.update_mode_payload("s", "whisper", "r")["whisper_call_control_ids"], ["r"])
 
-	def test_tone_is_rep_only(self):
+	def test_hold_is_peer_only(self):
+		action, body = desk.hold_payload(["peer1"], True)
+		self.assertEqual((action, body), ("hold", {"call_control_ids": ["peer1"]}))
+		action, body = desk.hold_payload(["peer1"], False)
+		self.assertEqual(action, "unhold")
+		with self.assertRaises(ValueError):
+			desk.hold_payload([])
+
+
 		action, body = desk.tone_payload("rep1", "https://x/tone.mp3")
 		self.assertEqual((action, body), ("play", {"audio_url": "https://x/tone.mp3", "call_control_ids": ["rep1"]}))
 		action, body = desk.tone_payload("rep1")
@@ -189,7 +197,7 @@ class StateStoreTests(unittest.TestCase):
 class EndpointGatingTests(unittest.TestCase):
 	def test_all_session_only(self):
 		for fn in (telephony.lines, telephony.dial, telephony.active_calls, telephony.join, telephony.set_mode,
-		           telephony.live_one, telephony.history, telephony.send_text, telephony.hangup,
+		           telephony.live_one, telephony.history, telephony.send_text, telephony.hangup, telephony.hold,
 		           telephony.get_phone_settings, telephony.save_phone_settings):
 			self.assertTrue(fn._whitelisted, fn.__name__)
 			self.assertFalse(fn._allow_guest, fn.__name__)

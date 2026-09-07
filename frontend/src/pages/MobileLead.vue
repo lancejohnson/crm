@@ -365,9 +365,9 @@ import InvestorLiftCard from '@/components/InvestorLiftCard.vue'
 import DispoBuyerBadges from '@/components/DispoBuyerBadges.vue'
 import { setupCustomizations, isTranslatable, ddExpiration, parseColor, openWebsite } from '@/utils'
 import { getView } from '@/utils/view'
-import { callHref, formatPhone } from '@/utils/phoneFormat'
+import { formatPhone } from '@/utils/phoneFormat'
 import { listLeadPhones, primaryLeadPhone } from '@/utils/leadPhones'
-import { myQuoNumber } from '@/composables/quoSender'
+import { clickToCall } from '@/composables/clickToCall'
 import { getSettings } from '@/stores/settings'
 import { globalStore } from '@/stores/global'
 import { statusesStore } from '@/stores/statuses'
@@ -732,9 +732,7 @@ function onPhonesSaved() {
 }
 
 function dialNumber(number) {
-  const href = callHref(number, myQuoNumber())
-  if (!href) return
-  window.location.href = href
+  clickToCall(number, { lead: leadId, name: doc.lead_name || doc.first_name })
 }
 
 function updateField(name, value) {

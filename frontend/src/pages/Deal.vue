@@ -385,8 +385,8 @@ import {
   copyToClipboard,
   isTranslatable,
 } from '@/utils'
-import { formatPhone, callHref } from '@/utils/phoneFormat'
-import { myQuoNumber } from '@/composables/quoSender'
+import { formatPhone } from '@/utils/phoneFormat'
+import { clickToCall } from '@/composables/clickToCall'
 import { getView } from '@/utils/view'
 import { getSettings } from '@/stores/settings'
 import { globalStore } from '@/stores/global'
@@ -789,13 +789,7 @@ function deleteDeal() {
 const activities = ref(null)
 
 function dialNumber(number) {
-  // Desktop: tel: (the Quo desktop app is the registered handler). Mobile:
-  // an OpenPhone deep link so the call places through the user's Quo number.
-  const href = callHref(number, myQuoNumber())
-  if (!href) return
-  // Navigate to the tel:/openphone: URL — the browser hands it to the OS handler
-  // (Quo) without unloading the page. More reliable than a synthetic <a> click.
-  window.location.href = href
+  clickToCall(number, { name: doc.organization || doc.name })
 }
 
 function dialPrimaryContact() {

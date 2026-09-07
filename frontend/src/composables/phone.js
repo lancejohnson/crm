@@ -104,10 +104,30 @@ export async function setMode(mode) {
   return true
 }
 
+function notify(title, body, tag) {
+  try {
+    if (typeof Notification === 'undefined' || document.hasFocus()) return
+    if (Notification.permission === 'granted') {
+      new Notification(title, { body, tag, silent: false })
+    } else if (Notification.permission === 'default') {
+      Notification.requestPermission()
+    }
+  } catch { /* permission API missing or denied */ }
+}
+export function requestNotifyPermission() {
+  try {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') Notification.requestPermission()
+  } catch { /* ignore */ }
+}
+export function notifyLiveOne(data) {
+  notify(__('Got a live one'), `${data?.rep || ''} · ${data?.lead_name || data?.lead || ''}`.trim(), 'crm-live-one')
+}
+
 /** Incoming ring from `crm_incoming`; the SDK leg rings separately. */
 export function ring(data) {
   if (onCall.value) return
   phone.incoming = data
+  notify(__('Incoming call'), data?.lead_name || data?.from || __('Unknown'), 'crm-incoming')
 }
 export async function answer() {
   if (!phone.incoming) return
@@ -125,7 +145,9 @@ export async function decline() {
 }
 
 export function hangup() {
+  const log = phone.callLog
   currentCall?.hangup()
+  if (log) call('crm.api.telephony.hangup', { call_log: log }).catch(() => {})
   reset()
 }
 export function toggleMute() {
@@ -133,10 +155,15 @@ export function toggleMute() {
   phone.muted = !phone.muted
   phone.muted ? currentCall.muteAudio() : currentCall.unmuteAudio()
 }
-export function toggleHold() {
-  if (!currentCall) return
-  phone.held = !phone.held
-  phone.held ? currentCall.hold() : currentCall.unhold()
+export async function toggleHold() {
+  if (!phone.callLog) return
+  const next = !phone.held
+  try {
+    await call('crm.api.telephony.hold', { call_log: phone.callLog, held: next ? 1 : 0 })
+    phone.held = next
+  } catch (e) {
+    toast.error(e?.messages?.[0] || __('Could not hold'))
+  }
 }
 export function dtmf(digit) {
   currentCall?.dtmf(String(digit))

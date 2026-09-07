@@ -1,13 +1,26 @@
 <template>
   <LayoutHeader><template #left-header><Breadcrumbs :items="[{ label: __('Settings') }, { label: __('Phone') }]" /></template></LayoutHeader>
-  <div v-if="!isManager()" class="mx-auto max-w-xl px-5 py-10">
-    <h1 class="text-lg font-semibold text-ink-gray-9">{{ __('Managers only') }}</h1>
-    <p class="mt-2 text-base text-ink-gray-6">{{ __('Phone numbers, access and recording are managed by a Sales Manager.') }}</p>
-  </div>
-  <div v-else class="phone-settings">
-    <nav :aria-label="__('Phone settings')"><h2>{{ __('Phone') }}</h2><button :class="{ selected: section === 'numbers' }" @click="section = 'numbers'">{{ __('Numbers & access') }}</button><button :class="{ selected: section === 'recording' }" @click="section = 'recording'">{{ __('Recording') }}</button></nav>
+  <div class="phone-settings">
+    <nav :aria-label="__('Phone settings')">
+      <h2>{{ __('Phone') }}</h2>
+      <button :class="{ selected: section === 'voicemail' }" @click="section = 'voicemail'">{{ __('Voicemail') }}</button>
+      <template v-if="isManager()">
+        <button :class="{ selected: section === 'numbers' }" @click="section = 'numbers'">{{ __('Numbers & access') }}</button>
+        <button :class="{ selected: section === 'recording' }" @click="section = 'recording'">{{ __('Recording') }}</button>
+      </template>
+    </nav>
     <main>
-      <template v-if="section === 'recording'">
+      <template v-if="section === 'voicemail'">
+        <h1>{{ __('Voicemail greeting') }}</h1>
+        <p class="description">{{ __('Spoken to anyone who reaches your voicemail. Required before you can place a Telnyx call — sellers ring this number back.') }}</p>
+        <FormControl v-model="greeting" type="textarea" :rows="4" :label="__('Greeting')" :placeholder="__('Hi, you’ve reached Groundwork. Please leave a message after the tone.')" />
+        <div class="mt-4 flex items-center gap-3">
+          <Button variant="solid" :disabled="greeting.trim().length < 10 || savingGreeting" @click="saveGreeting">{{ __('Save greeting') }}</Button>
+          <span v-if="greetingStatus.configured" class="text-xs text-ink-gray-5">{{ __('Configured') }}</span>
+          <span v-else class="text-xs text-ink-red-4">{{ __('Not set — outbound calls are blocked until you save one.') }}</span>
+        </div>
+      </template>
+      <template v-else-if="section === 'recording'">
         <h1>{{ __('Recording') }}</h1><p class="description">{{ __('A workspace default, with an explicit override for each line.') }}</p>
         <label class="setting-row"><span><b>{{ __('Record calls by default') }}</b><small>{{ __('Applies to lines set to “Use workspace default”.') }}</small></span><Switch :modelValue="!!settingsDoc.doc?.recording_default" @update:modelValue="saveSetting('recording_default', $event ? 1 : 0)" /></label>
         <label class="setting-row"><span><b>{{ __('Ring my cell as a fallback') }}</b><small>{{ __('If the browser does not answer, incoming calls also ring the rep’s mobile.') }}</small></span><Switch :modelValue="!!settingsDoc.doc?.ring_cell_fallback" @update:modelValue="saveSetting('ring_cell_fallback', $event ? 1 : 0)" /></label>
@@ -56,7 +69,23 @@ import { usersStore } from '@/stores/users'
 import { formatPhone } from '@/utils/phoneFormat'
 
 const { users, getUser, isManager } = usersStore()
-const section = ref('numbers')
+const section = ref('voicemail')
+const greeting = ref('')
+const greetingStatus = ref({ configured: false, greeting: '' })
+const savingGreeting = ref(false)
+call('crm.integrations.telnyx.api.voicemail_status').then((r) => {
+  greetingStatus.value = r || { configured: false }
+  greeting.value = r?.greeting || ''
+}).catch(() => {})
+async function saveGreeting() {
+  savingGreeting.value = true
+  try {
+    const r = await call('crm.integrations.telnyx.api.set_voicemail_greeting', { greeting: greeting.value.trim() })
+    greetingStatus.value = { configured: true, greeting: r?.greeting }
+    toast.success(__('Voicemail greeting saved'))
+  } catch (e) { toast.error(e?.messages?.[0] || __('Could not save greeting')) }
+  finally { savingGreeting.value = false }
+}
 const selected = ref(null)
 const lines = createListResource({
   doctype: 'CRM Phone Line', fields: ['name', 'number', 'label', 'owner', 'recording'], pageLength: 100, auto: true,
