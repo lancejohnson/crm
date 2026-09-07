@@ -28,6 +28,64 @@ duplicating. Work substantial features in a worktree of your own.
 
 ## Our changes vs upstream (keep this list current)
 
+- **Next workspace (Telnyx desk + Talk), backend** — staging-first; the
+  build contract is `docs/next-workspace-build.md`. Four pieces:
+  - **Gating** (`crm/api/workspace.py`): `get()` → `{version, allowed}`,
+    `set_version()`. `next` is offered to and accepted from site_config
+    `crm_next_users` only (default `[lance.johnson@…]`); a malformed key
+    degrades to that default, never to everyone. Stored as user default
+    `crm_workspace_version` (+ `defaults._clear_cache("__default")` after the
+    write — same stale-read trap as Lead Assignment). Classic is byte-identical.
+  - **Talk** (`crm/api/talk.py`; ops `setup_talk.py`: `CRM Channel` slug-named
+    with `members` child, `CRM Message` with UNIQUE `mm_post_id`, `CRM Channel
+    Read`; seeds `acquisitions`/`dispo`/`ops-bot`/`standup`(bot)). Membership is
+    the access model (public channel = no members listed = everyone). Unread is
+    one grouped pass (`unread_counts`, pure). Realtime `crm_talk` (site-wide,
+    after commit) / `crm_talk_read` (user) / `crm_presence`. Bot posts
+    (`post_as_bot`) carry `props.mirror=false` when the Mattermost DM already IS
+    the copy: the 5am standup lands in `#standup`, BatchData wallet alerts in
+    `#ops-bot`, both still DM'd. The live-one alert now ALSO writes a `CRM
+    Notification` (type **Live one** — `setup_notification_types.py` widens the
+    Select via Property Setter, no `bench migrate` here), a Talk DM rep→closer,
+    and publishes `crm_live_one` to the closer; Mattermost DM kept.
+  - **Mattermost two-way sync** (`crm/integrations/mattermost/`). Mattermost
+    stays source of truth during the transition; the sync dying loses nothing.
+    Outbound: `CRM Message` hooks enqueue `sync.mirror_message` after commit;
+    posts as the author via `mattermost_user_tokens` PAT, else the bot with a
+    `**Name:**` prefix; `props.crm_origin=1`; stores `mm_post_id`. Inbound:
+    `webhook.event` (allow_guest) verifies HMAC-SHA256 over the RAW body in
+    `X-Groundwork-Signature` with `mattermost_sync_secret`, **fails closed**
+    without it, constant-time compare. Loop guard = `props.crm_origin` OR a
+    known `mm_post_id` (a test caught the first cut comparing against the CRM
+    name). Unknown channel → auto-created from MM type (O/P→channel, D→dm);
+    users by email; unmapped author → bot + `author_label`. `sync.backfill`.
+    The forwarder lives in `Projects/Groundwork/mattermost/agent-listener`.
+  - **Telnyx desk** (`crm/api/telephony.py` write side + pure
+    `crm/integrations/telnyx/desk.py`; ops `setup_phone_lines.py`: `CRM Phone
+    Line` with `owner_user` — `owner` is a Frappe column — and members with
+    SEPARATE `view`/`use`/`ring`; `CRM Telephony Settings` Single). **Conference-
+    first**: `dial()` rings the REP first (softphone SIP URI from their
+    telephony credential, else their cell), the webhook creates `crm-<desk_id>`
+    on answer and dials the other party into it. Legs are told apart by
+    `client_state.kind` (rep/peer/caller/ring/supervisor); internal legs never
+    get a CRM Call Log — only the external one, still written by the webhook.
+    Inbound on a line with ring members: one ring leg per member (+cell when
+    `ring_cell_fallback`, off by default — carrier voicemail can win), first
+    answer wins, losers hung up, `crm_incoming` to members; nobody → existing
+    voicemail path. `join(call_log, monitor|whisper|barge)` rings the closer
+    with a supervisor leg; on answer `conferences/{id}/actions/join` with
+    `supervisor_role` (+`whisper_call_control_ids=[rep_leg]`), `beep_enabled:
+    never`, then `play`/`speak` scoped to `call_control_ids=[rep_leg]` — the
+    rep-only tone. Recording starts at bridge on the external leg when
+    `line.recording` resolves on (inherit → settings default). Transient call
+    state = Redis hash `crm:telnyx:desks` keyed by desk id (+ `..._by_call_log`);
+    the durable record is the Call Log. `history(number)` unions calls + texts
+    across providers by last-10. GOTCHA to verify on staging: dual-channel
+    recording on the EXTERNAL leg may invert `_save_transcript`'s A=rep mapping.
+  - Unit tests run without a bench: `python3 crm/tests/run_unit.py` (stubs
+    frappe via `crm/tests/frappe_shim.py`; files are `unit_test_*.py` so
+    bench's `test_*` discovery never loads them).
+
 - **Dev-only Phone Preview** — `/phone-preview` opens an actual CRM lead
   with `?phonePreview=1`: collapsed phone dock, bottom team bar, persistent
   live-one invitations, Listen/Whisper/Barge, history/text threads, incoming
