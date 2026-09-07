@@ -12,12 +12,20 @@ const routes = [
     path: '/phone-settings-preview',
     name: 'Phone Settings Preview',
     component: () => import('@/pages/PhoneSettingsPreview.vue'),
-  }, {
-    // D · Left nav comms mockup: a conversation is a page in the main area.
+  }] : []),
+  {
+    // Next workspace: a conversation (channel | dm | standup | live) is a page
+    // in the main area. pages/Talk.vue gates on workspaceStore.isNext and, in
+    // DEV only, falls back to the fictional TalkPreview mockup.
     path: '/talk/:kind/:id',
     name: 'Talk',
-    component: () => import('@/pages/TalkPreview.vue'),
-  }] : []),
+    component: () => import('@/pages/Talk.vue'),
+  },
+  {
+    path: '/settings/phone',
+    name: 'Phone Settings',
+    component: () => import('@/pages/PhoneSettings.vue'),
+  },
   {
     path: '/',
     name: 'Home',

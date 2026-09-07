@@ -11,7 +11,7 @@ import {
   talkKinds, talkSlug, talkRoute, resolveTalk, isTalkActive, STANDUP_ID,
 } from '../src/utils/commsPreview.js'
 import { newPhonePreview, previewCalls, previewTeamCall, previewJoinOutcome, startPreviewCall, sendPreviewChat, previewTeammates, endPreviewTeamCall } from '../src/utils/phonePreview.js'
-import { talkConversations, talkIndex, nextTalk, nextUnreadTalk, matchTalk, talkPaletteSections, shortcutFor, isTypingTarget, talkShortcutList } from '../src/utils/talkShortcuts.js'
+import { talkConversations, talkIndex, nextTalk, nextUnreadTalk, matchTalk, talkPaletteSections, shortcutFor, isTypingTarget, talkShortcutList } from '../src/utils/talkShortcutsPreview.js'
 import { WORKSPACE_DEFAULT_KEY, workspaceVersions, currentWorkspace, workspaceMenuLabel, applyWorkspace, toggleWorkspace, nextWorkspaceQuery, classicWorkspaceQuery, NEXT_PHONE_DESIGN, NEXT_COMMS_DESIGN } from '../src/utils/workspaceVersion.js'
 
 // Design selection

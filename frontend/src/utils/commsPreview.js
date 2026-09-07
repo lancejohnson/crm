@@ -34,7 +34,8 @@ export const talkKinds = ['channel', 'dm', 'live', 'standup']
 export const STANDUP_ID = 'today'
 export function navWidth(collapsed = false) { return collapsed ? NAV_COLLAPSED_WIDTH : NAV_WIDTH }
 // Route params are slugs: a channel drops its '#', everything else is its id.
-export function talkSlug(kind, id) { return kind === 'channel' ? String(id).replace(/^#/, '') : String(id) }
+import { talkSlug } from './talkShortcuts.js'
+export { talkSlug }
 export function talkRoute(kind, id, query = {}) {
   return { name: 'Talk', params: { kind, id: talkSlug(kind, id) }, query }
 }

@@ -7,22 +7,20 @@
 // (`Modals/GlobalModals.vue`), so Talk conversations are offered INSIDE it as
 // a section (`talkPaletteSections`) instead of fighting the binding.
 // Ctrl/⌘+Shift+K opens the same palette scoped to DMs.
+// No fixture imports here: the real workspace ships this module, so the
+// preview's fictional lists live in ./talkShortcutsPreview.js instead.
 import { fuzzyScore } from './fuzzy.js'
-import { previewTeammates } from './phonePreview.js'
-import { STANDUP_ID, talkSlug } from './commsPreview.js'
 
-// The list in left-column order: Live (newest first, calls still in progress),
-// then the pinned Standup, channels, direct messages. Alt+↑/↓ walk this order.
-export function talkConversations(comms, phone) {
-  const ended = phone?.endedIds || []
-  const live = [...comms.events]
-    .filter(event => event.call && !ended.includes(event.call.id))
-    .sort((a, b) => b.sequence - a.sequence)
-    .map(event => ({ kind: 'live', id: event.id, label: `${event.call.rep} · ${event.call.name}`, group: 'Live', unread: 0, keywords: `live call ${event.kind === 'live_one' ? 'live one' : ''}` }))
-  const standup = [{ kind: 'standup', id: STANDUP_ID, label: 'Standup', group: 'Channels', unread: 0, keywords: 'pinned digest today' }]
-  const channels = Object.entries(comms.channels).map(([name, channel]) => ({ kind: 'channel', id: name, label: name, group: 'Channels', unread: channel.unread, keywords: `channel ${name.slice(1)}` }))
-  const dms = previewTeammates.map(name => ({ kind: 'dm', id: name, label: name, group: 'Direct messages', unread: comms.dmUnread[name] || 0, keywords: 'dm direct message' }))
-  return [...live, ...standup, ...channels, ...dms]
+// Route id for an item: a channel's leading '#' is dropped in the URL.
+export function talkSlug(kind, id) {
+  return kind === 'channel' ? String(id).replace(/^#/, '') : String(id)
+}
+
+// The real workspace already keeps `talkStore.conversations` in column order
+// with slug ids (no leading '#'), so it uses this identity mapping and shares
+// every navigation/matching rule below with the preview.
+export function talkListFrom(conversations) {
+  return (conversations || []).map(item => ({ ...item, unread: item.unread || 0, keywords: item.keywords || '' }))
 }
 
 export function talkIndex(list, current) {
