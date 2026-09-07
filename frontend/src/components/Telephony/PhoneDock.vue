@@ -10,7 +10,7 @@
 
     <section v-if="phone.incoming" class="incoming-call" :aria-label="__('Incoming call')">
       <div class="incoming-symbol"><FeatherIcon name="phone-incoming" class="size-6" /></div>
-      <p class="eyebrow">{{ __('Incoming') }} · {{ phone.incoming.line_label || formatPhone(phone.incoming.line) }}</p>
+      <p class="eyebrow">{{ __('Incoming') }} · {{ phone.incoming.line_emoji }} {{ phone.incoming.line_label || formatPhone(phone.incoming.line) }}</p>
       <h2>{{ phone.incoming.lead_name || phone.incoming.from_name || formatPhone(phone.incoming.from) }}</h2>
       <p class="caller-number">{{ formatPhone(phone.incoming.from) }}</p>
       <p v-if="phone.incoming.lead" class="caller-context"><router-link :to="`/leads/${phone.incoming.lead}`" class="underline">{{ __('Open lead') }}</router-link></p>
@@ -123,7 +123,7 @@ const tab = ref('recent')
 const number = ref('')
 const chosenLine = ref('')
 const lineList = createResource({ url: 'crm.api.telephony.lines', auto: true, initialData: [], onError: () => {} })
-const lineOptions = computed(() => (lineList.data || []).filter((l) => l.access?.use).map((l) => ({ label: l.label || formatPhone(l.number), value: l.name })))
+const lineOptions = computed(() => (lineList.data || []).filter((l) => l.access?.use).map((l) => ({ label: `${l.emoji ? l.emoji + ' ' : ''}${l.label || formatPhone(l.number)}`, value: l.name })))
 const conversation = ref(null)
 const bar = ref(null)
 const panel = ref(null)

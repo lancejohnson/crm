@@ -302,11 +302,16 @@ def all_lines() -> list[dict]:
 	if not frappe.db.exists("DocType", LINE):
 		return []
 	fields = ["name", "number", "label", "owner_user", "recording", "active"]
+	if frappe.db.has_column(LINE, "emoji"):
+		fields.append("emoji")
 	rows = frappe.get_all(LINE, fields=fields, limit_page_length=200)
-	members = frappe.get_all(LINE_MEMBER, fields=["parent", "user", "view", "use", "ring"], limit_page_length=5000)
+	mfields = ["parent", "user", "view", "use", "ring"]
+	if frappe.db.has_column(LINE_MEMBER, "mute"):
+		mfields.append("mute")
+	members = frappe.get_all(LINE_MEMBER, fields=mfields, limit_page_length=5000)
 	by_line = {}
 	for m in members:
-		by_line.setdefault(m.parent, []).append({"user": m.user, "view": m.view, "use": m.use, "ring": m.ring})
+		by_line.setdefault(m.parent, []).append({"user": m.user, "view": m.view, "use": m.use, "ring": m.ring, "mute": bool(m.get("mute"))})
 	out = []
 	for r in rows:
 		out.append(
@@ -314,6 +319,7 @@ def all_lines() -> list[dict]:
 				"name": r.name,
 				"number": r.number,
 				"label": r.label,
+				"emoji": (r.get("emoji") or "").strip(),
 				"owner": r.owner_user,
 				"recording": r.recording or "inherit",
 				"active": bool(r.active),
@@ -339,6 +345,27 @@ def line_by_name(name) -> dict | None:
 
 
 @frappe.whitelist()
+def set_my_mute(line: str, muted: int = 1):
+	"""Mute notifications on a line you can see, without dropping view/use."""
+	row = _require_line(line, "view")
+	if not frappe.db.has_column(LINE_MEMBER, "mute"):
+		frappe.throw(_("Mute is not set up on this site yet."))
+	user = frappe.session.user
+	muted = 1 if int(muted) else 0
+	doc = frappe.get_doc(LINE, row["name"])
+	found = False
+	for m in doc.members:
+		if m.user == user:
+			m.mute = muted
+			found = True
+			break
+	if not found:
+		doc.append("members", {"user": user, "view": 1, "use": 1 if row["owner"] == user else 0, "ring": 1 if row["owner"] == user else 0, "mute": muted})
+	doc.save(ignore_permissions=True)
+	return {"ok": True, "muted": bool(muted), "line": row["name"]}
+
+
+@frappe.whitelist()
 def lines():
 	"""Lines the session user can see, with their access and effective recording."""
 	settings = phone_settings()
@@ -346,16 +373,18 @@ def lines():
 	out = []
 	for line in all_lines():
 		access = desk.line_access(line, user)
-		if not any(access.values()):
+		if not (access.get("view") or access.get("use") or access.get("ring")):
 			continue
 		out.append(
 			{
 				"name": line["name"],
 				"number": line["number"],
 				"label": line["label"] or line["number"],
+				"emoji": line.get("emoji") or "",
 				"owner": line["owner"],
 				"active": line["active"],
 				"access": access,
+				"muted": bool(access.get("mute")),
 				"recording": line["recording"],
 				"recording_effective": desk.resolve_recording(line["recording"], settings["recording_default"]),
 				"members": line["members"],

@@ -41,17 +41,22 @@ LINE = {
 
 class AccessTests(unittest.TestCase):
 	def test_owner_has_everything(self):
-		self.assertEqual(desk.line_access(LINE, "Exe@x.com"), {"view": True, "use": True, "ring": True})
+		self.assertEqual(desk.line_access(LINE, "Exe@x.com"), {"view": True, "use": True, "ring": True, "mute": False})
 
 	def test_members_are_separate_grants(self):
-		self.assertEqual(desk.line_access(LINE, "dennis@x.com"), {"view": True, "use": True, "ring": False})
-		self.assertEqual(desk.line_access(LINE, "german@x.com"), {"view": True, "use": False, "ring": True})
-		self.assertEqual(desk.line_access(LINE, "nobody@x.com"), {"view": False, "use": False, "ring": False})
+		self.assertEqual(desk.line_access(LINE, "dennis@x.com"), {"view": True, "use": True, "ring": False, "mute": False})
+		self.assertEqual(desk.line_access(LINE, "german@x.com"), {"view": True, "use": False, "ring": True, "mute": False})
+		self.assertEqual(desk.line_access(LINE, "nobody@x.com"), {"view": False, "use": False, "ring": False, "mute": False})
 		self.assertTrue(desk.can(LINE, "dennis@x.com", "use"))
 		self.assertFalse(desk.can(LINE, "dennis@x.com", "ring"))
 
 	def test_ring_members_owner_first_then_ring_flag(self):
 		self.assertEqual(desk.ring_members(LINE), ["exe@x.com", "german@x.com"])
+
+	def test_muted_member_does_not_ring(self):
+		line = {**LINE, "members": LINE["members"] + [{"user": "exe@x.com", "view": 1, "use": 1, "ring": 1, "mute": 1}]}
+		self.assertEqual(desk.ring_members(line), ["german@x.com"])
+		self.assertTrue(desk.line_access(line, "exe@x.com")["mute"])
 
 
 class RecordingTests(unittest.TestCase):
@@ -200,7 +205,7 @@ class StateStoreTests(unittest.TestCase):
 
 class EndpointGatingTests(unittest.TestCase):
 	def test_all_session_only(self):
-		for fn in (telephony.lines, telephony.dial, telephony.active_calls, telephony.join, telephony.set_mode, telephony.inbox,
+		for fn in (telephony.lines, telephony.set_my_mute, telephony.dial, telephony.active_calls, telephony.join, telephony.set_mode, telephony.inbox,
 		           telephony.live_one, telephony.history, telephony.send_text, telephony.hangup, telephony.hold,
 		           telephony.invite, telephony.transfer, telephony.lookup, telephony.link_lead,
 		           telephony.get_phone_settings, telephony.save_phone_settings):

@@ -355,7 +355,8 @@ def _desk_inbound_initiated(call_log_name, payload, our_number) -> bool:
 				"crm_incoming",
 				{"call_log": call_log_name, "desk_id": desk_id, "from": caller, "from_name": from_name,
 				 "lead": lead, "lead_name": telephony._lead_name(lead) or from_name,
-				 "line": line["number"], "line_label": line.get("label")},
+				 "line": line["number"], "line_label": line.get("label"),
+				 "line_emoji": line.get("emoji") or ""},
 				user=user, after_commit=True,
 			)
 		except Exception:

@@ -133,14 +133,20 @@ def conference_name(desk_id: str) -> str:
 
 
 def line_access(line: dict, user: str) -> dict:
-	"""{view, use, ring} for `user` on a line. The owner has everything."""
+	"""{view, use, ring, mute} for `user` on a line. The owner has view/use/ring."""
 	user = (user or "").lower()
-	if (line.get("owner") or "").lower() == user:
-		return {"view": True, "use": True, "ring": True}
+	mute = False
+	member = None
 	for m in line.get("members") or []:
 		if (m.get("user") or "").lower() == user:
-			return {"view": bool(m.get("view")), "use": bool(m.get("use")), "ring": bool(m.get("ring"))}
-	return {"view": False, "use": False, "ring": False}
+			member = m
+			mute = bool(m.get("mute"))
+			break
+	if (line.get("owner") or "").lower() == user:
+		return {"view": True, "use": True, "ring": True, "mute": mute}
+	if member:
+		return {"view": bool(member.get("view")), "use": bool(member.get("use")), "ring": bool(member.get("ring")), "mute": mute}
+	return {"view": False, "use": False, "ring": False, "mute": False}
 
 
 def can(line: dict, user: str, permission: str) -> bool:
@@ -158,14 +164,15 @@ def resolve_recording(line_recording, workspace_default) -> bool:
 
 
 def ring_members(line: dict) -> list[str]:
-	"""Logins whose phone rings on an incoming call to this line. Owner always."""
+	"""Logins whose phone rings on an incoming call. Muted people are skipped."""
 	out = []
 	owner = (line.get("owner") or "").lower()
-	if owner:
+	muted = {(m.get("user") or "").lower() for m in (line.get("members") or []) if m.get("mute")}
+	if owner and owner not in muted:
 		out.append(owner)
 	for m in line.get("members") or []:
 		login = (m.get("user") or "").lower()
-		if login and m.get("ring") and login not in out:
+		if login and m.get("ring") and login not in out and login not in muted:
 			out.append(login)
 	return out
 

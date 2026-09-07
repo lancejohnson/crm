@@ -150,6 +150,7 @@ export function notifyLiveOne(data) {
 export function ring(data) {
   if (onCall.value) return
   phone.incoming = data
+  if (data?.muted) return
   notify(__('Incoming call'), data?.lead_name || data?.from_name || data?.from || __('Unknown'), 'crm-incoming')
 }
 export async function answer() {
