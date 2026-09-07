@@ -390,6 +390,9 @@ scheduler_events = {
 		# InvestorLift Tier-1: refresh marketing metrics for every lead linked to an
 		# IL property (needs `sync_jobs` on prod after deploy — see gw127/128).
 		"crm.api.investorlift.sync_all_marketing",
+		# Signed-contract parser backstop: enqueue any envelope signed in the
+		# last CATCHUP_DAYS that has no parsed_at (needs `sync_jobs` on prod).
+		"crm.api.contract_parse.catch_up_unparsed",
 	],
 	"monthly_long": ["crm.lead_syncing.background_sync.sync_leads_from_sources_monthly"],
 	"cron": {

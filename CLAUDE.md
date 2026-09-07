@@ -3519,33 +3519,37 @@ duplicating. Work substantial features in a worktree of your own.
   - Ops (`../frappe-crm-deploy`): `scripts/setup_agreement.py` adds `source`
     (Select `crm\nadopted`), `match_basis` (Small Text) and `is_archived` (Check)
     via `ensure_field` (idempotent). All three are live on prod.
-- **Signed contracts parse themselves into the lead (pi on the Mac mini)** — when
-  a DocuSeal envelope goes fully signed, `docuseal_webhook` POSTs a trigger to a
-  listener on the Mac mini; it fetches the signed PDF back out of the CRM, reads
-  it with a one-shot `pi`, and writes `acq_price` / `dd_expiration_date` /
-  `closing_date` (+ the property address if the contract corrects it) onto the
-  lead. Push, not polling — the mini never sleeps (`pmset`: `sleep 0`,
-  `autorestart 1`), so a startup catch-up is enough of a backstop.
-  - **Transport = Tailscale Funnel**, `https://lances-mac-mini.tailc8c60d.ts.net:8443`
-    → `127.0.0.1:7474`. Prod is NOT on the tailnet and doesn't need to be. Note
-    the pre-existing `:8444` Serve (→ `:7373`) is tailnet-only and is NOT a
-    Funnel-eligible port; this tailnet allows Funnel on **443, 8443, 10000**.
-  - **The push carries an ID, not a payload.** The URL is public, so nothing
-    from the request may reach the model — the listener reads one agreement id
-    and re-fetches everything authoritative from the CRM with its own token. A
-    forged trigger (needs the shared secret; wrong/absent → 403) can at worst
-    re-read a real agreement.
-  - **`pi` runs with every tool disabled** (`-xt bash,read,write,edit,ask_question`).
-    Contract text is semi-untrusted input going into a prompt on a machine with a
-    shell; with no tools the run is a pure text completion and the CRM write is
-    done afterwards by the script, through a validating endpoint. GOTCHA: pi
-    emits an OSC escape (`ESC ]9;Pi`) around stdout even when piped — strip
-    escapes before parsing JSON.
+- **Signed contracts parse themselves into the lead (Gemini, in-app)** — when
+  a DocuSeal envelope goes fully signed, `docuseal_webhook` enqueues
+  `contract_parse.parse_agreement` on the `long` queue; it fetches the signed
+  PDF from DocuSeal, sends **the PDF itself** to Gemini (`gemini-pro-latest`,
+  override `contract_parse_model`; same `gemini_api_key` as call review) with
+  a JSON `responseSchema` derived from `PARSE_FIELDS`, and writes `acq_price` /
+  `dd_expiration_date` / `closing_date` (+ the property address if the contract
+  corrects it) onto the lead. **Hourly `catch_up_unparsed`** re-enqueues
+  anything signed in the last 2 days with no `parsed_at` (needs `sync_jobs`).
+  `parse_now(agreement, force=1, dry_run=1)` is the bench/manual entry —
+  dry-run shows what WOULD be written. ~15s per contract.
+  - **Moved in-app 2026-09-07 (gw458).** For a month this ran as a `pi`
+    listener on the Mac mini behind Tailscale Funnel (`mini/contract-parser/`
+    in the ops repo, launchd `com.groundwork.contract-parser`). It
+    crash-looped for days after the ops checkout moved ("can't open file
+    …listener.py") and a PSA signed 09:55 was still unparsed at 13:00. The CRM
+    already owned the field map, validation and write path — only the model
+    call lived on the mini. Verified before switching: Gemini matched pi to
+    the dollar and the day on lead 01194's PSA. `notify_mini` survives as the
+    fallback ONLY when `gemini_api_key` is unset; the launchd agent was
+    unloaded. GOTCHA: `gemini-2.5-pro` now **404s** ("no longer available to
+    new users") — hence the rolling `-latest` alias rather than a pinned name.
+  - **PDF goes in as inline data**, not extracted text — no poppler in the
+    container, and scanned/hand-built (adopted) envelopes still parse. The
+    prompt says the document is untrusted data; the model has no tools, and
+    `write_agreement_fields` still validates every value and rejects unknown
+    field names. The job runs as Administrator (the webhook enqueues as Guest).
   - **Writes go through `doc.save()`, not `db.set_value`** — deliberately the
     opposite of the tax-pull/first-call pattern. The Version row is the point:
     it renders as "changed Acq Price from … to …" on the activity timeline,
-    which is the entire audit trail here. Attribution is whichever user's API
-    key the mini holds (currently Administrator).
+    which is the entire audit trail here.
   - **GOTCHA — the catch-up sweep is an outage bridge, NOT an importer.** It
     first shipped at 30 days keyed on `creation`; on install that swept every
     signed contract in history and began rewriting live leads (14 queued before
@@ -3557,10 +3561,10 @@ duplicating. Work substantial features in a worktree of your own.
     days from the effective date", and holiday handling silently moves the
     deadline a day (Labor Day did exactly this in testing). The convention is
     now pinned in the prompt (weekends **and** US federal holidays excluded;
-    effective date = last signature = day 0) and the model returns a `_basis`
+    effective date = last signature = day 0) and the model returns a `basis`
     explaining each date, stored in `parse_result`.
-  - **Cancellations are deliberately not parsed** — the prompt returns `{}` for
-    them. Clearing real fields on an LLM read of a cancellation is the one
+  - **Cancellations are deliberately not parsed** — the prompt returns nulls for
+    them; assignments return `acq_price` null; amendments only what they amend. Clearing real fields on an LLM read of a cancellation is the one
     failure here that loses data instead of just being wrong. Verified live.
   - **GOTCHA — backfilling: preview first, and mind ASSIGNMENT documents.** An
     Assignment Agreement's price is what the BUYER pays US, not our acq price;
@@ -3574,18 +3578,17 @@ duplicating. Work substantial features in a worktree of your own.
     under a **fill-blanks-never-overwrite** rule; 7 fields across 5 leads, 4
     agreements held back because the document disagreed with the CRM (two were
     simply superseded originals the CRM already reflected).
-  - `crm/api/contract_parse.py` (**new**: `PARSE_FIELDS` — the single source of
-    truth, shipped to the mini on each fetch so adding a field needs no redeploy
-    there — plus `notify_mini` / `get_agreement_for_parse` /
-    `list_unparsed_agreements` / `write_agreement_fields` / `mark_parse_failed`)
-    + the trigger call in `agreement.py::docuseal_webhook`.
-  - Ops (`../frappe-crm-deploy`): `mini/contract-parser/` (listener + plist +
-    README), `setup_agreement.py` gains `parsed_at` / `parse_status` /
-    `parse_result` (`parsed_at` = the idempotency key, so a re-delivered webhook
-    can't clobber a human's correction; an amendment is its own row and so
-    correctly overwrites). site_config: `contract_parser_url` +
-    `contract_parser_secret` — absent, `notify_mini` is a no-op and the feature
-    lies dormant.
+  - `crm/api/contract_parse.py` (`PARSE_FIELDS` — the single source of truth:
+    prompt, schema and validation derive from it — plus `trigger_parse` /
+    `enqueue_parse` / `catch_up_unparsed` / `parse_agreement` / `parse_now` /
+    `get_agreement_for_parse` / `list_unparsed_agreements` /
+    `write_agreement_fields` / `mark_parse_failed`) + the trigger call in
+    `agreement.py::docuseal_webhook` + the `hourly_long` hook.
+  - Ops (`../frappe-crm-deploy`): `setup_agreement.py` owns `parsed_at` /
+    `parse_status` / `parse_result` (`parsed_at` = the idempotency key, so a
+    re-delivered webhook can't clobber a human's correction; an amendment is
+    its own row and so correctly overwrites). A failed parse is stamped too,
+    so a bad PDF is not re-billed hourly — `force=1` is the deliberate retry.
 - **First-Call Read (2x2 lead qualification)** — after the first call a rep marks
   two yes/no reads that place the lead in a 2x2: **Motivated?** (is the seller
   motivated) x **On price?** (is their price realistic) → Motivated·On price /
