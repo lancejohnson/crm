@@ -200,7 +200,7 @@ class StateStoreTests(unittest.TestCase):
 
 class EndpointGatingTests(unittest.TestCase):
 	def test_all_session_only(self):
-		for fn in (telephony.lines, telephony.dial, telephony.active_calls, telephony.join, telephony.set_mode,
+		for fn in (telephony.lines, telephony.dial, telephony.active_calls, telephony.join, telephony.set_mode, telephony.inbox,
 		           telephony.live_one, telephony.history, telephony.send_text, telephony.hangup, telephony.hold,
 		           telephony.invite, telephony.transfer, telephony.lookup, telephony.link_lead,
 		           telephony.get_phone_settings, telephony.save_phone_settings):

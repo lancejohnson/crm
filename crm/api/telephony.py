@@ -801,6 +801,53 @@ def history(number: str = None, limit: int = 100):
 
 
 @frappe.whitelist()
+def inbox(limit: int = 200):
+	"""One row per peer number, newest first — including numbers with no CRM lead."""
+	events = history(limit=limit)
+	groups: dict[str, dict] = {}
+	order: list[str] = []
+	for e in events:
+		key = last10(e.get("number"))
+		if not key:
+			continue
+		if key not in groups:
+			order.append(key)
+			groups[key] = {
+				"number": e.get("number") or "",
+				"lead": e.get("lead"),
+				"lead_name": e.get("lead_name"),
+				"last_at": e.get("at"),
+				"last_kind": e.get("kind"),
+				"last_text": (e.get("text") or e.get("status") or ""),
+				"direction": e.get("direction"),
+				"calls": 0,
+				"texts": 0,
+			}
+		g = groups[key]
+		if e.get("kind") == "call":
+			g["calls"] += 1
+		else:
+			g["texts"] += 1
+		if e.get("lead") and not g.get("lead"):
+			g["lead"] = e.get("lead")
+			g["lead_name"] = e.get("lead_name")
+	leads = [g["lead"] for g in groups.values() if g.get("lead")]
+	names = {}
+	if leads and frappe.db.exists("DocType", "CRM Lead"):
+		names = {
+			r.name: r.lead_name
+			for r in frappe.get_all("CRM Lead", filters={"name": ("in", leads)}, fields=["name", "lead_name"])
+		}
+	out = []
+	for key in order:
+		g = groups[key]
+		g["lead_name"] = names.get(g.get("lead")) or g.get("lead_name")
+		g["title"] = g["lead_name"] or g["number"]
+		out.append(g)
+	return out
+
+
+@frappe.whitelist()
 def send_text(to: str, text: str, line: str = None):
 	"""Text from a line the session user may use. Lands as a Quo Message (provider Telnyx)."""
 	from crm.integrations.telnyx import api as telnyx_api

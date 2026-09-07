@@ -68,7 +68,7 @@ const real = [
   'stores/workspace.js', 'stores/talk.js', 'composables/phone.js',
   'components/Talk/NextWorkspaceShell.vue', 'components/Talk/TalkNav.vue', 'components/Talk/TalkKeys.vue',
   'components/Telephony/PhoneDock.vue', 'components/Telephony/PhoneDockCall.vue', 'components/Telephony/PhoneDockConversation.vue',
-  'pages/Talk.vue', 'pages/PhoneSettings.vue', 'utils/talkMentions.js',
+  'pages/Talk.vue', 'pages/PhoneDesk.vue', 'pages/PhoneSettings.vue', 'utils/talkMentions.js',
 ]
 const SECRET = /(api[_-]?key|secret|token)\s*[:=]\s*['"][A-Za-z0-9_\-]{12,}['"]|KEY[A-Z0-9_]*\s*=\s*['"][A-Za-z0-9]{16,}|sk_live|Bearer\s+[A-Za-z0-9]{20,}/
 for (const file of real) {
@@ -90,7 +90,7 @@ assert.match(src('pages/Talk.vue'), /import\.meta\.env\.DEV && !workspace\.isNex
 // --- Contract endpoints the frontend calls ---------------------------------
 {
   const all = real.map(src).join('\n')
-  for (const ep of ['crm.api.workspace.get', 'crm.api.workspace.set_version', 'crm.api.talk.list_channels', 'crm.api.talk.thread', 'crm.api.talk.post', 'crm.api.talk.mark_read', 'crm.api.talk.ensure_dm', 'crm.api.talk.presence', 'crm.api.telephony.active_calls', 'crm.api.telephony.dial', 'crm.api.telephony.join', 'crm.api.telephony.set_mode', 'crm.api.telephony.live_one', 'crm.api.telephony.history', 'crm.api.telephony.send_text', 'crm.integrations.telnyx.api.webrtc_token', 'crm.integrations.api.get_recording_url']) {
+  for (const ep of ['crm.api.workspace.get', 'crm.api.workspace.set_version', 'crm.api.talk.list_channels', 'crm.api.talk.thread', 'crm.api.talk.post', 'crm.api.talk.mark_read', 'crm.api.talk.ensure_dm', 'crm.api.talk.presence', 'crm.api.telephony.active_calls', 'crm.api.telephony.dial', 'crm.api.telephony.join', 'crm.api.telephony.set_mode', 'crm.api.telephony.live_one', 'crm.api.telephony.history', 'crm.api.telephony.inbox', 'crm.api.telephony.send_text', 'crm.integrations.telnyx.api.webrtc_token', 'crm.integrations.api.get_recording_url']) {
     assert.ok(all.includes(ep), `frontend calls ${ep}`)
   }
   for (const ev of ['crm_talk', 'crm_talk_read', 'crm_presence', 'crm_telnyx_call', 'crm_incoming', 'crm_live_one', 'crm_transcript']) assert.ok(src('stores/talk.js').includes(`'${ev}'`), `listens for ${ev}`)

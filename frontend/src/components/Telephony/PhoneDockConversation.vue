@@ -1,7 +1,7 @@
 <template>
-  <div class="conversation" :aria-label="`${__('Conversation with')} ${name}`">
+  <div class="conversation" :class="{ full: !showBack }" :aria-label="`${__('Conversation with')} ${name}`">
     <div class="thread-heading">
-      <Button variant="ghost" icon="arrow-left" :aria-label="__('Back')" @click="$emit('back')" />
+      <Button v-if="showBack" variant="ghost" icon="arrow-left" :aria-label="__('Back')" @click="$emit('back')" />
       <div class="min-w-0"><b class="block truncate">{{ name }}</b><small>{{ formatPhone(number) }}<router-link v-if="lead || info.lead" :to="`/leads/${lead || info.lead}`" class="ml-2 underline">{{ __('Open lead') }}</router-link></small></div>
       <Button icon="phone" variant="ghost" :disabled="onCall" :aria-label="`${__('Call')} ${name}`" @click="dial(number, { name, lead })" />
     </div>
@@ -54,7 +54,7 @@ const route = useRoute()
 const routeLead = computed(() => route.params.leadId || null)
 const info = ref({ dnc: false, lead: null })
 
-const props = defineProps({ number: { type: String, required: true }, name: { type: String, default: '' }, lead: { type: String, default: null } })
+const props = defineProps({ number: { type: String, required: true }, name: { type: String, default: '' }, lead: { type: String, default: null }, showBack: { type: Boolean, default: true } })
 defineEmits(['back'])
 const scroller = ref(null)
 const draft = ref('')
@@ -95,6 +95,8 @@ onBeforeUnmount(() => { playing.value = null })
 </script>
 <style scoped>
 .conversation { display: flex; flex-direction: column; min-height: 0; }
+.conversation.full { height: 100%; }
+.conversation.full .timeline { max-height: none; flex: 1; }
 .thread-heading { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--outline-gray-1, #eee); padding: 8px 10px; }
 .thread-heading > div { flex: 1; }
 .thread-heading b { font-size: 13px; font-weight: 600; }.thread-heading small { display: block; margin-top: 2px; font-size: 10px; color: var(--ink-gray-5, #777); }

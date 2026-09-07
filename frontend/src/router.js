@@ -22,6 +22,11 @@ const routes = [
     component: () => import('@/pages/Talk.vue'),
   },
   {
+    path: '/phone/:number?',
+    name: 'Phone Desk',
+    component: () => import('@/pages/PhoneDesk.vue'),
+  },
+  {
     path: '/settings/phone',
     name: 'Phone Settings',
     component: () => import('@/pages/PhoneSettings.vue'),

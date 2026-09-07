@@ -8,6 +8,7 @@
           <span v-else-if="unreadNotificationsCount" class="strip-dot" aria-hidden="true" />
         </template>
       </SidebarLink>
+      <SidebarLink :label="__('Inbox')" :icon="PhoneIcon" :to="{ name: 'Phone Desk' }" :isCollapsed="talk.navCollapsed" class="mx-2 my-[1.5px]" />
       <ul class="item-list inbox-links" :aria-label="__('Talk inbox')">
         <li><button type="button" class="item" :class="{ selected: isSelected('unreads', 'all'), unread: talk.totalUnread }" @click="pick('unreads', 'all')"><FeatherIcon name="inbox" class="size-3.5 item-icon lead" /><span class="item-text">{{ __('Unreads') }}</span><span v-if="talk.totalUnread" class="group-badge">{{ talk.totalUnread }}</span></button></li>
         <li><button type="button" class="item" :class="{ selected: isSelected('drafts', 'all'), unread: talk.draftList.length }" @click="pick('drafts', 'all')"><FeatherIcon name="edit-3" class="size-3.5 item-icon lead" /><span class="item-text">{{ __('Drafts') }}</span><span v-if="talk.draftList.length" class="group-badge">{{ talk.draftList.length }}</span></button></li>
@@ -82,6 +83,7 @@ import { useRoute, useRouter } from 'vue-router'
 import UserDropdown from '@/components/UserDropdown.vue'
 import SidebarLink from '@/components/SidebarLink.vue'
 import NotificationsIcon from '@/components/Icons/NotificationsIcon.vue'
+import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
 import CollapseSidebar from '@/components/Icons/CollapseSidebar.vue'
 import PinIcon from '@/components/Icons/PinIcon.vue'
 import { getSettings } from '@/stores/settings'
