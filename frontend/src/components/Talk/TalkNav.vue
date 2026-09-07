@@ -34,6 +34,16 @@
             </template>
           </nav>
 
+          <ul v-else-if="group.id === 'phones'" class="item-list" :aria-label="__('Numbers')">
+            <li v-if="!phoneLines.length" class="item-empty">{{ __('No numbers yet.') }}</li>
+            <li v-for="line in phoneLines" :key="line.name">
+              <button type="button" class="item" :class="{ selected: isPhoneLine(line) }" @click="openLine(line)">
+                <span class="item-text">{{ line.emoji }} {{ line.label || formatPhone(line.number) }}</span>
+                <button type="button" class="copy-num" :title="__('Copy number')" :aria-label="__('Copy number')" @click.stop="copyNumber(line.number)"><FeatherIcon name="copy" class="size-3.5" /></button>
+              </button>
+            </li>
+          </ul>
+
           <ul v-else-if="group.id === 'live'" class="item-list" :aria-label="__('Live')">
             <li v-if="!talk.calls.length" class="item-empty">{{ __('Nothing live right now.') }}</li>
             <li v-for="c in talk.calls" :key="c.call_log">
@@ -77,7 +87,7 @@
  * A conversation is a page: picking one routes to /talk/:kind/:id and the
  * active item is read off the route, exactly as SidebarLink highlights Leads.
  */
-import { Badge, FeatherIcon } from 'frappe-ui'
+import { Badge, FeatherIcon, createResource } from 'frappe-ui'
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import UserDropdown from '@/components/UserDropdown.vue'
@@ -92,6 +102,7 @@ import { applySidebarConfig } from '@/utils/sidebarLinks'
 import { unreadNotificationsCount, notificationsStore } from '@/stores/notifications'
 import { talkStore } from '@/stores/talk'
 import { formatPhone } from '@/utils/phoneFormat'
+import { copyToClipboard } from '@/utils'
 import { openCommandPalette } from '@/composables/modals'
 
 defineProps({ bottom: { type: Number, default: 0 }, mobile: Boolean })
@@ -111,7 +122,10 @@ const extraViews = computed(() => [
   name: group.name,
   views: group.views.map((view) => ({ label: view.label, icon: view.icon || PinIcon, to: { name: view.route_name, params: { viewType: view.type || 'list' }, query: { view: view.name } } })),
 })))
+const phoneLineList = createResource({ url: 'crm.api.telephony.lines', auto: true, initialData: [], onError: () => {} })
+const phoneLines = computed(() => phoneLineList.data || [])
 const groups = computed(() => [
+  { id: 'phones', label: __('Numbers'), icon: 'phone', unread: 0 },
   { id: 'crm', label: __('CRM'), icon: 'grid', unread: 0 },
   { id: 'live', label: __('Live'), icon: 'activity', unread: talk.liveOnes.length },
   { id: 'channels', label: __('Channels'), icon: 'hash', unread: talk.unreadOf('channels') },
@@ -130,6 +144,9 @@ function expandTo(group) { talk.navCollapsed = false; talk.navOpen[group] = true
 // New message = the ⌘⇧K DM switcher, which also lists teammates without a
 // thread yet (TalkKeys creates the DM channel on pick via talk.ensure_dm).
 function newDm() { openCommandPalette('dm') }
+function isPhoneLine(line) { return route.name === 'Phone Desk' && String(route.query.line || '') === line.name }
+function openLine(line) { router.push({ name: 'Phone Desk', query: { line: line.name } }); emit('picked') }
+function copyNumber(number) { copyToClipboard(formatPhone(number) || number) }
 </script>
 <style scoped>
 .left-nav { position: fixed; top: 0; left: 0; z-index: 39; display: flex; flex-direction: column; background: var(--surface-menu-bar, #f8f8f8); border-right: 1px solid var(--outline-gray-2, #e2e2e2); color: var(--ink-gray-8, #333); transition: width .3s ease-in-out; }
@@ -137,6 +154,8 @@ function newDm() { openCommandPalette('dm') }
 .nav-header { padding: 8px; }
 .nav-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .inbox-links { margin: 4px 0 2px; }
+.copy-num { flex-shrink: 0; padding: 2px; color: var(--ink-gray-5, #777); }
+.copy-num:hover { color: var(--ink-gray-9, #222); }
 .nav-group { margin-top: 6px; }
 .group-header { display: flex; align-items: center; gap: 6px; width: 100%; padding: 9px 16px 8px; font-size: 13px; color: var(--ink-gray-5, #777); text-align: left; }
 .group-header:hover { color: var(--ink-gray-8, #333); }

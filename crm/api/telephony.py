@@ -345,6 +345,57 @@ def line_by_name(name) -> dict | None:
 
 
 @frappe.whitelist()
+def search_numbers(area_code: str, limit: int = 12):
+	"""Available local numbers in an area code. Managers only; spends nothing."""
+	if not _is_manager():
+		frappe.throw(_("Only a manager can search for numbers."), frappe.PermissionError)
+	from crm.integrations.telnyx import api as telnyx_api
+
+	if not telnyx_api.enabled():
+		frappe.throw(_("Telnyx is not configured on this site."))
+	return telnyx_api.search_local_numbers(area_code, limit)
+
+
+@frappe.whitelist()
+def buy_number(number: str, label: str = "", emoji: str = ""):
+	"""Purchase a Telnyx number and add it as a CRM Phone Line. Managers only."""
+	if not _is_manager():
+		frappe.throw(_("Only a manager can buy a number."), frappe.PermissionError)
+	from crm.integrations.telnyx import api as telnyx_api
+
+	if not telnyx_api.enabled():
+		frappe.throw(_("Telnyx is not configured on this site."))
+	e164 = desk.e164(number)
+	if not e164:
+		frappe.throw(_("That does not look like a phone number."))
+	if frappe.db.exists(LINE, {"number": e164}) or frappe.db.exists(LINE, e164):
+		frappe.throw(_("That number is already a line in the CRM."))
+	ordered = telnyx_api.order_local_number(e164)
+	phone_id = None
+	try:
+		for item in ordered.get("phone_numbers") or []:
+			if isinstance(item, dict) and item.get("id"):
+				phone_id = item.get("id")
+				break
+	except Exception:
+		phone_id = None
+	doc = frappe.get_doc(
+		{
+			"doctype": LINE,
+			"number": e164,
+			"label": (label or "").strip() or e164,
+			"emoji": (emoji or "").strip(),
+			"owner_user": frappe.session.user,
+			"provider": TELNYX,
+			"recording": "inherit",
+			"active": 1,
+			"telnyx_number_id": phone_id or "",
+		}
+	).insert(ignore_permissions=True)
+	return {"ok": True, "name": doc.name, "number": e164, "order": ordered.get("id")}
+
+
+@frappe.whitelist()
 def set_my_mute(line: str, muted: int = 1):
 	"""Mute notifications on a line you can see, without dropping view/use."""
 	row = _require_line(line, "view")
@@ -693,6 +744,14 @@ def live_one(lead: str, note: str = "", call_log: str = None):
 	return alert(lead, note, call_log)
 
 
+def _history_ours(from_n, to_n, ours: set[str]) -> str:
+	if last10(from_n) in ours:
+		return desk.e164(from_n) or from_n or ""
+	if last10(to_n) in ours:
+		return desk.e164(to_n) or to_n or ""
+	return ""
+
+
 def _history_peer(from_n, to_n, ours: set[str], inbound: bool) -> str:
 	"""The number that is not us. Falls back to the far-side field by direction."""
 	far = from_n if inbound else to_n
@@ -712,6 +771,7 @@ def _shape_call(r, ours: set[str]) -> dict:
 		"kind": "call",
 		"name": r.name,
 		"number": _history_peer(r.get("from"), r.get("to"), ours, inbound),
+		"line": _history_ours(r.get("from"), r.get("to"), ours),
 		"at": r.start_time,
 		"direction": "Incoming" if inbound else "Outgoing",
 		"status": r.status,
@@ -745,6 +805,7 @@ def _shape_text(r, ours: set[str]) -> dict:
 		"kind": "text",
 		"name": r.name,
 		"number": _history_peer(r.get("from"), r.get("to"), ours, inbound),
+		"line": _history_ours(r.get("from"), r.get("to"), ours),
 		"at": r.message_date,
 		"direction": "in" if inbound else "out",
 		"text": r.content,
@@ -830,9 +891,13 @@ def history(number: str = None, limit: int = 100):
 
 
 @frappe.whitelist()
-def inbox(limit: int = 200):
+def inbox(limit: int = 200, line: str = None):
 	"""One row per peer number, newest first — including numbers with no CRM lead."""
 	events = history(limit=limit)
+	if line:
+		row = line_by_name(line)
+		want = last10((row or {}).get("number") or line)
+		events = [e for e in events if last10(e.get("line")) == want]
 	groups: dict[str, dict] = {}
 	order: list[str] = []
 	for e in events:

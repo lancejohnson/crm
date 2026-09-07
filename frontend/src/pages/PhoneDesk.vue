@@ -1,10 +1,11 @@
 <template>
   <LayoutHeader>
     <template #left-header>
-      <Breadcrumbs :items="[{ label: __('Inbox'), route: { name: 'Phone Desk' } }]" />
+      <Breadcrumbs :items="crumbs" />
     </template>
     <template #right-header>
-      <span class="text-xs text-ink-gray-5">{{ __('Calls and texts, including numbers with no lead') }}</span>
+      <Button v-if="activeLine" variant="ghost" size="sm" iconLeft="copy" @click="copyToClipboard(formatPhone(activeLine.number) || activeLine.number)">{{ formatPhone(activeLine.number) }}</Button>
+      <span v-else class="text-xs text-ink-gray-5">{{ __('Calls and texts, including numbers with no lead') }}</span>
     </template>
   </LayoutHeader>
 
@@ -72,12 +73,12 @@
  */
 import LayoutHeader from '@/components/LayoutHeader.vue'
 import PhoneDockConversation from '@/components/Telephony/PhoneDockConversation.vue'
-import { Breadcrumbs, FormControl, call, createResource, toast } from 'frappe-ui'
+import { Breadcrumbs, Button, FormControl, call, createResource, toast } from 'frappe-ui'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { workspaceStore } from '@/stores/workspace'
 import { formatPhone, normalizeNumber } from '@/utils/phoneFormat'
-import { prettyDate } from '@/utils'
+import { copyToClipboard, prettyDate } from '@/utils'
 
 const workspace = workspaceStore()
 const route = useRoute()
@@ -105,12 +106,22 @@ async function linkLead(lead) {
     await call('crm.api.telephony.link_lead', { lead, number: selected.value })
     leadHits.value = []
     leadQuery.value = ''
-    inbox.reload()
+    loadInbox()
     history.reload()
   } catch (e) { toast.error(e?.messages?.[0] || __('Could not link')) }
 }
-const inbox = createResource({ url: 'crm.api.telephony.inbox', params: { limit: 200 }, auto: true, initialData: [], onError: () => {} })
+const lineFilter = computed(() => route.query.line || '')
+const lineList = createResource({ url: 'crm.api.telephony.lines', auto: true, initialData: [], onError: () => {} })
+const activeLine = computed(() => (lineList.data || []).find((l) => l.name === lineFilter.value) || null)
+const crumbs = computed(() => {
+  const items = [{ label: __('Inbox'), route: { name: 'Phone Desk' } }]
+  if (activeLine.value) items.push({ label: `${activeLine.value.emoji || ''} ${activeLine.value.label || formatPhone(activeLine.value.number)}`.trim() })
+  return items
+})
+const inbox = createResource({ url: 'crm.api.telephony.inbox', auto: false, initialData: [], onError: () => {} })
 const history = createResource({ url: 'crm.api.telephony.history', params: { limit: 200 }, auto: true, initialData: [], onError: () => {} })
+function loadInbox() { inbox.submit({ limit: 200, line: lineFilter.value || undefined }) }
+watch(lineFilter, loadInbox, { immediate: true })
 
 const selected = computed(() => route.params.number ? String(route.params.number) : '')
 const inboxRows = computed(() => (inbox.data || []).map((r) => ({
@@ -147,7 +158,7 @@ function openTyped() {
   const n = normalizeNumber(query.value) || query.value.trim()
   if (n) open(n)
 }
-watch(tab, () => { if (tab.value === 'inbox') inbox.reload(); else history.reload() })
+watch(tab, () => { if (tab.value === 'inbox') loadInbox(); else history.reload() })
 </script>
 <style scoped>
 .desk { display: flex; height: 100%; min-height: 0; color: var(--ink-gray-9, #222); }

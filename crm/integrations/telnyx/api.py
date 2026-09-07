@@ -69,7 +69,57 @@ def _post(path, payload):
 	return r.json().get("data") or {}
 
 
-def sending_number(user=None):
+def search_local_numbers(area_code: str, limit: int = 12) -> list[dict]:
+	"""Available US local numbers in an area code (voice + SMS)."""
+	ndc = "".join(c for c in str(area_code or "") if c.isdigit())[:3]
+	if len(ndc) != 3:
+		frappe.throw(_("Enter a 3-digit area code."))
+	r = requests.get(
+		f"{API}/available_phone_numbers",
+		headers=_headers(),
+		params=[
+			("filter[country_code]", "US"),
+			("filter[national_destination_code]", ndc),
+			("filter[phone_number_type]", "local"),
+			("filter[features][]", "sms"),
+			("filter[features][]", "voice"),
+			("filter[limit]", str(max(1, min(int(limit or 12), 20)))),
+		],
+		timeout=TIMEOUT,
+	)
+	if r.status_code >= 400:
+		frappe.log_error(title="Telnyx API error", message=f"GET /available_phone_numbers -> {r.status_code}\n{r.text[:2000]}")
+		frappe.throw(_("Telnyx rejected the search ({0}).").format(r.status_code))
+	out = []
+	for row in r.json().get("data") or []:
+		cost = row.get("cost_information") or {}
+		out.append(
+			{
+				"number": row.get("phone_number"),
+				"city": row.get("locality") or "",
+				"state": "",
+				"monthly": cost.get("monthly_cost"),
+			}
+		)
+	return [n for n in out if n.get("number")]
+
+
+def order_local_number(number: str) -> dict:
+	"""Purchase a number onto this site's call-control app and messaging profile."""
+	number = (number or "").strip()
+	if not number.startswith("+"):
+		frappe.throw(_("That does not look like a phone number."))
+	body = {"phone_numbers": [{"phone_number": number}], "customer_reference": "crm-desk"}
+	conn = (frappe.conf.get("telnyx_connection_id") or "").strip()
+	msg = (frappe.conf.get("telnyx_messaging_profile_id") or "").strip()
+	if conn:
+		body["connection_id"] = conn
+	if msg:
+		body["messaging_profile_id"] = msg
+	return _post("/number_orders", body)
+
+
+
 	"""The line this user sends from, or the site default.
 
 	Reads through `telephony.user_lines`, so a rep who holds a Quo line AND a

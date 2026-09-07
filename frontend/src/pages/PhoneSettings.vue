@@ -37,7 +37,19 @@
         <p class="consent">{{ settingsDoc.doc?.consent_note || __('This toggle is not legal consent. Disclosure, access, retention and consent policy must be settled before real recording.') }}</p>
       </template>
       <template v-else>
-        <div class="settings-title"><div><h1>{{ __('Numbers & access') }}</h1><p class="description">{{ __('A number has an owner. Other teammates get explicit access.') }}</p></div><Button iconLeft="plus" variant="solid" disabled :title="__('Coming soon')">{{ __('Buy number') }} · {{ __('coming soon') }}</Button></div>
+        <div class="settings-title"><div><h1>{{ __('Numbers & access') }}</h1><p class="description">{{ __('A number has an owner. Other teammates get explicit access.') }}</p></div><Button iconLeft="plus" variant="solid" @click="showBuy = !showBuy">{{ showBuy ? __('Close') : __('Buy number') }}</Button></div>
+        <div v-if="showBuy" class="buy-box">
+          <p class="description">{{ __('Search a US area code, then buy. Telnyx charges the account when you confirm.') }}</p>
+          <form class="buy-search" @submit.prevent="runSearch">
+            <FormControl v-model="areaCode" :label="__('Area code')" placeholder="612" />
+            <Button type="submit" variant="solid" :loading="searching">{{ __('Search') }}</Button>
+          </form>
+          <p v-if="searchError" class="description">{{ searchError }}</p>
+          <div v-for="n in available" :key="n.number" class="buy-row">
+            <span><b>{{ formatPhone(n.number) }}</b><small>{{ n.city }}</small></span>
+            <Button size="sm" variant="solid" :loading="buying === n.number" @click="confirmBuy(n)">{{ __('Buy') }}</Button>
+          </div>
+        </div>
         <p v-if="lines.loading && !lines.data?.length" class="description">{{ __('Loading…') }}</p>
         <p v-else-if="!lines.data?.length" class="description">{{ __('No lines yet. Numbers are added by ops for now.') }}</p>
         <div v-else class="number-list">
@@ -104,6 +116,33 @@ async function saveGreeting() {
   finally { savingGreeting.value = false }
 }
 const EMOJIS = ['📱', '🏡', '🏢', '💼', '🔥', '⭐', '🎯', '📣']
+const showBuy = ref(false)
+const areaCode = ref('612')
+const available = ref([])
+const searching = ref(false)
+const searchError = ref('')
+const buying = ref('')
+async function runSearch() {
+  searching.value = true
+  searchError.value = ''
+  available.value = []
+  try { available.value = await call('crm.api.telephony.search_numbers', { area_code: areaCode.value, limit: 12 }) || [] }
+  catch (e) { searchError.value = e?.messages?.[0] || __('Search failed') }
+  finally { searching.value = false }
+}
+async function confirmBuy(n) {
+  if (!confirm(__('Buy {0}? Telnyx will charge this account.', [formatPhone(n.number)]))) return
+  buying.value = n.number
+  try {
+    await call('crm.api.telephony.buy_number', { number: n.number, label: n.city || '', emoji: '📱' })
+    toast.success(__('Number purchased'))
+    showBuy.value = false
+    available.value = []
+    lines.reload()
+    myLineList.reload()
+  } catch (e) { toast.error(e?.messages?.[0] || __('Could not buy')) }
+  finally { buying.value = '' }
+}
 const myLineList = createResource({ url: 'crm.api.telephony.lines', auto: true, initialData: [], onError: () => {} })
 const myLines = computed(() => myLineList.data || [])
 async function toggleMute(line, muted) {
@@ -171,6 +210,10 @@ main h1 { font-size: 20px; font-weight: 600; letter-spacing: -.3px; }
 .emoji-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .emoji-btn { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--outline-gray-1, #eee); font-size: 16px; }
 .emoji-btn.on { background: var(--surface-gray-2, #eee); }
+.buy-box { margin-top: 16px; padding: 14px; border: 1px solid var(--outline-gray-1, #eee); border-radius: 10px; }
+.buy-search { display: flex; align-items: flex-end; gap: 8px; margin-top: 10px; }
+.buy-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--outline-gray-1, #eee); font-size: 13px; }
+.buy-row small { display: block; color: var(--ink-gray-5, #777); }
 .access-table { margin-top: 12px; }table { width: 100%; border-collapse: collapse; font-size: 13px; }th, td { padding: 10px 8px; border-bottom: 1px solid var(--outline-gray-1, #eee); text-align: left; }th:not(:first-child), td:not(:first-child) { width: 80px; text-align: center; }td small { color: var(--ink-gray-5, #777); }
 @media (max-width: 900px) { .phone-settings { grid-template-columns: 1fr; gap: 16px; padding: 16px; }.number-row { grid-template-columns: 1fr; gap: 4px; }.detail-fields { grid-template-columns: 1fr; } }
 </style>

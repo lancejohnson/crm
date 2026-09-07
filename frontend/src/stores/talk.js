@@ -39,7 +39,7 @@ export const talkStore = defineStore('crm-talk', () => {
   // Live-one alerts waiting on this user (from `crm_live_one`), newest first.
   const liveOnes = ref([])
   // Collapsed groups in the left column: in memory per session.
-  const navOpen = reactive({ crm: true, live: true, channels: true, dms: true })
+  const navOpen = reactive({ crm: true, live: true, channels: true, leads: true, dms: true, phones: true })
   const navCollapsed = ref(false)
   const DRAFT_KEY = 'crm-talk-drafts'
   function readDrafts() { try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || '{}') } catch { return {} } }
