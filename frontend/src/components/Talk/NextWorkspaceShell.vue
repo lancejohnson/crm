@@ -32,7 +32,6 @@ import TalkNav from '@/components/Talk/TalkNav.vue'
 import TalkKeys from '@/components/Talk/TalkKeys.vue'
 import PhoneDock from '@/components/Telephony/PhoneDock.vue'
 import { ring, dial, requestNotifyPermission, notifyLiveOne } from '@/composables/phone'
-import { globalStore } from '@/stores/global'
 
 const emit = defineEmits(['reserve'])
 const props = defineProps({ mobile: Boolean })
