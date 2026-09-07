@@ -198,7 +198,9 @@ def list_channels():
 		limit_page_length=2000,
 	)
 	unread = unread_counts(recent, reads, user)
-	presence = presence()
+	# Do not name this `presence` — that shadows the module function and
+	# UnboundLocalError's on the call (shipped as gw458).
+	status_map = globals()["presence"]()
 
 	out = []
 	for ch in visible:
@@ -214,7 +216,7 @@ def list_channels():
 				"unread": unread.get(ch.name, 0),
 				"last_at": ch.last_message_at,
 				"dm_user": dm_user,
-				"presence": presence.get(dm_user) if dm_user else None,
+				"presence": status_map.get(dm_user) if dm_user else None,
 			}
 		)
 	return order_channels(out)
