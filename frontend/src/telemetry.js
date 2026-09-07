@@ -71,10 +71,14 @@ export function initTelemetry() {
       maskAllInputs: true,
       maskTextSelector: '*',
       maskTextFn: maskText,
-      blockSelector: 'img, video, audio, canvas, iframe',
+      // Map tiles are <img> and the call waveform is a <canvas>; blocking them
+      // left bug replays as blank rectangles. Cross-origin iframes (Street View)
+      // can never be captured, video/audio stay out to keep payloads small.
+      blockSelector: 'video, audio, iframe',
       recordHeaders: false,
       recordBody: false,
-      captureCanvas: { recordCanvas: false },
+      // Also needs "Capture canvas elements" ON in PostHog → Settings → Session replay.
+      captureCanvas: { recordCanvas: true, canvasFps: 4, canvasQuality: 0.6 },
       recordCrossOriginIframes: false,
       maskCapturedNetworkRequestFn: scrubNetworkRequest,
     },
