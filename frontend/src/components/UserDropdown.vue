@@ -61,6 +61,7 @@ import { confirmLoginToFrappeCloud } from '@/composables/frappecloud'
 import { Dropdown } from 'frappe-ui'
 import { computed, h, markRaw, shallowRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { workspaceStore } from '@/stores/workspace'
 
 defineProps({
   isCollapsed: { type: Boolean, default: false },
@@ -73,21 +74,29 @@ const { getUser } = usersStore()
 const user = computed(() => getUser() || {})
 
 // Workspace version switch ("Try the new workspace" / "Back to classic").
-// DEV-only for now: the preview modules are pulled in with a dynamic import
-// inside a dead branch, so the production bundle is unchanged. The real
-// mechanism is a per-user Frappe default (`crm_workspace_version`) — see
-// utils/workspaceVersion.js — read with the user store at boot and written
-// from this same item; nothing is written to the server yet.
-// shallowRef: a deep ref would auto-unwrap the nested `label` computed and
-// `.label.value` would read undefined (blank menu item).
-const workspaceItem = shallowRef(null)
+// Real mechanism: stores/workspace.js (`crm.api.workspace.get` / `set_version`,
+// per-user default `crm_workspace_version`, site_config `crm_next_users`
+// allowlist). The item renders only when the server says this user is
+// allowed, so everyone else's menu is byte-identical to production. In DEV,
+// a non-allowlisted session still gets the fictional mockup toggle.
+const workspace = workspaceStore()
+const previewSwitch = shallowRef(null)
 if (import.meta.env.DEV) {
   const route = useRoute()
   const router = useRouter()
   import('@/composables/workspaceSwitch').then(({ useWorkspaceSwitch }) => {
-    workspaceItem.value = useWorkspaceSwitch({ route, router })
+    previewSwitch.value = useWorkspaceSwitch({ route, router })
   })
 }
+const workspaceItem = computed(() => {
+  if (workspace.allowed) {
+    return { icon: 'layout', label: workspace.menuLabel, onClick: () => workspace.toggle() }
+  }
+  if (previewSwitch.value) {
+    return { icon: 'layout', label: previewSwitch.value.label.value, onClick: previewSwitch.value.toggle }
+  }
+  return null
+})
 
 const dropdownItems = computed(() => {
   if (!settings.value?.dropdown_items) return []
@@ -103,11 +112,7 @@ const dropdownItems = computed(() => {
   ]
 
   if (workspaceItem.value) {
-    _dropdownItems[0].items.push({
-      icon: 'layout',
-      label: workspaceItem.value.label.value,
-      onClick: workspaceItem.value.toggle,
-    })
+    _dropdownItems[0].items.push({ ...workspaceItem.value })
   }
 
   items.forEach((item) => {
