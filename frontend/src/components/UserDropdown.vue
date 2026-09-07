@@ -59,7 +59,9 @@ import { showSettings, isMobileView } from '@/composables/settings'
 import { showAboutModal } from '@/composables/modals'
 import { confirmLoginToFrappeCloud } from '@/composables/frappecloud'
 import { Dropdown } from 'frappe-ui'
-import { computed, h, markRaw } from 'vue'
+import { computed, h, markRaw, shallowRef } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { workspaceStore } from '@/stores/workspace'
 
 defineProps({
   isCollapsed: { type: Boolean, default: false },
@@ -70,6 +72,31 @@ const { logout } = sessionStore()
 const { getUser } = usersStore()
 
 const user = computed(() => getUser() || {})
+
+// Workspace version switch ("Try the new workspace" / "Back to classic").
+// Real mechanism: stores/workspace.js (`crm.api.workspace.get` / `set_version`,
+// per-user default `crm_workspace_version`, site_config `crm_next_users`
+// allowlist). The item renders only when the server says this user is
+// allowed, so everyone else's menu is byte-identical to production. In DEV,
+// a non-allowlisted session still gets the fictional mockup toggle.
+const workspace = workspaceStore()
+const previewSwitch = shallowRef(null)
+if (import.meta.env.DEV) {
+  const route = useRoute()
+  const router = useRouter()
+  import('@/composables/workspaceSwitch').then(({ useWorkspaceSwitch }) => {
+    previewSwitch.value = useWorkspaceSwitch({ route, router })
+  })
+}
+const workspaceItem = computed(() => {
+  if (workspace.allowed) {
+    return { icon: 'layout', label: workspace.menuLabel, onClick: () => workspace.toggle() }
+  }
+  if (previewSwitch.value) {
+    return { icon: 'layout', label: previewSwitch.value.label.value, onClick: previewSwitch.value.toggle }
+  }
+  return null
+})
 
 const dropdownItems = computed(() => {
   if (!settings.value?.dropdown_items) return []
@@ -83,6 +110,10 @@ const dropdownItems = computed(() => {
       items: [],
     },
   ]
+
+  if (workspaceItem.value) {
+    _dropdownItems[0].items.push({ ...workspaceItem.value })
+  }
 
   items.forEach((item) => {
     if (item.hidden) return

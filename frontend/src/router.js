@@ -4,6 +4,28 @@ import { sessionStore } from '@/stores/session'
 import { viewsStore } from '@/stores/views'
 
 const routes = [
+  ...(import.meta.env.DEV ? [{
+    path: '/phone-preview',
+    name: 'Phone Preview',
+    component: () => import('@/pages/PhonePreview.vue'),
+  }, {
+    path: '/phone-settings-preview',
+    name: 'Phone Settings Preview',
+    component: () => import('@/pages/PhoneSettingsPreview.vue'),
+  }] : []),
+  {
+    // Next workspace: a conversation (channel | dm | standup | live) is a page
+    // in the main area. pages/Talk.vue gates on workspaceStore.isNext and, in
+    // DEV only, falls back to the fictional TalkPreview mockup.
+    path: '/talk/:kind/:id',
+    name: 'Talk',
+    component: () => import('@/pages/Talk.vue'),
+  },
+  {
+    path: '/settings/phone',
+    name: 'Phone Settings',
+    component: () => import('@/pages/PhoneSettings.vue'),
+  },
   {
     path: '/',
     name: 'Home',

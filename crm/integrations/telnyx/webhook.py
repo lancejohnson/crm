@@ -29,6 +29,7 @@ import frappe
 
 from crm.api import telephony
 from crm.integrations.telnyx import api as telnyx_api
+from crm.integrations.telnyx import desk
 from crm.integrations.telnyx.api import _store_message
 
 #: Seconds of silence before voicemail gives up. Long enough for a real message,
@@ -186,6 +187,15 @@ def voice():
 	to = payload.get("to")
 	external = frm if inbound else to
 
+	# CONFERENCE-FIRST DESK LEGS. Anything we dialled ourselves carries a
+	# `kind` in client_state; those legs are wiring, not calls, and never get a
+	# CRM Call Log of their own. The external party's leg (peer/caller) does.
+	state_bits = desk.decode_client_state(payload.get("client_state"))
+	kind = state_bits.get("kind")
+	if kind in desk.INTERNAL_KINDS:
+		_desk_internal_leg(event, payload, state_bits)
+		return {"ok": True, "leg": kind}
+
 	existing = frappe.db.get_value("CRM Call Log", {"id": call_id}, "name")
 
 	if event == "call.initiated" and not existing:
@@ -217,20 +227,23 @@ def voice():
 		user = _client_state_user(payload)
 		if user:
 			doc["caller" if not inbound else "receiver"] = user
-		frappe.get_doc(doc).insert(ignore_permissions=True)
+		created = frappe.get_doc(doc).insert(ignore_permissions=True)
+		if kind == "peer_leg":
+			_desk_peer_initiated(created.name, payload, state_bits)
+		elif inbound:
+			# A line with ring members rings them (conference-first); otherwise the
+			# legacy behaviour: answer and take voicemail in the line owner's voice.
+			if not _desk_inbound_initiated(created.name, payload, to):
+				_answer_and_take_voicemail(payload, to)
 		return {"ok": True, "created": call_id}
 
-	# An answered call is a recorded call. Dual channel + transcription, started
-	# the moment media exists rather than on a timer, so the first words of the
-	# call -- the ones that decide the rest of it -- are in the file.
 	if event == "call.answered":
-		telnyx_api.start_recording(payload.get("call_control_id"))
-
-	# INBOUND that nobody picked up -> voicemail, in the caller's own rep's voice.
-	# Telnyx's own Voicemail product is number-level; doing it here means the
-	# greeting is per USER and lives in the CRM next to everything else about them.
-	if event == "call.initiated" and inbound:
-		_answer_and_take_voicemail(payload, to)
+		state = _desk_state_for_external(payload)
+		if state and kind == "peer_leg":
+			_desk_peer_answered(state, payload)
+		elif not state:
+			# Legacy (non-desk) answered call: record it, dual channel, immediately.
+			telnyx_api.start_recording(payload.get("call_control_id"))
 
 	if event in ("call.answered", "call.hangup") and existing:
 		updates = {"status": "Completed" if event == "call.hangup" else "In Progress"}
@@ -239,9 +252,233 @@ def voice():
 			updates["duration"] = _duration(payload, existing)
 			if payload.get("hangup_cause") in ("call_rejected", "busy", "no_answer", "timeout"):
 				updates["status"] = "No Answer"
+			state = _desk_state_for_external(payload)
+			if state:
+				if not state.get("answered_by") and state.get("direction") == "inbound" and state.get("state") != "active":
+					updates["status"] = "No Answer"
+				_desk_end(state)
 		frappe.db.set_value("CRM Call Log", existing, updates)
 
 	return {"ok": True}
+
+
+# ── the desk: conference-first legs ───────────────────────────────────────────
+
+
+def _desk_state_for_external(payload):
+	"""Desk state for an external leg (peer/caller), by its desk id or ccid."""
+	bits = desk.decode_client_state(payload.get("client_state"))
+	state = telephony._load(bits["desk"]) if bits.get("desk") else None
+	if state:
+		return state
+	ccid = payload.get("call_control_id")
+	for s in telephony._all_states():
+		if ccid and ccid in (s.get("caller_leg"), s.get("peer_leg")):
+			return s
+	return None
+
+
+def _desk_peer_initiated(call_log_name, payload, bits):
+	"""The other party's leg exists: link the CRM Call Log to the desk state."""
+	state = telephony._load(bits.get("desk") or "")
+	if not state:
+		return
+	state["peer_leg"] = payload.get("call_control_id")
+	state["call_log"] = call_log_name
+	telephony._save(state)
+	telephony.publish_call(state, "ringing")
+
+
+def _desk_peer_answered(state, payload):
+	"""Seller picked up: put them in the room with the rep; record if the line says so."""
+	if not state.get("conference_id"):
+		return
+	ccid = payload.get("call_control_id")
+	telnyx_api.conference_command(state["conference_id"], "join", desk.join_payload(ccid))
+	state["state"] = "active"
+	_desk_maybe_record(state, ccid)
+	telephony._save(state)
+	telephony.publish_call(state, "answered")
+
+
+def _desk_inbound_initiated(call_log_name, payload, our_number) -> bool:
+	"""Incoming call on a line with ring members: ring them all, first answer wins.
+
+	Returns False when the line has nobody to ring (no CRM Phone Line, or no
+	members with a reachable phone), so the caller falls through to voicemail.
+	"""
+	if not telephony.desk_enabled():
+		return False
+	line = telephony.line_by_number(our_number)
+	if not line or not line.get("active", True):
+		return False
+	settings = telephony.phone_settings()
+	members = desk.ring_members(line)
+	sips = {u: telephony.sip_username(u) for u in members}
+	mobiles = {u: telephony.user_mobile(u) for u in members} if settings["ring_cell_fallback"] else {}
+	targets = desk.ring_targets(members, sips, mobiles, settings["ring_cell_fallback"])
+	if not targets:
+		return False
+	connection = (frappe.conf.get("telnyx_connection_id") or "").strip()
+	if not connection:
+		return False
+
+	desk_id = desk.new_desk_id()
+	caller = payload.get("from")
+	lead = frappe.db.get_value("CRM Call Log", call_log_name, "reference_docname")
+	state = desk.new_state(desk_id, "inbound", line["number"], lead=lead, frm=caller, to=line["number"])
+	state["caller_leg"] = payload.get("call_control_id")
+	state["call_log"] = call_log_name
+	state["started_at"] = frappe.utils.now()
+	for target in targets:
+		client_state = desk.encode_client_state(kind="ring_leg", desk=desk_id, user=target["user"], via=target["via"])
+		try:
+			data = telnyx_api._post(
+				"/calls",
+				desk.dial_leg_payload(connection, target["to"], caller or line["number"], client_state, settings["ring_timeout_secs"]),
+			)
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), f"Telnyx: ring leg to {target['user']} failed")
+			continue
+		if data.get("call_control_id"):
+			state["ring_legs"][data["call_control_id"]] = {"user": target["user"], "via": target["via"]}
+	if not state["ring_legs"]:
+		return False
+	telephony._save(state)
+	for user in members:
+		try:
+			frappe.publish_realtime(
+				"crm_incoming",
+				{"call_log": call_log_name, "desk_id": desk_id, "from": caller, "lead": lead,
+				 "lead_name": telephony._lead_name(lead), "line": line["number"], "line_label": line.get("label")},
+				user=user, after_commit=True,
+			)
+		except Exception:
+			pass
+	telephony.publish_call(state, "ringing")
+	return True
+
+
+def _desk_internal_leg(event, payload, bits):
+	"""Events on the legs WE dialled: rep, ring members, supervisors."""
+	state = telephony._load(bits.get("desk") or "")
+	if not state:
+		return
+	ccid = payload.get("call_control_id")
+	kind = bits.get("kind")
+
+	if event == "call.answered":
+		if kind == "rep_leg":
+			_desk_rep_answered(state, ccid, bits)
+		elif kind == "ring_leg":
+			_desk_ring_answered(state, ccid)
+		elif kind == "supervisor_leg":
+			_desk_supervisor_answered(state, ccid, bits)
+		return
+
+	if event == "call.hangup":
+		if kind == "ring_leg":
+			state.get("ring_legs", {}).pop(ccid, None)
+			if desk.all_ring_legs_gone(state):
+				# Nobody picked up: voicemail on the caller's leg, as before.
+				_answer_and_take_voicemail({"call_control_id": state.get("caller_leg")}, state.get("line"))
+				state["state"] = "voicemail"
+			telephony._save(state)
+		elif kind == "supervisor_leg":
+			state.get("supervisors", {}).pop(ccid, None)
+			telephony._save(state)
+			telephony.publish_call(state)
+		elif kind == "rep_leg":
+			# The rep hung up (or never answered): end the whole call.
+			if state.get("peer_leg") and state.get("state") != "ended":
+				telnyx_api.command(state["peer_leg"], "hangup")
+			if state.get("caller_leg") and state.get("state") == "active":
+				telnyx_api.command(state["caller_leg"], "hangup")
+			if not state.get("peer_leg") and not state.get("caller_leg"):
+				_desk_end(state)
+
+
+def _desk_rep_answered(state, ccid, bits):
+	"""Outbound: the rep is on. Make the room with them, then dial the other party into it."""
+	state["rep_leg"] = ccid
+	try:
+		conf = telnyx_api.create_conference(desk.create_conference_payload(state["desk_id"], ccid))
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Telnyx: conference create failed")
+		telnyx_api.command(ccid, "hangup")
+		_desk_end(state)
+		return
+	state["conference_id"] = conf.get("id")
+	connection = (frappe.conf.get("telnyx_connection_id") or "").strip()
+	client_state = desk.encode_client_state(kind="peer_leg", desk=state["desk_id"], user=state.get("rep"), lead=state.get("lead"))
+	try:
+		data = telnyx_api._post("/calls", desk.dial_leg_payload(connection, state["to"], state["from"], client_state))
+		state["peer_leg"] = data.get("call_control_id")
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Telnyx: peer dial failed")
+		telnyx_api.command(ccid, "hangup")
+		_desk_end(state)
+		return
+	telephony._save(state)
+	telephony.publish_call(state, "ringing")
+
+
+def _desk_ring_answered(state, ccid):
+	"""Inbound: a ring member picked up. First one claims the call; the others are hung up."""
+	if not desk.first_answer_wins(state, ccid):
+		telnyx_api.command(ccid, "hangup")
+		return
+	caller = state.get("caller_leg")
+	telnyx_api.command(caller, "answer")
+	try:
+		conf = telnyx_api.create_conference(desk.create_conference_payload(state["desk_id"], caller))
+		state["conference_id"] = conf.get("id")
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Telnyx: conference create failed (inbound)")
+		# Degrade to a plain bridge so the caller is not left hanging.
+		telnyx_api.command(caller, "bridge", {"call_control_id": ccid})
+	if state.get("conference_id"):
+		telnyx_api.conference_command(state["conference_id"], "join", desk.join_payload(ccid))
+	for loser in desk.losing_ring_legs(state, ccid):
+		telnyx_api.command(loser, "hangup")
+		state["ring_legs"].pop(loser, None)
+	_desk_maybe_record(state, caller)
+	if state.get("call_log"):
+		frappe.db.set_value("CRM Call Log", state["call_log"], {"receiver": state["rep"], "status": "In Progress"})
+	telephony._save(state)
+	telephony.publish_call(state, "answered")
+
+
+def _desk_supervisor_answered(state, ccid, bits):
+	"""A closer's leg is up: join as supervisor, then the rep-only join tone."""
+	mode = bits.get("mode") if bits.get("mode") in desk.MODES else "monitor"
+	conf = state.get("conference_id")
+	if not conf:
+		telnyx_api.command(ccid, "hangup")
+		return
+	telnyx_api.conference_command(conf, "join", desk.join_payload(ccid, mode, state.get("rep_leg")))
+	state.setdefault("supervisors", {})[ccid] = {"user": bits.get("user"), "mode": mode, "joined": True}
+	if state.get("rep_leg"):
+		settings = telephony.phone_settings()
+		action, body = desk.tone_payload(state["rep_leg"], settings.get("join_tone_url"))
+		telnyx_api.conference_command(conf, action, body)
+	telephony._save(state)
+	telephony.publish_call(state, "supervisor_joined")
+
+
+def _desk_maybe_record(state, external_ccid):
+	"""Record at bridge time when the line resolves to recording on."""
+	settings = telephony.phone_settings()
+	line = telephony.line_by_number(state.get("line")) or {"recording": "inherit"}
+	if desk.resolve_recording(line.get("recording"), settings["recording_default"]):
+		telnyx_api.command(external_ccid, "record_start", desk.record_payload())
+		state["recording"] = True
+
+
+def _desk_end(state):
+	state["state"] = "ended"
+	telephony.publish_call(state, "ended")
+	telephony._drop(state)
 
 
 def _answer_and_take_voicemail(payload, our_number):
@@ -256,7 +493,8 @@ def _answer_and_take_voicemail(payload, our_number):
 	call_control_id = payload.get("call_control_id")
 	if not call_control_id:
 		return
-	owner = telephony.line_owners().get(telephony.last10(our_number))
+	line = telephony.line_by_number(our_number) if telephony.desk_enabled() else None
+	owner = (line or {}).get("owner") or telephony.line_owners().get(telephony.last10(our_number))
 	greeting = telnyx_api.voicemail_greeting(owner) if owner else ""
 	if not greeting:
 		greeting = (

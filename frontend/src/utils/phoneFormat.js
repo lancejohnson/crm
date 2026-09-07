@@ -36,13 +36,20 @@ function isMobileDevice() {
 }
 
 // Normalize a US-ish phone string to E.164 (+1XXXXXXXXXX). Non-US digit runs
-// just get a leading '+'. Returns '' when there's nothing dialable.
+// just get a leading '+'. Returns '' when there's nothing dialable. Exported
+// as `normalizeNumber` for the next workspace's dialer/history keys.
 function toE164(value) {
   const digits = String(value || '').replace(/\D/g, '')
   if (!digits) return ''
   if (digits.length === 10) return '+1' + digits
   if (digits.length === 11 && digits[0] === '1') return '+' + digits
   return '+' + digits
+}
+
+export function normalizeNumber(value) {
+  const e164 = toE164(value)
+  const digits = e164.replace(/\D/g, '')
+  return digits.length >= 10 && digits.length <= 15 ? e164 : ''
 }
 
 // Build a click-to-call href for a phone number.

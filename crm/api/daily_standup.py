@@ -527,12 +527,28 @@ def _mm(path, token, base, method="GET", body=None):
 	return r.json()
 
 
+def post_to_talk(text, channel="standup", label="Standup"):
+	"""ALSO land a bot post in Talk, when Talk exists (ops setup_talk.py).
+
+	The Mattermost DM is kept during the transition; this is additive. Written
+	with mirror=False — the DM IS the Mattermost copy, and mirroring the channel
+	post too would put it in Mattermost twice. Never raises."""
+	try:
+		from crm.api.talk import post_as_bot
+
+		return post_as_bot(channel, text, author_label=label, mirror=False)
+	except Exception:
+		frappe.log_error(title="standup: Talk post failed", message=frappe.get_traceback())
+		return None
+
+
 def send_dm(text):
 	"""DM the standup to the configured user as the `pi` bot. Returns the post id.
 
 	Absent a token this is a no-op rather than an error, so the feature lies
 	dormant on any site that has not been configured (same shape as the contract
-	parser's `notify_mini`)."""
+	parser's `notify_mini`). Shared with the BatchData wallet alert, so Talk
+	delivery is NOT here — each caller names its own channel."""
 	base, token, user = _mm_conf()
 	if not token:
 		frappe.log_error(title="standup: no mattermost_token in site_config", message="skipped DM")
@@ -571,6 +587,7 @@ def send_daily_standup():
 		spend = render_spend(commit_snapshot=True)
 		if spend:
 			text = f"{text}\n\n{spend}"
+		post_to_talk(text)
 		send_dm(text)
 	except Exception:
 		frappe.log_error(title="standup: send_daily_standup failed", message=frappe.get_traceback())
@@ -594,6 +611,8 @@ def preview_standup(today=None, send=0, note=None):
 		text = f"{text}\n\n{spend}"
 	if note:
 		text = f"_{note}_\n\n{text}"
+	if int(send or 0):
+		post_to_talk(text)
 	post = send_dm(text) if int(send or 0) else None
 	return {
 		"markdown": text,

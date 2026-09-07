@@ -29,6 +29,7 @@ export const sidebarLinks = [
   // first thing the setters open each morning and the surface the 5am standup
   // DM describes.
   { label: 'Today', icon: LucideListChecks, to: 'Today' },
+  ...(import.meta.env.DEV ? [{ label: 'Phone Preview', icon: PhoneIcon, to: 'Phone Preview' }] : []),
   { label: 'Practice', icon: LucideTarget, to: 'Practice' },
   { label: 'Dashboard', icon: LucideLayoutDashboard, to: 'Dashboard' },
   { label: 'Leads', icon: LeadsIcon, to: 'Leads' },

@@ -196,7 +196,9 @@ def _message(sender_name, lead, summary, note, mention, as_self=False):
 def _log_comment(lead, recipient_name, note, mode):
 	try:
 		head = _("Flagged as a live one to {0} on Mattermost").format(recipient_name)
-		if mode == "direct":
+		if mode == "crm":
+			head = _("Flagged as a live one to {0} in the CRM").format(recipient_name)
+		elif mode == "direct":
 			head += " " + _("(via the pi bot)")
 		elif mode == "group":
 			head += " " + _("(group chat with the pi bot)")
@@ -218,8 +220,92 @@ def _log_comment(lead, recipient_name, note, mode):
 		frappe.log_error(frappe.get_traceback(), "Live one: timeline comment failed")
 
 
+def closer_login() -> str | None:
+	"""The closer's CRM login: site_config `live_one_login`, else the enabled
+	User whose email local-part matches the Mattermost username. None when
+	nobody matches — the Talk/notification path then simply does not fire."""
+	explicit = (frappe.conf.get("live_one_login") or "").strip().lower()
+	if explicit and frappe.db.exists("User", explicit):
+		return explicit
+	username = _recipient_username()
+	rows = frappe.get_all(
+		"User", filters={"enabled": 1, "user_type": "System User"},
+		fields=["name", "username", "full_name"], limit_page_length=200,
+	)
+	for row in rows:
+		if (row.username or "").lower() == username.lower():
+			return row.name
+	for row in rows:
+		local = (row.name or "").split("@")[0].replace(".", "").lower()
+		if local == username.replace(".", "").lower():
+			return row.name
+	return None
+
+
+def notify_in_crm(lead: str, doc, note: str, call_log: str | None = None) -> dict:
+	"""The in-CRM half of the alert: a `CRM Notification` (type Live one) for
+	the closer, a Talk DM from the rep to the closer, and the `crm_live_one`
+	realtime event the phone dock's alert card listens for. Runs BEFORE the
+	Mattermost post and never raises — during the transition Mattermost is the
+	delivery everyone relies on, and this must not be able to break it."""
+	out = {"notification": None, "talk": None}
+	closer = closer_login()
+	if not closer or closer == frappe.session.user:
+		return out
+	summary = _lead_summary(doc)
+	rep_name = frappe.utils.get_fullname(frappe.session.user) or frappe.session.user
+	line = f"{rep_name} has a live one: {summary['name']}"
+	if summary.get("address"):
+		line += f" · {summary['address']}"
+	try:
+		notification = frappe.get_doc(
+			{
+				"doctype": "CRM Notification",
+				"type": "Live one",
+				"from_user": frappe.session.user,
+				"to_user": closer,
+				"message": (note or line)[:1000],
+				"notification_text": f"<b>{escape_html(rep_name)}</b> has a live one: {escape_html(summary['name'])}",
+				"notification_type_doctype": "CRM Lead",
+				"notification_type_doc": lead,
+				"reference_doctype": "CRM Lead",
+				"reference_name": lead,
+			}
+		).insert(ignore_permissions=True)
+		out["notification"] = notification.name
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Live one: CRM Notification failed")
+	try:
+		from crm.api import talk
+
+		channel = talk.dm_channel_between(frappe.session.user, closer)
+		if channel:
+			text = _message(rep_name, lead, summary, note, "", as_self=True)
+			msg = frappe.get_doc(
+				{
+					"doctype": talk.MESSAGE, "channel": channel, "author": frappe.session.user,
+					"text": text, "posted_at": frappe.utils.now(), "origin": "crm",
+					# The Mattermost DM below IS the mirror; do not post it twice.
+					"props": json.dumps({"mirror": False, "live_one": lead}),
+				}
+			).insert(ignore_permissions=True)
+			out["talk"] = msg.name
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Live one: Talk DM failed")
+	try:
+		frappe.publish_realtime(
+			"crm_live_one",
+			{"lead": lead, "lead_name": summary["name"], "rep": frappe.session.user,
+			 "rep_name": rep_name, "note": note, "call_log": call_log},
+			user=closer, after_commit=True,
+		)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Live one: realtime failed")
+	return out
+
+
 @frappe.whitelist()
-def alert(lead: str, note: str = ""):
+def alert(lead: str, note: str = "", call_log: str = None):
 	"""Post the alert. Returns {ok, mode: group|direct, to, channel_id}."""
 	validate_access()
 	if not lead or not frappe.db.exists("CRM Lead", lead):
@@ -228,8 +314,15 @@ def alert(lead: str, note: str = ""):
 	doc.check_permission("read")
 	note = (note or "").strip()[:1000]
 
+	# In-CRM delivery first (notification + Talk DM + realtime). Additive; the
+	# Mattermost DM below stays the delivery the team relies on today.
+	in_crm = notify_in_crm(lead, doc, note, call_log)
+
 	base, token, _dm_user = _mm_conf()
 	if not token:
+		if in_crm.get("notification") or in_crm.get("talk"):
+			_log_comment(lead, closer_login() or "the closer", note, "crm")
+			return {"ok": True, "mode": "crm", "to": closer_login(), **in_crm}
 		frappe.throw(_("Mattermost is not configured on this site, so the alert was not sent."))
 
 	username = _recipient_username()
