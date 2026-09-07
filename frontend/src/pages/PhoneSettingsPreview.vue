@@ -1,0 +1,49 @@
+<template>
+  <LayoutHeader><template #left-header><Breadcrumbs :items="[{ label: 'Settings' }, { label: 'Phone · preview' }]" /></template></LayoutHeader>
+  <div class="phone-settings">
+    <nav aria-label="Phone settings"><h2>Phone</h2><button :class="{ selected: section === 'numbers' }" @click="section = 'numbers'">Numbers & access</button><button :class="{ selected: section === 'recording' }" @click="section = 'recording'">Recording</button><RouterLink :to="{ name: 'Phone Preview' }">Back to phone preview</RouterLink></nav>
+    <main>
+      <p class="demo-note">Design preview · fictional numbers and permissions. Changes stay in memory; nothing is purchased or saved to CRM.</p>
+      <template v-if="section === 'recording'"><h1>Recording</h1><p class="description">A workspace default, with an explicit override for each line.</p><label class="setting-row"><span><b>Record calls by default</b><small>Applies to numbers set to “Use workspace default”.</small></span><input v-model="settings.recordingDefault" type="checkbox"></label><div class="consent-note"><b>Recording policy still applies</b><p>A switch is not legal consent. Required disclosures, consent, retention, and who can access recordings must be settled before enabling real recording.</p></div></template>
+      <template v-else-if="buyStep">
+        <Button variant="ghost" iconLeft="arrow-left" @click="buyStep = ''">Numbers & access</Button><h1>Buy a number</h1><p class="description">Search → choose → review. Illustrative inventory only; availability and pricing have not been checked.</p>
+        <template v-if="buyStep === 'search'"><form class="number-search" @submit.prevent="searched = true"><FormControl v-model="search" label="Area code" placeholder="202" /><Button type="submit" variant="solid">Search examples</Button></form><div v-if="searched" class="number-results"><p class="description">{{ search.trim() && search.trim() !== '202' ? 'No examples for that area code. Try 202.' : 'Example results · not purchasable inventory' }}</p><template v-if="!search.trim() || search.trim() === '202'"><button v-for="candidate in candidates" :key="candidate" class="result-row" @click="chosen = candidate; buyStep = 'review'"><span>{{ candidate }}</span><span>Select →</span></button></template></div></template>
+        <template v-else><div class="review-number"><span>Selected example</span><h2>{{ chosen }}</h2><FormControl v-model="buyLabel" label="Line name" placeholder="New team line" /><label class="select-label">Owner<select v-model="buyOwner"><option v-for="name in previewTeammates" :key="name">{{ name }}</option></select></label><p>Price and availability: not checked.</p><p>Recording default: {{ settings.recordingDefault ? 'On' : 'Off' }}. Access would be assigned after purchase.</p></div><div class="consent-note"><b>Review only — no order placed</b><p>The real version would show verified availability, recurring price and confirmation before charging. This mockup never calls a provider.</p></div><Button class="mt-4" @click="buyStep = 'search'">Choose a different example</Button></template>
+      </template>
+      <template v-else>
+        <div class="settings-title"><div><h1>Numbers & access</h1><p class="description">A number has an owner. Other teammates get explicit access.</p></div><Button iconLeft="plus" variant="solid" @click="buyStep = 'search'; searched = false">Buy number</Button></div>
+        <div class="number-list"><button v-for="(number, index) in settings.numbers" :key="number.number" class="number-row" :class="{ selected: index === selected }" @click="selected = index"><span><b>{{ number.label }}</b><small>{{ number.number }}</small></span><span><small>Owner</small>{{ number.owner }}</span><span><small>Recording</small>{{ recordingLabel(number) }}</span></button></div>
+        <section class="number-detail"><h2>{{ current.label }}</h2><div class="detail-fields"><FormControl v-model="current.label" label="Line name" /><label class="select-label">Owner<select v-model="current.owner"><option v-for="name in previewTeammates" :key="name">{{ name }}</option></select></label><label class="select-label">Recording<select v-model="current.recording"><option value="inherit">Use workspace default</option><option value="on">Always on</option><option value="off">Off</option></select></label></div><p class="description">Effective recording: {{ recordingLabel(current) }}. The owner and access controls are shown separately; changing owner does not silently change this preview’s permissions.</p>
+          <h3>Shared-number group</h3><p class="description">View = see this line’s calls and texts. Use = place calls and send texts from it. Ring = receive its incoming calls.</p><div class="access-table"><table><thead><tr><th>Teammate</th><th>View</th><th>Use</th><th>Ring</th></tr></thead><tbody><tr v-for="name in previewTeammates" :key="name"><td>{{ name }}<small v-if="current.owner === name">Owner</small></td><td v-for="permission in ['view', 'use', 'ring']" :key="permission"><input v-model="current.members[name][permission]" type="checkbox" :aria-label="`${name}: ${permission} ${current.label}`"></td></tr></tbody></table></div><p class="description">Preview changes are immediate in memory only. No real number permissions are changed.</p>
+        </section>
+      </template>
+    </main>
+  </div>
+</template>
+<script setup>
+import LayoutHeader from '@/components/LayoutHeader.vue'
+import { Breadcrumbs, Button, FormControl } from 'frappe-ui'
+import { computed, ref } from 'vue'
+import { phonePreview as p } from '@/composables/phonePreview'
+import { previewTeammates } from '@/utils/phonePreview'
+const settings = computed(() => p.phoneSettings)
+const section = ref('numbers')
+const selected = ref(0)
+const current = computed(() => settings.value.numbers[selected.value])
+const buyStep = ref('')
+const searched = ref(false)
+const search = ref('202')
+const chosen = ref('')
+const buyLabel = ref('New team line')
+const buyOwner = ref('Exe')
+const candidates = ['(202) 555-0161', '(202) 555-0172', '(202) 555-0183']
+function recordingLabel(number) {
+  return number.recording === 'inherit' ? `${settings.value.recordingDefault ? 'On' : 'Off'} · workspace default` : number.recording === 'on' ? 'On · override' : 'Off · override'
+}
+</script>
+<style scoped>
+.phone-settings { display: flex; flex: 1; min-height: 0; overflow-y: auto; color: var(--ink-gray-8, #333); }
+nav { width: 200px; flex-shrink: 0; padding: 24px 16px; border-right: 1px solid var(--outline-gray-1, #eee); }nav h2 { font-size: 14px; font-weight: 600; margin: 0 8px 14px; }nav button, nav a { display: block; padding: 10px 8px; border-radius: 6px; font-size: 13px; width: 100%; text-align: left; }nav .selected { background: var(--surface-gray-2, #eee); }nav a { margin-top: 20px; font-size: 11px; color: var(--ink-gray-5, #777); }
+main { flex: 1; min-width: 0; padding: 24px 30px; max-width: 1000px; }h1 { font-size: 24px; font-weight: 600; letter-spacing: -.5px; margin-top: 14px; }h2 { font-size: 18px; font-weight: 600; }h3 { margin-top: 24px; font-size: 15px; font-weight: 600; }.description { margin: 10px 0; font-size: 12px; line-height: 1.6; color: var(--ink-gray-5, #777); }.demo-note { font-size: 11px; line-height: 1.5; padding-bottom: 14px; border-bottom: 1px solid var(--outline-gray-1, #eee); color: var(--ink-gray-5, #777); }.settings-title { display: flex; align-items: center; justify-content: space-between; gap: 16px; }.number-list { margin-top: 22px; }.number-row { display: grid; grid-template-columns: 1.4fr .7fr 1fr; gap: 12px; width: 100%; text-align: left; padding: 16px 12px; border-bottom: 1px solid var(--outline-gray-1, #eee); font-size: 13px; }.number-row.selected { background: var(--surface-gray-1, #fafafa); }.number-row b { font-weight: 600; }small { display: block; font-size: 11px; color: var(--ink-gray-5, #777); margin: 4px 0; }.number-detail { margin-top: 28px; }.detail-fields { display: grid; grid-template-columns: 1fr 1fr 1.3fr; gap: 12px; margin: 20px 0 10px; }.select-label { display: grid; gap: 7px; font-size: 12px; }select { border: 1px solid var(--outline-gray-2, #ddd); border-radius: 6px; padding: 6px 8px; background: var(--surface-white, white); font-size: 12px; }.access-table { overflow-x: auto; }table { width: 100%; margin: 14px 0; font-size: 13px; }th { text-align: left; font-size: 11px; font-weight: 500; color: var(--ink-gray-5, #777); }th, td { padding: 12px 8px; border-bottom: 1px solid var(--outline-gray-1, #eee); }.setting-row { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-top: 30px; padding: 20px 0; border-block: 1px solid var(--outline-gray-1, #eee); font-size: 14px; }.consent-note { margin-top: 24px; padding: 16px; border: 1px solid var(--outline-gray-2, #ddd); border-radius: 8px; font-size: 12px; line-height: 1.6; }.consent-note p { margin-top: 8px; color: var(--ink-gray-5, #777); }.number-search { display: flex; align-items: end; gap: 10px; margin-top: 24px; }.result-row { display: flex; width: 100%; justify-content: space-between; border-bottom: 1px solid var(--outline-gray-1, #eee); padding: 16px; font-size: 14px; }.result-row:hover { background: var(--surface-gray-1, #fafafa); }.review-number { display: grid; gap: 14px; max-width: 360px; margin-top: 20px; font-size: 12px; }
+@media(max-width: 760px) { .phone-settings { display: block; }nav { display: flex; align-items: center; gap: 5px; width: 100%; padding: 10px 12px; border-bottom: 1px solid var(--outline-gray-1, #eee); }nav h2, nav a { display: none; }nav button { font-size: 12px; padding: 8px; width: auto; }main { padding: 16px; }.detail-fields { grid-template-columns: 1fr; }.number-row { grid-template-columns: 1fr 1fr; }.number-row > :last-child { grid-column: 1/-1; }.settings-title { align-items: flex-start; flex-wrap: wrap; } }
+</style>

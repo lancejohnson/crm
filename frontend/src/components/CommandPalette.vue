@@ -20,7 +20,7 @@
             ref="inputRef"
             v-model="query"
             type="text"
-            :placeholder="__('Search or run a command…')"
+            :placeholder="scope === 'dm' ? __('Message someone…') : __('Search or run a command…')"
             class="w-full border-none bg-transparent py-4 text-base text-ink-gray-9 placeholder:text-ink-gray-4 focus:outline-none focus:ring-0"
             spellcheck="false"
             autocomplete="off"
@@ -112,12 +112,17 @@ import {
   toggleCompsFocusMap,
 } from '@/composables/compsLayout'
 import { getSettings } from '@/stores/settings'
+import { commandPaletteScope, paletteExtensions } from '@/composables/modals'
 import { createResource, FeatherIcon, LoadingIndicator } from 'frappe-ui'
 import { useDebounceFn } from '@vueuse/core'
-import { ref, computed, watch, nextTick, onMounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 
 const show = defineModel({ type: Boolean, default: false })
+// A scope narrows the palette to extension sections only (a scoped switcher
+// reuses this one modal). It is set before the palette opens and cleared on close.
+const scope = computed(() => commandPaletteScope.value)
+onBeforeUnmount(() => { commandPaletteScope.value = null })
 
 const router = useRouter()
 const { settings } = getSettings()
@@ -228,9 +233,22 @@ const recordEntries = computed(() =>
   })),
 )
 
+// --- Extension sections (registered providers, e.g. Talk conversations) -----
+const extensionSections = computed(() =>
+  paletteExtensions.value.flatMap((provider) => {
+    try {
+      return provider(query.value.trim(), scope.value) || []
+    } catch (e) {
+      return []
+    }
+  }).filter((s) => s?.items?.length),
+)
+
 // --- Assemble sections ----------------------------------------------------
 const sections = computed(() => {
   const q = query.value.trim()
+
+  if (scope.value) return extensionSections.value
 
   if (!q) {
     // grouped, unfiltered
@@ -239,7 +257,10 @@ const sections = computed(() => {
       if (!groups.has(c.group)) groups.set(c.group, [])
       groups.get(c.group).push(c)
     }
-    return [...groups.entries()].map(([title, items]) => ({ title, items }))
+    return [
+      ...[...groups.entries()].map(([title, items]) => ({ title, items })),
+      ...extensionSections.value,
+    ]
   }
 
   const out = []
@@ -253,6 +274,10 @@ const sections = computed(() => {
   cmds.sort((a, b) => b.s - a.s)
   if (cmds.length)
     out.push({ title: __('Commands'), items: cmds.map((x) => x.c) })
+
+  // extension results (already ranked by their provider) sit between commands
+  // and record hits
+  out.push(...extensionSections.value)
 
   // records grouped by doctype, ranked by fuzzy score within each group
   const recGroups = new Map()

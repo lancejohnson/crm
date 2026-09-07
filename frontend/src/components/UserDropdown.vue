@@ -59,7 +59,8 @@ import { showSettings, isMobileView } from '@/composables/settings'
 import { showAboutModal } from '@/composables/modals'
 import { confirmLoginToFrappeCloud } from '@/composables/frappecloud'
 import { Dropdown } from 'frappe-ui'
-import { computed, h, markRaw } from 'vue'
+import { computed, h, markRaw, shallowRef } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 defineProps({
   isCollapsed: { type: Boolean, default: false },
@@ -70,6 +71,23 @@ const { logout } = sessionStore()
 const { getUser } = usersStore()
 
 const user = computed(() => getUser() || {})
+
+// Workspace version switch ("Try the new workspace" / "Back to classic").
+// DEV-only for now: the preview modules are pulled in with a dynamic import
+// inside a dead branch, so the production bundle is unchanged. The real
+// mechanism is a per-user Frappe default (`crm_workspace_version`) — see
+// utils/workspaceVersion.js — read with the user store at boot and written
+// from this same item; nothing is written to the server yet.
+// shallowRef: a deep ref would auto-unwrap the nested `label` computed and
+// `.label.value` would read undefined (blank menu item).
+const workspaceItem = shallowRef(null)
+if (import.meta.env.DEV) {
+  const route = useRoute()
+  const router = useRouter()
+  import('@/composables/workspaceSwitch').then(({ useWorkspaceSwitch }) => {
+    workspaceItem.value = useWorkspaceSwitch({ route, router })
+  })
+}
 
 const dropdownItems = computed(() => {
   if (!settings.value?.dropdown_items) return []
@@ -83,6 +101,14 @@ const dropdownItems = computed(() => {
       items: [],
     },
   ]
+
+  if (workspaceItem.value) {
+    _dropdownItems[0].items.push({
+      icon: 'layout',
+      label: workspaceItem.value.label.value,
+      onClick: workspaceItem.value.toggle,
+    })
+  }
 
   items.forEach((item) => {
     if (item.hidden) return

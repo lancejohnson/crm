@@ -4,6 +4,20 @@ import { sessionStore } from '@/stores/session'
 import { viewsStore } from '@/stores/views'
 
 const routes = [
+  ...(import.meta.env.DEV ? [{
+    path: '/phone-preview',
+    name: 'Phone Preview',
+    component: () => import('@/pages/PhonePreview.vue'),
+  }, {
+    path: '/phone-settings-preview',
+    name: 'Phone Settings Preview',
+    component: () => import('@/pages/PhoneSettingsPreview.vue'),
+  }, {
+    // D · Left nav comms mockup: a conversation is a page in the main area.
+    path: '/talk/:kind/:id',
+    name: 'Talk',
+    component: () => import('@/pages/TalkPreview.vue'),
+  }] : []),
   {
     path: '/',
     name: 'Home',

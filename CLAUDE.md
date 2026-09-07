@@ -28,6 +28,28 @@ duplicating. Work substantial features in a worktree of your own.
 
 ## Our changes vs upstream (keep this list current)
 
+- **Dev-only Phone Preview** — `/phone-preview` opens an actual CRM lead
+  with `?phonePreview=1`: collapsed phone dock, bottom team bar, persistent
+  live-one invitations, Listen/Whisper/Barge, history/text threads, incoming
+  Answer/Decline, and chat anchored above each teammate status. Three layouts
+  via `phoneDesign=A|B|C`; dev `/phone-settings-preview` mocks numbers,
+  ownership/access groups, recording defaults, and number-search/review only.
+  Phone fixtures stay explicitly distinct from the real lead; no telephony,
+  notification APIs, or writes. The bottom bar reserves height; compact
+  minimizable popovers leave the real lead's width intact. Route/sidebar/widget
+  activation are DEV-gated. Comms mockups (`commsDesign=A|B|C|D`, D = the
+  chosen direction: Slack-style left nav, conversations as `/talk/:kind/:id`
+  pages) sit on the same activation. **Workspace switch**: the user menu's
+  "Try the new workspace" / "Back to classic" toggles classic ↔ next
+  (phone A + comms D) in memory; the real mechanism is the per-user default
+  `crm_workspace_version` (`utils/workspaceVersion.js`, not written yet).
+  **Mattermost-style shortcuts** (`utils/talkShortcuts.js`, bound once in
+  `TalkShortcuts.vue`): Talk section inside the existing ⌘K palette (via a
+  new `registerPaletteExtension` hook in `composables/modals.js`), ⌘⇧K DM
+  switcher (same palette, scoped), ⌥↑/↓ prev/next, ⌥⇧↑/↓ unread, ⌘⇧L
+  composer, Esc read+blur, ⌘/ help sheet.
+  See `docs/phone-preview.md`; this is a design mockup, not enabled calling.
+
 - **Practice comps** — sidebar **Practice** (`/practice`). Any sales user can
   build a set of properties (picked from real leads) with an optional time
   limit — **per listing by default** (e.g. 3 min each), or whole-set (10 houses
