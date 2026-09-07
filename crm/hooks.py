@@ -251,6 +251,16 @@ doc_events = {
 			"crm.api.do_not_contact.check_inbound_opt_out",
 		],
 	},
+	# CRM Message is Talk (ops setup_talk.py): the in-CRM chat that replaces
+	# Mattermost. Insert/edit/delete publish `crm_talk` and, for rows written
+	# here (origin=crm), mirror to Mattermost during the transition. Inbound
+	# Mattermost posts arrive origin=mattermost and are never mirrored back.
+	# See crm/api/talk.py + crm/integrations/mattermost/.
+	"CRM Message": {
+		"after_insert": ["crm.api.talk.on_message_insert"],
+		"on_update": ["crm.api.talk.on_message_update"],
+		"on_trash": ["crm.api.talk.on_message_trash"],
+	},
 	# CRM Property Tax Pull is a custom doctype (ops repo). The `pull-tax-info`
 	# server script stores BatchData's raw property record; the sandbox can't
 	# parse it richly or publish_realtime, so the parse + lead writeback + live

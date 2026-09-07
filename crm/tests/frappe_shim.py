@@ -92,8 +92,18 @@ class DoesNotExistError(Exception):
 
 
 def install(user="lance.johnson@groundworkpro.com"):
-	"""Register a fake `frappe` (and `requests`, if absent) in sys.modules."""
+	"""Register a fake `frappe` (and `requests`, if absent) in sys.modules.
+
+	Idempotent: a second call returns the shim already installed, so every test
+	module and every crm module share ONE fake (a module imported under shim A
+	and a test asserting on shim B would silently disagree).
+	"""
+	existing = sys.modules.get("frappe")
+	if existing is not None and getattr(existing, "_is_crm_test_shim", False):
+		existing.session.user = user
+		return existing
 	shim = types.ModuleType("frappe")
+	shim._is_crm_test_shim = True
 	shim.conf = {}
 	shim.local = _Local(response={}, request=None, cache={})
 	shim.request = None
@@ -132,7 +142,8 @@ def install(user="lance.johnson@groundworkpro.com"):
 	shim.get_cached_doc = mock.MagicMock()
 	shim.new_doc = mock.MagicMock()
 	shim.get_meta = mock.MagicMock()
-	shim.get_roles = mock.MagicMock(return_value=["System Manager"])
+	shim.get_roles = mock.MagicMock(return_value=["System Manager", "Sales Manager"])
+	shim.only_for = lambda *roles: None
 	shim.has_permission = mock.MagicMock(return_value=True)
 	shim.enqueue = mock.MagicMock()
 	shim.flags = types.SimpleNamespace(in_test=True)
@@ -147,6 +158,9 @@ def install(user="lance.johnson@groundworkpro.com"):
 	utils.now_datetime = lambda: datetime(2026, 9, 7, 12, 0, 0)
 	utils.get_datetime = lambda v: v if isinstance(v, datetime) else datetime.fromisoformat(str(v))
 	utils.add_days = lambda d, n: d
+	utils.getdate = lambda v=None: (v if isinstance(v, datetime) else datetime.fromisoformat(str(v))).date() if v else datetime(2026, 9, 7).date()
+	utils.today = lambda: "2026-09-07"
+	utils.nowdate = utils.today
 	utils.get_fullname = lambda u: u
 	utils.get_url = lambda: "https://crm.example.test"
 	utils.escape_html = lambda s: s

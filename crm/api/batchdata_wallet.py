@@ -322,8 +322,10 @@ def _notify(text, kind):
 	if _already_alerted(kind):
 		return False
 	try:
-		from crm.api.daily_standup import send_dm
+		from crm.api.daily_standup import post_to_talk, send_dm
 
+		# Ops alerts land in Talk's #ops-bot too (when Talk exists); the DM stays.
+		post_to_talk(text, channel="ops-bot", label="BatchData")
 		send_dm(text)
 		return True
 	except Exception:
