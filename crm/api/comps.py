@@ -1370,13 +1370,13 @@ def _zillow_match(doc, subject=None):
 	}
 
 
-@frappe.whitelist()
 def _is_rentals(inventory):
 	return str(inventory or "sale").strip().lower() in (
 		"rent", "rental", "rentals", "for_rent",
 	)
 
 
+@frappe.whitelist()
 def get_lead_comps(
 	lead, radius_mi=None, limit=None, filters=None, auto=0, include_hidden=0, state=None,
 	inventory=None,
