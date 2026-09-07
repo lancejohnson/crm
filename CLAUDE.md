@@ -3387,6 +3387,19 @@ duplicating. Work substantial features in a worktree of your own.
     existing `_seller_values` superset so seller prefill just works.
     `crm/api/agreement.py` (`want_amendment` + resolver branch) +
     `CreateAgreementModal.vue` (third type option).
+    - **Rebuilt 2026-09-07 (ids 5758621 one / 5758624 two)**, Lance's asks off
+      lead 01194: buyer reads **Groundwork Ventures Inc.** everywhere (the DOCX
+      said "Inc" up top and ", LLC" at the signature block); each amendment is
+      **optional behind a checkbox** — price, closing date, or a two-line
+      **Other** (`Amend Purchase Price` / `Amend Closing Date` / `Amend Other`
+      checkbox fields + `Other Amendments` text); and the Buyer block gained
+      **Printed name / Title** with the PSA's field names (`Signer Name` req,
+      `Title` opt) so the CRM prefills the rep's name. The PDF is now DRAWN by
+      `tmp/build_amendment_templates_v2.py` (PyMuPDF, no DOCX) so the blank
+      bboxes are known at draw time; `--pdf-only` writes the PDFs + a red-box
+      field preview PNG. Old 4996712/4996713 left unarchived (in-flight
+      submissions; resolver takes the newest id). Verified on the live
+      signing page for both variants before the test submissions were archived.
   - **Cancellation type (2026-07-15)** — "Cancellation / release of earnest
     money" in the type dropdown creates a Cancellation-of-Contract + Release-of-EMD
     envelope from DocuSeal templates `Cancellation - One Seller` /

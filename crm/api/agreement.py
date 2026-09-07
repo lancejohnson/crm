@@ -304,10 +304,13 @@ def create_docuseal_agreement(
 	# boilerplate terms (all still editable by the buyer on the signing page).
 	# A termination notice pre-fills today's notice date, owner, phone, property,
 	# and current user's name; contract date and title remain buyer-entered.
-	# The Amendment only carries name/address; the amended price, closing date and
-	# Binding Agreement Date are the whole point of the document — buyer fills them.
+	# The Amendment only carries name/address (+ the rep's printed name, same
+	# `Signer Name` field as the PSA signature page since the Sep-07 rebuild); the
+	# amended price / closing date / other, their checkboxes and the Binding
+	# Agreement Date are the whole point of the document — buyer fills them.
 	# Same for the Cancellation: the contract date, escrow agent and earnest-money
 	# disbursement are per-deal facts the buyer fills on the signing page.
+	# (`Signer Name` is not on the Cancellation template; DocuSeal ignores it.)
 	if want_termination:
 		buyer_values = _clean({
 			"Notice Date": frappe.utils.nowdate(),
@@ -320,6 +323,7 @@ def create_docuseal_agreement(
 		buyer_values = _clean({
 			"Seller Name(s)": sellers_joined,
 			"Property Address": addr,
+			"Signer Name": buyer_name,
 		})
 	else:
 		# The live Purchase Agreement template carries: Agreement Date, Seller

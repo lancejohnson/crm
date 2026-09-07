@@ -11,6 +11,18 @@
       <p class="mt-2 text-base text-ink-gray-6">{{ workspace.allowed ? __('Switch from your name menu → Try the new workspace.') : __('It is not enabled for your account yet.') }}</p>
     </div>
 
+    <div v-else-if="kind === 'unreads' || kind === 'drafts'" class="talk-page">
+      <div class="talk-inbox">
+        <h1>{{ kind === 'unreads' ? __('Unreads') : __('Drafts') }}</h1>
+        <p v-if="inboxRows.length === 0" class="talk-empty">{{ kind === 'unreads' ? __('You\'re all caught up.') : __('No saved drafts.') }}</p>
+        <button v-for="row in inboxRows" :key="row.id" type="button" class="inbox-row" @click="openInbox(row)">
+          <b>{{ row.label }}</b>
+          <small v-if="row.unread">{{ row.unread }} {{ __('unread') }}</small>
+          <small v-else class="snippet">{{ row.snippet }}</small>
+        </button>
+      </div>
+    </div>
+
     <div v-else-if="!talkItem" class="mx-auto max-w-xl px-5 py-10">
       <h1 class="text-lg font-semibold text-ink-gray-9">{{ talk.channels.loading ? __('Loading…') : __('Nothing here') }}</h1>
       <p v-if="!talk.channels.loading" class="mt-2 text-base text-ink-gray-6">{{ __('That conversation does not exist, or the call already ended.') }}</p>
@@ -34,6 +46,8 @@
 
       <!-- Channel / DM / standup thread -->
       <template v-else>
+        <div class="talk-layout">
+        <div class="talk-col">
         <div ref="scroller" class="talk-scroll" :aria-label="`${title} messages`" @scroll="onScroll">
           <p v-if="thread.loading && !messages.length" class="talk-empty">{{ __('Loading…') }}</p>
           <button v-else-if="hasMore" type="button" class="talk-more" @click="loadMore">{{ __('Load earlier messages') }}</button>
@@ -44,6 +58,7 @@
               <b>{{ m.author_name || talk.displayName(m.author) }}</b> <small :title="m.posted_at">{{ prettyDate(m.posted_at) }}</small><small v-if="m.edited_at" class="edited">· {{ __('edited') }}</small>
               <p v-if="m.deleted" class="deleted-text">{{ __('Message deleted') }}</p>
               <p v-else v-html="renderText(m.text)" />
+              <button v-if="!m.deleted" type="button" class="reply-link" @click="openThread(m.name)">{{ m.reply_count ? __('{0} replies', [m.reply_count]) : __('Reply') }}</button>
             </div>
           </div>
         </div>
@@ -57,6 +72,21 @@
           </div>
           <Button type="submit" icon="arrow-up" variant="solid" :disabled="!draft.trim() || posting" :aria-label="kind === 'dm' ? __('Send direct message') : __('Post to channel')" />
         </form>
+        </div>
+        <aside v-if="threadRoot" class="talk-thread-pane" :aria-label="__('Thread')">
+          <header><b>{{ __('Thread') }}</b><Button variant="ghost" icon="x" :aria-label="__('Close thread')" @click="closeThread" /></header>
+          <div class="talk-scroll thread-scroll">
+            <div v-for="m in threadMessages" :key="m.name" class="talk-message" :class="{ mine: m.author === session.user }">
+              <Avatar :label="m.author_name || m.author" :image="getUser(m.author)?.user_image" size="sm" class="avatar" />
+              <div class="talk-body"><b>{{ m.author_name }}</b> <small>{{ prettyDate(m.posted_at) }}</small><p v-html="renderText(m.text)" /></div>
+            </div>
+          </div>
+          <form class="talk-compose" @submit.prevent="sendThread">
+            <FormControl v-model="threadDraft" type="textarea" :rows="2" :placeholder="__('Reply in thread…')" @keydown.enter.exact.prevent="sendThread" />
+            <Button type="submit" icon="arrow-up" variant="solid" :disabled="!threadDraft.trim() || postingThread" />
+          </form>
+        </aside>
+        </div>
       </template>
     </div>
   </template>
@@ -105,6 +135,11 @@ const channelRow = computed(() => ['channel', 'dm', 'standup'].includes(kind.val
 const liveCall = computed(() => kind.value === 'live' ? talk.calls.find((c) => c.call_log === id.value) : null)
 const liveOne = computed(() => liveCall.value ? talk.liveOnes.find((a) => a.call_log === liveCall.value.call_log) : null)
 const talkItem = computed(() => channelRow.value || liveCall.value)
+const inboxRows = computed(() => {
+  if (kind.value === 'unreads') return talk.conversations.filter((c) => c.unread && !['unreads', 'drafts'].includes(c.kind)).map((c) => ({ id: `${c.kind}:${c.id}`, label: c.label, unread: c.unread, kind: c.kind, channel: c.id }))
+  return talk.draftList.map((d) => ({ id: d.channel, label: d.title, snippet: d.text, kind: d.kind, channel: d.channel }))
+})
+function openInbox(row) { router.push({ name: 'Talk', params: { kind: row.kind, id: row.channel } }) }
 const title = computed(() => {
   if (!talkItem.value) return __('Talk')
   if (kind.value === 'live') return __('Live')
@@ -155,6 +190,13 @@ watch(() => messages.value.length, async (n, prev) => {
 function onLiveMessage(data) {
   if (data?.channel !== id.value || !data?.message) return false
   const m = data.message
+  if (m.parent) {
+    const root = messages.value.find((x) => x.name === m.parent)
+    if (root) root.reply_count = (root.reply_count || 0) + 1
+    if (threadRoot.value === m.parent && !threadMessages.value.some((x) => x.name === m.name)) threadMessages.value.push(m)
+    call('crm.api.talk.mark_read', { channel: id.value }).catch(() => {})
+    return true
+  }
   const i = messages.value.findIndex((x) => x.name === m.name)
   if (i >= 0) messages.value.splice(i, 1, { ...messages.value[i], ...m })
   else messages.value.push(m)
@@ -167,11 +209,37 @@ onBeforeUnmount(() => $socket.off('crm_talk', onLiveMessage))
 // Composer + @mentions
 const draft = ref('')
 const posting = ref(false)
+const threadRoot = computed(() => route.query.thread || null)
+const threadMessages = ref([])
+const threadDraft = ref('')
+const postingThread = ref(false)
+function openThread(name) { router.replace({ query: { ...route.query, thread: name } }) }
+function closeThread() { const q = { ...route.query }; delete q.thread; router.replace({ query: q }) }
+async function loadNested() {
+  if (!threadRoot.value || !channelRow.value) { threadMessages.value = []; return }
+  try {
+    const data = await call('crm.api.talk.thread', { channel: id.value, root: threadRoot.value, limit: 200 })
+    threadMessages.value = data?.messages || []
+  } catch { threadMessages.value = [] }
+}
+watch(threadRoot, loadNested, { immediate: true })
+async function sendThread() {
+  const text = threadDraft.value.trim()
+  if (!text || postingThread.value || !threadRoot.value) return
+  postingThread.value = true
+  try {
+    const m = await call('crm.api.talk.post', { channel: id.value, text, parent: threadRoot.value })
+    if (m?.name) threadMessages.value.push(m)
+    threadDraft.value = ''
+  } finally { postingThread.value = false }
+}
 const mentionIndex = ref(0)
 const mentionOptions = computed(() => {
   const q = mentionQuery(draft.value)
   return q === null ? [] : mentionCandidates((users.data?.crmUsers || []).filter((u) => u.name !== session.user), q)
 })
+watch(() => [id.value, kind.value], () => { draft.value = talk.drafts[id.value] || '' }, { immediate: true })
+watch(draft, (text) => { if (channelRow.value) talk.setDraft(id.value, text) })
 watch(mentionOptions, () => (mentionIndex.value = 0))
 function pickMention(u) { draft.value = insertMention(draft.value, u) }
 function onComposerKey(e) {
@@ -190,6 +258,7 @@ async function send() {
     const m = await call('crm.api.talk.post', { channel: id.value, text })
     if (m?.name && !messages.value.some((x) => x.name === m.name)) messages.value.push(m)
     draft.value = ''
+    talk.setDraft(id.value, '')
   } finally { posting.value = false }
 }
 function escapeHtml(s) { return String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])) }
@@ -237,5 +306,14 @@ async function joinListening() {
 .talk-live blockquote { margin-top: 16px; padding-left: 12px; border-left: 3px solid var(--outline-gray-2, #ddd); font-size: 15px; line-height: 1.5; color: var(--ink-gray-7, #555); }
 .live-hint { margin-top: 14px; font-size: 12px; line-height: 1.5; color: var(--ink-gray-5, #777); }
 .live-actions { display: flex; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
-@media (max-width: 640px) { .talk-scroll, .talk-compose, .talk-live { padding-inline: 14px; } }
+.talk-layout { display: flex; flex: 1; min-height: 0; }
+.talk-col { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.talk-thread-pane { display: flex; flex-direction: column; width: min(380px, 42%); border-left: 1px solid var(--outline-gray-1, #eee); }
+.talk-thread-pane header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--outline-gray-1, #eee); font-size: 13px; }
+.reply-link { margin-top: 4px; font-size: 11px; font-weight: 600; color: #2d4f9e; }
+.talk-inbox { padding: 20px 24px; max-width: 640px; }
+.talk-inbox h1 { font-size: 20px; font-weight: 600; margin-bottom: 12px; }
+.inbox-row { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 10px 0; border-bottom: 1px solid var(--outline-gray-1, #eee); text-align: left; }
+.inbox-row .snippet { color: var(--ink-gray-5, #777); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 640px) { .talk-scroll, .talk-compose, .talk-live { padding-inline: 14px; } .talk-thread-pane { width: 100%; } }
 </style>

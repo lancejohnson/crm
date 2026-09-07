@@ -41,6 +41,21 @@ export const talkStore = defineStore('crm-talk', () => {
   // Collapsed groups in the left column: in memory per session.
   const navOpen = reactive({ crm: true, live: true, channels: true, dms: true })
   const navCollapsed = ref(false)
+  const DRAFT_KEY = 'crm-talk-drafts'
+  function readDrafts() { try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || '{}') } catch { return {} } }
+  const drafts = reactive(readDrafts())
+  function setDraft(channel, text) {
+    if (!channel) return
+    const t = String(text || '')
+    if (t.trim()) drafts[channel] = t
+    else delete drafts[channel]
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...drafts }))
+  }
+  const draftList = computed(() => Object.entries(drafts).map(([channel, text]) => {
+    const row = byName(channel)
+    return { channel, text, kind: row?.kind === 'dm' ? 'dm' : channel === 'standup' ? 'standup' : 'channel', title: row ? (row.kind === 'dm' ? displayName(row.dm_user) : `#${row.name}`) : channel }
+  }))
+  const totalUnread = computed(() => list.value.reduce((n, c) => n + (c.unread || 0), 0))
 
   const list = computed(() => channels.data || [])
   const channelRows = computed(() => list.value.filter((c) => c.kind === 'channel'))
@@ -68,6 +83,8 @@ export const talkStore = defineStore('crm-talk', () => {
   // Ordered conversation list (Live → Standup → channels → bots → DMs); the
   // left column, the ⌘K section and Alt+arrows all walk exactly this.
   const conversations = computed(() => [
+    { kind: 'unreads', id: 'all', label: __('Unreads'), group: 'Talk', unread: totalUnread.value, keywords: 'unread inbox' },
+    { kind: 'drafts', id: 'all', label: __('Drafts'), group: 'Talk', unread: draftList.value.length, keywords: 'draft saved' },
     ...calls.value.map((c) => ({
       kind: 'live', id: c.call_log, label: `${displayName(c.rep)} · ${c.lead_name || c.number || 'Unknown'}`,
       group: 'Live', unread: 0, keywords: 'live call', call: c,
@@ -121,7 +138,7 @@ export const talkStore = defineStore('crm-talk', () => {
   }
 
   return {
-    channels, presence, activeCalls, liveOnes, navOpen, navCollapsed,
+    channels, presence, activeCalls, liveOnes, navOpen, navCollapsed, drafts, setDraft, draftList, totalUnread,
     list, channelRows, botRows, standup, dmRows, calls, conversations,
     statusOf, displayName, byName, unreadOf, patchUnread, bind, unbind, dismissLiveOne,
   }

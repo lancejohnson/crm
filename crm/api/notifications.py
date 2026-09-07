@@ -15,25 +15,27 @@ def get_notifications():
 
 	_notifications = []
 	for notification in notifications:
-		_notifications.append(
-			{
-				"creation": notification.creation,
-				"from_user": {
-					"name": notification.from_user,
-					"full_name": frappe.get_value("User", notification.from_user, "full_name"),
-				},
-				"type": notification.type,
-				"to_user": notification.to_user,
-				"read": notification.read,
-				"hash": get_hash(notification),
-				"notification_text": notification.notification_text,
-				"notification_type_doctype": notification.notification_type_doctype,
-				"notification_type_doc": notification.notification_type_doc,
-				"reference_doctype": ("deal" if notification.reference_doctype == "CRM Deal" else "lead"),
-				"reference_name": notification.reference_name,
-				"route_name": ("Deal" if notification.reference_doctype == "CRM Deal" else "Lead"),
-			}
-		)
+		row = {
+			"creation": notification.creation,
+			"from_user": {
+				"name": notification.from_user,
+				"full_name": frappe.get_value("User", notification.from_user, "full_name"),
+			},
+			"type": notification.type,
+			"to_user": notification.to_user,
+			"read": notification.read,
+			"hash": get_hash(notification),
+			"notification_text": notification.notification_text,
+			"notification_type_doctype": notification.notification_type_doctype,
+			"notification_type_doc": notification.notification_type_doc,
+			"reference_doctype": ("deal" if notification.reference_doctype == "CRM Deal" else "lead"),
+			"reference_name": notification.reference_name,
+			"route_name": ("Deal" if notification.reference_doctype == "CRM Deal" else "Lead"),
+		}
+		talk = talk_route(notification)
+		if talk:
+			row.update(talk)
+		_notifications.append(row)
 
 	return _notifications
 
@@ -54,14 +56,37 @@ def mark_as_read(user: str | None = None, doc: str | None = None):
 		d.save()
 
 
-def get_hash(notification):
+def talk_route(notification) -> dict | None:
+	"""Talk mention/reply → /talk/:kind/:id?thread=."""
+	if notification.type not in ("Talk", "Mention"):
+		return None
+	if notification.reference_doctype != "CRM Channel":
+		return None
+	channel = notification.reference_name
+	kind = "channel"
+	try:
+		ckind = frappe.db.get_value("CRM Channel", channel, "kind")
+		if ckind == "dm":
+			kind = "dm"
+		elif channel == "standup":
+			kind = "standup"
+	except Exception:
+		pass
+	return {
+		"route_name": "Talk",
+		"talk_kind": kind,
+		"talk_id": channel,
+		"talk_thread": notification.notification_type_doc or None,
+		"reference_doctype": "talk",
+	}
+
+
+
 	_hash = ""
 	if notification.type == "Mention" and notification.notification_type_doc:
 		_hash = "#" + notification.notification_type_doc
-
 	if notification.type == "WhatsApp":
 		_hash = "#whatsapp"
-
 	if notification.type == "Assignment" and notification.notification_type_doctype == "CRM Task":
 		_hash = "#tasks"
 		if "has been removed by" in notification.message:

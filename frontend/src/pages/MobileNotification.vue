@@ -89,6 +89,13 @@ onMounted(() => {
 })
 
 function getRoute(notification) {
+  if (notification.route_name === 'Talk') {
+    return {
+      name: 'Talk',
+      params: { kind: notification.talk_kind || 'channel', id: notification.talk_id },
+      query: notification.talk_thread ? { thread: notification.talk_thread } : {},
+    }
+  }
   let params = {
     leadId: notification.reference_name,
   }

@@ -226,38 +226,110 @@ def _dm_title(user: str) -> str:
 	return frappe.db.get_value("User", user, "full_name") or user
 
 
+def _message_fields() -> list[str]:
+	fields = ["name", "author", "author_label", "text", "posted_at", "origin", "edited_at", "mm_post_id", "mm_root_id"]
+	if frappe.db.has_column(MESSAGE, "parent_message"):
+		fields.append("parent_message")
+	return fields
+
+
+def _is_reply(row) -> bool:
+	parent = row.get("parent_message") if isinstance(row, dict) else getattr(row, "parent_message", None)
+	if parent:
+		return True
+	root = row.get("mm_root_id") if isinstance(row, dict) else getattr(row, "mm_root_id", None)
+	post = row.get("mm_post_id") if isinstance(row, dict) else getattr(row, "mm_post_id", None)
+	return bool(root) and root != post
+
+
 @frappe.whitelist()
-def thread(channel: str, before: str = None, limit: int = PAGE):
-	"""Messages newest-last, paged backwards with `before` (a posted_at)."""
+def thread(channel: str, before: str = None, limit: int = PAGE, root: str = None):
+	"""Channel roots (newest-last), or one nested thread when `root` is a message name."""
 	validate_access()
 	if not enabled():
 		return {"messages": [], "has_more": False}
 	_require_member(channel)
 	limit = max(1, min(int(limit or PAGE), 200))
+	fields = _message_fields()
+	if root:
+		if not frappe.db.exists(MESSAGE, root):
+			frappe.throw(_("That thread is gone."))
+		head = frappe.get_doc(MESSAGE, root)
+		if head.channel != channel:
+			frappe.throw(_("That message is not in this channel."))
+		replies = _replies_for(channel, head, fields)
+		names = {head.author} | {r.author for r in replies}
+		full = _full_names(names)
+		return {
+			"messages": [shape_message(head.as_dict(), full)] + [shape_message(r, full) for r in replies],
+			"has_more": False,
+			"root": head.name,
+		}
 	filters = {"channel": channel, "deleted": 0}
 	if before:
 		filters["posted_at"] = ("<", before)
 	rows = frappe.get_all(
 		MESSAGE,
 		filters=filters,
-		fields=["name", "author", "author_label", "text", "posted_at", "origin", "edited_at", "mm_post_id"],
+		fields=fields,
 		order_by="posted_at desc",
-		limit_page_length=limit + 1,
+		limit_page_length=limit * 3 + 1,
 	)
-	has_more = len(rows) > limit
-	rows = list(reversed(rows[:limit]))
-	names = {r.author for r in rows}
-	full = {
-		u.name: u.full_name
-		for u in frappe.get_all("User", filters={"name": ("in", list(names))}, fields=["name", "full_name"])
-	} if names else {}
+	roots = [r for r in rows if not _is_reply(r)]
+	has_more = len(roots) > limit or len(rows) > limit * 3
+	roots = list(reversed(roots[:limit]))
+	counts = _reply_counts(channel, roots)
+	names = {r.author for r in roots}
+	full = _full_names(names)
 	return {
-		"messages": [shape_message(r, full) for r in rows],
+		"messages": [shape_message(r, full, reply_count=counts.get(r.name, 0)) for r in roots],
 		"has_more": has_more,
 	}
 
 
-def shape_message(row, full_names: dict | None = None) -> dict:
+def _full_names(names) -> dict:
+	if not names:
+		return {}
+	return {
+		u.name: u.full_name
+		for u in frappe.get_all("User", filters={"name": ("in", list(names))}, fields=["name", "full_name"])
+	}
+
+
+def _replies_for(channel: str, head, fields: list[str]) -> list:
+	seen, out = set(), []
+	def take(rows):
+		for r in rows:
+			if r.name in seen or r.name == head.name:
+				continue
+			seen.add(r.name)
+			out.append(r)
+	if frappe.db.has_column(MESSAGE, "parent_message"):
+		take(frappe.get_all(MESSAGE, filters={"channel": channel, "deleted": 0, "parent_message": head.name}, fields=fields, limit_page_length=500))
+	if head.mm_post_id:
+		take(frappe.get_all(MESSAGE, filters={"channel": channel, "deleted": 0, "mm_root_id": head.mm_post_id}, fields=fields, limit_page_length=500))
+	out.sort(key=lambda r: str(r.posted_at or ""))
+	return out
+
+
+def _reply_counts(channel: str, roots: list) -> dict[str, int]:
+	if not roots:
+		return {}
+	counts: dict[str, int] = {r.name: 0 for r in roots}
+	by_mm = {r.mm_post_id: r.name for r in roots if r.get("mm_post_id")}
+	if frappe.db.has_column(MESSAGE, "parent_message"):
+		for r in frappe.get_all(MESSAGE, filters={"channel": channel, "deleted": 0, "parent_message": ("in", list(counts))}, fields=["parent_message"], limit_page_length=2000):
+			if r.parent_message in counts:
+				counts[r.parent_message] += 1
+	if by_mm:
+		for r in frappe.get_all(MESSAGE, filters={"channel": channel, "deleted": 0, "mm_root_id": ("in", list(by_mm))}, fields=["mm_root_id", "name"], limit_page_length=2000):
+			root_name = by_mm.get(r.mm_root_id)
+			if root_name and r.name != root_name:
+				counts[root_name] += 1
+	return counts
+
+
+def shape_message(row, full_names: dict | None = None, reply_count: int = 0) -> dict:
 	full_names = full_names or {}
 	author = row.get("author")
 	return {
@@ -269,13 +341,14 @@ def shape_message(row, full_names: dict | None = None) -> dict:
 		"origin": row.get("origin") or "crm",
 		"edited_at": row.get("edited_at"),
 		"mm_post_id": row.get("mm_post_id"),
+		"parent": row.get("parent_message") or None,
+		"reply_count": reply_count,
 	}
 
 
 @frappe.whitelist()
-def post(channel: str, text: str):
-	"""Insert a message as the session user. Mirroring to Mattermost happens in
-	the after_insert hook so a webhook-driven insert and a UI insert share it."""
+def post(channel: str, text: str, parent: str = None):
+	"""Insert a message as the session user. `parent` starts/continues a thread."""
 	validate_access()
 	if not enabled():
 		frappe.throw(_("Talk is not set up on this site yet."))
@@ -285,19 +358,61 @@ def post(channel: str, text: str):
 	if len(text) > MAX_TEXT:
 		frappe.throw(_("That message is too long."))
 	_require_member(channel)
-	doc = frappe.get_doc(
-		{
-			"doctype": MESSAGE,
-			"channel": channel,
-			"author": frappe.session.user,
-			"text": text,
-			"posted_at": frappe.utils.now(),
-			"origin": "crm",
-		}
-	).insert(ignore_permissions=True)
-	# Posting is reading: the author has seen everything up to their own post.
+	values = {
+		"doctype": MESSAGE,
+		"channel": channel,
+		"author": frappe.session.user,
+		"text": text,
+		"posted_at": frappe.utils.now(),
+		"origin": "crm",
+	}
+	if parent:
+		if not frappe.db.exists(MESSAGE, parent):
+			frappe.throw(_("That thread is gone."))
+		head = frappe.get_doc(MESSAGE, parent)
+		if head.channel != channel:
+			frappe.throw(_("That message is not in this channel."))
+		if frappe.db.has_column(MESSAGE, "parent_message"):
+			values["parent_message"] = parent
+		values["mm_root_id"] = head.mm_post_id or head.mm_root_id or None
+	doc = frappe.get_doc(values).insert(ignore_permissions=True)
 	_stamp_read(channel, frappe.session.user, doc.posted_at)
+	_notify_talk_mentions(channel, doc)
 	return shape_message(doc.as_dict())
+
+
+def _notify_talk_mentions(channel: str, doc):
+	import re
+
+	handles = {h.lower() for h in re.findall(r"(?:^|\s)@([\w.-]+)", doc.text or "")}
+	handles.discard((frappe.session.user or "").split("@")[0].lower())
+	if not handles:
+		return
+	kind = frappe.db.get_value(CHANNEL, channel, "kind") or "channel"
+	talk_kind = "standup" if channel == "standup" else ("dm" if kind == "dm" else "channel")
+	users = frappe.get_all("User", filters={"enabled": 1, "user_type": "System User"}, fields=["name", "full_name"])
+	author_name = frappe.utils.get_fullname(doc.author) or doc.author
+	for u in users:
+		handle = (u.name or "").split("@")[0].lower()
+		if handle not in handles:
+			continue
+		try:
+			frappe.get_doc(
+				{
+					"doctype": "CRM Notification",
+					"type": "Talk",
+					"from_user": doc.author,
+					"to_user": u.name,
+					"message": (doc.text or "")[:500],
+					"notification_text": f"<b>{frappe.utils.escape_html(author_name)}</b> mentioned you in Talk",
+					"notification_type_doctype": MESSAGE,
+					"notification_type_doc": doc.name,
+					"reference_doctype": CHANNEL,
+					"reference_name": channel,
+				}
+			).insert(ignore_permissions=True)
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), "Talk: mention notification failed")
 
 
 @frappe.whitelist()

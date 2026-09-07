@@ -8,6 +8,10 @@
           <span v-else-if="unreadNotificationsCount" class="strip-dot" aria-hidden="true" />
         </template>
       </SidebarLink>
+      <ul class="item-list inbox-links" :aria-label="__('Talk inbox')">
+        <li><button type="button" class="item" :class="{ selected: isSelected('unreads', 'all'), unread: talk.totalUnread }" @click="pick('unreads', 'all')"><FeatherIcon name="inbox" class="size-3.5 item-icon lead" /><span class="item-text">{{ __('Unreads') }}</span><span v-if="talk.totalUnread" class="group-badge">{{ talk.totalUnread }}</span></button></li>
+        <li><button type="button" class="item" :class="{ selected: isSelected('drafts', 'all'), unread: talk.draftList.length }" @click="pick('drafts', 'all')"><FeatherIcon name="edit-3" class="size-3.5 item-icon lead" /><span class="item-text">{{ __('Drafts') }}</span><span v-if="talk.draftList.length" class="group-badge">{{ talk.draftList.length }}</span></button></li>
+      </ul>
 
       <section v-for="group in groups" :key="group.id" class="nav-group">
         <button v-if="!talk.navCollapsed" type="button" class="group-header" :aria-expanded="talk.navOpen[group.id]" :aria-controls="`talk-group-${group.id}`" @click="talk.navOpen[group.id] = !talk.navOpen[group.id]">
@@ -124,6 +128,7 @@ function newDm() { openCommandPalette('dm') }
 .left-nav.mobile { position: absolute; inset: 0; width: 100% !important; bottom: 0 !important; z-index: 20; border-right: 0; }
 .nav-header { padding: 8px; }
 .nav-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+.inbox-links { margin: 4px 0 2px; }
 .nav-group { margin-top: 6px; }
 .group-header { display: flex; align-items: center; gap: 6px; width: 100%; padding: 9px 16px 8px; font-size: 13px; color: var(--ink-gray-5, #777); text-align: left; }
 .group-header:hover { color: var(--ink-gray-8, #333); }
