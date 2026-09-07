@@ -549,16 +549,26 @@ def active_calls():
 	return out
 
 
-@frappe.whitelist()
-def join(call_log: str, mode: str = "monitor"):
-	"""A closer joins an in-progress call as a supervisor.
-
-	Their own softphone is rung with a supervisor leg; on answer the webhook
-	joins it to the conference with `supervisor_role` and plays the join tone
-	to the REP LEG ONLY. `mode` ∈ monitor|whisper|barge.
-	"""
+def _dial_supervisor(state: dict, user: str, mode: str, transfer: bool = False) -> dict:
 	from crm.integrations.telnyx import api as telnyx_api
 
+	connection = (frappe.conf.get("telnyx_connection_id") or "").strip()
+	if not connection:
+		frappe.throw(_("No Telnyx call control application is configured."))
+	sup_to, via = _rep_target(user)
+	client_state = desk.encode_client_state(
+		kind="supervisor_leg", desk=state["desk_id"], user=user, mode=mode, via=via, transfer=1 if transfer else None,
+	)
+	data = telnyx_api._post("/calls", desk.dial_leg_payload(connection, sup_to, state.get("line") or "", client_state))
+	ccid = data.get("call_control_id")
+	state.setdefault("supervisors", {})[ccid] = {"user": user, "mode": mode, "joined": False, "transfer": bool(transfer)}
+	_save(state)
+	return {"ok": True, "call_control_id": ccid, "mode": mode, "desk_id": state["desk_id"], "user": user}
+
+
+@frappe.whitelist()
+def join(call_log: str, mode: str = "monitor"):
+	"""A closer joins an in-progress call as a supervisor."""
 	if mode not in desk.MODES:
 		frappe.throw(_("Unknown mode."))
 	state = _by_call_log(call_log)
@@ -569,14 +579,39 @@ def join(call_log: str, mode: str = "monitor"):
 	line = line_by_number(state.get("line"))
 	if line and not (desk.can(line, frappe.session.user, "use") or _is_manager()):
 		frappe.throw(_("You cannot join calls on this line."), frappe.PermissionError)
-	connection = (frappe.conf.get("telnyx_connection_id") or "").strip()
-	sup_to, via = _rep_target(frappe.session.user)
-	client_state = desk.encode_client_state(kind="supervisor_leg", desk=state["desk_id"], user=frappe.session.user, mode=mode, via=via)
-	data = telnyx_api._post("/calls", desk.dial_leg_payload(connection, sup_to, state.get("line") or "", client_state))
-	ccid = data.get("call_control_id")
-	state.setdefault("supervisors", {})[ccid] = {"user": frappe.session.user, "mode": mode, "joined": False}
+	return _dial_supervisor(state, frappe.session.user, mode)
+
+
+@frappe.whitelist()
+def invite(call_log: str, user: str, mode: str = "barge"):
+	"""The rep brings a teammate onto the live conference. Seller hears no join beep."""
+	if mode not in desk.MODES:
+		frappe.throw(_("Unknown mode."))
+	state = _by_call_log(call_log)
+	if not state or state.get("state") != "active" or not state.get("conference_id"):
+		frappe.throw(_("That call is not in progress."))
+	if state.get("rep") != frappe.session.user and not _is_manager():
+		frappe.throw(_("Only the rep on this call can invite."), frappe.PermissionError)
+	if not user or user == state.get("rep"):
+		frappe.throw(_("Pick a teammate."))
+	return _dial_supervisor(state, user, mode)
+
+
+@frappe.whitelist()
+def transfer(call_log: str, user: str):
+	"""Blind transfer: ring the teammate; when they answer, the original rep drops."""
+	state = _by_call_log(call_log)
+	if not state or state.get("state") != "active" or not state.get("conference_id"):
+		frappe.throw(_("That call is not in progress."))
+	if state.get("rep") != frappe.session.user and not _is_manager():
+		frappe.throw(_("Only the rep on this call can transfer."), frappe.PermissionError)
+	if not user or user == state.get("rep"):
+		frappe.throw(_("Pick a teammate to transfer to."))
+	state["transfer_to"] = user
 	_save(state)
-	return {"ok": True, "call_control_id": ccid, "mode": mode, "desk_id": state["desk_id"]}
+	out = _dial_supervisor(state, user, "barge", transfer=True)
+	out["transfer"] = True
+	return out
 
 
 @frappe.whitelist()
@@ -649,6 +684,7 @@ def _shape_call(r, ours: set[str]) -> dict:
 		"recording": "ready" if r.recording_url else "none",
 		"recording_url": r.recording_url,
 		"has_transcript": bool(r.get("custom_transcript")),
+		"transcript": r.get("custom_transcript") or "",
 		"summary": r.get("custom_ai_summary"),
 		"outcome": r.get("custom_call_class"),
 		"reference_doctype": r.reference_doctype if r.reference_docname else None,
@@ -761,6 +797,10 @@ def send_text(to: str, text: str, line: str = None):
 	number = desk.e164(to)
 	if not number:
 		frappe.throw(_("That does not look like a phone number."))
+	from crm.api.do_not_contact import is_blocked_number
+
+	if is_blocked_number(number):
+		frappe.throw(_("{0} has asked not to be contacted.").format(to))
 	doctype, name = None, None
 	try:
 		from crm.integrations.telnyx.webhook import _link
@@ -769,6 +809,57 @@ def send_text(to: str, text: str, line: str = None):
 	except Exception:
 		pass
 	return telnyx_api.send_sms(number, text, reference_doctype=doctype, reference_docname=name, frm=line_row["number"])
+
+
+@frappe.whitelist()
+def lookup(number: str):
+	"""Lead + DNC for a number, used by the dock before dial/text."""
+	from crm.api.do_not_contact import is_blocked_number
+
+	e = desk.e164(number)
+	if not e:
+		return {"number": "", "dnc": False, "lead": None, "lead_name": None}
+	doctype = name = None
+	try:
+		from crm.integrations.telnyx.webhook import _link
+
+		doctype, name = _link(e)
+	except Exception:
+		pass
+	lead = name if doctype == "CRM Lead" else None
+	return {
+		"number": e,
+		"dnc": bool(is_blocked_number(e)),
+		"lead": lead,
+		"lead_name": _lead_name(lead) if lead else None,
+		"doctype": doctype,
+		"name": name,
+	}
+
+
+@frappe.whitelist()
+def link_lead(lead: str, call_log: str = None, number: str = None):
+	"""Attach a lead to the live call and/or this number's recent call logs."""
+	if not lead or not frappe.db.exists("CRM Lead", lead):
+		frappe.throw(_("That lead does not exist."))
+	if call_log and frappe.db.exists("CRM Call Log", call_log):
+		frappe.db.set_value("CRM Call Log", call_log, {"reference_doctype": "CRM Lead", "reference_docname": lead})
+		state = _by_call_log(call_log)
+		if state:
+			state["lead"] = lead
+			_save(state)
+			publish_call(state)
+	elif number:
+		key = last10(number)
+		if key and frappe.db.exists("DocType", "CRM Call Log"):
+			for name in frappe.get_all(
+				"CRM Call Log",
+				filters=[["from", "like", f"%{key}"]],
+				pluck="name",
+				limit=20,
+			):
+				frappe.db.set_value("CRM Call Log", name, {"reference_doctype": "CRM Lead", "reference_docname": lead})
+	return {"ok": True, "lead": lead, "lead_name": _lead_name(lead)}
 
 
 @frappe.whitelist()

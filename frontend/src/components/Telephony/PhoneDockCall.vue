@@ -3,6 +3,7 @@
     <div class="call-state"><span class="connection-dot" :class="phone.state" />{{ stateLabel }}<span class="elapsed">{{ elapsed }}</span></div>
     <h2>{{ phone.peerName || formatPhone(phone.peerNumber) || __('Call') }}</h2>
     <p class="number">{{ formatPhone(phone.peerNumber) }}<router-link v-if="phone.lead" :to="`/leads/${phone.lead}`" class="ml-2 underline">{{ __('Open lead') }}</router-link></p>
+    <p v-if="phone.dnc" class="dnc" role="alert">{{ __('Do not contact') }}</p>
 
     <template v-if="phone.role === 'supervisor'">
       <div class="modes" :aria-label="__('Microphone audience')">
@@ -24,6 +25,11 @@
         <FormControl v-model="note" :aria-label="__('Note for the closer')" :placeholder="__('A quick note for the closer…')" />
         <Button iconLeft="zap" variant="solid" :disabled="invited || !phone.lead || sending" :title="phone.lead ? '' : __('Link the call to a lead first')" @click="liveOne">{{ invited ? __('Closer notified') : __('Got a live one') }}</Button>
       </div>
+      <div class="handoff">
+        <FormControl type="select" v-model="teammate" :options="teammateOptions" :placeholder="__('Teammate')" :aria-label="__('Teammate')" />
+        <Button variant="subtle" :disabled="!teammate" @click="inviteTeammate(teammate)">{{ __('Invite') }}</Button>
+        <Button variant="subtle" :disabled="!teammate" @click="transferTo(teammate)">{{ __('Transfer') }}</Button>
+      </div>
       <p v-if="invited" class="context">{{ __('Your invitation is with the closer until handled.') }}</p>
       <Button class="end-call" theme="red" iconLeft="phone-off" @click="hangup">{{ __('End call') }}</Button>
     </template>
@@ -33,7 +39,16 @@
 import { Button, FormControl, call, toast } from 'frappe-ui'
 import { computed, ref, watch } from 'vue'
 import { formatPhone } from '@/utils/phoneFormat'
-import { phone, elapsed, hangup, toggleMute, toggleHold, dtmf, setMode } from '@/composables/phone'
+import { phone, elapsed, hangup, toggleMute, toggleHold, dtmf, setMode, inviteTeammate, transferTo } from '@/composables/phone'
+import { usersStore } from '@/stores/users'
+import { sessionStore } from '@/stores/session'
+
+const { users } = usersStore()
+const session = sessionStore()
+const teammate = ref('')
+const teammateOptions = computed(() => [{ label: __('Teammate…'), value: '' }].concat(
+  (users.data?.crmUsers || []).filter((u) => u.name !== session.user).map((u) => ({ label: u.full_name, value: u.name })),
+))
 
 const keypad = ref(false)
 const digits = ref('')
@@ -74,6 +89,7 @@ watch(() => phone.callLog, () => { invited.value = false; note.value = ''; digit
 .call-controls, .modes { display: flex; gap: 6px; margin-top: 16px; }.call-controls > *, .modes > * { flex: 1; }
 .audience { margin-top: 10px; padding: 10px; border-radius: 8px; background: var(--surface-gray-1, #f7f7f7); font-size: 12px; line-height: 1.5; }.audience.speaking { background: #fff1f0; color: #a32e2e; }
 .keypad { margin-top: 12px; }.keypad output { display: block; min-height: 22px; font-size: 16px; text-align: center; letter-spacing: 2px; }.keypad > div { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; }
-.invite { display: flex; gap: 6px; margin-top: 16px; }.invite > :first-child { flex: 1; min-width: 0; }
+.invite, .handoff { display: flex; gap: 6px; margin-top: 12px; }.invite > :first-child, .handoff > :first-child { flex: 1; min-width: 0; }
+.dnc { margin-top: 8px; font-size: 11px; font-weight: 600; color: #a32e2e; }
 .end-call { width: 100%; margin-top: 14px; }
 </style>

@@ -11,7 +11,7 @@
     <section v-if="phone.incoming" class="incoming-call" :aria-label="__('Incoming call')">
       <div class="incoming-symbol"><FeatherIcon name="phone-incoming" class="size-6" /></div>
       <p class="eyebrow">{{ __('Incoming') }} · {{ phone.incoming.line_label || formatPhone(phone.incoming.line) }}</p>
-      <h2>{{ phone.incoming.lead_name || formatPhone(phone.incoming.from) }}</h2>
+      <h2>{{ phone.incoming.lead_name || phone.incoming.from_name || formatPhone(phone.incoming.from) }}</h2>
       <p class="caller-number">{{ formatPhone(phone.incoming.from) }}</p>
       <p v-if="phone.incoming.lead" class="caller-context"><router-link :to="`/leads/${phone.incoming.lead}`" class="underline">{{ __('Open lead') }}</router-link></p>
       <div class="incoming-actions">
@@ -62,6 +62,7 @@
           </article>
         </section>
         <form v-if="!onCall && !conversation" class="inline-dial" @submit.prevent="dialTyped">
+          <FormControl v-if="lineOptions.length > 1" type="select" v-model="chosenLine" :options="lineOptions" :aria-label="__('Line')" />
           <FormControl v-model="number" :aria-label="__('Number to dial')" :placeholder="__('Dial a number…')" />
           <Button type="submit" icon="phone" variant="solid" :disabled="!validNumber" :aria-label="__('Dial')" />
         </form>
@@ -120,6 +121,9 @@ const talk = talkStore()
 const minimized = ref(true)
 const tab = ref('recent')
 const number = ref('')
+const chosenLine = ref('')
+const lineList = createResource({ url: 'crm.api.telephony.lines', auto: true, initialData: [], onError: () => {} })
+const lineOptions = computed(() => (lineList.data || []).filter((l) => l.access?.use).map((l) => ({ label: l.label || formatPhone(l.number), value: l.name })))
 const conversation = ref(null)
 const bar = ref(null)
 const panel = ref(null)
@@ -163,7 +167,7 @@ function openConversation(item) { conversation.value = { number: item.number, na
 async function dialTyped() {
   const to = normalizeNumber(number.value)
   if (!to) return
-  const ok = await dial(to, { name: '' })
+  const ok = await dial(to, { name: '', line: chosenLine.value || null })
   if (ok) { tab.value = 'call'; number.value = '' }
 }
 function toggle() { minimized.value = !minimized.value }

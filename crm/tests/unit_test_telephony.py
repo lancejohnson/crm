@@ -198,6 +198,7 @@ class EndpointGatingTests(unittest.TestCase):
 	def test_all_session_only(self):
 		for fn in (telephony.lines, telephony.dial, telephony.active_calls, telephony.join, telephony.set_mode,
 		           telephony.live_one, telephony.history, telephony.send_text, telephony.hangup, telephony.hold,
+		           telephony.invite, telephony.transfer, telephony.lookup, telephony.link_lead,
 		           telephony.get_phone_settings, telephony.save_phone_settings):
 			self.assertTrue(fn._whitelisted, fn.__name__)
 			self.assertFalse(fn._allow_guest, fn.__name__)

@@ -183,8 +183,8 @@ def voice():
 		return {"ok": True, "ignored": "no call log doctype"}
 
 	inbound = (payload.get("direction") or "") == "incoming"
-	frm = payload.get("from")
-	to = payload.get("to")
+	frm, from_name = _party(payload.get("from"), payload)
+	to, _to_name = _party(payload.get("to"), payload)
 	external = frm if inbound else to
 
 	# CONFERENCE-FIRST DESK LEGS. Anything we dialled ourselves carries a
@@ -324,7 +324,7 @@ def _desk_inbound_initiated(call_log_name, payload, our_number) -> bool:
 		return False
 
 	desk_id = desk.new_desk_id()
-	caller = payload.get("from")
+	caller, from_name = _party(payload.get("from"), payload)
 	lead = frappe.db.get_value("CRM Call Log", call_log_name, "reference_docname")
 	state = desk.new_state(desk_id, "inbound", line["number"], lead=lead, frm=caller, to=line["number"])
 	state["caller_leg"] = payload.get("call_control_id")
@@ -349,8 +349,9 @@ def _desk_inbound_initiated(call_log_name, payload, our_number) -> bool:
 		try:
 			frappe.publish_realtime(
 				"crm_incoming",
-				{"call_log": call_log_name, "desk_id": desk_id, "from": caller, "lead": lead,
-				 "lead_name": telephony._lead_name(lead), "line": line["number"], "line_label": line.get("label")},
+				{"call_log": call_log_name, "desk_id": desk_id, "from": caller, "from_name": from_name,
+				 "lead": lead, "lead_name": telephony._lead_name(lead) or from_name,
+				 "line": line["number"], "line_label": line.get("label")},
 				user=user, after_commit=True,
 			)
 		except Exception:
@@ -389,6 +390,9 @@ def _desk_internal_leg(event, payload, bits):
 			telephony._save(state)
 			telephony.publish_call(state)
 		elif kind == "rep_leg":
+			# After a transfer the old rep_leg hangs up; the new one is already in state.
+			if ccid != state.get("rep_leg"):
+				return
 			# The rep hung up (or never answered): end the whole call.
 			if state.get("peer_leg") and state.get("state") != "ended":
 				telnyx_api.command(state["peer_leg"], "hangup")
@@ -450,11 +454,28 @@ def _desk_ring_answered(state, ccid):
 
 
 def _desk_supervisor_answered(state, ccid, bits):
-	"""A closer's leg is up: join as supervisor, then the rep-only join tone."""
+	"""A closer's leg is up: join as supervisor, then the rep-only join tone.
+
+	A transfer joins as a normal participant, becomes the new rep, and the
+	original rep_leg is hung up without tearing down the seller.
+	"""
 	mode = bits.get("mode") if bits.get("mode") in desk.MODES else "monitor"
 	conf = state.get("conference_id")
 	if not conf:
 		telnyx_api.command(ccid, "hangup")
+		return
+	transferring = bool(bits.get("transfer")) or bits.get("user") == state.get("transfer_to")
+	if transferring:
+		telnyx_api.conference_command(conf, "join", desk.join_payload(ccid))
+		old = state.get("rep_leg")
+		state["rep"] = bits.get("user")
+		state["rep_leg"] = ccid
+		state["transfer_to"] = None
+		state.get("supervisors", {}).pop(ccid, None)
+		telephony._save(state)
+		if old and old != ccid:
+			telnyx_api.command(old, "hangup")
+		telephony.publish_call(state, "transferred")
 		return
 	telnyx_api.conference_command(conf, "join", desk.join_payload(ccid, mode, state.get("rep_leg")))
 	state.setdefault("supervisors", {})[ccid] = {"user": bits.get("user"), "mode": mode, "joined": True}
@@ -624,6 +645,15 @@ def _duration(payload, call_log_name):
 			pass
 	return 0
 
+
+def _party(value, payload=None):
+	"""(e164-or-raw, CNAM) from a Telnyx `from`/`to` field."""
+	name = ""
+	if isinstance(payload, dict):
+		name = payload.get("caller_id_name") or payload.get("caller_id") or ""
+	if isinstance(value, dict):
+		return value.get("phone_number") or "", value.get("caller_id_name") or value.get("display_name") or name
+	return value or "", name
 
 def _client_state_user(payload):
 	"""The CRM user we stamped on an outbound dial, if this is one of ours."""

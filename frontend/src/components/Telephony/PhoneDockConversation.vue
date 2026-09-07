@@ -2,7 +2,7 @@
   <div class="conversation" :aria-label="`${__('Conversation with')} ${name}`">
     <div class="thread-heading">
       <Button variant="ghost" icon="arrow-left" :aria-label="__('Back')" @click="$emit('back')" />
-      <div class="min-w-0"><b class="block truncate">{{ name }}</b><small>{{ formatPhone(number) }}<router-link v-if="lead" :to="`/leads/${lead}`" class="ml-2 underline">{{ __('Open lead') }}</router-link></small></div>
+      <div class="min-w-0"><b class="block truncate">{{ name }}</b><small>{{ formatPhone(number) }}<router-link v-if="lead || info.lead" :to="`/leads/${lead || info.lead}`" class="ml-2 underline">{{ __('Open lead') }}</router-link></small></div>
       <Button icon="phone" variant="ghost" :disabled="onCall" :aria-label="`${__('Call')} ${name}`" @click="dial(number, { name, lead })" />
     </div>
 
@@ -17,6 +17,7 @@
           <div class="call-head"><FeatherIcon :name="e.direction === 'Incoming' ? 'phone-incoming' : 'phone-outgoing'" class="size-4" /><b>{{ e.direction }} {{ __('call') }}</b><span>{{ e.status }}<template v-if="e.duration"> · {{ formatDuration(e.duration) }}</template></span></div>
           <small class="call-time">{{ prettyDate(e.at) }}<template v-if="e.rep_name"> · {{ e.rep_name }}</template></small>
           <details v-if="e.summary" class="summary"><summary><FeatherIcon name="align-left" class="size-3" /> {{ __('AI summary') }}</summary><p>{{ e.summary }}</p></details>
+          <details v-if="e.transcript" class="summary"><summary><FeatherIcon name="align-left" class="size-3" /> {{ __('Transcript') }}</summary><p class="transcript">{{ e.transcript }}</p></details>
           <div v-if="e.recording_url" class="recording">
             <button v-if="playing !== e.name" type="button" class="play" @click="playing = e.name"><FeatherIcon name="play" class="size-3" /> {{ __('Play recording') }}</button>
             <audio v-else controls autoplay preload="metadata" :src="recordingSrc(e.name)" :aria-label="`${__('Recording of call with')} ${name}`" @ended="playing = null" />
@@ -26,6 +27,8 @@
       </template>
     </div>
 
+    <p v-if="info.dnc" class="dnc bar">{{ __('Do not contact — texts and calls are blocked.') }}</p>
+    <button v-else-if="!lead && !info.lead && routeLead" type="button" class="link-lead" @click="linkOpenLead">{{ __('Link to this lead') }}</button>
     <form class="compose" @submit.prevent="send">
       <FormControl v-model="draft" type="textarea" :rows="2" :aria-label="`${__('Text')} ${name}`" :placeholder="__('Write a text…')" @keydown.enter.exact.prevent="send" />
       <Button type="submit" icon="arrow-up" variant="solid" :disabled="!draft.trim() || sending" :aria-label="__('Send text')" />
@@ -45,6 +48,11 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { formatPhone } from '@/utils/phoneFormat'
 import { formatDuration, prettyDate } from '@/utils'
 import { onCall, dial } from '@/composables/phone'
+import { useRoute } from 'vue-router'
+
+const route = useRoute()
+const routeLead = computed(() => route.params.leadId || null)
+const info = ref({ dnc: false, lead: null })
 
 const props = defineProps({ number: { type: String, required: true }, name: { type: String, default: '' }, lead: { type: String, default: null } })
 defineEmits(['back'])
@@ -55,12 +63,25 @@ const playing = ref(null)
 const history = createResource({ url: 'crm.api.telephony.history', initialData: [], onError: () => {} })
 const events = computed(() => (history.data || []).map((r) => ({ ...r, key: `${r.kind}:${r.name}`, direction: r.direction, at: r.at, summary: r.summary || r.custom_ai_summary || '' })).sort((a, b) => new Date(a.at) - new Date(b.at)))
 function recordingSrc(callLog) { return `/api/method/crm.integrations.api.get_recording_url?call_log_name=${encodeURIComponent(callLog)}` }
-function load() { playing.value = null; history.submit({ number: props.number, limit: 200 }) }
+function load() {
+  playing.value = null
+  history.submit({ number: props.number, limit: 200 })
+  call('crm.api.telephony.lookup', { number: props.number }).then((r) => { info.value = r || { dnc: false } }).catch(() => {})
+}
+async function linkOpenLead() {
+  if (!routeLead.value) return
+  try {
+    const r = await call('crm.api.telephony.link_lead', { lead: routeLead.value, number: props.number })
+    info.value = { ...info.value, lead: r.lead, lead_name: r.lead_name, dnc: info.value.dnc }
+    load()
+  } catch (e) { toast.error(e?.messages?.[0] || __('Could not link')) }
+}
 watch(() => props.number, load, { immediate: true })
 watch(() => events.value.length, async () => { await nextTick(); if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight })
 async function send() {
   const text = draft.value.trim()
   if (!text || sending.value) return
+  if (info.value.dnc) { toast.error(__('This number is on the do-not-contact list')); return }
   sending.value = true
   try {
     await call('crm.api.telephony.send_text', { to: props.number, text })
@@ -88,5 +109,8 @@ onBeforeUnmount(() => { playing.value = null })
 .summary { margin-top: 9px; font-size: 12px; }.summary summary { display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 11px; font-weight: 600; color: var(--ink-gray-7, #555); list-style: none; }.summary summary::-webkit-details-marker { display: none; }.summary p { margin-top: 7px; line-height: 1.55; }
 .recording { margin-top: 10px; }.play { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; color: #167645; }.recording audio { display: block; width: 100%; height: 36px; }
 .open-call { display: block; margin-top: 8px; font-size: 10px; color: var(--ink-gray-5, #777); text-decoration: underline; }
+.dnc { margin-top: 8px; font-size: 11px; font-weight: 600; color: #a32e2e; }.dnc.bar { padding: 8px 12px; border-top: 1px solid var(--outline-gray-1, #eee); }
+.transcript { white-space: pre-wrap; max-height: 160px; overflow: auto; }
+.link-lead { padding: 8px 12px; font-size: 11px; font-weight: 600; text-align: left; color: #167645; text-decoration: underline; }
 .compose { display: flex; align-items: flex-end; gap: 7px; padding: 10px 12px 14px; border-top: 1px solid var(--outline-gray-1, #eee); }.compose > :first-child { flex: 1; min-width: 0; }
 </style>

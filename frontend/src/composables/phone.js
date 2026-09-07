@@ -23,6 +23,7 @@ export const phone = reactive({
   seconds: 0,
   error: '',
   incoming: null, // { call_log, from, lead, lead_name, line } from crm_incoming
+  dnc: false,
 })
 
 let client = null
@@ -60,10 +61,22 @@ async function ensureClient() {
 }
 
 /** Outbound: the server creates the conference-first call and we join our leg. */
+export async function enrich(number) {
+  try {
+    const r = await call('crm.api.telephony.lookup', { number })
+    if (r?.dnc) phone.dnc = true
+    if (r?.lead && !phone.lead) phone.lead = r.lead
+    if (r?.lead_name && !phone.peerName) phone.peerName = r.lead_name
+    return r
+  } catch { return null }
+}
+
 export async function dial(number, { name = '', lead = null, line = null } = {}) {
   if (onCall.value) { toast.error(__('Finish your current call first')); return false }
   phone.error = ''
-  Object.assign(phone, { peerNumber: number, peerName: name, lead, line, role: 'rep', state: 'connecting', callLog: null })
+  Object.assign(phone, { peerNumber: number, peerName: name, lead, line, role: 'rep', state: 'connecting', callLog: null, dnc: false })
+  const info = await enrich(number)
+  if (info?.dnc) { reset(); toast.error(__('This number is on the do-not-contact list')); return false }
   try {
     await ensureClient()
     const started = await call('crm.api.telephony.dial', { to: number, line, lead })
@@ -127,12 +140,13 @@ export function notifyLiveOne(data) {
 export function ring(data) {
   if (onCall.value) return
   phone.incoming = data
-  notify(__('Incoming call'), data?.lead_name || data?.from || __('Unknown'), 'crm-incoming')
+  notify(__('Incoming call'), data?.lead_name || data?.from_name || data?.from || __('Unknown'), 'crm-incoming')
 }
 export async function answer() {
   if (!phone.incoming) return
   const inc = phone.incoming
-  Object.assign(phone, { peerNumber: inc.from, peerName: inc.lead_name || '', lead: inc.lead || null, line: inc.line || null, role: 'rep', callLog: inc.call_log, incoming: null })
+  Object.assign(phone, { peerNumber: inc.from, peerName: inc.lead_name || inc.from_name || '', lead: inc.lead || null, line: inc.line || null, role: 'rep', callLog: inc.call_log, incoming: null, dnc: false })
+  enrich(inc.from)
   await ensureClient()
   if (currentCall?.state === 'ringing') currentCall.answer()
   else phone.state = 'connecting'
@@ -168,12 +182,34 @@ export async function toggleHold() {
 export function dtmf(digit) {
   currentCall?.dtmf(String(digit))
 }
+export async function inviteTeammate(user, mode = 'barge') {
+  if (!phone.callLog || !user) return false
+  try {
+    await call('crm.api.telephony.invite', { call_log: phone.callLog, user, mode })
+    toast.success(__('Ringing teammate…'))
+    return true
+  } catch (e) {
+    toast.error(e?.messages?.[0] || __('Could not invite'))
+    return false
+  }
+}
+export async function transferTo(user) {
+  if (!phone.callLog || !user) return false
+  try {
+    await call('crm.api.telephony.transfer', { call_log: phone.callLog, user })
+    toast.success(__('Transferring… they take over when they answer.'))
+    return true
+  } catch (e) {
+    toast.error(e?.messages?.[0] || __('Could not transfer'))
+    return false
+  }
+}
 
 function startTimer() { stopTimer(); phone.seconds = 0; timer = setInterval(() => (phone.seconds += 1), 1000) }
 function stopTimer() { if (timer) clearInterval(timer); timer = null }
 function reset() {
   stopTimer()
-  Object.assign(phone, { state: 'idle', muted: false, held: false, callLog: null, role: 'rep', mode: 'monitor' })
+  Object.assign(phone, { state: 'idle', muted: false, held: false, callLog: null, role: 'rep', mode: 'monitor', dnc: false })
   currentCall = null
 }
 export function disconnect() {
