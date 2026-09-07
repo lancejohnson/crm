@@ -65,18 +65,11 @@ export async function dial(number, { name = '', lead = null, line = null } = {})
   phone.error = ''
   Object.assign(phone, { peerNumber: number, peerName: name, lead, line, role: 'rep', state: 'connecting', callLog: null })
   try {
-    const c = await ensureClient()
-    const cred = await call('crm.integrations.telnyx.api.webrtc_token')
-    const started = await call('crm.api.telephony.dial', { to: number, line })
-    phone.callLog = started?.call_log || null
-    currentCall = c.newCall({
-      destinationNumber: number,
-      callerNumber: line || cred.caller_number,
-      callerName: cred.caller_name,
-      audio: true,
-      video: false,
-      clientState: started?.client_state,
-    })
+    await ensureClient()
+    const started = await call('crm.api.telephony.dial', { to: number, line, lead })
+    phone.callLog = started?.call_log || started?.desk_id || null
+    // Server rings OUR credential first (conference-first). A second newCall
+    // to the seller from the browser would double-dial them. Wait for the inbound.
     return true
   } catch (e) {
     reset()

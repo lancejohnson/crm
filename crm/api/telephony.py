@@ -605,96 +605,151 @@ def _is_manager() -> bool:
 
 
 @frappe.whitelist()
-def live_one(lead: str, note: str = ""):
+def live_one(lead: str, note: str = "", call_log: str = None):
 	"""'Got a live one' from the desk: the existing alert, plus the call it is about."""
 	from crm.api.live_one import alert
 
-	call_log = None
-	for state in _all_states():
-		if state.get("rep") == frappe.session.user and state.get("state") == "active":
-			call_log = state.get("call_log")
-			break
+	if not call_log:
+		for state in _all_states():
+			if state.get("rep") == frappe.session.user and state.get("state") == "active":
+				call_log = state.get("call_log")
+				break
 	return alert(lead, note, call_log)
 
 
+def _history_peer(from_n, to_n, ours: set[str], inbound: bool) -> str:
+	"""The number that is not us. Falls back to the far-side field by direction."""
+	far = from_n if inbound else to_n
+	us = to_n if inbound else from_n
+	if last10(far) and last10(far) not in ours:
+		return desk.e164(far) or far or ""
+	if last10(us) and last10(us) not in ours:
+		return desk.e164(us) or us or ""
+	return desk.e164(far) or far or ""
+
+
+def _shape_call(r, ours: set[str]) -> dict:
+	inbound = (r.type or "") == "Incoming"
+	lead = r.reference_docname if r.reference_docname and r.reference_doctype == "CRM Lead" else (r.reference_docname if r.reference_docname else None)
+	rep = r.caller if not inbound else r.receiver
+	return {
+		"kind": "call",
+		"name": r.name,
+		"number": _history_peer(r.get("from"), r.get("to"), ours, inbound),
+		"at": r.start_time,
+		"direction": "Incoming" if inbound else "Outgoing",
+		"status": r.status,
+		"result": r.status,
+		"duration": r.duration,
+		"rep": rep,
+		"rep_name": rep,
+		"lead": lead,
+		"lead_name": None,
+		"provider": call_provider(r),
+		"recording": "ready" if r.recording_url else "none",
+		"recording_url": r.recording_url,
+		"has_transcript": bool(r.get("custom_transcript")),
+		"summary": r.get("custom_ai_summary"),
+		"outcome": r.get("custom_call_class"),
+		"reference_doctype": r.reference_doctype if r.reference_docname else None,
+		"reference_docname": r.reference_docname,
+	}
+
+
+def _shape_text(r, ours: set[str]) -> dict:
+	inbound = (r.direction or "").lower().startswith("in")
+	lead = r.reference_docname if r.reference_docname and r.reference_doctype == "CRM Lead" else (r.reference_docname if r.reference_docname else None)
+	media = r.get("media")
+	try:
+		media = _json.loads(media) if isinstance(media, str) and media else (media or [])
+	except ValueError:
+		media = []
+	return {
+		"kind": "text",
+		"name": r.name,
+		"number": _history_peer(r.get("from"), r.get("to"), ours, inbound),
+		"at": r.message_date,
+		"direction": "in" if inbound else "out",
+		"text": r.content,
+		"status": r.status,
+		"provider": message_provider(r),
+		"media": media,
+		"rep": r.get("sent_by"),
+		"sender_name": r.get("sent_by"),
+		"lead": lead,
+		"lead_name": None,
+		"reference_doctype": r.reference_doctype if r.reference_docname else None,
+		"reference_docname": r.reference_docname,
+	}
+
+
 @frappe.whitelist()
-def history(number: str, limit: int = 100):
-	"""Everything with one number, oldest first: calls (any provider, with
-	recording/transcript/summary when present) and texts (any provider)."""
+def history(number: str = None, limit: int = 100):
+	"""Call + text timeline.
+
+	With `number`: that peer, oldest first (the dock conversation).
+	Without: the session user's recent activity across their lines, newest first
+	(the dock's Recent / Conversations tabs).
+	"""
 	key = last10(number)
-	if not key:
-		return []
 	limit = max(1, min(int(limit or 100), 500))
+	ours = {last10(l["number"]) for l in lines() if last10(l["number"])}
+	if number and not key:
+		return []
+	if key:
+		ours.add(key)
+	where_num = "RIGHT(REGEXP_REPLACE(COALESCE(`from`,''), '[^0-9]', ''), 10) = %s OR RIGHT(REGEXP_REPLACE(COALESCE(`to`,''), '[^0-9]', ''), 10) = %s"
 	events = []
 	if frappe.db.exists("DocType", "CRM Call Log"):
 		fields = ["name", "`from`", "`to`", "type", "status", "duration", "start_time", "end_time", "caller", "receiver", "medium", "recording_url", "reference_doctype", "reference_docname"]
 		for extra in ("custom_transcript", "custom_ai_summary", "custom_call_class"):
 			if frappe.db.has_column("CRM Call Log", extra):
 				fields.append(extra)
-		rows = frappe.db.sql(
-			f"""SELECT {", ".join(fields)} FROM `tabCRM Call Log`
-			    WHERE RIGHT(REGEXP_REPLACE(COALESCE(`from`,''), '[^0-9]', ''), 10) = %s
-			       OR RIGHT(REGEXP_REPLACE(COALESCE(`to`,''), '[^0-9]', ''), 10) = %s
-			    ORDER BY start_time DESC LIMIT %s""",
-			(key, key, limit),
-			as_dict=True,
-		)
-		for r in rows:
-			events.append(
-				{
-					"kind": "call",
-					"name": r.name,
-					"at": r.start_time,
-					"direction": "Inbound" if r.type == "Incoming" else "Outbound",
-					"result": r.status,
-					"duration": r.duration,
-					"rep": r.caller if r.type != "Incoming" else r.receiver,
-					"provider": call_provider(r),
-					"recording": "ready" if r.recording_url else "none",
-					"recording_url": r.recording_url,
-					"has_transcript": bool(r.get("custom_transcript")),
-					"summary": r.get("custom_ai_summary"),
-					"outcome": r.get("custom_call_class"),
-					"reference_doctype": r.reference_doctype if r.reference_docname else None,
-					"reference_docname": r.reference_docname,
-				}
+		if key:
+			rows = frappe.db.sql(
+				f"SELECT {', '.join(fields)} FROM `tabCRM Call Log` WHERE {where_num} ORDER BY start_time DESC LIMIT %s",
+				(key, key, limit), as_dict=True,
 			)
+		else:
+			ours_list = list(ours) or ["________"]
+			in_list = ",".join(["%s"] * len(ours_list))
+			rows = frappe.db.sql(
+				f"""SELECT {', '.join(fields)} FROM `tabCRM Call Log`
+				    WHERE caller = %s OR receiver = %s
+				       OR RIGHT(REGEXP_REPLACE(COALESCE(`from`,''), '[^0-9]', ''), 10) IN ({in_list})
+				       OR RIGHT(REGEXP_REPLACE(COALESCE(`to`,''), '[^0-9]', ''), 10) IN ({in_list})
+				    ORDER BY start_time DESC LIMIT %s""",
+				(frappe.session.user, frappe.session.user, *ours_list, *ours_list, limit),
+				as_dict=True,
+			)
+		for r in rows:
+			events.append(_shape_call(r, ours if not key else {key}))
 	if frappe.db.exists("DocType", "Quo Message"):
 		fields = ["name", "`from`", "`to`", "direction", "content", "message_date", "status", "reference_doctype", "reference_docname"]
 		for extra in ("provider", "media", "sent_by"):
 			if frappe.db.has_column("Quo Message", extra):
 				fields.append(extra)
-		rows = frappe.db.sql(
-			f"""SELECT {", ".join(fields)} FROM `tabQuo Message`
-			    WHERE RIGHT(REGEXP_REPLACE(COALESCE(`from`,''), '[^0-9]', ''), 10) = %s
-			       OR RIGHT(REGEXP_REPLACE(COALESCE(`to`,''), '[^0-9]', ''), 10) = %s
-			    ORDER BY message_date DESC LIMIT %s""",
-			(key, key, limit),
-			as_dict=True,
-		)
-		for r in rows:
-			media = r.get("media")
-			try:
-				media = _json.loads(media) if isinstance(media, str) and media else (media or [])
-			except ValueError:
-				media = []
-			events.append(
-				{
-					"kind": "text",
-					"name": r.name,
-					"at": r.message_date,
-					"direction": "Inbound" if (r.direction or "").lower().startswith("in") else "Outbound",
-					"text": r.content,
-					"status": r.status,
-					"provider": message_provider(r),
-					"media": media,
-					"rep": r.get("sent_by"),
-					"reference_doctype": r.reference_doctype if r.reference_docname else None,
-					"reference_docname": r.reference_docname,
-				}
+		if key:
+			rows = frappe.db.sql(
+				f"SELECT {', '.join(fields)} FROM `tabQuo Message` WHERE {where_num} ORDER BY message_date DESC LIMIT %s",
+				(key, key, limit), as_dict=True,
 			)
-	events.sort(key=lambda e: str(e.get("at") or ""))
-	return events[-limit:]
+		else:
+			ours_list = list(ours) or ["________"]
+			in_list = ",".join(["%s"] * len(ours_list))
+			rows = frappe.db.sql(
+				f"""SELECT {', '.join(fields)} FROM `tabQuo Message`
+				    WHERE COALESCE(sent_by,'') = %s
+				       OR RIGHT(REGEXP_REPLACE(COALESCE(`from`,''), '[^0-9]', ''), 10) IN ({in_list})
+				       OR RIGHT(REGEXP_REPLACE(COALESCE(`to`,''), '[^0-9]', ''), 10) IN ({in_list})
+				    ORDER BY message_date DESC LIMIT %s""",
+				(frappe.session.user, *ours_list, *ours_list, limit),
+				as_dict=True,
+			)
+		for r in rows:
+			events.append(_shape_text(r, ours if not key else {key}))
+	events.sort(key=lambda e: str(e.get("at") or ""), reverse=not bool(key))
+	return events[:limit] if not key else events[-limit:]
 
 
 @frappe.whitelist()
@@ -714,6 +769,12 @@ def send_text(to: str, text: str, line: str = None):
 	except Exception:
 		pass
 	return telnyx_api.send_sms(number, text, reference_doctype=doctype, reference_docname=name, frm=line_row["number"])
+
+
+@frappe.whitelist()
+def decline(call_log: str = None, desk_id: str = None):
+	"""Reject an inbound ring. Same hangup on our unanswered leg."""
+	return hangup(call_log=call_log, desk_id=desk_id)
 
 
 @frappe.whitelist()

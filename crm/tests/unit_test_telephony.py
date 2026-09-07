@@ -267,5 +267,18 @@ class WebhookRoutingTests(unittest.TestCase):
 		self.assertEqual(commands, [("r2", "hangup")], "a late answer is just hung up")
 
 
+class HistoryShapeTests(unittest.TestCase):
+	def test_peer_picks_the_number_that_is_not_ours(self):
+		ours = {"6125550100"}
+		self.assertEqual(telephony._history_peer("+16125550100", "+16125559999", ours, inbound=False), "+16125559999")
+		self.assertEqual(telephony._history_peer("+16125559999", "+16125550100", ours, inbound=True), "+16125559999")
+
+	def test_history_requires_ten_digits_when_a_number_is_given(self):
+		self.assertEqual(telephony.history("nope"), [])
+
+	def test_decline_exists(self):
+		self.assertTrue(callable(telephony.decline))
+
+
 if __name__ == "__main__":
 	unittest.main()
