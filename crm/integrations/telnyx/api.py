@@ -48,6 +48,14 @@ def _headers():
 	return {"Authorization": f"Bearer {_key()}", "Content-Type": "application/json"}
 
 
+def _get(path):
+	r = requests.get(f"{API}{path}", headers=_headers(), timeout=TIMEOUT)
+	if r.status_code >= 400:
+		frappe.log_error(title="Telnyx API error", message=f"GET {path} -> {r.status_code}\n{r.text[:2000]}")
+		frappe.throw(_("Telnyx rejected the request ({0}).").format(r.status_code))
+	return r.json().get("data") or {}
+
+
 def _post(path, payload):
 	r = requests.post(f"{API}{path}", json=payload, headers=_headers(), timeout=TIMEOUT)
 	if r.status_code >= 400:
@@ -75,8 +83,11 @@ def sending_number(user=None):
 
 
 @frappe.whitelist()
-def send_sms(to: str, text: str, reference_doctype: str = None, reference_docname: str = None):
+def send_sms(to: str, text: str, reference_doctype: str = None, reference_docname: str = None, frm: str = None):
 	"""Send one text and mirror it into `Quo Message` as a Telnyx row.
+
+	`frm` lets the desk send from a SHARED line the user may use (checked by
+	`crm.api.telephony.send_text`); absent, it is the user's own sending number.
 
 	Do-not-contact is checked HERE as well as in the UI, and deliberately last:
 	the flag is a statement about a person, it can be set by another system
@@ -91,7 +102,7 @@ def send_sms(to: str, text: str, reference_doctype: str = None, reference_docnam
 	if is_blocked_number(to):
 		frappe.throw(_("{0} has asked not to be contacted.").format(to))
 
-	frm = sending_number()
+	frm = (frm or "").strip() or sending_number()
 	if not frm:
 		frappe.throw(_("No Telnyx number is set for you or for this site."))
 
@@ -241,6 +252,28 @@ def command(call_control_id: str, action: str, payload: dict = None):
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), f"Telnyx command {action} failed")
 		return {}
+
+
+def create_conference(payload: dict) -> dict:
+	"""POST /conferences — the room, created with its first participant. Raises
+	on failure: without a room the conference-first call cannot continue."""
+	return _post("/conferences", payload)
+
+
+def conference_command(conference_id: str, action: str, payload: dict = None):
+	"""POST /conferences/{id}/actions/{join|update|play|speak|mute|hold|...}.
+	Logged, never raised, same as `command`."""
+	try:
+		return _post(f"/conferences/{conference_id}/actions/{action}", payload or {})
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), f"Telnyx conference {action} failed")
+		return {}
+
+
+def get_credential(credential_id: str) -> dict:
+	"""GET /telephony_credentials/{id} — carries `sip_username`, which is how a
+	Call Control leg reaches the browser softphone (`sip:<username>@sip.telnyx.com`)."""
+	return _get(f"/telephony_credentials/{credential_id}")
 
 
 def start_recording(call_control_id: str):
