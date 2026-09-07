@@ -93,7 +93,7 @@ assert.match(src('pages/Talk.vue'), /import\.meta\.env\.DEV && !workspace\.isNex
   for (const ep of ['crm.api.workspace.get', 'crm.api.workspace.set_version', 'crm.api.talk.list_channels', 'crm.api.talk.thread', 'crm.api.talk.post', 'crm.api.talk.mark_read', 'crm.api.talk.ensure_dm', 'crm.api.talk.presence', 'crm.api.telephony.active_calls', 'crm.api.telephony.dial', 'crm.api.telephony.join', 'crm.api.telephony.set_mode', 'crm.api.telephony.live_one', 'crm.api.telephony.history', 'crm.api.telephony.send_text', 'crm.integrations.telnyx.api.webrtc_token', 'crm.integrations.api.get_recording_url']) {
     assert.ok(all.includes(ep), `frontend calls ${ep}`)
   }
-  for (const ev of ['crm_talk', 'crm_talk_read', 'crm_presence', 'crm_telnyx_call', 'crm_incoming', 'crm_live_one']) assert.ok(src('stores/talk.js').includes(`'${ev}'`), `listens for ${ev}`)
+  for (const ev of ['crm_talk', 'crm_talk_read', 'crm_presence', 'crm_telnyx_call', 'crm_incoming', 'crm_live_one', 'crm_transcript']) assert.ok(src('stores/talk.js').includes(`'${ev}'`), `listens for ${ev}`)
   assert.ok(src('components/Telephony/PhoneDock.vue').includes('.answer-call { background: #167645'), 'Answer is green')
 }
 

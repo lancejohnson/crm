@@ -176,6 +176,10 @@ def voice():
 		_save_transcript(payload)
 		return {"ok": True, "transcript": True}
 
+	if event == "call.transcription":
+		_live_transcript(payload)
+		return {"ok": True, "live_transcript": True}
+
 	if not call_id:
 		return {"ok": True, "ignored": "no call id"}
 
@@ -488,12 +492,24 @@ def _desk_supervisor_answered(state, ccid, bits):
 
 
 def _desk_maybe_record(state, external_ccid):
-	"""Record at bridge time when the line resolves to recording on."""
+	"""Record at bridge time when the line resolves to recording on.
+
+	Live dual-track transcription starts on the EXTERNAL leg (`both` tracks:
+	inbound = them, outbound = us). Failures here must not drop the call.
+	"""
 	settings = telephony.phone_settings()
 	line = telephony.line_by_number(state.get("line")) or {"recording": "inherit"}
 	if desk.resolve_recording(line.get("recording"), settings["recording_default"]):
-		telnyx_api.command(external_ccid, "record_start", desk.record_payload())
-		state["recording"] = True
+		try:
+			telnyx_api.command(external_ccid, "record_start", desk.record_payload())
+			state["recording"] = True
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), "Telnyx: record_start failed")
+		try:
+			telnyx_api.command(external_ccid, "transcription_start", desk.live_transcription_payload())
+			state["live_transcription"] = True
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), "Telnyx: transcription_start failed")
 
 
 def _desk_end(state):
@@ -560,7 +576,56 @@ def _save_recording(payload):
 		frappe.db.set_value("CRM Call Log", name, "recording_url", url)
 
 
-def _save_transcript(payload):
+def _live_transcript(payload):
+	"""Streaming dual-track words while the call is up."""
+	ccid = payload.get("call_control_id")
+	data = payload.get("transcription_data") if isinstance(payload.get("transcription_data"), dict) else {}
+	text = (data.get("transcript") or payload.get("transcript") or payload.get("text") or "").strip()
+	if not text:
+		return
+	track = (data.get("transcription_track") or payload.get("transcription_track") or "inbound").lower()
+	is_final = data.get("is_final")
+	if is_final is None:
+		is_final = payload.get("is_final")
+	if is_final is None:
+		is_final = str(payload.get("status") or "").lower() in ("final", "completed")
+	speaker = "lead" if track in ("inbound", "in", "remote") else "rep"
+	state = None
+	for s in telephony._all_states():
+		if ccid and (
+			ccid in (s.get("caller_leg"), s.get("peer_leg"), s.get("rep_leg"))
+			or ccid in (s.get("supervisors") or {})
+		):
+			state = s
+			break
+	if not state:
+		return
+	segment = {"speaker": speaker, "text": text, "final": bool(is_final), "track": track}
+	live = state.setdefault("live_transcript", [])
+	if live and not live[-1].get("final") and live[-1].get("speaker") == speaker:
+		live[-1] = segment
+	else:
+		live.append(segment)
+	state["live_transcript"] = live[-80:]
+	telephony._save(state)
+	telephony.publish_transcript(state, segment)
+	if segment["final"] and state.get("call_log") and frappe.db.has_column("CRM Call Log", "custom_transcript"):
+		dialogue = [
+			{"speaker": r["speaker"], "start": 0, "end": 0, "content": r["text"]}
+			for r in state["live_transcript"]
+			if r.get("final") and r.get("text")
+		]
+		if dialogue:
+			frappe.db.set_value(
+				"CRM Call Log",
+				state["call_log"],
+				"custom_transcript",
+				json.dumps({"dialogue": dialogue, "duration": 0, "live": True}),
+				update_modified=False,
+			)
+
+
+
 	"""Store a finished transcript in the shape `call_transcript.py` already reads.
 
 	That shape is `{"dialogue": [{speaker, start, end, content}], "duration": n}`,

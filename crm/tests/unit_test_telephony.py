@@ -147,6 +147,10 @@ class PayloadTests(unittest.TestCase):
 	def test_record_is_dual_channel(self):
 		self.assertEqual(desk.record_payload()["channels"], "dual")
 		self.assertFalse(desk.record_payload()["play_beep"])
+		self.assertFalse(desk.record_payload()["transcription"])
+		live = desk.live_transcription_payload()
+		self.assertEqual(live["transcription_tracks"], "both")
+		self.assertTrue(live["transcription_engine_config"]["interimResults"])
 
 
 class StateTests(unittest.TestCase):

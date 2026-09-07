@@ -87,7 +87,7 @@ export const talkStore = defineStore('crm-talk', () => {
   // we are not looking at bumps its badge, `crm_talk_read` is the server's
   // word on the count, presence and calls refetch (cheap, small).
   let bound = false
-  function bind(socket, { onMessage, onIncoming, onLiveOne, onCall } = {}) {
+  function bind(socket, { onMessage, onIncoming, onLiveOne, onCall, onTranscript } = {}) {
     if (bound || !socket) return
     bound = true
     socket.on('crm_talk', (data) => {
@@ -109,11 +109,12 @@ export const talkStore = defineStore('crm-talk', () => {
       liveOnes.value = [data, ...liveOnes.value.filter((a) => a.call_log !== data.call_log)]
       onLiveOne && onLiveOne(data)
     })
+    socket.on('crm_transcript', (data) => onTranscript && onTranscript(data))
   }
   function unbind(socket) {
     if (!bound || !socket) return
     bound = false
-    for (const event of ['crm_talk', 'crm_talk_read', 'crm_presence', 'crm_telnyx_call', 'crm_incoming', 'crm_live_one']) socket.off(event)
+    for (const event of ['crm_talk', 'crm_talk_read', 'crm_presence', 'crm_telnyx_call', 'crm_incoming', 'crm_live_one', 'crm_transcript']) socket.off(event)
   }
   function dismissLiveOne(callLog) {
     liveOnes.value = liveOnes.value.filter((a) => a.call_log !== callLog)

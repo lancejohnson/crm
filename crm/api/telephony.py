@@ -420,6 +420,18 @@ def _all_states() -> list[dict]:
 	return out
 
 
+def publish_transcript(state: dict, segment: dict):
+	"""Live dual-track words, only to people on this call."""
+	row = {"call_log": state.get("call_log"), "desk_id": state.get("desk_id"), **segment}
+	users = {state.get("rep")} | {s.get("user") for s in (state.get("supervisors") or {}).values()}
+	users.discard(None)
+	for user in users:
+		try:
+			frappe.publish_realtime("crm_transcript", row, user=user, after_commit=True)
+		except Exception:
+			pass
+
+
 def publish_call(state: dict, event: str = "update"):
 	"""`crm_telnyx_call` — site-wide, so every open dock and team bar updates."""
 	try:

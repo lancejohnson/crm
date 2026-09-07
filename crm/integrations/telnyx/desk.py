@@ -262,13 +262,30 @@ def hold_payload(call_control_ids: list[str], held: bool = True) -> tuple[str, d
 
 
 def record_payload() -> dict:
+	# Dual-channel audio only. Live words come from transcription_start
+	# (otherwise we pay twice for the same transcript).
 	return {
 		"format": "mp3",
 		"channels": "dual",
 		"play_beep": False,
-		"transcription": True,
-		"transcription_engine": "B",
-		"transcription_language": "en",
+		"transcription": False,
+	}
+
+
+def live_transcription_payload() -> dict:
+	"""Real-time dual-track transcription on one call-control leg.
+
+	`both`: inbound = that party speaking, outbound = what they hear.
+	Google + interimResults so the dock can stream partials.
+	"""
+	return {
+		"transcription_engine": "Google",
+		"transcription_tracks": "both",
+		"transcription_engine_config": {
+			"transcription_engine": "Google",
+			"language": "en",
+			"interimResults": True,
+		},
 	}
 
 

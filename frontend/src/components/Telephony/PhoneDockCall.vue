@@ -4,6 +4,10 @@
     <h2>{{ phone.peerName || formatPhone(phone.peerNumber) || __('Call') }}</h2>
     <p class="number">{{ formatPhone(phone.peerNumber) }}<router-link v-if="phone.lead" :to="`/leads/${phone.lead}`" class="ml-2 underline">{{ __('Open lead') }}</router-link></p>
     <p v-if="phone.dnc" class="dnc" role="alert">{{ __('Do not contact') }}</p>
+    <div v-if="phone.live.length" class="live-tx" :aria-label="__('Live transcript')">
+      <div class="col"><b>{{ __('You') }}</b><p v-for="(r, i) in phone.live.filter(x => x.speaker === 'rep')" :key="'r'+i" :class="{ partial: !r.final }">{{ r.text }}</p></div>
+      <div class="col"><b>{{ __('Them') }}</b><p v-for="(r, i) in phone.live.filter(x => x.speaker === 'lead')" :key="'l'+i" :class="{ partial: !r.final }">{{ r.text }}</p></div>
+    </div>
 
     <template v-if="phone.role === 'supervisor'">
       <div class="modes" :aria-label="__('Microphone audience')">
@@ -91,5 +95,9 @@ watch(() => phone.callLog, () => { invited.value = false; note.value = ''; digit
 .keypad { margin-top: 12px; }.keypad output { display: block; min-height: 22px; font-size: 16px; text-align: center; letter-spacing: 2px; }.keypad > div { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; }
 .invite, .handoff { display: flex; gap: 6px; margin-top: 12px; }.invite > :first-child, .handoff > :first-child { flex: 1; min-width: 0; }
 .dnc { margin-top: 8px; font-size: 11px; font-weight: 600; color: #a32e2e; }
+.live-tx { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; max-height: 140px; overflow: auto; }
+.live-tx .col { padding: 8px; border-radius: 8px; background: var(--surface-gray-1, #f7f7f7); font-size: 11px; line-height: 1.45; }
+.live-tx b { display: block; margin-bottom: 4px; font-size: 10px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-gray-5, #777); }
+.live-tx p.partial { opacity: .65; font-style: italic; }
 .end-call { width: 100%; margin-top: 14px; }
 </style>

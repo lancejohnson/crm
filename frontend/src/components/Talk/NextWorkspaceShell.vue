@@ -31,7 +31,7 @@ import { mobileSidebarOpened } from '@/composables/settings'
 import TalkNav from '@/components/Talk/TalkNav.vue'
 import TalkKeys from '@/components/Talk/TalkKeys.vue'
 import PhoneDock from '@/components/Telephony/PhoneDock.vue'
-import { ring, dial, requestNotifyPermission, notifyLiveOne } from '@/composables/phone'
+import { ring, dial, requestNotifyPermission, notifyLiveOne, onTranscript } from '@/composables/phone'
 
 const emit = defineEmits(['reserve'])
 const props = defineProps({ mobile: Boolean })
@@ -57,7 +57,7 @@ watch(mobileSidebarOpened, async (opened) => {
 onMounted(() => {
   requestNotifyPermission()
   globalStore().setMakeCall((number) => dial(number))
-  talk.bind($socket, { onIncoming: ring, onLiveOne: notifyLiveOne })
+  talk.bind($socket, { onIncoming: ring, onLiveOne: notifyLiveOne, onTranscript })
 })
 onBeforeUnmount(() => {
   talk.unbind($socket)

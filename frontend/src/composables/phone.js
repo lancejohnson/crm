@@ -24,6 +24,7 @@ export const phone = reactive({
   error: '',
   incoming: null, // { call_log, from, lead, lead_name, line } from crm_incoming
   dnc: false,
+  live: [], // [{speaker:'rep'|'lead', text, final}]
 })
 
 let client = null
@@ -132,6 +133,15 @@ export function requestNotifyPermission() {
     if (typeof Notification !== 'undefined' && Notification.permission === 'default') Notification.requestPermission()
   } catch { /* ignore */ }
 }
+export function onTranscript(data) {
+  if (!data?.text) return
+  if (data.call_log && phone.callLog && data.call_log !== phone.callLog) return
+  const row = { speaker: data.speaker === 'rep' ? 'rep' : 'lead', text: data.text, final: !!data.final }
+  const live = phone.live
+  if (live.length && !live[live.length - 1].final && live[live.length - 1].speaker === row.speaker) live[live.length - 1] = row
+  else live.push(row)
+  if (live.length > 80) live.splice(0, live.length - 80)
+}
 export function notifyLiveOne(data) {
   notify(__('Got a live one'), `${data?.rep || ''} · ${data?.lead_name || data?.lead || ''}`.trim(), 'crm-live-one')
 }
@@ -209,7 +219,7 @@ function startTimer() { stopTimer(); phone.seconds = 0; timer = setInterval(() =
 function stopTimer() { if (timer) clearInterval(timer); timer = null }
 function reset() {
   stopTimer()
-  Object.assign(phone, { state: 'idle', muted: false, held: false, callLog: null, role: 'rep', mode: 'monitor', dnc: false })
+  Object.assign(phone, { state: 'idle', muted: false, held: false, callLog: null, role: 'rep', mode: 'monitor', dnc: false, live: [] })
   currentCall = null
 }
 export function disconnect() {
