@@ -31,7 +31,7 @@ import { phonePreview as p } from '@/composables/phonePreview'
 import { commandPaletteScope, showCommandPalette, openCommandPalette, registerPaletteExtension } from '@/composables/modals'
 import { isDialogOpen } from '@/utils/dialogs'
 import { openNavItem, talkRoute } from '@/utils/commsPreview'
-import { talkConversations, nextTalk, nextUnreadTalk, talkPaletteSections, shortcutFor, isTypingTarget, talkShortcutList } from '@/utils/talkShortcuts'
+import { talkConversations, nextTalk, nextUnreadTalk, talkPaletteSections, shortcutFor, isTypingTarget, talkShortcutList } from '@/utils/talkShortcutsPreview'
 const route = useRoute()
 const router = useRouter()
 const helpOpen = ref(false)
