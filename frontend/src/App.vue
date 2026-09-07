@@ -3,8 +3,11 @@
     <NotPermitted v-if="$route.name === 'Not Permitted'" />
     <Layout v-else-if="session.isLoggedIn" class="isolate" :style="previewWorkspaceStyle">
       <router-view :key="$route.fullPath" />
-      <PhonePreviewWidget v-if="PhonePreviewWidget" @reserve="previewSpace = $event" />
-      <CommsPreviewWidget v-if="CommsPreviewWidget" :bottom="previewSpace.bottom" @reserve="commsSpace = $event" />
+      <NextWorkspaceShell v-if="workspace.isNext" :mobile="isMobile" @reserve="nextSpace = $event" />
+      <template v-else-if="PhonePreviewWidget">
+        <PhonePreviewWidget @reserve="previewSpace = $event" />
+        <CommsPreviewWidget :bottom="previewSpace.bottom" @reserve="commsSpace = $event" />
+      </template>
     </Layout>
     <Dialogs />
   </FrappeUIProvider>
@@ -16,6 +19,14 @@ import { Dialogs } from '@/utils/dialogs'
 import { sessionStore } from '@/stores/session'
 import { FrappeUIProvider, setConfig, useTheme } from 'frappe-ui'
 import { computed, defineAsyncComponent, provide, ref } from 'vue'
+import { workspaceStore } from '@/stores/workspace'
+
+// The next workspace (Telnyx phone dock + Talk left nav) mounts from ONE
+// dynamically imported shell, only when the server says this user is on
+// `next`. Classic users never fetch that chunk: their render is production.
+const workspace = workspaceStore()
+const NextWorkspaceShell = defineAsyncComponent(() => import('@/components/Talk/NextWorkspaceShell.vue'))
+const nextSpace = ref({ bottom: 0, left: 0 })
 
 // Dev-only activation: production never mounts the mockup or its fixtures.
 const PhonePreviewWidget = import.meta.env.DEV
@@ -32,6 +43,17 @@ const CommsPreviewWidget = import.meta.env.DEV
 const previewSpace = ref({ bottom: 0 })
 const commsSpace = ref({ bottom: 0, right: 0, left: 0 })
 const previewWorkspaceStyle = computed(() => {
+  if (workspace.isNext) {
+    // Real layout: the Talk column replaces the sidebar's width (220 expanded /
+    // 48 collapsed in classic), the dock bar reserves its height.
+    const left = nextSpace.value.left - (isSidebarCollapsedNow() ? 48 : 220)
+    const bottom = nextSpace.value.bottom
+    return {
+      height: bottom ? `calc(100dvh - ${bottom}px)` : undefined,
+      width: left ? `calc(100vw - ${left}px)` : undefined,
+      marginLeft: left ? `${left}px` : undefined,
+    }
+  }
   const bottom = previewSpace.value.bottom + commsSpace.value.bottom
   const right = commsSpace.value.right
   const left = commsSpace.value.left || 0
@@ -56,13 +78,13 @@ const MobileLayout = defineAsyncComponent(
 const DesktopLayout = defineAsyncComponent(
   () => import('./components/Layouts/DesktopLayout.vue'),
 )
-const Layout = computed(() => {
-  if (window.innerWidth < 640) {
-    return MobileLayout
-  } else {
-    return DesktopLayout
-  }
-})
+const isMobile = window.innerWidth < 640
+const Layout = computed(() => (isMobile ? MobileLayout : DesktopLayout))
+// The real sidebar under the Talk column: classic collapses to 48px via the
+// stored preference (composables/settings sidebarCollapsed); read it so the
+// shift is exact either way. Mobile has no fixed sidebar.
+import { sidebarCollapsed } from '@/composables/settings'
+function isSidebarCollapsedNow() { return isMobile ? true : !!sidebarCollapsed.value }
 
 setConfig('systemTimezone', window.timezone?.system || null)
 setConfig('localTimezone', window.timezone?.user || null)
