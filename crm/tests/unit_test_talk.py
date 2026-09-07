@@ -50,6 +50,9 @@ class OrderingTests(unittest.TestCase):
 
 
 class SlugTests(unittest.TestCase):
+	def test_lead_channel_name(self):
+		self.assertEqual(talk.lead_channel_name("CRM-LEAD-1"), "lead-CRM-LEAD-1")
+
 	def test_dm_slug_is_order_independent_and_stable(self):
 		a = talk.dm_slug("Lance@x.com", "exe@x.com")
 		b = talk.dm_slug("exe@x.com", "lance@x.com ")

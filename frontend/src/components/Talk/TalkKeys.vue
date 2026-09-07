@@ -38,7 +38,7 @@ const talk = talkStore()
 const session = sessionStore()
 const { users } = usersStore()
 const helpOpen = ref(false)
-const icons = { live: 'zap', standup: 'bookmark', channel: 'hash', dm: 'message-square', user: 'user-plus' }
+const icons = { live: 'zap', standup: 'bookmark', channel: 'hash', dm: 'message-square', user: 'user-plus', lead: 'home', unreads: 'inbox', drafts: 'edit-3' }
 const iconFor = (kind) => markRaw({ render: () => h(FeatherIcon, { name: icons[kind] }) })
 
 function conversations() { return talkListFrom(talk.conversations) }

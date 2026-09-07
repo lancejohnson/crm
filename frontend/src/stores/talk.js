@@ -62,6 +62,7 @@ export const talkStore = defineStore('crm-talk', () => {
   const standup = computed(() => list.value.find((c) => c.kind === 'bot' && c.name === 'standup') || null)
   const botRows = computed(() => list.value.filter((c) => c.kind === 'bot' && c.name !== 'standup'))
   const dmRows = computed(() => list.value.filter((c) => c.kind === 'dm'))
+  const leadRows = computed(() => list.value.filter((c) => c.kind === 'lead'))
   const calls = computed(() => activeCalls.data || [])
 
   function statusOf(user) {
@@ -76,7 +77,7 @@ export const talkStore = defineStore('crm-talk', () => {
     return list.value.find((c) => c.name === name) || null
   }
   function unreadOf(kind) {
-    const rows = kind === 'dms' ? dmRows.value : kind === 'channels' ? [...channelRows.value, ...botRows.value, ...(standup.value ? [standup.value] : [])] : []
+    const rows = kind === 'dms' ? dmRows.value : kind === 'leads' ? leadRows.value : kind === 'channels' ? [...channelRows.value, ...botRows.value, ...(standup.value ? [standup.value] : [])] : []
     return rows.reduce((n, c) => n + (c.unread || 0), 0)
   }
 
@@ -92,6 +93,7 @@ export const talkStore = defineStore('crm-talk', () => {
     ...(standup.value ? [{ kind: 'standup', id: standup.value.name, label: 'Standup', group: 'Channels', unread: standup.value.unread || 0, keywords: 'pinned digest today' }] : []),
     ...channelRows.value.map((c) => ({ kind: 'channel', id: c.name, label: `#${c.name}`, group: 'Channels', unread: c.unread || 0, keywords: `channel ${c.title || ''}` })),
     ...botRows.value.map((c) => ({ kind: 'channel', id: c.name, label: `#${c.name}`, group: 'Channels', unread: c.unread || 0, keywords: `bot ${c.title || ''}` })),
+    ...leadRows.value.map((c) => ({ kind: 'lead', id: c.lead || c.name.replace(/^lead-/, ''), label: c.title || c.lead, group: 'Leads', unread: c.unread || 0, keywords: `lead ${c.title || ''} ${c.lead || ''}` })),
     ...dmRows.value.map((c) => ({ kind: 'dm', id: c.name, label: displayName(c.dm_user), group: 'Direct messages', unread: c.unread || 0, keywords: `dm direct message ${c.dm_user || ''}`, user: c.dm_user })),
   ])
 
@@ -139,7 +141,7 @@ export const talkStore = defineStore('crm-talk', () => {
 
   return {
     channels, presence, activeCalls, liveOnes, navOpen, navCollapsed, drafts, setDraft, draftList, totalUnread,
-    list, channelRows, botRows, standup, dmRows, calls, conversations,
+    list, channelRows, botRows, standup, dmRows, leadRows, calls, conversations,
     statusOf, displayName, byName, unreadOf, patchUnread, bind, unbind, dismissLiveOne,
   }
 })

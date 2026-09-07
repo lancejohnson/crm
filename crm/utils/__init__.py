@@ -378,6 +378,12 @@ def on_comment_insert(doc: Comment, method: str | None = None):
 
 	if doc.reference_doctype and doc.reference_name:
 		frappe.enqueue(update_modified_background, doctype=doc.reference_doctype, docname=doc.reference_name)
+	try:
+		from crm.api.talk import ingest_comment
+
+		ingest_comment(doc)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Talk: comment ingest failed")
 
 
 def update_modified_background(doctype, docname):

@@ -3,7 +3,10 @@
   <template v-else>
     <LayoutHeader>
       <template #left-header><Breadcrumbs :items="crumbs" /></template>
-      <template #right-header><span class="text-xs text-ink-gray-5">{{ caption }}</span></template>
+      <template #right-header>
+        <router-link v-if="kind === 'lead'" :to="`/leads/${id}`" class="mr-3 text-xs underline text-ink-gray-5">{{ __('Open lead') }}</router-link>
+        <span class="text-xs text-ink-gray-5">{{ caption }}</span>
+      </template>
     </LayoutHeader>
 
     <div v-if="!workspace.isNext" class="mx-auto max-w-xl px-5 py-10">
@@ -58,6 +61,7 @@
               <b>{{ m.author_name || talk.displayName(m.author) }}</b> <small :title="m.posted_at">{{ prettyDate(m.posted_at) }}</small><small v-if="m.edited_at" class="edited">· {{ __('edited') }}</small>
               <p v-if="m.deleted" class="deleted-text">{{ __('Message deleted') }}</p>
               <p v-else v-html="renderText(m.text)" />
+              <small v-if="m.from_comment" class="from-comment">{{ __('From activity') }}</small>
               <button v-if="!m.deleted" type="button" class="reply-link" @click="openThread(m.name)">{{ m.reply_count ? __('{0} replies', [m.reply_count]) : __('Reply') }}</button>
             </div>
           </div>
@@ -131,7 +135,11 @@ const Preview = (import.meta.env.DEV && !workspace.isNext && new URLSearchParams
 
 const kind = computed(() => route.params.kind)
 const id = computed(() => route.params.id)
-const channelRow = computed(() => ['channel', 'dm', 'standup'].includes(kind.value) ? talk.byName(id.value) : null)
+const channelRow = computed(() => {
+  if (kind.value === 'lead') return talk.byName(`lead-${id.value}`) || talk.leadRows.find((c) => c.lead === id.value) || null
+  return ['channel', 'dm', 'standup'].includes(kind.value) ? talk.byName(id.value) : null
+})
+const channelName = computed(() => (kind.value === 'lead' ? (channelRow.value?.name || `lead-${id.value}`) : id.value))
 const liveCall = computed(() => kind.value === 'live' ? talk.calls.find((c) => c.call_log === id.value) : null)
 const liveOne = computed(() => liveCall.value ? talk.liveOnes.find((a) => a.call_log === liveCall.value.call_log) : null)
 const talkItem = computed(() => channelRow.value || liveCall.value)
@@ -145,6 +153,7 @@ const title = computed(() => {
   if (kind.value === 'live') return __('Live')
   if (kind.value === 'dm') return talk.displayName(channelRow.value.dm_user)
   if (kind.value === 'standup') return __('Standup')
+  if (kind.value === 'lead') return channelRow.value.title || id.value
   return `#${channelRow.value.name}`
 })
 const crumbs = computed(() => [{ label: __('Talk'), route: { name: 'Talk', params: { kind: 'channel', id: talk.channelRows[0]?.name || 'acquisitions' } } }, { label: title.value }])
@@ -152,6 +161,7 @@ const caption = computed(() => {
   if (kind.value === 'dm' && channelRow.value) return { on_call: __('On call'), online: __('Online'), away: __('Away'), offline: __('Offline') }[talk.statusOf(channelRow.value.dm_user)] || ''
   if (kind.value === 'live' && liveCall.value) return liveCall.value.state || ''
   if (kind.value === 'standup') return __('Pinned')
+  if (kind.value === 'lead') return __('Lead chat')
   return messages.value.length ? `${messages.value.length} ${__('messages')}` : ''
 })
 const compsPath = computed(() => liveCall.value?.lead ? `/leads/${encodeURIComponent(liveCall.value.lead)}/comps` : null)
@@ -169,15 +179,24 @@ const thread = createResource({
   },
   onError: () => {},
 })
+async function ensureLeadChat() {
+  if (kind.value !== 'lead' || !id.value) return
+  try {
+    await call('crm.api.talk.ensure_lead_channel', { lead: id.value })
+    await talk.channels.reload()
+  } catch (e) { /* Talk.vue empty state handles missing */ }
+}
+watch(() => [kind.value, id.value], ensureLeadChat, { immediate: true })
 function loadThread() {
-  if (!channelRow.value) return
+  if (kind.value === 'lead' && !channelRow.value) return
+  if (!channelRow.value && kind.value !== 'lead') return
   messages.value = []
-  thread.submit({ channel: id.value, limit: 50 })
-  call('crm.api.talk.mark_read', { channel: id.value }).then((r) => talk.patchUnread(id.value, r?.unread || 0)).catch(() => {})
+  thread.submit({ channel: channelName.value, limit: 50 })
+  call('crm.api.talk.mark_read', { channel: channelName.value }).then((r) => talk.patchUnread(channelName.value, r?.unread || 0)).catch(() => {})
 }
 function loadMore() {
   if (!messages.value.length || thread.loading) return
-  thread.submit({ channel: id.value, before: messages.value[0].posted_at, limit: 50 })
+  thread.submit({ channel: channelName.value, before: messages.value[0].posted_at, limit: 50 })
 }
 function onScroll() { if (scroller.value && scroller.value.scrollTop < 40 && hasMore.value) loadMore() }
 watch(() => [id.value, channelRow.value?.name], loadThread, { immediate: true })
@@ -188,7 +207,7 @@ watch(() => messages.value.length, async (n, prev) => {
 
 // A message for the open thread is appended and counted as read, not unread.
 function onLiveMessage(data) {
-  if (data?.channel !== id.value || !data?.message) return false
+  if (data?.channel !== channelName.value || !data?.message) return false
   const m = data.message
   if (m.parent) {
     const root = messages.value.find((x) => x.name === m.parent)
@@ -218,7 +237,7 @@ function closeThread() { const q = { ...route.query }; delete q.thread; router.r
 async function loadNested() {
   if (!threadRoot.value || !channelRow.value) { threadMessages.value = []; return }
   try {
-    const data = await call('crm.api.talk.thread', { channel: id.value, root: threadRoot.value, limit: 200 })
+    const data = await call('crm.api.talk.thread', { channel: channelName.value, root: threadRoot.value, limit: 200 })
     threadMessages.value = data?.messages || []
   } catch { threadMessages.value = [] }
 }
@@ -228,7 +247,7 @@ async function sendThread() {
   if (!text || postingThread.value || !threadRoot.value) return
   postingThread.value = true
   try {
-    const m = await call('crm.api.talk.post', { channel: id.value, text, parent: threadRoot.value })
+    const m = await call('crm.api.talk.post', { channel: channelName.value, text, parent: threadRoot.value })
     if (m?.name) threadMessages.value.push(m)
     threadDraft.value = ''
   } finally { postingThread.value = false }
@@ -238,8 +257,8 @@ const mentionOptions = computed(() => {
   const q = mentionQuery(draft.value)
   return q === null ? [] : mentionCandidates((users.data?.crmUsers || []).filter((u) => u.name !== session.user), q)
 })
-watch(() => [id.value, kind.value], () => { draft.value = talk.drafts[id.value] || '' }, { immediate: true })
-watch(draft, (text) => { if (channelRow.value) talk.setDraft(id.value, text) })
+watch(() => [channelName.value, kind.value], () => { draft.value = talk.drafts[channelName.value] || '' }, { immediate: true })
+watch(draft, (text) => { if (channelRow.value) talk.setDraft(channelName.value, text) })
 watch(mentionOptions, () => (mentionIndex.value = 0))
 function pickMention(u) { draft.value = insertMention(draft.value, u) }
 function onComposerKey(e) {
@@ -255,10 +274,10 @@ async function send() {
   if (!text || posting.value || !channelRow.value) return
   posting.value = true
   try {
-    const m = await call('crm.api.talk.post', { channel: id.value, text })
+    const m = await call('crm.api.talk.post', { channel: channelName.value, text })
     if (m?.name && !messages.value.some((x) => x.name === m.name)) messages.value.push(m)
     draft.value = ''
-    talk.setDraft(id.value, '')
+    talk.setDraft(channelName.value, '')
   } finally { posting.value = false }
 }
 function escapeHtml(s) { return String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])) }
@@ -311,6 +330,7 @@ async function joinListening() {
 .talk-thread-pane { display: flex; flex-direction: column; width: min(380px, 42%); border-left: 1px solid var(--outline-gray-1, #eee); }
 .talk-thread-pane header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--outline-gray-1, #eee); font-size: 13px; }
 .reply-link { margin-top: 4px; font-size: 11px; font-weight: 600; color: #2d4f9e; }
+.from-comment { display: block; margin-top: 2px; font-size: 10px; color: var(--ink-gray-4, #999); }
 .talk-inbox { padding: 20px 24px; max-width: 640px; }
 .talk-inbox h1 { font-size: 20px; font-weight: 600; margin-bottom: 12px; }
 .inbox-row { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 10px 0; border-bottom: 1px solid var(--outline-gray-1, #eee); text-align: left; }

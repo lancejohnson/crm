@@ -17,6 +17,7 @@
         :actions="document.actions"
       />
       <AssignTo v-model="assignees.data" doctype="CRM Lead" :docname="leadId" />
+      <Button v-if="workspace.isNext" variant="subtle" iconLeft="message-square" :label="__('Team chat')" @click="openLeadChat" />
       <Dropdown
         v-if="doc && document.statuses"
         :options="statuses"
@@ -487,6 +488,7 @@ import { mapsUrl, zillowUrl } from '@/utils/propertyLinks'
 import { clickToCall } from '@/composables/clickToCall'
 import { getSettings } from '@/stores/settings'
 import { globalStore } from '@/stores/global'
+import { workspaceStore } from '@/stores/workspace'
 import { statusesStore } from '@/stores/statuses'
 import { getMeta } from '@/stores/meta'
 import { useDocument } from '@/data/document'
@@ -518,6 +520,10 @@ import { useActiveTabManager } from '@/composables/useActiveTabManager'
 
 const { brand } = getSettings()
 const { $dialog, $socket, makeCall } = globalStore()
+const workspace = workspaceStore()
+function openLeadChat() {
+  router.push({ name: 'Talk', params: { kind: 'lead', id: props.leadId } })
+}
 const { statusOptions, getLeadStatus } = statusesStore()
 const { doctypeMeta } = getMeta('CRM Lead')
 

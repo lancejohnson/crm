@@ -48,6 +48,11 @@
             <li v-if="!talk.channelRows.length && !talk.standup" class="item-empty">{{ talk.channels.loading ? __('Loading…') : __('No channels yet.') }}</li>
           </ul>
 
+          <ul v-else-if="group.id === 'leads'" class="item-list" :aria-label="__('Leads')">
+            <li v-if="!talk.leadRows.length" class="item-empty">{{ __('Open Team chat on a lead to start one.') }}</li>
+            <li v-for="c in talk.leadRows" :key="c.name"><button type="button" class="item" :class="{ selected: isSelected('lead', c.lead || c.name.replace(/^lead-/, '')), unread: c.unread }" @click="pick('lead', c.lead || c.name.replace(/^lead-/, ''))"><FeatherIcon name="home" class="size-3.5 item-icon lead" /><span class="item-text">{{ c.title || c.lead }}</span><span v-if="c.unread" class="group-badge">{{ c.unread }}</span></button></li>
+          </ul>
+
           <ul v-else class="item-list" :aria-label="__('Direct messages')">
             <li v-for="c in talk.dmRows" :key="c.name"><button type="button" class="item" :class="{ selected: isSelected('dm', c.name), unread: c.unread }" :aria-pressed="isSelected('dm', c.name)" @click="pick('dm', c.name)"><span class="presence" :class="talk.statusOf(c.dm_user)" aria-hidden="true" /><span class="item-text">{{ talk.displayName(c.dm_user) }}</span><span v-if="c.unread" class="group-badge">{{ c.unread }}</span><small v-else class="item-state">{{ stateLabel(talk.statusOf(c.dm_user)) }}</small></button></li>
             <li><button type="button" class="item new-dm" @click="newDm"><FeatherIcon name="plus" class="size-3.5 item-icon lead" /><span class="item-text">{{ __('New message') }}</span></button></li>
@@ -108,6 +113,7 @@ const groups = computed(() => [
   { id: 'crm', label: __('CRM'), icon: 'grid', unread: 0 },
   { id: 'live', label: __('Live'), icon: 'activity', unread: talk.liveOnes.length },
   { id: 'channels', label: __('Channels'), icon: 'hash', unread: talk.unreadOf('channels') },
+  { id: 'leads', label: __('Leads'), icon: 'home', unread: talk.unreadOf('leads') },
   { id: 'dms', label: __('Direct messages'), icon: 'message-square', unread: talk.unreadOf('dms') },
 ])
 const stateLabels = { on_call: __('On call'), away: __('Away'), offline: __('Offline'), online: '' }

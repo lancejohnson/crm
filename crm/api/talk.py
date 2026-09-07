@@ -41,16 +41,20 @@ from crm.api.reports import validate_access
 CHANNEL = "CRM Channel"
 MESSAGE = "CRM Message"
 READ = "CRM Channel Read"
-KINDS = ("channel", "dm", "bot")
+KINDS = ("channel", "dm", "bot", "lead")
 PAGE = 50
 MAX_TEXT = 16000
 
-#: Left-column order: bot feeds and channels first (standup pinned on top), DMs after.
-KIND_ORDER = {"bot": 0, "channel": 1, "dm": 2}
+#: Left-column order: bot feeds and channels first (standup pinned on top), lead chats, then DMs.
+KIND_ORDER = {"bot": 0, "channel": 1, "lead": 2, "dm": 3}
 PINNED = ("standup",)
 
 
 # ── pure helpers (unit-tested) ─────────────────────────────────────────────────
+
+
+def lead_channel_name(lead: str) -> str:
+	return f"lead-{lead}"
 
 
 def dm_slug(a: str, b: str) -> str:
@@ -155,10 +159,13 @@ def list_channels():
 	if not enabled():
 		return []
 	user = frappe.session.user
+	fields = ["name", "title", "kind", "last_message_at", "mm_channel_id"]
+	if frappe.db.has_column(CHANNEL, "lead"):
+		fields.append("lead")
 	channels = frappe.get_all(
 		CHANNEL,
 		filters={"archived": 0},
-		fields=["name", "title", "kind", "last_message_at", "mm_channel_id"],
+		fields=fields,
 		limit_page_length=500,
 	)
 	member_rows = frappe.get_all(
@@ -208,15 +215,21 @@ def list_channels():
 		if ch.kind == "dm":
 			others = [m for m in members.get(ch.name, []) if m != user]
 			dm_user = others[0] if others else None
+		kind = ch.kind
+		lead = ch.get("lead") if hasattr(ch, "get") else None
+		if kind == "lead" or lead or (ch.name or "").startswith("lead-"):
+			kind = "lead"
+			lead = lead or (ch.name[5:] if (ch.name or "").startswith("lead-") else None)
 		out.append(
 			{
 				"name": ch.name,
 				"title": _dm_title(dm_user) if ch.kind == "dm" and dm_user else ch.title,
-				"kind": ch.kind,
+				"kind": kind,
 				"unread": unread.get(ch.name, 0),
 				"last_at": ch.last_message_at,
 				"dm_user": dm_user,
 				"presence": status_map.get(dm_user) if dm_user else None,
+				"lead": lead,
 			}
 		)
 	return order_channels(out)
@@ -227,7 +240,7 @@ def _dm_title(user: str) -> str:
 
 
 def _message_fields() -> list[str]:
-	fields = ["name", "author", "author_label", "text", "posted_at", "origin", "edited_at", "mm_post_id", "mm_root_id"]
+	fields = ["name", "author", "author_label", "text", "posted_at", "origin", "edited_at", "mm_post_id", "mm_root_id", "props"]
 	if frappe.db.has_column(MESSAGE, "parent_message"):
 		fields.append("parent_message")
 	return fields
@@ -329,7 +342,14 @@ def _reply_counts(channel: str, roots: list) -> dict[str, int]:
 	return counts
 
 
-def shape_message(row, full_names: dict | None = None, reply_count: int = 0) -> dict:
+def _from_comment(row) -> str | None:
+	try:
+		return (json.loads(row.get("props") or "{}") or {}).get("from_comment")
+	except (TypeError, ValueError):
+		return None
+
+
+
 	full_names = full_names or {}
 	author = row.get("author")
 	return {
@@ -343,6 +363,7 @@ def shape_message(row, full_names: dict | None = None, reply_count: int = 0) -> 
 		"mm_post_id": row.get("mm_post_id"),
 		"parent": row.get("parent_message") or None,
 		"reply_count": reply_count,
+		"from_comment": _from_comment(row),
 	}
 
 
@@ -375,10 +396,44 @@ def post(channel: str, text: str, parent: str = None):
 		if frappe.db.has_column(MESSAGE, "parent_message"):
 			values["parent_message"] = parent
 		values["mm_root_id"] = head.mm_post_id or head.mm_root_id or None
+	if _channel_kind(channel) == "lead":
+		values["props"] = json.dumps({"mirror": False})
 	doc = frappe.get_doc(values).insert(ignore_permissions=True)
 	_stamp_read(channel, frappe.session.user, doc.posted_at)
 	_notify_talk_mentions(channel, doc)
+	_echo_lead_comment(channel, doc)
 	return shape_message(doc.as_dict())
+
+
+def _channel_kind(channel: str) -> str:
+	return frappe.db.get_value(CHANNEL, channel, "kind") or "channel"
+
+
+def _echo_lead_comment(channel: str, doc):
+	if getattr(doc.flags, "skip_lead_comment", False):
+		return
+	lead = None
+	if frappe.db.has_column(CHANNEL, "lead"):
+		lead = frappe.db.get_value(CHANNEL, channel, "lead")
+	if not lead and channel.startswith("lead-"):
+		lead = channel[5:]
+	if not lead or not frappe.db.exists("CRM Lead", lead):
+		return
+	html = frappe.utils.escape_html(doc.text or "").replace("\n", "<br>")
+	comment = frappe.get_doc(
+		{
+			"doctype": "Comment",
+			"comment_type": "Comment",
+			"reference_doctype": "CRM Lead",
+			"reference_name": lead,
+			"content": html,
+			"comment_email": frappe.session.user,
+			"comment_by": frappe.utils.get_fullname(frappe.session.user),
+		}
+	)
+	comment.flags.skip_talk_mirror = True
+	comment.insert(ignore_permissions=True)
+
 
 
 def _notify_talk_mentions(channel: str, doc):
@@ -463,6 +518,98 @@ def ensure_dm(user: str):
 			}
 		).insert(ignore_permissions=True)
 	return {"name": name}
+
+
+@frappe.whitelist()
+def ensure_lead_channel(lead: str):
+	"""The team chat for a lead. Created on first open; comments are copied in."""
+	validate_access()
+	if not enabled():
+		frappe.throw(_("Talk is not set up on this site yet."))
+	if not lead or not frappe.db.exists("CRM Lead", lead):
+		frappe.throw(_("That lead does not exist."))
+	name = lead_channel_name(lead)
+	title = frappe.db.get_value("CRM Lead", lead, "lead_name") or lead
+	if not frappe.db.exists(CHANNEL, name):
+		values = {"doctype": CHANNEL, "name": name, "title": title, "kind": "lead"}
+		if frappe.db.has_column(CHANNEL, "lead"):
+			values["lead"] = lead
+		try:
+			frappe.get_doc(values).insert(ignore_permissions=True)
+		except Exception:
+			# kind=lead may not be on the Select yet; fall back to a titled channel.
+			values["kind"] = "channel"
+			if not frappe.db.exists(CHANNEL, name):
+				frappe.get_doc(values).insert(ignore_permissions=True)
+	elif title:
+		frappe.db.set_value(CHANNEL, name, "title", title, update_modified=False)
+	_backfill_lead_comments(name, lead)
+	return {"name": name, "lead": lead, "title": title}
+
+
+def _plain_text(html: str) -> str:
+	try:
+		from bs4 import BeautifulSoup
+
+		return BeautifulSoup(html or "", "html.parser").get_text("\n").strip()
+	except Exception:
+		return (html or "").strip()
+
+
+def _backfill_lead_comments(channel: str, lead: str):
+	existing = set()
+	for row in frappe.get_all(MESSAGE, filters={"channel": channel}, fields=["props"], limit_page_length=2000):
+		try:
+			existing.add((json.loads(row.props or "{}") or {}).get("from_comment"))
+		except ValueError:
+			pass
+	existing.discard(None)
+	for c in frappe.get_all(
+		"Comment",
+		filters={"reference_doctype": "CRM Lead", "reference_name": lead, "comment_type": "Comment"},
+		fields=["name", "content", "owner", "creation"],
+		order_by="creation asc",
+		limit_page_length=500,
+	):
+		if c.name in existing:
+			continue
+		text = _plain_text(c.content)
+		if not text:
+			continue
+		_insert_comment_message(channel, c.name, c.owner, text, c.creation)
+
+
+def ingest_comment(doc):
+	"""A new lead Comment, if that lead already has a Talk channel."""
+	if not enabled() or getattr(doc.flags, "skip_talk_mirror", False):
+		return
+	if (doc.reference_doctype or "") != "CRM Lead" or (doc.comment_type or "Comment") != "Comment":
+		return
+	channel = lead_channel_name(doc.reference_name)
+	if not frappe.db.exists(CHANNEL, channel):
+		return
+	text = _plain_text(doc.content)
+	if not text:
+		return
+	_insert_comment_message(channel, doc.name, doc.owner or frappe.session.user, text, doc.creation)
+
+
+def _insert_comment_message(channel, comment_name, author, text, posted_at):
+	if not frappe.db.exists("User", author):
+		author = bot_user()
+	doc = frappe.get_doc(
+		{
+			"doctype": MESSAGE,
+			"channel": channel,
+			"author": author,
+			"text": text[:MAX_TEXT],
+			"posted_at": posted_at or frappe.utils.now(),
+			"origin": "crm",
+			"props": json.dumps({"from_comment": comment_name, "mirror": False}),
+		}
+	)
+	doc.flags.skip_lead_comment = True
+	doc.insert(ignore_permissions=True)
 
 
 @frappe.whitelist()
@@ -596,6 +743,8 @@ def _mirror(doc, action: str):
 	except ValueError:
 		props = {}
 	if props.get("mirror") is False:
+		return
+	if _channel_kind(doc.channel) == "lead":
 		return
 	try:
 		from crm.integrations.mattermost import sync
