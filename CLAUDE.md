@@ -3550,6 +3550,21 @@ duplicating. Work substantial features in a worktree of your own.
     opposite of the tax-pull/first-call pattern. The Version row is the point:
     it renders as "changed Acq Price from … to …" on the activity timeline,
     which is the entire audit trail here.
+  - **GOTCHA — `property_address` is only written when the house number or
+    street NAME differs** (`_address_really_differs`). The model returns
+    street-only while the CRM holds the full string, and on the Aug-31
+    backfill it overwrote "16 S 5th St W, Aurora, MN 55705" with "16 S 5th
+    St" — a dry run minutes earlier had NOT returned the address (the model
+    is not deterministic across runs, so a dry run is a preview, not a proof).
+  - **Backfill 2026-09-07 of the 9 older unparsed envelopes**: 00070 closing
+    08-15→09-30 (amendment), 00034 Aurora closing 08-21→08-31; three
+    terminations + two hand-built amendments wrote nothing and were stamped.
+    Two prices were HELD: the "8-31 Amendment" read **135,000** off the
+    settlement statement — that is the novation SALE price (`dispo_price`),
+    not acq — and the "Aurora Addendum and New Novation Agreement" read
+    **101,000** (unstamped, awaiting Lance). The assignment/novation trap
+    is alive and well; a settlement statement inside an envelope is the new
+    shape of it.
   - **GOTCHA — the catch-up sweep is an outage bridge, NOT an importer.** It
     first shipped at 30 days keyed on `creation`; on install that swept every
     signed contract in history and began rewriting live leads (14 queued before

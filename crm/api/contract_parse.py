@@ -547,6 +547,36 @@ def _coerce(fieldname, raw):
 	return str(raw).strip()[:140]
 
 
+def _address_really_differs(before, after) -> bool:
+	"""True only when the house number or the street NAME changes.
+
+	A dropped directional ("W"), an abbreviation ("S"/"South"), a missing
+	unit or the city tail is the same street said differently, not a
+	correction. Street-name tokens are alphabetic, 3+ chars, minus the common
+	suffixes; two non-empty disjoint sets mean a different street.
+	"""
+	import re
+
+	suffixes = {"street", "ave", "avenue", "road", "drive", "lane", "court", "blvd", "boulevard",
+	            "way", "place", "circle", "trail", "loop", "north", "south", "east", "west",
+	            "unit", "apt", "suite"}
+
+	def toks(s):
+		s = (s or "").split(",")[0].lower()
+		return [t for t in re.split(r"[^a-z0-9]+", s) if t]
+
+	a, b = toks(before), toks(after)
+	if not a or not b:
+		return bool(a) != bool(b)
+	if a[0].isdigit() and b[0].isdigit() and a[0] != b[0]:
+		return True
+	na = {t for t in a if t.isalpha() and len(t) >= 3 and t not in suffixes}
+	nb = {t for t in b if t.isalpha() and len(t) >= 3 and t not in suffixes}
+	if na and nb and na.isdisjoint(nb):
+		return True
+	return False
+
+
 @frappe.whitelist()
 def write_agreement_fields(agreement: str, values, note: str = None):
 	"""Write extracted values onto the lead + stamp the agreement as parsed.
@@ -589,6 +619,12 @@ def write_agreement_fields(agreement: str, values, note: str = None):
 			before = lead.get(k)
 			# Compare as strings: Currency comes back as Decimal, Date as date.
 			if str(before or "") == str(v or ""):
+				continue
+			if k == "property_address" and not _address_really_differs(before, v):
+				# The model returns street-only; the CRM often holds the full
+				# string. "16 S 5th St" is not a correction of "16 S 5th St W,
+				# Aurora, MN 55705" — it is a lossier spelling of it, and it
+				# overwrote a real address once (2026-09-07).
 				continue
 			lead.set(k, v)
 			written[k] = {"from": str(before or ""), "to": str(v)}
