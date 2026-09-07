@@ -789,7 +789,7 @@ function deleteDeal() {
 const activities = ref(null)
 
 function dialNumber(number) {
-  clickToCall(number, { name: doc.organization || doc.name })
+  clickToCall(number, { name: doc.value.organization || doc.value.name })
 }
 
 function dialPrimaryContact() {

@@ -1076,7 +1076,7 @@ function onPhonesSaved() {
 }
 
 function dialNumber(number) {
-  clickToCall(number, { lead: leadId, name: doc.lead_name || doc.first_name })
+  clickToCall(number, { lead: props.leadId, name: doc.value.lead_name || doc.value.first_name })
 }
 
 function openEmailBox() {

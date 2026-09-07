@@ -35,8 +35,9 @@
             />
             <a
               v-if="item?.mobile_no"
-              :href="callHref(item.mobile_no)"
+              href="#"
               class="whitespace-nowrap text-sm text-ink-blue-3 hover:underline"
+              @click.prevent="clickToCall(item.mobile_no, { lead: item.lead, name: item.lead_name })"
             >
               {{ formatPhone(item.mobile_no) }}
             </a>
@@ -245,7 +246,8 @@ import CompsView from '@/components/CompsView.vue'
 import FirstCallReadCard from '@/components/FirstCallReadCard.vue'
 import ZillowAddressMatch from '@/components/ZillowAddressMatch.vue'
 import DispoBuyerBadges from '@/components/DispoBuyerBadges.vue'
-import { callHref, formatPhone } from '@/utils/phoneFormat'
+import { formatPhone } from '@/utils/phoneFormat'
+import { clickToCall } from '@/composables/clickToCall'
 import { Badge, Button, Dialog, FeatherIcon, call } from 'frappe-ui'
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'

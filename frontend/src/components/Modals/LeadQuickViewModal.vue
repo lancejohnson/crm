@@ -70,8 +70,9 @@
             <div class="flex flex-col gap-2 text-sm text-ink-gray-6">
               <a
                 v-if="leadDoc?.mobile_no"
-                :href="callHref(leadDoc.mobile_no)"
+                href="#"
                 class="w-fit text-ink-blue-3 hover:underline"
+                @click.prevent="clickToCall(leadDoc.mobile_no, { lead: leadDoc.name, name: leadDoc.lead_name })"
               >
                 {{ formatPhone(leadDoc.mobile_no) }}
               </a>
@@ -135,7 +136,8 @@
 <script setup>
 import Activities from '@/components/Activities/Activities.vue'
 import FirstCallReadCard from '@/components/FirstCallReadCard.vue'
-import { callHref, formatPhone } from '@/utils/phoneFormat'
+import { formatPhone } from '@/utils/phoneFormat'
+import { clickToCall } from '@/composables/clickToCall'
 import { mapsUrl } from '@/utils/propertyLinks'
 import IndicatorIcon from '@/components/Icons/IndicatorIcon.vue'
 import { usersStore } from '@/stores/users'

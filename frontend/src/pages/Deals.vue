@@ -196,9 +196,9 @@
         </div>
         <a
           v-else-if="['mobile_no', 'phone'].includes(fieldName)"
-          :href="callHref(getRow(itemName, fieldName).label, myNumber)"
+          href="#"
           class="truncate text-base text-ink-gray-9 hover:text-ink-blue-link hover:underline"
-          @click.stop
+          @click.prevent.stop="clickToCall(getRow(itemName, fieldName).label, { name: itemName })"
         >
           {{ getRow(itemName, fieldName).label }}
         </a>
@@ -317,8 +317,8 @@ import { organizationsStore } from '@/stores/organizations'
 import { statusesStore } from '@/stores/statuses'
 import { callEnabled } from '@/composables/settings'
 import { formatDate, timeAgo, website, formatTime, dueColor, parseColor } from '@/utils'
-import { formatPhone, callHref } from '@/utils/phoneFormat'
-import { myQuoNumber } from '@/composables/quoSender'
+import { formatPhone } from '@/utils/phoneFormat'
+import { clickToCall } from '@/composables/clickToCall'
 import { Tooltip, Avatar, Dropdown, call } from 'frappe-ui'
 import { useRoute } from 'vue-router'
 import { ref, reactive, computed, h, onMounted, onBeforeUnmount } from 'vue'
@@ -329,9 +329,6 @@ const { makeCall, $socket } = globalStore()
 const { getUser } = usersStore()
 const { getOrganization } = organizationsStore()
 const { getDealStatus } = statusesStore()
-
-// Current user's Quo number — caller ID for the mobile click-to-call deep link.
-const myNumber = computed(() => myQuoNumber())
 
 const route = useRoute()
 

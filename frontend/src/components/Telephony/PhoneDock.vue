@@ -5,7 +5,7 @@
       <Button icon="minus" variant="ghost" :aria-label="__('Minimize phone')" @click="minimized = true" />
       <span class="phone-title">{{ __('Phone') }}</span>
       <span class="quiet-dot" :class="{ off: !ready }" :title="ready ? __('Phone ready') : __('Phone not connected')" />
-      <Button v-if="isManager()" icon="settings" variant="ghost" :aria-label="__('Phone settings')" @click="router.push({ name: 'Phone Settings' })" />
+      <Button icon="settings" variant="ghost" :aria-label="__('Phone settings')" @click="router.push({ name: 'Phone Settings' })" />
     </header>
 
     <section v-if="phone.incoming" class="incoming-call" :aria-label="__('Incoming call')">

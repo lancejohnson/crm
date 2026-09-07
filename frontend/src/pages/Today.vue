@@ -244,9 +244,9 @@
               </div>
               <div v-if="item.mobile_no" class="mt-0.5 flex items-center gap-1.5">
                 <a
-                  :href="callHref(item.mobile_no)"
+                  href="#"
                   class="w-fit text-xs text-ink-blue-3 hover:underline"
-                  @click.stop
+                  @click.prevent.stop="clickToCall(item.mobile_no, { lead: item.lead, name: item.lead_name })"
                 >
                   {{ formatPhone(item.mobile_no) }}
                 </a>
@@ -585,7 +585,8 @@ import { globalStore } from '@/stores/global'
 import { sessionStore } from '@/stores/session'
 import { statusesStore } from '@/stores/statuses'
 import { formatDate, getFormat, timeAgo } from '@/utils'
-import { callHref, formatPhone } from '@/utils/phoneFormat'
+import { formatPhone } from '@/utils/phoneFormat'
+import { clickToCall } from '@/composables/clickToCall'
 import { dueFromPreset, formatDueStamp, snapMidnightToMorning } from '@/utils/taskDue'
 import { useTaskDuePresets } from '@/composables/taskDuePresets'
 import {
