@@ -51,7 +51,7 @@
  */
 import LayoutHeader from '@/components/LayoutHeader.vue'
 import { Breadcrumbs, Button, FormControl, Switch, call, createListResource, createDocumentResource, toast } from 'frappe-ui'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { usersStore } from '@/stores/users'
 import { formatPhone } from '@/utils/phoneFormat'
 
@@ -59,15 +59,14 @@ const { users, getUser, isManager } = usersStore()
 const section = ref('numbers')
 const selected = ref(null)
 const lines = createListResource({
-  doctype: 'CRM Phone Line', fields: ['name', 'number', 'label', 'owner', 'recording', 'members.user as member_user'], pageLength: 100, auto: true,
-  transform: (rows) => rows, onError: () => {},
+  doctype: 'CRM Phone Line', fields: ['name', 'number', 'label', 'owner', 'recording'], pageLength: 100, auto: true,
+  onError: () => {},
 })
 const detail = createDocumentResource({ doctype: 'CRM Phone Line', name: computed(() => selected.value), auto: false })
 const settingsDoc = createDocumentResource({ doctype: 'CRM Telephony Settings', name: 'CRM Telephony Settings', auto: true, onError: () => {} })
 const crmUsers = computed(() => users.data?.crmUsers || [])
 const userOptions = computed(() => crmUsers.value.map((u) => ({ label: u.full_name, value: u.name })))
 const current = computed(() => (selected.value && detail.doc?.name === selected.value) ? detail.doc : null)
-import { watch } from 'vue'
 watch(selected, (name) => { if (name) { detail.name = name; detail.reload() } })
 watch(() => lines.data, (rows) => { if (!selected.value && rows?.length) selected.value = rows[0].name })
 function displayName(user) { return getUser(user)?.full_name || user || '—' }

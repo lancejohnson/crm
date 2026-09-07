@@ -98,7 +98,7 @@
  * talk.presence + telephony.active_calls. Only the bar reserves height;
  * the panel floats.
  */
-import { Button, FeatherIcon, FormControl, createResource } from 'frappe-ui'
+import { Button, FeatherIcon, FormControl, call, createResource } from 'frappe-ui'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usersStore } from '@/stores/users'
@@ -146,7 +146,6 @@ function contextOf(user) {
 async function chatWith(u) {
   const dm = talk.dmRows.find((c) => c.dm_user === u.name)
   if (dm) return router.push({ name: 'Talk', params: { kind: 'dm', id: dm.name } })
-  const { call } = await import('frappe-ui')
   const created = await call('crm.api.talk.ensure_dm', { user: u.name })
   await talk.channels.reload()
   if (created?.name) router.push({ name: 'Talk', params: { kind: 'dm', id: created.name } })

@@ -20,6 +20,7 @@ import { sessionStore } from '@/stores/session'
 import { FrappeUIProvider, setConfig, useTheme } from 'frappe-ui'
 import { computed, defineAsyncComponent, provide, ref } from 'vue'
 import { workspaceStore } from '@/stores/workspace'
+import { sidebarCollapsed } from '@/composables/settings'
 
 // The next workspace (Telnyx phone dock + Talk left nav) mounts from ONE
 // dynamically imported shell, only when the server says this user is on
@@ -83,7 +84,6 @@ const Layout = computed(() => (isMobile ? MobileLayout : DesktopLayout))
 // The real sidebar under the Talk column: classic collapses to 48px via the
 // stored preference (composables/settings sidebarCollapsed); read it so the
 // shift is exact either way. Mobile has no fixed sidebar.
-import { sidebarCollapsed } from '@/composables/settings'
 function isSidebarCollapsedNow() { return isMobile ? true : !!sidebarCollapsed.value }
 
 setConfig('systemTimezone', window.timezone?.system || null)

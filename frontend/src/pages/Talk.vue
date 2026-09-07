@@ -84,7 +84,7 @@ import { talkStore } from '@/stores/talk'
 import { formatPhone } from '@/utils/phoneFormat'
 import { prettyDate, timeAgo } from '@/utils'
 import { mentionQuery, mentionCandidates, insertMention } from '@/utils/talkMentions'
-import { phone, onCall, join } from '@/composables/phone'
+import { onCall, join } from '@/composables/phone'
 
 const route = useRoute()
 const router = useRouter()
@@ -207,7 +207,6 @@ async function joinListening() {
   const ok = await join(c.call_log, 'monitor', { name: c.lead_name || formatPhone(c.number), lead: c.lead || null })
   if (ok && compsPath.value) { talk.dismissLiveOne(c.call_log); router.push(compsPath.value) }
 }
-void phone
 </script>
 <style scoped>
 .talk-page { display: flex; flex-direction: column; height: 100%; min-height: 0; color: var(--ink-gray-9, #222); }
