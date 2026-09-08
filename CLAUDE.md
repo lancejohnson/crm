@@ -108,6 +108,35 @@ duplicating. Work substantial features in a worktree of your own.
   composer, Esc read+blur, ⌘/ help sheet.
   See `docs/phone-preview.md`; this is a design mockup, not enabled calling.
 
+- **Properties (comps + calcs without a lead)** — sidebar **Properties**
+  (`/properties`): type an address → `/properties/PROP-…` is the REAL comps
+  page (`CompsView` page mode) for a house that is not a lead. Fills the gap
+  where the only way to comp a drive-by / a buyer's ask / a neighbour was to
+  create a fake lead that then sat on the Kanban, the Today board, the round
+  robin tally and the dashboard cohort. `CRM Property` (ops
+  `setup_properties.py`, autoname `PROP-.#####`) carries the SAME column
+  names a CRM Lead uses for property / geocode / Zillow / BatchData caches
+  and `comps_hidden`/`comps_selected`/`comps_types`/`sqft_override`, and
+  `crm.api.comps.subject_doctype(name)` dispatches on the `PROP-` prefix —
+  so `get_lead_comps`, picks/hides/types, the sqft override, Zillow/Redfin/
+  Realtor facts, the BatchData fallback and the offer calculator run
+  unchanged (writers use `doc.doctype`, loaders `_load_subject`; the
+  `_*_supported()` gates take the subject doctype). **Adding a comps column
+  to CRM Lead means adding it to `setup_properties.py` too.** Saved calcs
+  live on the property (`offer_calcs` JSON, newest first, cap 25) since
+  there is no timeline; `save_cash_offer` branches there and
+  `get_lead_comps` returns the latest as `offer` — the same seed contract
+  practice uses — so a reopen lands on the saved numbers. Header: **Saved
+  calcs (N)** (history dialog of `CashOfferComment` cards, Tweak works),
+  **Edit** (an address change clears every location cache; picks/calcs
+  stay), delete. Underwrite and Live one are hidden (`isScratch`). Team-
+  visible like practice sets; `list_properties(q, mine)`. Guarded on the
+  doctype existing. `crm/api/properties.py` + `pages/Properties.vue` /
+  `Property.vue`; `utils/comps.js` `isScratchSubject`/`compsPagePath`.
+  Verified end-to-end on **staging** (stg21) — geocode, 55 comps, pick +
+  Full Gut tag, save calc, reload seeds, note edit keeps geocode; lead
+  comps unaffected.
+
 - **Practice comps** — sidebar **Practice** (`/practice`). Any sales user can
   build a set of properties (picked from real leads) with an optional time
   limit — **per listing by default** (e.g. 3 min each), or whole-set (10 houses
