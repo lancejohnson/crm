@@ -5,6 +5,19 @@
     </template>
     <template #right-header>
       <div class="flex items-center gap-2">
+        <!-- Board stage, changeable here so pricing a house and moving it to
+             "Offer Sent" does not need a trip back to the board. -->
+        <Dropdown v-if="stages.length" :options="stageOptions" placement="bottom-end">
+          <Button variant="subtle" :title="__('Change stage')">
+            <template #prefix>
+              <span class="size-2 rounded-full" :class="stageDot(stage)" />
+            </template>
+            {{ __(stage) }}
+            <template #suffix>
+              <FeatherIcon name="chevron-down" class="size-3.5" />
+            </template>
+          </Button>
+        </Dropdown>
         <Button
           :label="offerCount ? __('Saved calcs ({0})', [offerCount]) : __('Saved calcs')"
           variant="subtle"
@@ -123,10 +136,13 @@ import CompsView from '@/components/CompsView.vue'
 import CashOfferComment from '@/components/Activities/CashOfferComment.vue'
 import { sidebarCollapsedOverride } from '@/composables/settings'
 import { formatDate } from '@/utils'
+import { stageDot } from '@/utils/propertyStages'
 import {
   Breadcrumbs,
   Button,
   Dialog,
+  Dropdown,
+  FeatherIcon,
   FormControl,
   call,
   createResource,
@@ -172,6 +188,24 @@ const breadcrumbs = computed(() => [
 const showOffers = ref(false)
 function onCalcSaved() {
   prop.reload()
+}
+
+// --- stage ------------------------------------------------------------------
+const stages = computed(() => prop.data?.stages || [])
+const stage = computed(() => prop.data?.status || stages.value[0] || '')
+const stageOptions = computed(() =>
+  stages.value.map((s) => ({ label: __(s), onClick: () => setStage(s) })),
+)
+async function setStage(s) {
+  if (!prop.data || s === prop.data.status) return
+  const before = prop.data.status
+  prop.data.status = s
+  try {
+    await call('crm.api.properties.set_property_status', { name: props.propertyId, status: s })
+  } catch (e) {
+    prop.data.status = before
+    toast.error(e.messages?.[0] || __('Could not change the stage.'))
+  }
 }
 
 // --- edit -------------------------------------------------------------------

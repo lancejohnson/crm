@@ -30,6 +30,12 @@ from frappe.utils import now
 
 from crm.api.comps import SCRATCH_DOCTYPE, SCRATCH_PREFIX, _guard
 
+#: The board columns, in order. Stored as free text on `status` (not a Select)
+#: so renaming a stage is a one-line edit here with no schema change; anything
+#: not in this list renders in the first column and is rewritten on next move.
+STAGES = ("New", "Comped", "Offer Sent", "Follow Up", "Dead")
+DEFAULT_STAGE = STAGES[0]
+
 #: How many saved calcs a property keeps. Each is a few KB; nobody re-prices a
 #: house twenty-five times, and if they do the early ones are noise.
 MAX_OFFERS = 25
@@ -89,6 +95,15 @@ def record_offer(name: str, payload: dict, html: str) -> None:
 	)
 
 
+def _status_supported() -> bool:
+	return frappe.db.has_column(SCRATCH_DOCTYPE, "status")
+
+
+def _stage(doc) -> str:
+	val = (doc.get("status") or "").strip()
+	return val if val in STAGES else DEFAULT_STAGE
+
+
 def _user_label(user: str) -> str:
 	return frappe.db.get_value("User", user, "full_name") or user or ""
 
@@ -120,6 +135,7 @@ def _shape(doc, *, with_offers: bool = False) -> dict:
 		"property_state": doc.get("property_state") or "",
 		"property_zip": doc.get("property_zip") or "",
 		"notes": doc.get("notes") or "",
+		"status": _stage(doc),
 		"owner": doc.owner,
 		"owner_name": _user_label(doc.owner),
 		"creation": str(doc.creation),
@@ -131,6 +147,7 @@ def _shape(doc, *, with_offers: bool = False) -> dict:
 		"latest_offer_by": _user_label(latest.get("by")) if latest else None,
 	}
 	if with_offers:
+		out["stages"] = list(STAGES)
 		out["offers"] = [
 			{
 				"at": o.get("at"),
@@ -180,6 +197,8 @@ def list_properties(q: str = "", mine: int = 0) -> dict:
 	)
 	return {
 		"available": True,
+		"stages": list(STAGES),
+		"status_supported": _status_supported(),
 		"properties": [_shape(frappe.get_doc(SCRATCH_DOCTYPE, n)) for n in names],
 	}
 
@@ -214,6 +233,8 @@ def create_property(
 			"notes": (notes or "").strip(),
 		}
 	)
+	if _status_supported():
+		doc.status = DEFAULT_STAGE
 	doc.insert()
 	return _shape(doc)
 
@@ -263,6 +284,22 @@ def update_property(
 		doc.batchdata_comps_fetched_at = None
 	doc.save()
 	return _shape(doc, with_offers=True)
+
+
+@frappe.whitelist()
+def set_property_status(name: str, status: str) -> dict:
+	"""Move a property between board columns. `db.set_value` so a drag is not an
+	edit of the address (`modified` keeps meaning a person changed the record)."""
+	_guard()
+	_need()
+	status = (status or "").strip()
+	if status not in STAGES:
+		frappe.throw(_("Unknown stage {0}").format(status))
+	if not _status_supported():
+		frappe.throw(_("The status column is missing — run setup_properties.py."))
+	doc = _get(name)
+	frappe.db.set_value(SCRATCH_DOCTYPE, doc.name, "status", status, update_modified=False)
+	return {"ok": True, "name": doc.name, "status": status}
 
 
 @frappe.whitelist()
