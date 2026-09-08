@@ -1,4 +1,7 @@
 import './index.css'
+// Must stay the first JS import: sets frappe-ui's resourceFetcher before any
+// module-level `auto: true` resource can fire (see frappeConfig.js).
+import './frappeConfig'
 
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
@@ -19,7 +22,6 @@ import {
   Dialog,
   Alert,
   Badge,
-  setConfig,
   frappeRequest,
   FeatherIcon,
 } from 'frappe-ui'
@@ -43,7 +45,6 @@ let pinia = createPinia()
 
 let app = createApp(App)
 
-setConfig('resourceFetcher', frappeRequest)
 // socketio:false because main.js creates the app's own socket below and
 // overwrites $socket with it -- frappe-ui's instance was left connected but
 // unreferenced (its socketio.js registers no listeners), i.e. a duplicate
