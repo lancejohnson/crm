@@ -1,8 +1,8 @@
 import { call } from 'frappe-ui'
 
 /**
- * Comp map palette — Zillow's grammar: for sale RED, sold/off-market YELLOW,
- * the subject BLUE.
+ * Comp map palette: for sale RED, confirmed sold YELLOW, off-market SLATE,
+ * the subject BLUE. A removed listing is not evidence of a sale.
  *
  * Defined ONCE here because three surfaces have to agree and none of them can
  * read the others' styles: the Leaflet pills are hand-built HTML strings, the
@@ -24,6 +24,7 @@ import { call } from 'frappe-ui'
 export const COMP_COLORS = {
   active: { bg: '#d92d20', ink: '#ffffff', border: '#9f1d14', onLight: '#b42318' },
   sold: { bg: '#f5c518', ink: '#3a2f00', border: '#c99a06', onLight: '#8a6a00' },
+  off_market: { bg: '#cbd5e1', ink: '#0f172a', border: '#64748b', onLight: '#475569' },
   subject: { bg: '#2563c9', ink: '#ffffff', border: '#1c4ea1', onLight: '#2563c9' },
   // Pending / under contract. Violet because that is the convention on MLS maps,
   // and because it is far from both the red and the yellow in hue.
@@ -107,7 +108,8 @@ export function compColor(statusOrComp) {
   if (state === 'pending') return COMP_COLORS.pending
   if (state === 'for_rent') return COMP_COLORS.rent
   if (state === 'auction') return COMP_COLORS.auction
-  return state === 'for_sale' ? COMP_COLORS.active : COMP_COLORS.sold
+  if (state === 'for_sale') return COMP_COLORS.active
+  return state === 'sold' ? COMP_COLORS.sold : COMP_COLORS.off_market
 }
 
 /**

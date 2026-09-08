@@ -941,8 +941,10 @@ duplicating. Work substantial features in a worktree of your own.
     **401 at rest → 10262 hovered → 5262 after**, against a subject at 1273. The
     bands are far apart because the pixel-y term can reach ~1,000. `placePin`
     restyles through `restZ`, or a use/discard/filter change would undo it.
-  - **Pins use Zillow's grammar** — for sale RED (`#d92d20`), sold/off-market
-    YELLOW (`#f5c518`), subject BLUE (unchanged). One palette in `utils/comps.js`
+  - **Pins distinguish sales from removals** — for sale RED (`#d92d20`), confirmed
+    sold YELLOW (`#f5c518`), listing removed/off-market SLATE (`#cbd5e1`, dark ink),
+    subject BLUE (unchanged). Separate legend entries; removal is not a confirmed
+    transaction. One palette in `utils/comps.js`
     (`COMP_COLORS`) feeds the pills, the tray chips and the legend, because those
     three surfaces cannot read each other's styles. Yellow pills print **near-black
     text**, not white — white on `#f5c518` is unreadable. The popup headline uses

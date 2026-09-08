@@ -562,7 +562,14 @@
               class="size-2.5 rounded-full ring-1 ring-inset"
               :style="{ background: OFF_MARKET, '--tw-ring-color': COMP_COLORS.sold.border }"
             />
-            {{ __('Sold / off-market') }}
+            {{ __('Sold') }}
+          </span>
+          <span class="flex items-center gap-1.5">
+            <span
+              class="size-2.5 rounded-full ring-1 ring-inset"
+              :style="{ background: COMP_COLORS.off_market.bg, '--tw-ring-color': COMP_COLORS.off_market.border }"
+            />
+            {{ __('Listing removed / off-market') }}
           </span>
           <span class="flex items-center gap-1.5">
             <span class="size-2.5 rounded-full" :style="{ background: ACTIVE }" />
@@ -578,7 +585,7 @@
             <span class="size-2.5 rounded-full" :style="{ background: COMP_COLORS.auction.bg }" />
             {{ __('Auction ({0})', [auctionCount]) }}
           </span>
-          <span class="text-ink-gray-5">{{ __('Fainter = older sale') }}</span>
+          <span class="text-ink-gray-5">{{ __('Fainter = older sale / removal') }}</span>
           </template>
           <span
             v-if="hasFlipOnBoard"
@@ -1074,11 +1081,11 @@ function toggleHood(force) {
 }
 
 // Canvas/marker colours live in JS because Leaflet can't read Tailwind tokens.
-// Zillow's grammar: for sale RED, sold/off-market YELLOW, subject BLUE. The
+// For sale RED, sold YELLOW, off-market SLATE, subject BLUE. The
 // palette lives in utils/comps.js because the pills (hand-built HTML), the tray
 // cards (Tailwind) and the legend all have to agree.
 const ACTIVE = COMP_COLORS.active.bg // still listed = an ASK, not a sale
-const OFF_MARKET = COMP_COLORS.sold.bg // off-market = an actual transaction
+const OFF_MARKET = COMP_COLORS.sold.bg // example sold fill for flip/selection legend
 const SUBJECT = COMP_COLORS.subject.bg
 const PENDING = COMP_COLORS.pending.bg // spoken for = an AGREED price, still live
 
