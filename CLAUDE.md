@@ -126,8 +126,14 @@ duplicating. Work substantial features in a worktree of your own.
   live on the property (`offer_calcs` JSON, newest first, cap 25) since
   there is no timeline; `save_cash_offer` branches there and
   `get_lead_comps` returns the latest as `offer` — the same seed contract
-  practice uses — so a reopen lands on the saved numbers. Header: **Saved
-  calcs (N)** (history dialog of `CashOfferComment` cards, Tweak works),
+  practice uses — so a reopen lands on the saved numbers. **`/properties`
+  is a Board (drag between columns, Refunds-board shape) or a List**
+  (`localStorage['propertiesView']`); columns = `crm.api.properties.STAGES`
+  (New / Comped / Offer Sent / Follow Up / Dead), stored as free-text
+  `status` so a rename is a one-line edit, unknown values render in the
+  first column. `set_property_status` (`db.set_value`), also from the list
+  row's stage dropdown and a stage pill on the property header. Colours in
+  `utils/propertyStages.js`. Header: **Saved calcs (N)** (history dialog of `CashOfferComment` cards, Tweak works),
   **Edit** (an address change clears every location cache; picks/calcs
   stay), delete. Underwrite and Live one are hidden (`isScratch`). Team-
   visible like practice sets; `list_properties(q, mine)`. Guarded on the
