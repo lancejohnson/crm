@@ -9,6 +9,7 @@ install()
 from crm.api.zillow_comps import (  # noqa: E402
 	_apply_listing,
 	_is_auction,
+	_migrate_pin_v4,
 	_shape_search,
 	_state_from_facts,
 	listing_state,
@@ -80,6 +81,17 @@ class ListingStateTests(unittest.TestCase):
 	def test_facts_for_sale_not_inferred(self):
 		self.assertEqual(_state_from_facts({"home_status": "FOR_SALE"}), "for_sale")
 		self.assertIsNone(_state_from_facts({"home_status": "RECENTLY_SOLD"}))
+
+	def test_pin_v4_refetches_live_listing_missing_auction_flag(self):
+		self.assertIsNone(_migrate_pin_v4({"home_status": "FOR_SALE", "zpid": 1}))
+
+	def test_pin_v4_keeps_sold_without_refetch(self):
+		out = _migrate_pin_v4({"home_status": "RECENTLY_SOLD", "zpid": 1})
+		self.assertEqual(out["is_for_auction"], False)
+
+	def test_pin_v4_keeps_blob_that_already_has_the_flag(self):
+		blob = {"home_status": "FOR_SALE", "is_for_auction": True}
+		self.assertIs(blob, _migrate_pin_v4(blob))
 
 	def test_apply_listing_auction_does_not_keep_sale_price(self):
 		row = {"price": 190400, "status": "Inactive", "listing_state": "sold", "removed_date": "2026-06-03"}

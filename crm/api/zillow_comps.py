@@ -77,7 +77,7 @@ MAX_SEARCH_CALLS = 40
 # invalidated: since gw365 the caches survive `bench clear-cache`, so a deploy no
 # longer quietly does it for you (crm/hooks.py, persistent_cache_keys).
 AREA_CACHE_VERSION = 8  # v5 price-splits past 800; v6 imgSrc; v7 pending; v8 DOM fix
-PIN_CACHE_VERSION = 4  # v2 cover_photo; v3 parsed history (dropped); v4 raw price_history
+PIN_CACHE_VERSION = 5  # v2 cover_photo; v3 parsed history (dropped); v4 raw price_history; v5 is_for_auction
 
 
 #: A version bump used to mean re-buying every cached circle -- v7->v8 alone was
@@ -101,8 +101,29 @@ def _migrate_area_v7(data):
 
 
 AREA_MIGRATIONS = {7: _migrate_area_v7}
+
+
+def _migrate_pin_v4(data):
+	"""v5 adds is_for_auction from /property listingSubType.
+
+	A live listing whose cached blob predates the field cannot answer auction vs
+	for-sale (1623 Nevada stayed red For sale after gw481). Sold/empty blobs do
+	not need a re-buy — they were never auctions on this cache.
+	"""
+	if not isinstance(data, dict):
+		return data
+	if "is_for_auction" in data:
+		return data
+	home = str(data.get("home_status") or "").strip().upper()
+	if home in {"FOR_SALE", "PENDING", "CONTINGENT", "COMING_SOON", "FOR_RENT"}:
+		return None
+	data = dict(data)
+	data["is_for_auction"] = False
+	return data
+
+
 #: v3 dropped the raw priceHistory that v4 is built on; nothing to carry forward.
-PIN_MIGRATIONS = {}
+PIN_MIGRATIONS = {4: _migrate_pin_v4}
 
 #: Zillow's own words for a home that is spoken for but has not closed. We have
 #: to ask for these explicitly (`isPendingUnderContract=1`) because the default
