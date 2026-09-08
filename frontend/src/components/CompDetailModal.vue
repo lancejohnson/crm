@@ -165,7 +165,7 @@
           </div>
 
           <aside class="min-h-0 overflow-y-auto bg-surface-white p-5 sm:p-6">
-            <div class="flex items-baseline justify-between gap-3">
+            <div class="flex flex-wrap items-baseline justify-between gap-3">
               <div>
                 <div class="text-2xl font-semibold text-ink-gray-9">
                   {{ formatCompMoney(displayPrice) }}
@@ -174,16 +174,19 @@
                   {{ displayPriceLabel }}
                 </div>
               </div>
-              <a
-                v-if="zillowLink"
-                :href="zillowLink"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="flex shrink-0 items-center gap-1 text-sm font-medium text-ink-blue-3 hover:underline"
-              >
-                {{ __('Zillow') }}
-                <FeatherIcon name="arrow-up-right" class="size-3.5" />
-              </a>
+              <div class="flex flex-wrap gap-x-3 gap-y-2">
+                <a
+                  v-for="link in propertyLinks"
+                  :key="link.label"
+                  :href="link.href"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="flex items-center gap-1 text-sm font-medium text-ink-blue-3 hover:underline"
+                >
+                  {{ __(link.label) }}
+                  <FeatherIcon name="arrow-up-right" class="size-3.5" />
+                </a>
+              </div>
             </div>
 
             <div v-if="staleNote" class="mt-3 rounded-lg bg-surface-amber-1 p-3 text-xs leading-relaxed text-ink-amber-3">
@@ -316,7 +319,7 @@
 
 <script setup>
 import { COMP_CONDITION_TYPES, compColor, compFit, compState, compStateLabel, daysToSell, formatCompMoney } from '@/utils/comps'
-import { zillowUrl } from '@/utils/propertyLinks'
+import { propertySearchAddress, providerLink, zillowUrl } from '@/utils/propertyLinks'
 import { Badge, Button, Dialog, FeatherIcon, call } from 'frappe-ui'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
@@ -529,7 +532,16 @@ const displayPriceLabel = computed(() => {
   if (props.comp?.price) return __('Last known list price')
   return details.value?.zestimate ? __('Zestimate — no listing price on record') : ''
 })
-const zillowLink = computed(() => details.value?.zillow_url || zillowUrl(props.comp?.address || ''))
+const propertyLinks = computed(() => {
+  const address = propertySearchAddress(props.comp)
+  const subject = props.subjectMode ? props.subject : null
+  const zillow = details.value?.zillow_url || zillowUrl(props.comp?.address || '')
+  return [
+    zillow ? { label: 'Zillow', href: zillow } : null,
+    providerLink('Redfin', address, response.value?.redfin_url || subject?.redfin_url),
+    providerLink('Realtor', address, subject?.realtor_estimate?.href),
+  ].filter(Boolean)
+})
 const facts = computed(() => {
   const d = details.value || {}
   const c = props.comp || {}

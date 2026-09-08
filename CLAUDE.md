@@ -1694,6 +1694,14 @@ duplicating. Work substantial features in a worktree of your own.
       (it had to be, back when comps was itself a Dialog), so the gallery had to
       be excluded from `active` BY HAND. Without it `H` hides the very comp whose
       photos are on screen.
+    - **Gallery provider links** — Zillow stays unchanged; Redfin/Realtor open
+      observed listing URLs when available, otherwise **Google Redfin** / **Google
+      Realtor** explicitly name the site-restricted Google search. Realtor reuses
+      the subject's matched estimate `href`; Redfin uses redfin-scraper-api
+      `GET /url` (AVM match, store then one ~110m live box — not website
+      autocomplete) and falls back to `/photos` if that route is missing. No
+      invented listing IDs. Thin galleries still reuse `/photos` for CDN frames.
+      Both subject and comp galleries use `CompDetailModal` + `utils/propertyLinks.js`.
     - **The SUBJECT opens the same gallery** (gw352) — from its pin popup and from
       its tray card. It was the one house on the board you could not look at,
       which is backwards since it is the house being priced.

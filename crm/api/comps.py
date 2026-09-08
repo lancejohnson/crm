@@ -1055,26 +1055,31 @@ def _shape_detail(row, zpid=None):
 	# the gallery is still ≤1 image, on an explicit open, never for the tray, and
 	# the winner rides the 30-day detail cache. Absent its key, a rung no-ops.
 	photo_source = "zillow" if photos else ""
+	from crm.api import redfin
+
+	# Coordinates come from the row (CRM Comp / BatchData / client-passed for
+	# zillow:: pins), falling back to the fresh Zillow detail's own point.
+	addr = _detail_address(row, details)
+	lat = row.get("lat") or (details or {}).get("lat")
+	lng = row.get("lng") or (details or {}).get("lng")
+	# Listing URL is independent of the photo ladder: a 45-photo Zillow gallery
+	# still needs a Redfin link. Thin galleries reuse /photos (url + CDN).
+	redfin_url = None
 	if len(photos) <= 1:
 		from crm.api import apivex
 
-		realtor = apivex.realtor_photo_urls(_detail_address(row, details))
+		realtor = apivex.realtor_photo_urls(addr)
 		if len(realtor) > len(photos):
 			photos = realtor
 			photo_source = "realtor"
 	if len(photos) <= 1:
-		from crm.api import redfin
-
-		# Coordinates come from the row (CRM Comp / BatchData / client-passed for
-		# zillow:: pins), falling back to the fresh Zillow detail's own point.
-		rf = redfin.redfin_photo_urls(
-			_detail_address(row, details),
-			lat=row.get("lat") or (details or {}).get("lat"),
-			lng=row.get("lng") or (details or {}).get("lng"),
-		)
-		if len(rf) > len(photos):
-			photos = rf
+		rf = redfin.redfin_gallery(addr, lat=lat, lng=lng)
+		redfin_url = rf.get("url")
+		if len(rf["photos"]) > len(photos):
+			photos = rf["photos"]
 			photo_source = "redfin"
+	else:
+		redfin_url = redfin.redfin_listing_url(addr, lat, lng)
 
 	comp = dict(row)
 	for key in ("listed_date", "removed_date"):
@@ -1087,6 +1092,7 @@ def _shape_detail(row, zpid=None):
 		"photos": photos,
 		"photos_available": len(photos) > 0,
 		"photo_source": photo_source,
+		"redfin_url": redfin_url,
 		"message": "" if details else _("Zillow details are unavailable for this property."),
 	}
 
@@ -1598,6 +1604,7 @@ def get_lead_comps(
 			rec = redfin.finish_subject_record(redfin_check_job)
 			base["subject"]["redfin_check"] = redfin.compare_subject_facts(base["subject"], rec)
 			base["subject"]["redfin_estimate"] = redfin.subject_estimate(rec)
+			base["subject"]["redfin_url"] = rec.get("url") if rec and rec.get("matched") else None
 		except Exception:
 			frappe.log_error(frappe.get_traceback(), "Comps: Redfin check failed")
 	if realtor_job is not None:

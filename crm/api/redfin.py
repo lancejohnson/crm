@@ -72,20 +72,62 @@ def _base_url():
 
 
 def redfin_photo_urls(address: str, lat=None, lng=None, limit=60):
-	"""Address + point -> list of Redfin CDN photo hrefs, or []. Never raises.
+	"""Compatibility wrapper for photo-only consumers."""
+	return redfin_gallery(address, lat, lng, limit)["photos"]
+
+
+def _point(address, lat, lng):
+	addr = (address or "").strip()
+	try:
+		lat, lng = float(lat), float(lng)
+	except (TypeError, ValueError):
+		return None
+	if not addr or not lat or not lng:
+		return None
+	return addr, lat, lng
+
+
+def redfin_listing_url(address: str, lat=None, lng=None):
+	"""Address + point -> absolute Redfin listing URL from GET /url, or None.
+
+	Falls back to /photos' observed path if this service predates /url.
+	"""
+	base = _base_url()
+	point = _point(address, lat, lng)
+	if not base or not point:
+		return None
+	addr, lat, lng = point
+	try:
+		r = requests.get(
+			f"{base}/url",
+			params={"address": addr, "lat": lat, "lng": lng},
+			timeout=TIMEOUT,
+		)
+		if r.status_code == 404:
+			return redfin_gallery(addr, lat, lng)["url"]
+		r.raise_for_status()
+		body = r.json() or {}
+	except Exception:
+		import frappe
+
+		frappe.log_error(frappe.get_traceback(), "Redfin: geo /url failed")
+		return None
+	url = body.get("url") if body.get("matched") else None
+	return url if isinstance(url, str) and url.startswith("http") else None
+
+
+def redfin_gallery(address: str, lat=None, lng=None, limit=60):
+	"""Address + point -> photos and the matched record's observed listing URL.
 
 	The point finds the neighbourhood; the address picks the house (exact
 	normalized street-line match, service-side — no nearest-row fallback,
 	because the neighbour's gallery is worse than nothing).
 	"""
 	base = _base_url()
-	addr = (address or "").strip()
-	try:
-		lat, lng = float(lat), float(lng)
-	except (TypeError, ValueError):
-		return []
-	if not base or not addr or not lat or not lng:
-		return []
+	point = _point(address, lat, lng)
+	if not base or not point:
+		return {"photos": [], "url": None}
+	addr, lat, lng = point
 	try:
 		r = requests.get(
 			f"{base}/photos",
@@ -98,9 +140,12 @@ def redfin_photo_urls(address: str, lat=None, lng=None, limit=60):
 		import frappe
 
 		frappe.log_error(frappe.get_traceback(), "Redfin: geo /photos failed")
-		return []
+		return {"photos": [], "url": None}
 	photos = body.get("photos") or []
-	return [p for p in photos if isinstance(p, str) and p.startswith("http")][: int(limit)]
+	return {
+		"photos": [p for p in photos if isinstance(p, str) and p.startswith("http")][: int(limit)],
+		"url": body.get("url") if body.get("matched") else None,
+	}
 
 
 # ---------------------------------------------------------------------------------
@@ -192,6 +237,7 @@ def _fetch_subject_record(base, address, lat, lng, holder):
 					"source": "store",
 					"property_id": p.get("property_id"),
 					"address": p.get("address"),
+					"url": p.get("url"),
 					"beds": p.get("beds"),
 					"baths": p.get("baths"),
 					"sqft": p.get("sqft"),
