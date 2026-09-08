@@ -42,6 +42,7 @@ a separate closer list.
 
 import json
 from datetime import datetime, timedelta
+from functools import lru_cache
 
 import frappe
 import requests
@@ -88,8 +89,73 @@ DEFAULT_MM_BASE = "https://app.groundworkpro.com/mattermost/api/v4"
 # ── business-day helpers ───────────────────────────────────────────────────────
 
 
+def _nth_weekday(year, month, weekday, n):
+	"""The n-th `weekday` (Mon=0) of a month; n=-1 means the last one."""
+	if n > 0:
+		first = datetime(year, month, 1).date()
+		offset = (weekday - first.weekday()) % 7
+		return first + timedelta(days=offset + 7 * (n - 1))
+	nxt = datetime(year + (month == 12), (month % 12) + 1, 1).date()
+	last = nxt - timedelta(days=1)
+	return last - timedelta(days=(last.weekday() - weekday) % 7)
+
+
+def _observed(d):
+	"""Federal observance: a Saturday holiday is taken Friday, a Sunday one Monday."""
+	if d.weekday() == 5:
+		return d - timedelta(days=1)
+	if d.weekday() == 6:
+		return d + timedelta(days=1)
+	return d
+
+
+@lru_cache(maxsize=16)
+def us_federal_holidays(year) -> frozenset:
+	"""The eleven US federal holidays for `year`, as observed.
+
+	Computed, not fetched — no `holidays` package in the Frappe image, and the
+	rules have not changed since Juneteenth was added in 2021.
+	"""
+	fixed = [(1, 1), (6, 19), (7, 4), (11, 11), (12, 25)]
+	days = {_observed(datetime(year, m, d).date()) for m, d in fixed}
+	days |= {
+		_nth_weekday(year, 1, 0, 3),  # MLK Day
+		_nth_weekday(year, 2, 0, 3),  # Presidents' Day
+		_nth_weekday(year, 5, 0, -1),  # Memorial Day
+		_nth_weekday(year, 9, 0, 1),  # Labor Day
+		_nth_weekday(year, 10, 0, 2),  # Columbus Day
+		_nth_weekday(year, 11, 3, 4),  # Thanksgiving
+	}
+	return frozenset(days)
+
+
+def _extra_holidays() -> set:
+	"""site_config `crm_holidays`: a list of ISO dates the team also takes off
+	(company days, the Friday after Thanksgiving). Malformed → none."""
+	try:
+		raw = frappe.conf.get("crm_holidays") or []
+		if isinstance(raw, str):
+			raw = json.loads(raw)
+		return {getdate(x) for x in raw}
+	except Exception:
+		return set()
+
+
+def is_holiday(d) -> bool:
+	d = getdate(d)
+	return d in us_federal_holidays(d.year) or d in _extra_holidays()
+
+
 def is_business_day(d) -> bool:
-	return getdate(d).weekday() < 5
+	"""Weekday and not a holiday.
+
+	Holidays matter for the same reason weekends do: the call log is flat, so a
+	board generated on Labor Day breaks the streak for work nobody was asked to
+	do. Every business-day helper below routes through this one so the
+	standup, the pulse, board generation and the streak cannot disagree.
+	"""
+	d = getdate(d)
+	return d.weekday() < 5 and not is_holiday(d)
 
 
 def business_days_between(a, b) -> int:
@@ -104,14 +170,14 @@ def business_days_between(a, b) -> int:
 	n, cur = 0, a
 	while cur < b:
 		cur += timedelta(days=1)
-		if cur.weekday() < 5:
+		if is_business_day(cur):
 			n += 1
 	return n
 
 
 def previous_business_day(d):
 	d = getdate(d) - timedelta(days=1)
-	while d.weekday() >= 5:
+	while not is_business_day(d):
 		d -= timedelta(days=1)
 	return d
 

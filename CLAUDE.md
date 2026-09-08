@@ -1862,6 +1862,16 @@ duplicating. Work substantial features in a worktree of your own.
   the ISTL snapshot. ISTL line needs `leadmarket_token` in site_config (Infisical
   `LEADMARKET_GMAIL_WEBHOOK_TOKEN` or `LEADMARKET_WEB_SECRET`). The old list
   renderer (`render_markdown`) is kept but not sent.
+  - **Business days exclude US federal holidays** (2026-09-08, after Labor
+    Day generated a 90-card board nobody was asked to work and broke the
+    streak). `is_business_day` in `daily_standup.py` is the single gate —
+    computed observed federal holidays (`us_federal_holidays`, no package)
+    plus site_config `crm_holidays` (ISO date list) for company days off.
+    `previous_business_day` / `business_days_between` route through it, so
+    the standup recap, pulse, board generation, streak and cadence agree.
+    Unit-tested in `crm/tests/unit_test_business_days.py`. The Labor Day
+    cards were deleted (all 90 were untouched and every lead was on the
+    Sep 8 board).
   - **Cadence = Dennis's**, posted in the Acq channel 2026-07-31: 2x/day for a
     week → weekly for 3 weeks → monthly. Two clarifications from Lance:
     "Call/Text" means call AND text but **only calls are metered** (texts are fast
