@@ -133,7 +133,15 @@ duplicating. Work substantial features in a worktree of your own.
   `status` so a rename is a one-line edit, unknown values render in the
   first column. `set_property_status` (`db.set_value`), also from the list
   row's stage dropdown and a stage pill on the property header. Colours in
-  `utils/propertyStages.js`. Header: **Saved calcs (N)** (history dialog of `CashOfferComment` cards, Tweak works),
+  `utils/propertyStages.js`. **Add accepts a Zillow / Redfin / Realtor /
+  Auction.com listing URL** as well as an address: `crm/api/listing_url.py`
+  (pure, `unit_test_listing_url.py`) reads the address off the slug — no API
+  call. Redfin/Realtor delimit street/city/state; Zillow/Auction are one
+  hyphen run, split at the last street-suffix word (post-directional + unit
+  tokens stay on the street; no suffix → unsplit, still geocodes). Kept as
+  `listing_url` (→ **Listing** header button, ↗ on the card); the add
+  dialog previews the parsed address (`preview_address`) and refuses a
+  non-property page. Header: **Saved calcs (N)** (history dialog of `CashOfferComment` cards, Tweak works),
   **Edit** (an address change clears every location cache; picks/calcs
   stay), delete. Underwrite and Live one are hidden (`isScratch`). Team-
   visible like practice sets; `list_properties(q, mine)`. Guarded on the
