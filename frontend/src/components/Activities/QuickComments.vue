@@ -41,6 +41,32 @@
         </span>
       </div>
 
+      <!-- composer: type a one-off comment right here, same shape as the
+           To-do row above (Lance, 2026-09-08 — "more like how the follow ups
+           work" instead of New → Comment). Enter or Add posts it. -->
+      <div
+        v-if="!editing"
+        class="flex items-center gap-2 border-t border-outline-gray-1 px-3 pt-2 pb-2.5"
+      >
+        <LucidePlus class="size-4 shrink-0 text-ink-gray-4" />
+        <input
+          v-model="customText"
+          type="text"
+          :placeholder="__('Write a comment…')"
+          autocomplete="off"
+          :disabled="posting"
+          class="comment-composer min-w-0 flex-1 text-sm text-ink-gray-8 placeholder:text-ink-gray-4"
+          @keydown.enter.prevent="postCustom"
+        />
+        <Button
+          variant="solid"
+          :label="__('Add')"
+          :loading="posting"
+          :disabled="!customText.trim()"
+          @click="postCustom"
+        />
+      </div>
+
       <!-- inline editor: add / edit / remove the rows -->
       <div v-else class="flex flex-col gap-2 px-3 pt-1 pb-2.5">
         <div
@@ -136,6 +162,23 @@ async function post(c) {
   }
 }
 
+// One-off comment typed into the composer. Cleared only after the post
+// succeeds, so a failed request leaves the text in the box to retry.
+const customText = ref('')
+async function postCustom() {
+  const t = customText.value.trim()
+  if (!t || posting.value) return
+  posting.value = true
+  try {
+    await props.modalRef?.addComment(t)
+    customText.value = ''
+  } catch (e) {
+    toast.error(__('Could not add comment'))
+  } finally {
+    posting.value = false
+  }
+}
+
 // --- editing ---
 const editing = ref(false)
 const saving = ref(false)
@@ -178,3 +221,16 @@ async function save() {
   }
 }
 </script>
+
+<style scoped>
+/* Borderless inline input, matching the To-do composer's `.todo-composer`. */
+.comment-composer,
+.comment-composer:focus,
+.comment-composer:focus-visible {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent;
+  padding: 0;
+}
+</style>
