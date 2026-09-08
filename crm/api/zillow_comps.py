@@ -278,15 +278,39 @@ def _coordinates(lat, lng, radius_mi) -> str:
 	return f"{round(float(lng), 4)} {round(float(lat), 4)},{diameter}"
 
 
+def _listing_sub_type(prop):
+	sub = (prop or {}).get("listingSubType") or (prop or {}).get("listing_sub_type") or {}
+	return sub if isinstance(sub, dict) else {}
+
+
+def _is_auction(prop):
+	"""Zillow's own auction flag. Search and /property both send listingSubType.
+
+	Measured 2026-09-08 against Auction.com (foreclosure / redemption / bank-owned)
+	and ServiceLink: every live auction had `is_forAuction: true` and
+	`homeStatus: FOR_SALE`. `is_foreclosure` / `is_bankOwned` are NOT reliable —
+	most Auction.com rows left both false. Do not infer auction from provider
+	name or a Public Record sale.
+	"""
+	sub = _listing_sub_type(prop)
+	return bool(sub.get("is_forAuction") or sub.get("is_for_auction"))
+
+
 def listing_state(prop, kind):
-	"""What Zillow says this row IS: sold / pending / for sale / for rent.
+	"""What Zillow says this row IS: auction / sold / pending / for sale / for rent.
 
 	Read off the row's own `listingStatus` rather than inferred from which query
 	it arrived in, because the two disagree: a RecentlySold page came back holding
 	a PENDING row on the very first sample. `contingentListingType` is the second
 	signal -- an UNDER_CONTRACT home is still listed as FOR_SALE while accepting
 	backups, so reading only `listingStatus` would call it a plain listing.
+
+	Auction is first: RecentlySold search also returns houses that are still a
+	live auction on Zillow (1623 Nevada: listingStatus RECENTLY_SOLD, /property
+	homeStatus FOR_SALE + is_forAuction). The live flag wins.
 	"""
+	if _is_auction(prop):
+		return "auction"
 	status = str(prop.get("listingStatus") or "").strip().upper()
 	contingent = str(prop.get("contingentListingType") or "").strip().upper()
 	if kind == "rent" or status in RENT_STATUSES:
@@ -315,7 +339,7 @@ def _shape_search(prop, kind):
 	lng = zillow_api._num(prop.get("longitude"))
 	price = zillow_api._num(prop.get("price"))
 	zpid = prop.get("zpid")
-	if not addr or lat is None or lng is None or not price or not zpid:
+	if not addr or lat is None or lng is None or not zpid:
 		return None
 
 	sold = _ymd(prop.get("dateSold"))
@@ -328,10 +352,14 @@ def _shape_search(prop, kind):
 		dom = None
 	home = str(prop.get("propertyType") or "").strip().upper()
 	state = listing_state(prop, kind)
-	# A pending home has NOT sold, so it stays "Active" in the status field every
-	# filter, colour and count in this app already keys on. What makes it pending
-	# rides alongside in `listing_state`, which is additive -- nothing that predates
-	# it has to learn a third status to keep working.
+	# Auctions list at $0 (no ask). Dropping those rows is how they only ever
+	# arrived via RecentlySold, as a sold pin, while Zillow still showed Auction.
+	if not price and state in ("sold", "off_market"):
+		return None
+	# A pending/auction home has NOT sold, so it stays "Active" in the status field
+	# every filter, colour and count in this app already keys on. What makes it
+	# pending/auction rides alongside in `listing_state`, which is additive --
+	# nothing that predates it has to learn a third status to keep working.
 	# Rentals use a different name prefix so hide/select/type on a sale pin cannot
 	# collide with the same zpid listed for rent (or the reverse).
 	active = state not in ("sold", "off_market")
@@ -753,10 +781,33 @@ def _apply_sale(row, price, date):
 	row["zillow_refreshed"] = True
 
 
+def _state_from_facts(facts):
+	"""listing_state from a /property facts blob. None if it is not on the market."""
+	if not facts:
+		return None
+	if facts.get("is_for_auction"):
+		return "auction"
+	home = str(facts.get("home_status") or "").strip().upper()
+	if home in RENT_STATUSES:
+		return "for_rent"
+	if home in PENDING_STATUSES:
+		return "pending"
+	if home in {"FOR_SALE", "COMING_SOON"}:
+		return "for_sale"
+	return None
+
+
 def _apply_listing(row, price, days_on_market, state="for_sale"):
-	row["price"] = price or row.get("price")
+	state = state or "for_sale"
+	# Auctions often have no ask ($0). `price or row.get("price")` would keep a
+	# public-record transfer on the pin — 1623 Nevada stayed $190k sold that way.
+	if state == "auction":
+		row["price"] = price or 0
+	elif price:
+		row["price"] = price
 	row["status"] = "Active"
-	row["listing_state"] = state or "for_sale"
+	row["listing_state"] = state
+	row["removed_date"] = None
 	if days_on_market is not None:
 		row["days_on_market"] = int(days_on_market)
 	row["source"] = "zillow"
@@ -845,7 +896,6 @@ def refresh_pins(rows, cap=PIN_REFRESH_CAP):
 			continue
 		sale = facts.get("last_sale") or {}
 		sale_date = _ymd(sale.get("date"))
-		home = str(facts.get("home_status") or "").strip().upper()
 		changed = False
 		# A picture is not "newer" data, it is data the pooled index never had, so it
 		# rides along on ANY hit. We have already paid for this response; the tray
@@ -855,15 +905,15 @@ def refresh_pins(rows, cap=PIN_REFRESH_CAP):
 			changed = True
 		if facts.get("zpid") and not row.get("zpid"):
 			row["zpid"] = str(facts["zpid"])
-		if sale_date and _newer(sale_date, row.get("removed_date")):
-			_apply_sale(row, sale.get("price"), sale_date)
-			changed = True
-		elif home in {"FOR_SALE", "PENDING", "CONTINGENT", "COMING_SOON"}:
+		# Live homeStatus wins over a later public-record Sold in priceHistory.
+		live = _state_from_facts(facts)
+		if live:
 			listing = facts.get("last_listing") or {}
-			_apply_listing(row, listing.get("price") or facts.get("zestimate"), None)
-			# `/property` knows whether it is merely listed or already spoken for,
-			# which the pooled index never does.
-			row["listing_state"] = "pending" if home in PENDING_STATUSES else "for_sale"
+			ask = None if live == "auction" else (listing.get("price") or facts.get("zestimate"))
+			_apply_listing(row, ask, None, live)
+			changed = True
+		elif sale_date and _newer(sale_date, row.get("removed_date")):
+			_apply_sale(row, sale.get("price"), sale_date)
 			changed = True
 		# Shape from /property, even when the sale date did not move — same
 		# reason as _merge_one. Blank-only used to preserve ISTL's listing sqft.
@@ -935,6 +985,14 @@ def attach_sale_history(rows, today=None):
 					"lot_size": facts.get("lot_size"),
 				},
 			)
+			# Same billed /property payload. If Zillow still has the house on the
+			# market, the pin is live even when RecentlySold search called it sold.
+			live = _state_from_facts(facts)
+			if live:
+				# Don't copy last_listing.price — on an auction that is often a years-old
+			# MLS ask. Auction pins get $0 (no ask); other live pins keep the number
+			# they already had so a ForSale row's ask is not replaced with history.
+				_apply_listing(row, 0 if live == "auction" else None, None, live)
 		# Parsed HERE, from the raw events, on every read. The cache holds Zillow's
 		# priceHistory, not our reading of it, so a parser fix costs nothing and the
 		# ages inside are always computed against today rather than against whenever

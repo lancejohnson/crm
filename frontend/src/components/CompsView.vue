@@ -574,6 +574,10 @@
             <span class="size-2.5 rounded-full" :style="{ background: PENDING }" />
             {{ __('Pending ({0})', [pendingCount]) }}
           </span>
+          <span v-if="auctionCount" class="flex items-center gap-1.5">
+            <span class="size-2.5 rounded-full" :style="{ background: COMP_COLORS.auction.bg }" />
+            {{ __('Auction ({0})', [auctionCount]) }}
+          </span>
           <span class="text-ink-gray-5">{{ __('Fainter = older sale') }}</span>
           </template>
           <span
@@ -692,6 +696,7 @@ import {
   compState,
   daysToSell,
   finiteDays,
+  isAuction,
   isPending,
   isRentalComp,
   isScratchSubject,
@@ -1436,6 +1441,7 @@ watch([showStreet, streetViewPoint], syncStreetView)
 // the legend describes the pins in front of the rep, and a number that survives
 // filtering is the same mistake the Nearby label documents.
 const pendingCount = computed(() => comps.value.filter((c) => isPending(c)).length)
+const auctionCount = computed(() => comps.value.filter((c) => isAuction(c)).length)
 
 // Type glyphs and the dashed-flip note only when the board actually holds one.
 // Same rule as pending: a legend entry for a state nothing on the map is in is
@@ -1934,7 +1940,10 @@ function pillIcon(c) {
   // fade stay deep without the price becoming unreadable, and it is why the ink
   // can differ per colour: white on the red, near-black on the yellow.
   const ink = pal.ink
-  const price = priceShort(c.price, isRentalComp(c))
+  const price =
+    compState(c) === 'auction' && !(Number(c.price) > 0)
+      ? 'Auction'
+      : priceShort(c.price, isRentalComp(c))
   const { year, line2 } = pillBits(c)
   // Selected does NOT switch to the tall pill — that resized the icon under the
   // pointer and read as the map jumping. The ring is the selected signal.

@@ -464,6 +464,7 @@ const FRESH_STATES = {
 const pinState = computed(() => compState(props.comp))
 const freshState = computed(() => {
   if (props.subjectMode) return null
+  if (details.value?.is_for_auction) return 'auction'
   return FRESH_STATES[String(details.value?.home_status || '').trim().toUpperCase()] || null
 })
 const state = computed(() => freshState.value || pinState.value)
@@ -494,6 +495,12 @@ const displayPrice = computed(() => {
   // neither the pin's stale ask nor a leftover asking_price is the number.
   if (freshState.value === 'sold' && details.value?.last_sale?.price)
     return details.value.last_sale.price
+  // Auctions often have asking_price 0. Do not fall through to a public-record
+  // transfer sitting on the pin (1623 Nevada: $190,400 "last known list price").
+  if (state.value === 'auction') {
+    const ask = Number(details.value?.asking_price)
+    return Number.isFinite(ask) && ask > 0 ? ask : null
+  }
   // `/property` asking_price is a SALE ask. A rental pin's price is monthly rent.
   if (state.value === 'for_rent') return props.comp?.price
   return details.value?.asking_price || props.comp?.price || details.value?.zestimate
@@ -507,6 +514,9 @@ const displayPriceLabel = computed(() => {
     return when ? __('Sold · {0}', [dateOnly(when)]) : __('Sold')
   }
   if (state.value === 'for_rent') return __('Monthly rent')
+  if (state.value === 'auction') {
+    return Number(displayPrice.value) > 0 ? __('Auction') : __('Auction — no asking price')
+  }
   if (details.value?.asking_price) return __('Current Zillow ask')
   if (state.value === 'pending') return __('Agreed price · under contract')
   // The subject is not on the market, so its headline number is whatever it last

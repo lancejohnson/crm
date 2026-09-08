@@ -118,6 +118,14 @@ def _num(v):
 		return None
 
 
+def _is_for_auction(raw):
+	"""Zillow listingSubType.is_forAuction — search and /property share the flag."""
+	sub = (raw or {}).get("listingSubType") or (raw or {}).get("listing_sub_type") or {}
+	if not isinstance(sub, dict):
+		return False
+	return bool(sub.get("is_forAuction") or sub.get("is_for_auction"))
+
+
 def lot_size_label(src, reso=None):
 	"""A display string for lot size, from a /search row or a /property blob.
 
@@ -443,7 +451,8 @@ def _normalize(raw):
 		"tax_assessed_value": _num(reso.get("taxAssessedValue") or raw.get("taxAssessedValue")),
 		"last_sale": sale,
 		"last_listing": listing,
-		"home_status": raw.get("homeStatus"),
+			"home_status": raw.get("homeStatus"),
+		"is_for_auction": _is_for_auction(raw),
 		"address": raw.get("streetAddress"),
 		# Carried so a lead whose facts we already paid for can show its own photo
 		# without a second call. Leads cached before this shipped simply have no key
@@ -489,6 +498,7 @@ def normalize_detail(raw):
 		"property_type": HOME_TYPES.get(home_type) or (home_type.title().replace("_", " ") or None),
 		"lot_size": lot_size_label(raw, reso),
 		"home_status": raw.get("homeStatus"),
+		"is_for_auction": _is_for_auction(raw),
 		"asking_price": _num(raw.get("price")) if status in asking_statuses else None,
 		"zestimate": _num(raw.get("zestimate")),
 		"rent_zestimate": _num(raw.get("rentZestimate")),

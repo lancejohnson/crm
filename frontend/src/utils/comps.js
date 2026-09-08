@@ -37,6 +37,10 @@ export const COMP_COLORS = {
   // For-rent listings. Teal, far from sale red / sold yellow / pending violet
   // in both hue and lightness. Live listings, so they never recency-fade.
   rent: { bg: '#0f766e', ink: '#ffffff', border: '#115e59', onLight: '#0f766e' },
+  // For-sale auctions (Zillow listingSubType.is_forAuction). Orange, per Lance.
+  // Live, so they never recency-fade. The word "Auction" is on every surface —
+  // orange vs red is close in lightness, same rule as pending vs sold.
+  auction: { bg: '#ea580c', ink: '#ffffff', border: '#c2410c', onLight: '#c2410c' },
 }
 
 /** True when a comp is still listed (an ASK), rather than off-market (a sale). */
@@ -48,7 +52,7 @@ export function isActiveStatus(status) {
 
 /**
  * The states a comp can be in, resolved once so no surface has to re-derive
- * it: `for_sale`, `pending`, `sold`, `off_market`, `for_rent`.
+ * it: `for_sale`, `pending`, `sold`, `off_market`, `for_rent`, `auction`.
  *
  * The server sends `listing_state` on every row now. The fallback exists because
  * the frontend and backend deploy separately — for the length of a deploy window
@@ -79,9 +83,14 @@ export function isPending(comp) {
   return compState(comp) === 'pending'
 }
 
+export function isAuction(comp) {
+  return compState(comp) === 'auction'
+}
+
 /** What to call a state on a badge. Short: these render inside 24px pills. */
 export function compStateLabel(state) {
   if (state === 'pending') return __('Pending')
+  if (state === 'auction') return __('Auction')
   if (state === 'for_sale') return __('For sale')
   if (state === 'for_rent') return __('For rent')
   if (state === 'sold') return __('Sold')
@@ -97,6 +106,7 @@ export function compColor(statusOrComp) {
   const state = compState(comp)
   if (state === 'pending') return COMP_COLORS.pending
   if (state === 'for_rent') return COMP_COLORS.rent
+  if (state === 'auction') return COMP_COLORS.auction
   return state === 'for_sale' ? COMP_COLORS.active : COMP_COLORS.sold
 }
 

@@ -1134,9 +1134,13 @@ const rows = computed(() =>
       status:
         (kind.value === 'rental' || isRentalRow(c)
           ? __('For rent')
-          : active
-            ? __('Listed')
-            : __('Sold')) + (c.comp_type ? ` · ${c.comp_type}` : ''),
+          : c.listing_state === 'auction'
+            ? __('Auction')
+            : c.listing_state === 'pending'
+              ? __('Pending')
+              : active
+                ? __('Listed')
+                : __('Sold')) + (c.comp_type ? ` · ${c.comp_type}` : ''),
     }
   }),
 )

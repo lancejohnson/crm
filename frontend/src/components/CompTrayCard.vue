@@ -176,10 +176,13 @@
           :class="
             isPendingComp
               ? 'font-medium text-ink-violet-1'
-              : isActive
-                ? 'text-ink-red-3'
-                : 'text-ink-gray-5'
+              : state === 'auction'
+                ? 'font-medium'
+                : isActive
+                  ? 'text-ink-red-3'
+                  : 'text-ink-gray-5'
           "
+          :style="state === 'auction' ? { color: palette.onLight } : undefined"
         >
           {{ timing }}
         </div>
@@ -443,6 +446,10 @@ const timing = computed(() => {
     return dom
       ? __('Under contract · listed {0} days', [dom])
       : __('Under contract · price agreed')
+  }
+  if (state.value === 'auction') {
+    const dom = daysOnMarket(c)
+    return dom ? __('Auction · listed {0} days', [dom]) : __('Auction')
   }
   if (isActive.value) {
     const dom = daysOnMarket(c)
