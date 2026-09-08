@@ -179,6 +179,18 @@ const routes = [
     component: () => import('@/pages/Refunds.vue'),
   },
   {
+    // Scratch properties: comps + calcs on a house that is not a lead.
+    path: '/properties',
+    name: 'Properties',
+    component: () => import('@/pages/Properties.vue'),
+  },
+  {
+    path: '/properties/:propertyId',
+    name: 'Property',
+    component: () => import('@/pages/Property.vue'),
+    props: true,
+  },
+  {
     path: '/practice',
     name: 'Practice',
     component: () => import('@/pages/Practice.vue'),

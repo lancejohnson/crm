@@ -352,6 +352,29 @@ export function formatCompMoney(value) {
 }
 
 /** The street only — "705 Cliff St", not the city/state/ZIP that follows. */
+/**
+ * A comps SUBJECT is a CRM Lead or a scratch `CRM Property` (comps + calcs on a
+ * house that is not a lead). The backend dispatches on the `PROP-` prefix
+ * (`crm.api.comps.subject_doctype`); this is the one place the frontend does.
+ */
+export const SCRATCH_PREFIX = 'PROP-'
+
+export function isScratchSubject(name) {
+  return String(name || '').startsWith(SCRATCH_PREFIX)
+}
+
+export function subjectDoctype(name) {
+  return isScratchSubject(name) ? 'CRM Property' : 'CRM Lead'
+}
+
+/** The page that hosts the comps map for this subject. */
+export function compsPagePath(name) {
+  if (!name) return ''
+  return isScratchSubject(name)
+    ? `/crm/properties/${name}`
+    : `/crm/leads/${name}/comps`
+}
+
 export function streetAddress(address) {
   const raw = String(address || '').trim()
   if (!raw) return ''

@@ -175,6 +175,33 @@ def _available() -> bool:
 	return bool(frappe.db.exists("DocType", DOCTYPE))
 
 
+# ---------------------------------------------------------------------------------
+# Subject dispatch: a CRM Lead, or a scratch CRM Property (comps without a lead)
+# ---------------------------------------------------------------------------------
+#: A scratch property is a house someone wants to comp and price WITHOUT making it
+#: a lead — a deal being scouted, a neighbour's house, a buyer's ask. It carries
+#: the same property/cache/comps columns a CRM Lead does (see ops
+#: `setup_properties.py`), so every read and write in this module runs unchanged
+#: against it. Dispatch is on the NAME prefix rather than a DB lookup, because
+#: these functions sit on the hot path of every map open and a `frappe.db.exists`
+#: per call would be a query for a fact the name already states.
+SCRATCH_DOCTYPE = "CRM Property"
+SCRATCH_PREFIX = "PROP-"
+
+
+def subject_doctype(name) -> str:
+	"""`CRM Property` for a scratch-property name, else `CRM Lead`."""
+	return SCRATCH_DOCTYPE if str(name or "").startswith(SCRATCH_PREFIX) else "CRM Lead"
+
+
+def _load_subject(name):
+	"""The subject doc for a lead or scratch-property name; throws if absent."""
+	dt = subject_doctype(name)
+	if not frappe.db.exists(dt, name):
+		frappe.throw(_("{0} {1} does not exist.").format(dt, name), frappe.DoesNotExistError)
+	return frappe.get_doc(dt, name)
+
+
 def address_key(address: str) -> str:
 	"""Deterministic, collision-free docname for one property address.
 
@@ -242,7 +269,7 @@ def _subject_point(doc):
 	time someone opens the modal. `update_modified=False` so caching a coordinate
 	never looks like somebody edited the lead.
 	"""
-	has_cache = frappe.db.has_column("CRM Lead", "property_lat")
+	has_cache = frappe.db.has_column(doc.doctype, "property_lat")
 	if has_cache and doc.get("property_lat") and doc.get("property_lng"):
 		return float(doc.property_lat), float(doc.property_lng), True
 
@@ -255,7 +282,7 @@ def _subject_point(doc):
 	if has_cache:
 		try:
 			frappe.db.set_value(
-				"CRM Lead", doc.name,
+				doc.doctype, doc.name,
 				{"property_lat": point[0], "property_lng": point[1]},
 				update_modified=False,
 			)
@@ -745,7 +772,7 @@ def set_subject_sqft(lead, sqft=None):
 	mistake it for a measurement.
 	"""
 	_guard()
-	if not frappe.db.exists("CRM Lead", lead):
+	if not frappe.db.exists(subject_doctype(lead), lead):
 		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)
 	if not _sqft_override_supported():
 		return {"ok": False, "error": "sqft_override field is missing"}
@@ -759,7 +786,7 @@ def set_subject_sqft(lead, sqft=None):
 
 	# db.set_value, not doc.save: same reasoning as set_comp_state — a fact
 	# correction must not run SLA/assignment hooks or read as a lead edit.
-	frappe.db.set_value("CRM Lead", lead, SQFT_FIELD, val, update_modified=False)
+	frappe.db.set_value(subject_doctype(lead), lead, SQFT_FIELD, val, update_modified=False)
 	return {"ok": True, "sqft": val or None}
 
 
@@ -799,7 +826,7 @@ def set_comp_type(lead, comp, comp_type=None):
 	priced off, and what state they were in" is a deal artifact, not a view setting.
 	"""
 	_guard()
-	if not frappe.db.exists("CRM Lead", lead):
+	if not frappe.db.exists(subject_doctype(lead), lead):
 		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)
 	if not _types_supported():
 		return {"ok": False, "error": "comps_types field is missing"}
@@ -808,7 +835,7 @@ def set_comp_type(lead, comp, comp_type=None):
 	if ct and ct not in COMP_CONDITION_TYPES:
 		frappe.throw(_("Unknown comp condition {0}").format(ct))
 
-	doc = frappe.get_doc("CRM Lead", lead)
+	doc = _load_subject(lead)
 	types = _load_types(doc)
 	comp = str(comp)
 	if ct:
@@ -817,7 +844,7 @@ def set_comp_type(lead, comp, comp_type=None):
 		types.pop(comp, None)
 
 	frappe.db.set_value(
-		"CRM Lead", lead, TYPES_FIELD, json.dumps(types, sort_keys=True), update_modified=False
+		subject_doctype(lead), lead, TYPES_FIELD, json.dumps(types, sort_keys=True), update_modified=False
 	)
 	return {"ok": True, "comp": comp, "comp_type": ct or None}
 
@@ -875,12 +902,12 @@ def set_comp_state(lead, comp, state):
 	_guard()
 	if state not in ("selected", "hidden", "none"):
 		frappe.throw(_("Unknown comp state {0}").format(state))
-	if not frappe.db.exists("CRM Lead", lead):
+	if not frappe.db.exists(subject_doctype(lead), lead):
 		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)
 	if not _state_supported():
 		return {"ok": False, "error": "comps_hidden/comps_selected fields are missing"}
 
-	doc = frappe.get_doc("CRM Lead", lead)
+	doc = _load_subject(lead)
 	hidden, selected = _comp_state(doc)
 	comp = str(comp)
 	hidden.discard(comp)
@@ -893,7 +920,7 @@ def set_comp_state(lead, comp, state):
 	# db.set_value, not doc.save: this is a view judgement on a lead, and running
 	# the whole CRM Lead save path (SLA, hooks, assignment) for it would be absurd.
 	frappe.db.set_value(
-		"CRM Lead", lead,
+		subject_doctype(lead), lead,
 		{
 			HIDDEN_FIELD: json.dumps(sorted(hidden)),
 			SELECTED_FIELD: json.dumps(sorted(selected)),
@@ -1116,7 +1143,7 @@ def _batchdata_row(lead, comp):
 	from crm.api import batchdata_comps
 
 	try:
-		doc = frappe.get_doc("CRM Lead", lead)
+		doc = _load_subject(lead)
 		rows = batchdata_comps.fetch_for_lead(doc)
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "BatchData comp detail lookup failed")
@@ -1137,7 +1164,7 @@ def get_comp_details(lead, comp, address=None, lat=None, lng=None):
 	30 days. Access remains sales-role gated and the lead anchor must be real.
 	"""
 	_guard()
-	if not frappe.db.exists("CRM Lead", lead):
+	if not frappe.db.exists(subject_doctype(lead), lead):
 		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)
 	if not _available():
 		return {"available": False, "comp": None, "details": None, "photos": []}
@@ -1229,7 +1256,7 @@ def warm_lead_area(lead):
 
 	if not _available():
 		return {"warmed": False, "reason": "no_comps_doctype"}
-	doc = frappe.get_doc("CRM Lead", lead)
+	doc = _load_subject(lead)
 	# Geocoding is Census, not RapidAPI — free, and cached on the lead — so a lead
 	# that has never been located gets that out of the way here too.
 	lat, lng, _cached_point = _subject_point(doc)
@@ -1253,7 +1280,7 @@ def warm_lead_area(lead):
 def warm_lead_comps(lead):
 	"""Manual/whitelisted wrapper, for testing a single lead by hand."""
 	_guard()
-	if not frappe.db.exists("CRM Lead", lead):
+	if not frappe.db.exists(subject_doctype(lead), lead):
 		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)
 	return warm_lead_area(lead)
 
@@ -1275,9 +1302,7 @@ def get_subject_details(lead):
 	which skips re-resolving an address Zillow has resolved before.
 	"""
 	_guard()
-	if not frappe.db.exists("CRM Lead", lead):
-		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)
-	doc = frappe.get_doc("CRM Lead", lead)
+	doc = _load_subject(lead)
 
 	from crm.api import zillow as zillow_api
 
@@ -1398,9 +1423,7 @@ def get_lead_comps(
 	lets this deploy independently of the frontend.
 	"""
 	_guard()
-	if not frappe.db.exists("CRM Lead", lead):
-		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)
-	doc = frappe.get_doc("CRM Lead", lead)
+	doc = _load_subject(lead)
 
 	try:
 		radius = max(0.25, min(10.0, float(radius_mi or DEFAULT_RADIUS_MI)))
@@ -1430,6 +1453,13 @@ def get_lead_comps(
 		"available": _available(),
 		"zillow_match": _zillow_match(doc, subject),
 	}
+	if doc.doctype == SCRATCH_DOCTYPE:
+		# Same contract practice uses: the latest saved calc rides on the comps
+		# response and seeds the calculator, so a scratch property reopens on the
+		# numbers that were saved rather than on a localStorage draft.
+		from crm.api.properties import latest_offer
+
+		base["offer"] = latest_offer(doc)
 	rental = _is_rentals(inventory)
 	base["inventory"] = "rentals" if rental else "sale"
 	# Rentals are a Zillow ForRent circle. They do not need the ISTL pooled

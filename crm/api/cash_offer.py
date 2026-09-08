@@ -339,7 +339,13 @@ def _html(lead, scenes, comps, sqft, notes=""):
 	# as a text blob. One row per comp, each a real link. `data-cash-offer` is
 	# the structured copy the timeline card hydrates; the HTML is the fallback
 	# for email / edit-source / anything that is not CommentArea.
-	page = get_url(f"/crm/leads/{lead}/comps")
+	from crm.api.comps import SCRATCH_DOCTYPE, subject_doctype
+
+	page = get_url(
+		f"/crm/properties/{lead}"
+		if subject_doctype(lead) == SCRATCH_DOCTYPE
+		else f"/crm/leads/{lead}/comps"
+	)
 	attr = html_lib.escape(
 		json.dumps(_payload(lead, scenes, comps, sqft, notes), separators=(",", ":")),
 		quote=True,
@@ -482,10 +488,13 @@ def _html(lead, scenes, comps, sqft, notes=""):
 @frappe.whitelist()
 def save_cash_offer(lead, scenarios=None, comps=None, subject_sqft=None, notes=None):
 	"""Write the current cash, novation, list-it, or rental calc onto the lead timeline. Does not touch the desk rail."""
+	from crm.api.comps import SCRATCH_DOCTYPE, subject_doctype
+
 	_guard()
-	if not frappe.db.exists("CRM Lead", lead):
+	dt = subject_doctype(lead)
+	if not frappe.db.exists(dt, lead):
 		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)
-	if not frappe.has_permission("CRM Lead", "write", lead):
+	if not frappe.has_permission(dt, "write", lead):
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 
 	if isinstance(scenarios, str):
@@ -500,6 +509,14 @@ def save_cash_offer(lead, scenarios=None, comps=None, subject_sqft=None, notes=N
 
 	used = _comps(comps)
 	content = _html(lead, scenes, used, sqft, notes or "")
+	if dt == SCRATCH_DOCTYPE:
+		# A scratch property has no activity timeline and no Notes tab. The calc
+		# lives on the property itself, newest first, and the latest one seeds the
+		# calculator on the next open (see properties.py).
+		from crm.api.properties import record_offer
+
+		record_offer(lead, _payload(lead, scenes, used, sqft, notes or ""), content)
+		return {"ok": True, "comps": len(used), "scenarios": len(scenes)}
 	frappe.get_doc(
 		{
 			"doctype": "Comment",

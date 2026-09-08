@@ -286,10 +286,12 @@ def warm_realtor_estimate(lead):
 	"""Background half of finish_realtor_estimate's timeout path."""
 	import frappe
 
-	if not _api_key() or not frappe.db.exists("CRM Lead", lead):
+	from crm.api.comps import _load_subject, subject_doctype
+
+	if not _api_key() or not frappe.db.exists(subject_doctype(lead), lead):
 		return
 	try:
-		doc = frappe.get_doc("CRM Lead", lead)
+		doc = _load_subject(lead)
 		job = start_realtor_estimate(doc)
 		if job:
 			finish_realtor_estimate(job, budget=ESTIMATE_TIMEOUT * 2 + 2)

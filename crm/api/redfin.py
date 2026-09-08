@@ -356,12 +356,14 @@ def warm_subject_check(lead):
 	not afford. Runs on a worker, so frappe is available normally here."""
 	import frappe
 
-	if not _base_url() or not frappe.db.exists("CRM Lead", lead):
+	from crm.api.comps import subject_doctype
+
+	if not _base_url() or not frappe.db.exists(subject_doctype(lead), lead):
 		return
 	try:
-		from crm.api.comps import _subject_facts, _subject_point
+		from crm.api.comps import _load_subject, _subject_facts, _subject_point
 
-		doc = frappe.get_doc("CRM Lead", lead)
+		doc = _load_subject(lead)
 		lat, lng, _cached = _subject_point(doc)
 		if lat is None:
 			return

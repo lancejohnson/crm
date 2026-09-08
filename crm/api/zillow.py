@@ -575,7 +575,7 @@ def _store(doc, facts):
 		pass
 	try:
 		frappe.db.set_value(
-			"CRM Lead", doc.name,
+			doc.doctype, doc.name,
 			{
 				"zillow_facts": json.dumps(payload),
 				"zillow_fetched_at": frappe.utils.now(),
@@ -624,7 +624,9 @@ def _clear_location_caches(lead):
 	if frappe.db.has_column("CRM Lead", "batchdata_comps_fetched_at"):
 		updates["batchdata_comps_fetched_at"] = None
 	if updates:
-		frappe.db.set_value("CRM Lead", lead, updates, update_modified=False)
+		from crm.api.comps import subject_doctype
+
+		frappe.db.set_value(subject_doctype(lead), lead, updates, update_modified=False)
 
 
 @frappe.whitelist()
@@ -635,13 +637,12 @@ def refresh_lead_facts(lead):
 	address just changed, and leaving those in place would re-center the map on
 	the old parcel and skip the sale fallback for a miss we no longer mean.
 	"""
-	from crm.api.comps import _full_address, _guard
+	from crm.api.comps import _full_address, _guard, _load_subject
 
 	_guard()
-	if not frappe.db.exists("CRM Lead", lead):
-		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)
+	doc = _load_subject(lead)
 	_clear_location_caches(lead)
-	doc = frappe.get_doc("CRM Lead", lead)
+	doc.reload()
 	facts = facts_for_lead(doc, force=True) or {}
 	return {
 		"ok": True,

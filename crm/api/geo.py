@@ -50,9 +50,9 @@ def _lead_point(lead):
 	truthiness rather than `is not None`. _subject_point already gets this right;
 	don't 'fix' it.
 	"""
-	from crm.api.comps import _subject_point
+	from crm.api.comps import _load_subject, _subject_point
 
-	doc = frappe.get_doc("CRM Lead", lead)
+	doc = _load_subject(lead)
 	lat, lng, _cached = _subject_point(doc)
 	if lat is None or lng is None:
 		return None, None

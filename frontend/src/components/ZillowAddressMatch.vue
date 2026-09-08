@@ -40,6 +40,7 @@
  * a miss that is still a miss.
  */
 import { Button, call, toast } from 'frappe-ui'
+import { subjectDoctype } from '@/utils/comps'
 import { computed, ref, watch } from 'vue'
 
 const props = defineProps({
@@ -91,7 +92,7 @@ async function save() {
   saving.value = true
   try {
     await call('frappe.client.set_value', {
-      doctype: 'CRM Lead',
+      doctype: subjectDoctype(props.lead),
       name: props.lead,
       fieldname: 'property_address',
       value: draft.value.trim(),

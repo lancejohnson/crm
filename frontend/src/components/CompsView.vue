@@ -105,7 +105,7 @@
      selected, and the label carries the count so "up to 4" is visible
      before the click rather than as an error after it. -->
 <Button
-  v-if="pageMode && !practiceAttempt && !isRentals"
+  v-if="pageMode && !practiceAttempt && !isRentals && !isScratch"
   :label="underwritingLabel"
   :variant="selectedNames.length ? 'solid' : 'subtle'"
   :disabled="!selectedNames.length || creatingSheet"
@@ -119,7 +119,7 @@
      turns out to be real, so the ping to the closer lives here as well as
      on the lead header. Off in practice: nobody needs a drill flagged. -->
 <Button
-  v-if="!isPractice"
+  v-if="!isPractice && !isScratch"
   :label="__('Live one')"
   variant="subtle"
   :title="__('Got a live one? Send the closer a Mattermost message with a link to these comps')"
@@ -629,7 +629,7 @@
   <!-- Photos + Zillow facts for one comp. Mounted here rather than in each host
        so the map, the list and the Today modal all reach the same gallery. -->
   <LiveOneModal
-    v-if="!isPractice"
+    v-if="!isPractice && !isScratch"
     v-model="showLiveOne"
     :lead="lead"
     :leadName="address || data?.subject?.address || lead"
@@ -694,6 +694,7 @@ import {
   finiteDays,
   isPending,
   isRentalComp,
+  isScratchSubject,
   propertyTypeGlyphHtml,
   propertyTypeGlyphSvg,
   propertyTypeKind,
@@ -2608,6 +2609,9 @@ function applyCompState(name, state) {
  */
 const practiceSeed = computed(() => data.value?.offer || null)
 const isPractice = computed(() => Boolean(props.practiceAttempt && props.practiceProperty))
+// A scratch CRM Property: same map, same picks and calc, but nothing that only
+// makes sense on a LEAD — no underwriting sheet, no live-one ping to the closer.
+const isScratch = computed(() => isScratchSubject(props.lead))
 
 async function setCompState(comp, state) {
   if (!props.lead || !comp) return

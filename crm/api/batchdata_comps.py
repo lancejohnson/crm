@@ -131,7 +131,7 @@ def _store(doc, comps):
 	payload = {"t": time.time(), "comps": comps}
 	try:
 		frappe.db.set_value(
-			"CRM Lead",
+			doc.doctype,
 			doc.name,
 			{
 				CACHE_FIELD: json.dumps(payload),

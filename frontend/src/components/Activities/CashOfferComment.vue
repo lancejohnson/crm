@@ -148,7 +148,7 @@
  * and parses the old inline HTML so existing timeline rows upgrade in place.
  */
 import CompOfferCalc from '@/components/CompOfferCalc.vue'
-import { streetAddress } from '@/utils/comps'
+import { compsPagePath, streetAddress } from '@/utils/comps'
 import { zillowUrl } from '@/utils/propertyLinks'
 import { Button, Dialog } from 'frappe-ui'
 import { computed, ref } from 'vue'
@@ -282,9 +282,7 @@ function parseLegacy(html) {
   return { scenarios: scenes, comps, sqft, notes }
 }
 
-const compsPage = computed(() =>
-  props.lead ? `/crm/leads/${props.lead}/comps` : '',
-)
+const compsPage = computed(() => compsPagePath(props.lead))
 
 const offer = computed(() => {
   const raw = parsePayload(props.html) || parseLegacy(props.html) || {}
