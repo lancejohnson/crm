@@ -469,7 +469,7 @@ def _subject_facts(doc):
 		facts["sqft_label"] = _band_label((override, override, True), "", True)
 		facts["source"]["sqft"] = "manual"
 	facts["sqft_override"] = override or None
-	facts["sqft_override_supported"] = _sqft_override_supported()
+	facts["sqft_override_supported"] = _sqft_override_supported(doc.doctype)
 
 	z_type = (zillow or {}).get("property_type")
 	ptype = z_type or (listing or {}).get("property_type") or None
@@ -742,21 +742,22 @@ def _rental_preset_tiers(facts, radius):
 # ---------------------------------------------------------------------------------
 # Human judgement: hidden / selected comps
 # ---------------------------------------------------------------------------------
-def _state_supported() -> bool:
-	"""False until the ops script adds the fields; everything degrades quietly."""
-	return frappe.db.has_column("CRM Lead", HIDDEN_FIELD) and frappe.db.has_column(
-		"CRM Lead", SELECTED_FIELD
-	)
+def _state_supported(dt="CRM Lead") -> bool:
+	"""False until the ops script adds the fields; everything degrades quietly.
+
+	`dt` is the SUBJECT doctype — a scratch CRM Property carries the same
+	columns from birth, so it must not be gated on whether the LEAD has them."""
+	return frappe.db.has_column(dt, HIDDEN_FIELD) and frappe.db.has_column(dt, SELECTED_FIELD)
 
 
-def _sqft_override_supported() -> bool:
+def _sqft_override_supported(dt="CRM Lead") -> bool:
 	"""False until the ops script adds `sqft_override`; facts fall back to Zillow."""
-	return frappe.db.has_column("CRM Lead", SQFT_FIELD)
+	return frappe.db.has_column(dt, SQFT_FIELD)
 
 
 def _sqft_override(doc):
 	"""The rep-entered subject sqft, or None. 0/blank/garbage all mean none."""
-	if not _sqft_override_supported():
+	if not _sqft_override_supported(doc.doctype):
 		return None
 	val = _num(doc.get(SQFT_FIELD))
 	return int(val) if val and val > 0 else None
@@ -774,7 +775,7 @@ def set_subject_sqft(lead, sqft=None):
 	_guard()
 	if not frappe.db.exists(subject_doctype(lead), lead):
 		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)
-	if not _sqft_override_supported():
+	if not _sqft_override_supported(subject_doctype(lead)):
 		return {"ok": False, "error": "sqft_override field is missing"}
 
 	val = 0
@@ -790,15 +791,15 @@ def set_subject_sqft(lead, sqft=None):
 	return {"ok": True, "sqft": val or None}
 
 
-def _types_supported() -> bool:
+def _types_supported(dt="CRM Lead") -> bool:
 	"""False until the ops script adds `comps_types`; tags degrade quietly."""
-	return frappe.db.has_column("CRM Lead", TYPES_FIELD)
+	return frappe.db.has_column(dt, TYPES_FIELD)
 
 
 def _load_types(doc) -> dict:
 	"""comp docname -> condition label for this lead. Unknown labels are dropped
 	on read, so a bad historical write can never render an off-vocabulary chip."""
-	if not _types_supported():
+	if not _types_supported(doc.doctype):
 		return {}
 	raw = doc.get(TYPES_FIELD)
 	if not raw:
@@ -828,7 +829,7 @@ def set_comp_type(lead, comp, comp_type=None):
 	_guard()
 	if not frappe.db.exists(subject_doctype(lead), lead):
 		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)
-	if not _types_supported():
+	if not _types_supported(subject_doctype(lead)):
 		return {"ok": False, "error": "comps_types field is missing"}
 
 	ct = (comp_type or "").strip()
@@ -862,7 +863,7 @@ def _load_list(doc, field):
 
 def _comp_state(doc):
 	"""(hidden, selected) as sets of comp docnames for this lead."""
-	if not _state_supported():
+	if not _state_supported(doc.doctype):
 		return set(), set()
 	return set(_load_list(doc, HIDDEN_FIELD)), set(_load_list(doc, SELECTED_FIELD))
 
@@ -904,7 +905,7 @@ def set_comp_state(lead, comp, state):
 		frappe.throw(_("Unknown comp state {0}").format(state))
 	if not frappe.db.exists(subject_doctype(lead), lead):
 		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)
-	if not _state_supported():
+	if not _state_supported(subject_doctype(lead)):
 		return {"ok": False, "error": "comps_hidden/comps_selected fields are missing"}
 
 	doc = _load_subject(lead)
@@ -1523,7 +1524,7 @@ def get_lead_comps(
 	hidden, selected = override if override is not None else _comp_state(doc)
 	base["selected"] = sorted(selected)
 	base["hidden"] = sorted(hidden)
-	base["state_supported"] = _state_supported()
+	base["state_supported"] = _state_supported(doc.doctype)
 	out = []
 	for row in rows:
 		if row.lat is None or row.lng is None:
@@ -1650,7 +1651,7 @@ def get_lead_comps(
 	# value. Practice runs pass a state override and get none: the tags are a
 	# judgement about the REAL deal, not part of a training rerun.
 	comp_types = {} if override is not None else _load_types(doc)
-	base["types_supported"] = _types_supported()
+	base["types_supported"] = _types_supported(doc.doctype)
 	for row in out:
 		row["comp_type"] = comp_types.get(row["name"])
 
