@@ -1,8 +1,16 @@
 # Next workspace — build contract
 
 Real implementation of the previewed design (phone dock A + left-nav comms D +
-Talk pages). **Gated to an allowlist; only Lance until he widens it. Staging
-first; production webhooks/numbers untouched.**
+Talk pages). **Gated to an allowlist; only Lance until he widens it.**
+
+**Deploy target (Lance, 2026-09-07): production is allowed — the allowlist is
+the gate, not the environment.** Everyone else keeps the byte-identical classic
+layout. Still never touch Quo numbers or the existing "Groundwork CRM (test)"
+Telnyx resources (those stay on crm-staging); production telephony gets its
+own Telnyx call-control app / messaging profile / number named
+"Groundwork CRM", provisioned by an idempotent ops script. Mattermost sync in
+prod is safe by construction: inbound only mirrors into Frappe; outbound only
+fires for allowlisted authors.
 
 ## Gating
 
@@ -121,14 +129,17 @@ Doctype `CRM Phone Line` (ops `scripts/setup_phone_lines.py`): `number`
 2. `frontend` — wire preview components to the contract; DEV fixtures stay
    behind `?phonePreview=1`.
 3. `listener` — forwarder in `Projects/Groundwork/mattermost/agent-listener`.
-4. `integrate` — merge lanes, run both test suites, `yarn build`, then
-   **staging only**: `ALLOW_WORKTREE=1 scripts/build_image.sh` + staging
-   deploy per ops CLAUDE.md, run ops setup scripts on staging, set staging
-   site_config (`crm_next_users`, `mattermost_sync_secret`). Telnyx: staging
-   number +1 651 382 0252 only. Never touch prod webhooks or Quo.
+4. `integrate` — merge lanes, run both test suites, `yarn build`, then write
+   the rollout for **production, gated to Lance**: `build_image.sh` + deploy
+   per ops CLAUDE.md, run ops setup scripts, set site_config
+   (`crm_next_users` = Lance only, `mattermost_sync_secret`), Telnyx
+   "Groundwork CRM" prod resources via ops script, listener forwarder env.
+   A staging smoke first is preferred but not required. Never touch Quo or the
+   crm-staging Telnyx test resources.
 
 ## Must stay true
 - Classic layout byte-identical for everyone not on the allowlist.
-- No production deploy, no prod site_config, no Telnyx changes outside the
-  "Groundwork CRM (test)" resources, no Mattermost writes from a laptop.
+- Production deploy only via the ops flow and only with the allowlist in
+  place; no Telnyx changes to Quo-owned numbers or the crm-staging test
+  resources; no Mattermost writes from a laptop.
 - Every allow_guest endpoint verifies a signature and fails closed.
