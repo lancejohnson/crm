@@ -62,6 +62,16 @@ class ParseTests(unittest.TestCase):
 		self.assertEqual(out["address"], "3820 N Illinois St, Indianapolis, IN 46208")
 		self.assertEqual(out["source"], "auction")
 
+	def test_auction_no_zip_listing_id(self):
+		for suffix in ("2175212", "12345"):
+			out = parse_listing_url(
+				f"https://www.auction.com/details/633-parkway-dr-saint-paul-mn-{suffix}"
+			)
+			self.assertIsNotNone(out)
+			self.assertEqual(out["address"], "633 Parkway Dr, Saint Paul, MN")
+			self.assertEqual(out["zip"], "")
+			self.assertEqual(out["city"], "Saint Paul")
+
 	def test_auction_ordinal_street(self):
 		out = parse_listing_url("https://www.auction.com/details/16-s-5th-st-w-aurora-mn-55705-42-e_1/")
 		self.assertEqual(out["street"], "16 S 5th St W")

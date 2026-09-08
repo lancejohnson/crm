@@ -195,6 +195,15 @@ def _auction(path: str) -> dict | None:
 	if not m:
 		return None
 	slug = m.group(1).split("_")[0]
+	# Current links end in state + listing ID, with NO ZIP. Strip the ID
+	# before looking for a ZIP: even a five-digit listing ID is not a ZIP.
+	# Legacy links above include ZIP + ID + e_... and keep their old path.
+	current = re.fullmatch(r"(.+)-([A-Za-z]{2})-\d+", slug)
+	if current:
+		street, city = _split_street_city(current.group(1).split("-"))
+		if not street:
+			return None
+		return _assemble(street, city, current.group(2), "")
 	return _parse_hyphen_run(slug)
 
 
