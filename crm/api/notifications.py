@@ -56,6 +56,24 @@ def mark_as_read(user: str | None = None, doc: str | None = None):
 		d.save()
 
 
+def get_hash(notification) -> str:
+	"""URL hash the bell deep-links to on the lead/deal page (#<comment>, #whatsapp,
+	#tasks). Dropped by mistake in 8b55d175, which broke get_notifications with a
+	NameError and blanked the bell for everyone."""
+	_hash = ""
+	if notification.type == "Mention" and notification.notification_type_doc:
+		_hash = "#" + notification.notification_type_doc
+
+	if notification.type == "WhatsApp":
+		_hash = "#whatsapp"
+
+	if notification.type == "Assignment" and notification.notification_type_doctype == "CRM Task":
+		_hash = "#tasks"
+		if "has been removed by" in (notification.message or ""):
+			_hash = ""
+	return _hash
+
+
 def talk_route(notification) -> dict | None:
 	"""Talk mention/reply → /talk/:kind/:id?thread=."""
 	if notification.type not in ("Talk", "Mention"):
