@@ -3705,6 +3705,13 @@ duplicating. Work substantial features in a worktree of your own.
     hash). The SA JSON was delivered into the backend `site_config` via `bench
     set-config` (not a script in the repo).
 
+- **Frappe "assigned to you" emails are OFF by default** (2026-09-08, Lance —
+  a 41-lead handover mailed each receiver 41 times). `Notification Settings`
+  `before_insert` hook (`notification_prefs.default_assignment_emails_off`)
+  zeroes `enable_email_assignment` for new users; existing rows were swept
+  with `disable_assignment_emails(dry_run=0)`. Per-user re-enable lives at
+  `/app/notification-settings/<user>`. In-app CRM notifications, @-mention
+  emails and agreement alerts are untouched.
 - **Agreement activity notifications (text + email to the lead owner)** — when a
   DocuSeal agreement is **viewed / started / signed**, the **lead owner** is
   notified by text (from the dedicated "Notifications" Quo line **(952) 395-3833**,

@@ -74,3 +74,34 @@ def set_notification_prefs(prefs):
 		update_modified=False,
 	)
 	return cleaned
+
+
+# ── Frappe's own "assigned to you" emails ─────────────────────────────────────
+#
+# Every `_assign` (lead owner change, Today-board handover, buyer import) makes
+# core Frappe email the assignee via Notification Log → Notification Settings
+# `enable_email_assignment`, which ships ON. Handing 41 leads to two people
+# sent 41 emails each (2026-09-08). Off by default here; a user who wants them
+# flips the switch at /app/notification-settings/<user>.
+
+
+def default_assignment_emails_off(doc, method=None):
+	"""`Notification Settings` before_insert hook: new users start with
+	assignment emails off. Only touches the row Frappe is about to create."""
+	doc.enable_email_assignment = 0
+
+
+def disable_assignment_emails(dry_run=1):
+	"""One-time sweep for existing users (bench execute). Idempotent."""
+	rows = frappe.get_all(
+		"Notification Settings",
+		filters={"enable_email_assignment": 1},
+		pluck="name",
+	)
+	if not int(dry_run):
+		for name in rows:
+			frappe.db.set_value(
+				"Notification Settings", name, "enable_email_assignment", 0, update_modified=False
+			)
+		frappe.db.commit()
+	return {"dry_run": int(dry_run), "users": rows}

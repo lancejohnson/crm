@@ -239,6 +239,12 @@ doc_events = {
 		"before_validate": ["crm.api.live_demo.validate_user"],
 		"validate_reset_password": ["crm.api.live_demo.validate_reset_password"],
 	},
+	# Core Frappe emails every `_assign` ("assigned to you") — a bulk lead handover
+	# is a mailbox full of them. Off for new users; existing rows swept once via
+	# notification_prefs.disable_assignment_emails.
+	"Notification Settings": {
+		"before_insert": ["crm.api.notification_prefs.default_assignment_emails_off"],
+	},
 	# Quo Message is a custom doctype (ops repo); the SMS server scripts can't
 	# call publish_realtime (not whitelisted in the sandbox), so the live
 	# refresh for the SMS thread/inbox is emitted here on insert instead.
