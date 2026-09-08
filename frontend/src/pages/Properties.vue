@@ -100,7 +100,20 @@
               </div>
               <div class="mt-1.5 flex items-center justify-between text-xs text-ink-gray-5">
                 <span class="truncate">{{ p.owner_name }}</span>
-                <span :title="p.creation">{{ timeAgo(p.creation) }}</span>
+                <span class="flex items-center gap-1.5">
+                  <a
+                    v-if="p.listing_url"
+                    :href="p.listing_url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="hover:text-ink-gray-8"
+                    :title="__('Open the listing')"
+                    @click.stop
+                  >
+                    <FeatherIcon name="external-link" class="size-3" />
+                  </a>
+                  <span :title="p.creation">{{ timeAgo(p.creation) }}</span>
+                </span>
               </div>
             </router-link>
           </template>
@@ -188,13 +201,23 @@
   <Dialog v-model="addOpen" :options="{ title: __('Add property') }">
     <template #body-content>
       <form class="flex flex-col gap-3" @submit.prevent="add">
-        <FormControl
-          v-model="draft.address"
-          type="text"
-          :label="__('Property address')"
-          :placeholder="__('123 Main St, City, ST 55555')"
-          autocomplete="off"
-        />
+        <div>
+          <FormControl
+            v-model="draft.address"
+            type="text"
+            :label="__('Address, or a Zillow / Redfin / Realtor / Auction.com link')"
+            :placeholder="__('123 Main St, City, ST 55555  ·  https://www.zillow.com/homedetails/…')"
+            autocomplete="off"
+          />
+          <!-- What the link resolves to, before anything is created. -->
+          <p v-if="preview.error" class="mt-1 text-xs text-ink-red-4">
+            {{ preview.error }}
+          </p>
+          <p v-else-if="preview.from_url && preview.address" class="mt-1 text-xs text-ink-gray-6">
+            → <span class="font-medium text-ink-gray-8">{{ preview.address }}</span>
+            <span class="text-ink-gray-5"> · {{ sourceLabel(preview.source) }}</span>
+          </p>
+        </div>
         <FormControl
           v-model="draft.notes"
           type="text"
@@ -210,7 +233,7 @@
         variant="solid"
         :label="__('Add & open comps')"
         :loading="adding"
-        :disabled="!draft.address.trim()"
+        :disabled="!draft.address.trim() || !!preview.error"
         @click="add"
       />
     </template>
@@ -239,6 +262,7 @@ import {
   Button,
   Dialog,
   Dropdown,
+  FeatherIcon,
   FormControl,
   call,
   createResource,
@@ -335,9 +359,52 @@ const addOpen = ref(false)
 const adding = ref(false)
 const draft = reactive({ address: '', notes: '' })
 
+const SOURCES = {
+  zillow: 'Zillow',
+  redfin: 'Redfin',
+  realtor: 'Realtor',
+  auction: 'Auction.com',
+}
+function sourceLabel(s) {
+  return SOURCES[s] || __('listing')
+}
+
+// Live "what will this become" for a pasted link. Only asked for text that
+// looks like a URL; a typed address is stored as typed.
+const preview = reactive({ address: '', from_url: false, source: '', error: '' })
+let previewTimer = null
+watch(
+  () => draft.address,
+  (text) => {
+    clearTimeout(previewTimer)
+    const t = (text || '').trim().toLowerCase()
+    const isUrl =
+      t.startsWith('http') || t.startsWith('www.') ||
+      /^(zillow|redfin|realtor|auction)\.com/.test(t)
+    if (!isUrl) {
+      Object.assign(preview, { address: '', from_url: false, source: '', error: '' })
+      return
+    }
+    previewTimer = setTimeout(async () => {
+      try {
+        const r = await call('crm.api.properties.preview_address', { text })
+        Object.assign(preview, {
+          address: r?.address || '',
+          from_url: !!r?.from_url,
+          source: r?.source || '',
+          error: r?.error || '',
+        })
+      } catch (e) {
+        Object.assign(preview, { address: '', from_url: true, source: '', error: '' })
+      }
+    }, 250)
+  },
+)
+
 function openAdd() {
   draft.address = ''
   draft.notes = ''
+  Object.assign(preview, { address: '', from_url: false, source: '', error: '' })
   addOpen.value = true
   nextTick(() => {
     document.querySelector("[role=dialog] input[placeholder='123 Main St, City, ST 55555']")?.focus()

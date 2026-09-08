@@ -19,6 +19,14 @@
           </Button>
         </Dropdown>
         <Button
+          v-if="prop.data?.listing_url"
+          :label="__('Listing')"
+          variant="subtle"
+          iconLeft="external-link"
+          :title="prop.data.listing_url"
+          @click="openListing"
+        />
+        <Button
           :label="offerCount ? __('Saved calcs ({0})', [offerCount]) : __('Saved calcs')"
           variant="subtle"
           iconLeft="clock"
@@ -84,7 +92,7 @@
         <FormControl
           v-model="form.address"
           type="text"
-          :label="__('Property address')"
+          :label="__('Address, or a Zillow / Redfin / Realtor / Auction.com link')"
           :placeholder="__('123 Main St, City, ST 55555')"
         />
         <FormControl v-model="form.notes" type="textarea" :label="__('Note')" />
@@ -184,6 +192,13 @@ const breadcrumbs = computed(() => [
   { label: __('Properties'), route: { name: 'Properties' } },
   { label: address.value || props.propertyId },
 ])
+
+function openListing() {
+  const url = prop.data?.listing_url
+  if (!url) return
+  const win = window.open(url, '_blank', 'noopener')
+  if (win) win.opener = null
+}
 
 const showOffers = ref(false)
 function onCalcSaved() {

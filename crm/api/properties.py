@@ -29,6 +29,7 @@ from frappe import _
 from frappe.utils import now
 
 from crm.api.comps import SCRATCH_DOCTYPE, SCRATCH_PREFIX, _guard
+from crm.api.listing_url import looks_like_url, parse_listing_url
 
 #: The board columns, in order. Stored as free text on `status` (not a Select)
 #: so renaming a stage is a one-line edit here with no schema change; anything
@@ -99,6 +100,38 @@ def _status_supported() -> bool:
 	return frappe.db.has_column(SCRATCH_DOCTYPE, "status")
 
 
+def _listing_url_supported() -> bool:
+	return frappe.db.has_column(SCRATCH_DOCTYPE, "listing_url")
+
+
+def _resolve_address(address: str) -> tuple[dict, str]:
+	"""Typed text → ({address, city, state, zip}, listing_url).
+
+	A pasted Zillow / Redfin / Realtor / Auction.com link is read off its slug
+	(`crm.api.listing_url`); anything else is taken as the address itself.
+	"""
+	address = _clean(address)
+	if looks_like_url(address):
+		parsed = parse_listing_url(address)
+		if not parsed:
+			frappe.throw(
+				_(
+					"Could not read an address from that link. Paste a Zillow, Redfin, "
+					"Realtor or Auction.com PROPERTY page, or type the address."
+				)
+			)
+		return (
+			{
+				"address": parsed["address"],
+				"city": parsed.get("city") or "",
+				"state": parsed.get("state") or "",
+				"zip": parsed.get("zip") or "",
+			},
+			parsed["url"],
+		)
+	return {"address": address, "city": "", "state": "", "zip": ""}, ""
+
+
 def _stage(doc) -> str:
 	val = (doc.get("status") or "").strip()
 	return val if val in STAGES else DEFAULT_STAGE
@@ -136,6 +169,7 @@ def _shape(doc, *, with_offers: bool = False) -> dict:
 		"property_zip": doc.get("property_zip") or "",
 		"notes": doc.get("notes") or "",
 		"status": _stage(doc),
+		"listing_url": doc.get("listing_url") or "",
 		"owner": doc.owner,
 		"owner_name": _user_label(doc.owner),
 		"creation": str(doc.creation),
@@ -211,30 +245,52 @@ def get_property(name: str) -> dict:
 
 
 @frappe.whitelist()
+def preview_address(text: str) -> dict:
+	"""What `create_property` would store for this text — so the add dialog can
+	show the address read off a pasted link before anything is created."""
+	_guard()
+	text = _clean(text)
+	if not text:
+		return {"address": "", "from_url": False}
+	if looks_like_url(text):
+		parsed = parse_listing_url(text)
+		if not parsed:
+			return {"address": "", "from_url": True, "error": _("Not a property page we can read.")}
+		return {"address": parsed["address"], "from_url": True, "source": parsed["source"]}
+	return {"address": text, "from_url": False}
+
+
+@frappe.whitelist()
 def create_property(
 	address: str, city: str = "", state: str = "", zip_code: str = "", notes: str = ""
 ) -> dict:
-	"""Add a house to comp. One full address line is fine — `_full_address`
-	skips the city/state/zip parts already inside it, so "412 Maple Ave,
-	Aurora, MN 55705" with the rest blank geocodes and resolves on Zillow
-	exactly like a webhook lead's address does."""
+	"""Add a house to comp. `address` is either the address itself or a
+	Zillow / Redfin / Realtor / Auction.com listing URL.
+
+	One full address line is fine — `_full_address` skips the city/state/zip
+	parts already inside it, so "412 Maple Ave, Aurora, MN 55705" with the
+	rest blank geocodes and resolves on Zillow exactly like a webhook lead's
+	address does. A link is read off its slug and kept as `listing_url`.
+	"""
 	_guard()
 	_need()
-	address = _clean(address)
-	if not address:
-		frappe.throw(_("Type the property address first."))
+	if not _clean(address):
+		frappe.throw(_("Type the property address or paste a listing link first."))
+	parts, listing_url = _resolve_address(address)
 	doc = frappe.get_doc(
 		{
 			"doctype": SCRATCH_DOCTYPE,
-			"property_address": address,
-			"property_city": _clean(city),
-			"property_state": _clean(state).upper()[:2] if _clean(state) else "",
-			"property_zip": _clean(zip_code),
+			"property_address": parts["address"],
+			"property_city": _clean(city) or parts["city"],
+			"property_state": (_clean(state) or parts["state"]).upper()[:2],
+			"property_zip": _clean(zip_code) or parts["zip"],
 			"notes": (notes or "").strip(),
 		}
 	)
 	if _status_supported():
 		doc.status = DEFAULT_STAGE
+	if listing_url and _listing_url_supported():
+		doc.listing_url = listing_url
 	doc.insert()
 	return _shape(doc)
 
@@ -256,10 +312,18 @@ def update_property(
 		doc.get("property_zip"),
 	)
 	if address is not None:
-		address = _clean(address)
-		if not address:
+		if not _clean(address):
 			frappe.throw(_("The address cannot be blank."))
-		doc.property_address = address
+		parts, listing_url = _resolve_address(address)
+		doc.property_address = parts["address"]
+		if listing_url:
+			# A pasted link names the whole address, so its parts win over
+			# whatever city/state/zip were on file for the old house.
+			doc.property_city = parts["city"]
+			doc.property_state = parts["state"]
+			doc.property_zip = parts["zip"]
+			if _listing_url_supported():
+				doc.listing_url = listing_url
 	if city is not None:
 		doc.property_city = _clean(city)
 	if state is not None:
