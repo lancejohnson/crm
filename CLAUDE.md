@@ -1854,6 +1854,11 @@ duplicating. Work substantial features in a worktree of your own.
     number, not in a half-hourly nudge.
   - Carries: cards resolved **since the last pulse**, the day's rolling total as a
     Done/Skipped/left progress bar, pace vs. the hours left, and **Quo talk time**.
+  - **Team-wide by default** (2026-09-08): removed the Ger-only default roster
+    that silently excluded Exe/Dennis's completions and calls. Empty/unset
+    `today_pulse_users` now means everyone; an explicit site-config roster still
+    restricts the delta/calls (board totals remain team-wide). Check that override
+    on deployment. Regression tests: `unit_test_today_pulse.py`, including Ger off.
   - **Talk time is a first-class metric, not decoration.** Cards-per-half-hour
     alone punishes the behaviour we want: a setter in a 20-minute conversation
     with a motivated seller resolves fewer cards than one dialing voicemails, and

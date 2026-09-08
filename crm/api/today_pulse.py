@@ -48,8 +48,10 @@ from crm.api.daily_standup import DEFAULT_MM_BASE, is_business_day
 
 DOCTYPE = "CRM Today Item"
 
-#: CRM users whose progress this pulse reports on.
-DEFAULT_PULSE_USERS = ("german.haikazounian@groundworkpro.com",)
+#: Empty means the whole team, matching the shared board totals. A hardcoded
+#: rep roster silently hid Exe/Dennis's completions and calls when Ger was off.
+#: Keep today_pulse_users as an explicit site override, not a default roster.
+DEFAULT_PULSE_USERS = ()
 
 #: Where the pulse posts. The Acq channel, so the whole acquisitions team sees
 #: the same pace the setters are working against.
