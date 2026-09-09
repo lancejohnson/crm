@@ -67,7 +67,7 @@ TERMINAL_STATUS_TYPES = ("Lost", "Won")
 #: without a plan, which the weekly/monthly sweeps let happen.
 #: Only `closer` still generates cards from the board itself; the old ladder
 #: phases are kept so cards created before 2026-09-09 keep their labels.
-CADENCE_PHASES = ("never", "week1", "week1_partial", "weekly", "monthly", "closer")
+CADENCE_PHASES = ("never", "week1", "week1_partial", "weekly", "monthly", "closer", "nudge")
 
 #: phase 1 — first N business days after first contact, 2 calls per business day
 PHASE1_BUSINESS_DAYS = 5
@@ -85,7 +85,7 @@ PHASE3_INTERVAL = 22
 CALLS_PER_LEAD_MONTH1 = PHASE1_BUSINESS_DAYS * PHASE1_CALLS_PER_DAY + 3
 
 #: obvious non-leads that must never reach a call list
-EXCLUDE_LEAD_NAMES = ("lance test",)
+EXCLUDE_LEAD_NAMES = ("lance test", "test lead for agreement")
 
 #: who gets the DM
 DEFAULT_DM_USER = "lancejohnson"
@@ -273,6 +273,37 @@ def _fetch_chase_rows(today):
 	)
 	task_map = {t.n: t for t in tasks}
 
+	# Last CONTACT is calls and texts, either direction — the number the nudge
+	# card prints ("12 days since last contact"). A text the seller sent is
+	# contact; a voicemail we left is at least an attempt. Guarded on the Quo
+	# Message doctype so a site without texting still builds a board.
+	text_map = {}
+	if frappe.db.exists("DocType", "Quo Message"):
+		for t in frappe.db.sql(
+			"""
+			select reference_docname n, max(coalesce(message_date, creation)) last_text
+			from `tabQuo Message`
+			where reference_doctype = 'CRM Lead' and reference_docname in %(names)s
+			  and coalesce(status, '') not in ('scheduled', 'canceled')
+			group by reference_docname
+			""",
+			{"names": names},
+			as_dict=True,
+		):
+			text_map[t.n] = t.last_text
+
+	# A lead an Active sequence is driving gets its work from the sequence's
+	# tasks; the board must not nag it for a next step on top.
+	in_sequence = set()
+	if frappe.db.exists("DocType", "CRM Sequence Enrollment"):
+		in_sequence = set(
+			frappe.get_all(
+				"CRM Sequence Enrollment",
+				filters={"status": "Active", "lead": ["in", names]},
+				pluck="lead",
+			)
+		)
+
 	for r in rows:
 		c = call_map.get(r.name)
 		t = task_map.get(r.name)
@@ -282,7 +313,23 @@ def _fetch_chase_rows(today):
 		r.next_future_due = t.next_future_due if t else None
 		r.tasks_due_now = int(t.due_now or 0) if t else 0
 		r.due_task_title = t.due_title if t else None
+		last_text = text_map.get(r.name)
+		r.last_contact = max([d for d in (r.last_call, last_text) if d], default=None)
+		r.in_sequence = r.name in in_sequence
 	return rows
+
+
+def last_contact_label(row, today) -> str:
+	"""Pure: "3 days since last contact" / "last contact today" / "never contacted"."""
+	last = getattr(row, "last_contact", None) or getattr(row, "last_call", None)
+	if not last:
+		return "never contacted"
+	days = (getdate(today) - getdate(last)).days
+	if days <= 0:
+		return "last contact today"
+	if days == 1:
+		return "1 day since last contact"
+	return f"{days} days since last contact"
 
 
 def _classify(row, today):
@@ -303,39 +350,41 @@ def _classify(row, today):
 	# it has been reached, so "never called" / "2 calls today" say nothing
 	# useful about it — what matters is that nobody has written down what
 	# happens next. Booking any task after today clears it (the branch above).
+	ago = last_contact_label(row, today)
+
 	if row.status in CLOSER_STATUSES:
-		reason = f"{row.status} · no follow-up scheduled"
+		reason = f"{row.status} · no next step · {ago}"
 		if row.tasks_due_now:
 			title = (row.due_task_title or "").strip()
-			reason = f"{row.status} · " + (f"task: {title}" if title else "task due")
+			reason = f"{row.status} · " + (f"task: {title}" if title else "task due") + f" · {ago}"
 		return ("closer", 1, True, reason)
 
 	# The board's own call ladder (never-called → 2/day week 1 → weekly →
 	# monthly) is GONE (Lance, 2026-09-09: "the only cadence we want now are in
-	# the sequences"). A lead lands on the board because a task is due — which
-	# is exactly what the New Lead 10-Day sequence produces (a Text task daily,
-	# a triple-dial Call task every other day) — or because it is a deal in
-	# flight with nothing booked (above). Nothing else.
-	since = business_days_between(row.last_call, today) if row.last_call else None
-	ago = (
-		f"{since} business day{'' if since == 1 else 's'} since last call"
-		if since is not None
-		else "never called"
-	)
+	# the sequences"). Three things make a card: a task due today (which is
+	# what the New Lead 10-Day sequence produces), a deal in flight with
+	# nothing booked (above), and — since the same day — a live lead that NO
+	# sequence is driving and that has no dated next step. That last one is
+	# the poke: it comes back every day, naming how long since last contact,
+	# until someone books a task after today.
 	if row.tasks_due_now:
 		title = (row.due_task_title or "").strip()
 		generic = title.lower() in ("", "follow up", "follow up call", "call back", "call")
 		task_reason = "task due" if generic else f"task: {title}"
 		return ("task", 1, True, f"{task_reason} · {ago}")
 
-	return ("sequence", 0, False, f"no task due · {ago}")
+	if getattr(row, "in_sequence", False):
+		return ("sequence", 0, False, f"in a sequence · {ago}")
+
+	return ("nudge", 1, True, f"no next step · {ago}")
 
 
 #: display order — never-called first, then explicit due tasks, then cadence.
-_PHASE_RANK = {"closer": 0, "never": 1, "task": 2, "week1": 3, "weekly": 4, "monthly": 5}
+_PHASE_RANK = {"closer": 0, "never": 1, "task": 2, "nudge": 3, "week1": 4, "weekly": 5, "monthly": 6}
 
 _PHASE_LABEL = {
 	"closer": "Deal in flight — no follow-up scheduled",
+	"nudge": "No next step — book one",
 	"never": "Never called",
 	"week1": "Week 1 — 2 calls/day",
 	"weekly": "Weekly sweep",

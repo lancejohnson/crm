@@ -87,6 +87,21 @@ def pause_excluded_enrollments(lead, status, reason=None) -> list:
 	return paused
 
 
+def pause_all(lead, reason) -> list:
+	"""Pause every Active enrollment of `lead`, whatever its sequence's status
+	set — contact was made (Today card Connected, etc). Never raises."""
+	paused = []
+	try:
+		for row in frappe.get_all(
+			"CRM Sequence Enrollment", filters={"lead": lead, "status": "Active"}, pluck="name"
+		):
+			_pause(row, reason)
+			paused.append(row)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "sequence_status: pause_all failed")
+	return paused
+
+
 def on_lead_update(doc, method=None):
 	"""CRM Lead on_update: a status move out of a sequence's set pauses it."""
 	try:

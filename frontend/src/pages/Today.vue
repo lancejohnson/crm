@@ -677,13 +677,15 @@ const PHASE = {
     badgeClass: '!bg-purple-100 !text-purple-700',
     defaultOrder: 1,
   },
-  never: { label: 'Never called', theme: 'red', defaultOrder: 2 },
+  // live lead, no sequence driving it, no dated next step — daily until booked
+  nudge: { label: 'No next step', theme: 'orange', defaultOrder: 2 },
+  never: { label: 'Never called', theme: 'red', defaultOrder: 3 },
   week1_am: { label: 'Week 1 · morning', theme: 'orange', defaultOrder: 3 },
   week1_pm: { label: 'Week 1 · afternoon', theme: 'orange', defaultOrder: 4 },
   weekly: { label: 'Weekly', theme: 'blue', defaultOrder: 5 },
   monthly: { label: 'Monthly', theme: 'gray', defaultOrder: 6 },
 }
-const DEFAULT_PRIORITY_ORDER = ['task', 'closer']
+const DEFAULT_PRIORITY_ORDER = ['task', 'closer', 'nudge']
 
 const board = createResource({
   url: 'crm.api.today_board.get_today_board',

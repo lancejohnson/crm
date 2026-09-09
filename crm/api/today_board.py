@@ -59,6 +59,10 @@ DONE_OUTCOMES = (
 	"Other",
 )
 
+#: A Done outcome that means contact happened. It takes the lead OUT of any
+#: running sequence — the sequence's job was to reach them.
+SEQUENCE_EXIT_OUTCOMES = ("Connected",)
+
 #: Skip used to be a blank "why". 60 days of those notes (462 skips, 124 with
 #: no reason at all) clustered into the same handful of answers, so the picker
 #: is the Done one: one tap, Other still takes a sentence. Kept in step with
@@ -79,7 +83,9 @@ SKIP_OUTCOMES = (
 #: work to a rep) and a deal in flight with nothing booked. The old call-ladder
 #: keys (never / week1_am / week1_pm / weekly / monthly) are no longer offered
 #: in the Priority modal; cards that still carry them sort after these two.
-PRIORITY_ORDER = ("task", "closer")
+#: `nudge` = a live lead no sequence is driving, with no dated next step —
+#: daily until one is booked, with "N days since last contact" on the card.
+PRIORITY_ORDER = ("task", "closer", "nudge")
 PRIORITY_DEFAULT_KEY = "crm_today_priority_order"
 
 
@@ -1870,6 +1876,16 @@ def set_today_state(item, state, outcome=None, outcome_note=None):
 	# corrected a mis-click. Worth its own timeline line: without it the lead keeps
 	# showing the answer that was withdrawn.
 	_log_outcome_comment(doc, state, outcome, outcome_note, corrected=same_state)
+	# Contact made → the lead leaves its sequence (Lance, 2026-09-09): from here
+	# the rep owns the follow-up, and the nudge card chases them for a next
+	# step. Paused, not Stopped, like every other exit — resumable.
+	if state == "Done" and outcome in SEQUENCE_EXIT_OUTCOMES:
+		try:
+			from crm.api.sequence_status import pause_all
+
+			pause_all(doc.lead, f"Today card marked {outcome} by {frappe.session.user}")
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), "today_board: sequence exit failed")
 	_publish(doc.for_date)
 	return {"ok": True, "state": state, "outcome": outcome, "outcome_note": outcome_note}
 

@@ -2045,6 +2045,22 @@ duplicating. Work substantial features in a worktree of your own.
   re-entering a status — Resume is a human click. Unit tests:
   `unit_test_sequence_status.py`. `Seller Outreach (Default)` was set to
   New + Called No Answer during verification (0 enrollments, no auto-enroll).
+- **Contact exits the sequence; no next step gets poked daily** (2026-09-09,
+  Lance). (a) A Today card resolved Done with outcome **Connected**
+  (`SEQUENCE_EXIT_OUTCOMES` in `today_board.py`) pauses every Active
+  enrollment of the lead (`sequence_status.pause_all`) — alongside the
+  existing exits (text reply / answered inbound / Connected call outcome).
+  (b) Phase **`nudge`**: a live lead that NO Active sequence is driving and
+  that has no dated open task gets a card every day — reason "no next step ·
+  N days since last contact" — until someone books a task after today.
+  `_fetch_chase_rows` now carries `last_contact` (max of CRM Call Log and
+  Quo Message either direction, scheduled/canceled placeholders excluded)
+  and `in_sequence`; `last_contact_label` is the pure formatter, also on the
+  closer reason. Order: task → closer → nudge. Measured at the switch: 55
+  nudges (41 Follow Up; German 29 / Exe 19 / Dennis 7), oldest 29 days
+  silent. Test lead "Test Lead For Agreement" added to `EXCLUDE_LEAD_NAMES`.
+  NOTE "Sent a Text" does NOT exit (a day-1 sequence text would end the
+  sequence for everyone) — pending Lance.
 - **The Today board's own call ladder is GONE** (2026-09-09, Lance: "the
   only cadence we want now are in the sequences"). `daily_standup._classify`
   now returns due only for (a) a task due today — `task`, which is how the

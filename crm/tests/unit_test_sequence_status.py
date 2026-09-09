@@ -73,6 +73,8 @@ def _row(status, **kw):
 		next_future_due=None,
 		tasks_due_now=0,
 		due_task_title=None,
+		last_contact=None,
+		in_sequence=False,
 	)
 	base.update(kw)
 	return SimpleNamespace(**base)
@@ -85,7 +87,7 @@ class CloserCardTests(unittest.TestCase):
 		for status in ds.CLOSER_STATUSES:
 			phase, need, due, reason = ds._classify(_row(status, last_call=datetime(2026, 9, 4, 10, 0)), self.today)
 			self.assertEqual((phase, need, due), ("closer", 1, True), status)
-			self.assertIn("no follow-up scheduled", reason)
+			self.assertIn("no next step", reason); self.assertIn("since last contact", reason)
 
 	def test_future_task_clears_it(self):
 		phase, _, due, _ = ds._classify(
@@ -100,7 +102,7 @@ class CloserCardTests(unittest.TestCase):
 		self.assertEqual((phase, due), ("closer", True))
 		self.assertIn("Send DD docs", reason)
 
-	def test_no_board_cadence_without_a_task(self):
+	def test_no_board_cadence_while_a_sequence_drives_it(self):
 		# never-called, week-one, weekly, monthly: none of them make a card now
 		for kw in (
 			dict(first_call=None, last_call=None),
@@ -108,8 +110,31 @@ class CloserCardTests(unittest.TestCase):
 			dict(last_call=datetime(2026, 8, 25, 9, 0)),
 			dict(last_call=datetime(2026, 6, 1, 9, 0)),
 		):
-			phase, need, due, _ = ds._classify(_row("Called No Answer", **kw), self.today)
+			phase, need, due, _ = ds._classify(_row("Called No Answer", in_sequence=True, **kw), self.today)
 			self.assertEqual((phase, need, due), ("sequence", 0, False), kw)
+
+	def test_no_sequence_and_no_next_step_is_poked_daily(self):
+		phase, need, due, reason = ds._classify(
+			_row("Follow Up", last_contact=datetime(2026, 9, 1, 10, 0)), self.today
+		)
+		self.assertEqual((phase, need, due), ("nudge", 1, True))
+		self.assertIn("no next step", reason)
+		self.assertIn("6 days since last contact", reason)
+		phase, _, _, reason = ds._classify(_row("New", last_call=None, first_call=None), self.today)
+		self.assertEqual(phase, "nudge")
+		self.assertIn("never contacted", reason)
+
+	def test_last_contact_counts_texts(self):
+		r = _row("Follow Up", last_call=datetime(2026, 8, 1, 9, 0), last_contact=datetime(2026, 9, 6, 9, 0))
+		self.assertEqual(ds.last_contact_label(r, self.today), "1 day since last contact")
+		r = _row("Follow Up", last_contact=datetime(2026, 9, 7, 9, 0))
+		self.assertEqual(ds.last_contact_label(r, self.today), "last contact today")
+
+	def test_future_task_silences_the_poke(self):
+		phase, _, due, _ = ds._classify(
+			_row("Follow Up", next_future_due=datetime(2026, 9, 12, 9, 0)), self.today
+		)
+		self.assertEqual((phase, due), ("scheduled", False))
 
 	def test_task_due_today_is_the_only_other_card(self):
 		phase, need, due, reason = ds._classify(
