@@ -2059,8 +2059,10 @@ duplicating. Work substantial features in a worktree of your own.
   closer reason. Order: task → closer → nudge. Measured at the switch: 55
   nudges (41 Follow Up; German 29 / Exe 19 / Dennis 7), oldest 29 days
   silent. Test lead "Test Lead For Agreement" added to `EXCLUDE_LEAD_NAMES`.
-  NOTE "Sent a Text" does NOT exit (a day-1 sequence text would end the
-  sequence for everyone) — pending Lance.
+  **"Sent a Text" deliberately does NOT exit** (Lance, same day: "if we
+  receive a text it should exit, but not if we send a text") — a day-1
+  sequence text would otherwise end the sequence for everyone; a RECEIVED
+  text already exits via the webhook.
 - **The Today board's own call ladder is GONE** (2026-09-09, Lance: "the
   only cadence we want now are in the sequences"). `daily_standup._classify`
   now returns due only for (a) a task due today — `task`, which is how the
