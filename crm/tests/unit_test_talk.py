@@ -68,6 +68,64 @@ class PresenceTests(unittest.TestCase):
 		self.assertEqual(out, {"a@x": "on_call", "b@x": "offline", "c@x": "away", "d@x": "on_call"})
 
 
+class ShapeTests(unittest.TestCase):
+	"""`shape_message` is called from thread/post/_publish; a merge once dropped its
+	`def` line and every Talk read and post raised NameError on prod (gw488)."""
+
+	ROW = {
+		"name": "MSG-1",
+		"author": "exe@x.com",
+		"author_label": None,
+		"text": "hi",
+		"posted_at": "2026-09-07 10:00:00",
+		"origin": None,
+		"edited_at": None,
+		"mm_post_id": "abc",
+		"mm_root_id": None,
+		"parent_message": None,
+		"props": None,
+	}
+
+	def test_defined_with_the_signature_every_call_site_uses(self):
+		self.assertTrue(callable(getattr(talk, "shape_message", None)))
+		self.assertEqual(talk.shape_message(self.ROW), talk.shape_message(self.ROW, None, 0))
+		self.assertEqual(talk.shape_message(self.ROW, {}, reply_count=0)["reply_count"], 0)
+
+	def test_shape_keys_the_frontend_reads(self):
+		out = talk.shape_message(self.ROW, {"exe@x.com": "Exe Q"}, reply_count=2)
+		self.assertEqual(
+			out,
+			{
+				"name": "MSG-1",
+				"author": "exe@x.com",
+				"author_name": "Exe Q",
+				"text": "hi",
+				"posted_at": "2026-09-07 10:00:00",
+				"origin": "crm",
+				"edited_at": None,
+				"mm_post_id": "abc",
+				"parent": None,
+				"reply_count": 2,
+				"from_comment": None,
+			},
+		)
+
+	def test_author_label_beats_full_name_and_falls_back_to_email(self):
+		labelled = dict(self.ROW, author_label="Bot says")
+		self.assertEqual(talk.shape_message(labelled, {"exe@x.com": "Exe Q"})["author_name"], "Bot says")
+		self.assertEqual(talk.shape_message(self.ROW)["author_name"], "exe@x.com")
+
+	def test_parent_origin_and_from_comment(self):
+		row = dict(self.ROW, parent_message="MSG-0", origin="mattermost", props='{"from_comment": "CMT-9"}', text=None)
+		out = talk.shape_message(row)
+		self.assertEqual(out["parent"], "MSG-0")
+		self.assertEqual(out["origin"], "mattermost")
+		self.assertEqual(out["from_comment"], "CMT-9")
+		self.assertEqual(out["text"], "")
+		self.assertIsNone(talk.shape_message(dict(self.ROW, props="not json"))["from_comment"])
+
+
+
 class GuardTests(unittest.TestCase):
 	def setUp(self):
 		shim.db.doctypes.clear()

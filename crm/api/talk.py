@@ -349,7 +349,12 @@ def _from_comment(row) -> str | None:
 		return None
 
 
+def shape_message(row, full_names: dict | None = None, reply_count: int = 0) -> dict:
+	"""The one message shape every read (`thread`), `post` and `_publish` hand the frontend.
 
+	`row` is a `frappe.get_all` dict or `doc.as_dict()`; `full_names` maps author
+	email -> full name (`_full_names`) and is optional, as is `reply_count`.
+	"""
 	full_names = full_names or {}
 	author = row.get("author")
 	return {

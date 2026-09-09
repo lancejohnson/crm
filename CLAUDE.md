@@ -85,6 +85,15 @@ duplicating. Work substantial features in a worktree of your own.
   - Unit tests run without a bench: `python3 crm/tests/run_unit.py` (stubs
     frappe via `crm/tests/frappe_shim.py`; files are `unit_test_*.py` so
     bench's `test_*` discovery never loads them).
+  - **GOTCHA (2026-09-10) — `shape_message` went missing without an import
+    error.** `cb8142b2` (per-lead chats) pasted `_from_comment` OVER the
+    `def shape_message(...)` line; the orphaned body stayed indented, so
+    Python read it as dead code at the tail of `_from_comment` and the module
+    imported fine — every Talk read/post/`_publish` then raised `NameError`
+    on prod (gw488) while the unit suite stayed green, because nothing called
+    the shaper. Restored with its original signature
+    `(row, full_names=None, reply_count=0)`; `ShapeTests` in
+    `unit_test_talk.py` now pins the function and the frontend's keys.
 
 - **Dev-only Phone Preview** — `/phone-preview` opens an actual CRM lead
   with `?phonePreview=1`: collapsed phone dock, bottom team bar, persistent
