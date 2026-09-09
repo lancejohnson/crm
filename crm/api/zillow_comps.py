@@ -34,6 +34,7 @@ from datetime import datetime, timezone
 import frappe
 
 from crm.api import sale_history
+from crm.api.comp_provenance import is_adc, mark_verified, qualified_address
 from crm.api import zillow as zillow_api
 
 #: How long a COMPLETE circle is served before it is re-bought.
@@ -798,7 +799,7 @@ def _apply_sale(row, price, date):
 	# was always going to become, and leaving the old label would keep calling a
 	# closed transaction an open one.
 	row["listing_state"] = "sold"
-	row["source"] = "zillow"
+	mark_verified(row, "sold", "zillow_sale")
 	row["zillow_refreshed"] = True
 
 
@@ -831,7 +832,7 @@ def _apply_listing(row, price, days_on_market, state="for_sale"):
 	row["removed_date"] = None
 	if days_on_market is not None:
 		row["days_on_market"] = int(days_on_market)
-	row["source"] = "zillow"
+	mark_verified(row, state, "current_ask")
 	row["zillow_refreshed"] = True
 
 
@@ -902,7 +903,8 @@ def refresh_pins(rows, cap=PIN_REFRESH_CAP):
 		# Any pin still wearing ISTL facts — those are the listing/tax numbers
 		# that disagree with the Zillow page. Zillow-origin rows already carry
 		# livingArea from /search.
-		return bool(row.get("address") and row.get("source") != "zillow")
+		return bool(row.get("address") and row.get("source") != "zillow"
+			and (not is_adc(row) or qualified_address(row)))
 
 	candidates = [r for r in rows if _needs_zillow_shape(r)]
 	candidates.sort(key=lambda r: r.get("distance_mi") or 99)

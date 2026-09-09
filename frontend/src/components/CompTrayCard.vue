@@ -128,6 +128,9 @@
             {{ comp.distance_mi }} mi
           </span>
         </div>
+        <div v-if="comp.sale_source === 'Auction.com'" class="mt-0.5 text-xs text-ink-gray-5">
+          ADC reported sale · {{ comp.sale_date || __('date unknown') }}
+        </div>
         <div class="mt-0.5 text-xs text-ink-gray-7">{{ facts }}</div>
 
         <!-- How this comp differs from the subject, which is the actual question
@@ -439,6 +442,7 @@ const deltas = computed(() => {
  */
 const timing = computed(() => {
   const c = props.comp
+  if (state.value === 'unknown') return __('Current status unknown — ADC sale evidence only')
   // A pending house is not "listed" any more and has not sold either. What
   // matters about it is that the price is agreed, so that is what it says.
   if (isPendingComp.value) {

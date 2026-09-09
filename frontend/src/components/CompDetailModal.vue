@@ -165,6 +165,10 @@
           </div>
 
           <aside class="min-h-0 overflow-y-auto bg-surface-white p-5 sm:p-6">
+            <p v-if="comp?.sale_source === 'Auction.com'" class="mb-3 text-sm text-ink-gray-6">
+              {{ __('ADC reported sale') }}: {{ formatCompMoney(comp.sale_price) }} · {{ comp.sale_date || __('date unknown') }}.
+              {{ __('Historical evidence, not a current asking price or status.') }}
+            </p>
             <div class="flex flex-wrap items-baseline justify-between gap-3">
               <div>
                 <div class="text-2xl font-semibold text-ink-gray-9">
@@ -506,6 +510,7 @@ const displayPrice = computed(() => {
   }
   // `/property` asking_price is a SALE ask. A rental pin's price is monthly rent.
   if (state.value === 'for_rent') return props.comp?.price
+  if (props.comp?.price_basis === 'adc_sale' && !freshState.value) return props.comp.sale_price
   return details.value?.asking_price || props.comp?.price || details.value?.zestimate
 })
 const displayPriceLabel = computed(() => {
@@ -520,6 +525,7 @@ const displayPriceLabel = computed(() => {
   if (state.value === 'auction') {
     return Number(displayPrice.value) > 0 ? __('Auction') : __('Auction — no asking price')
   }
+  if (props.comp?.price_basis === 'adc_sale' && !freshState.value) return __('ADC reported sale')
   if (details.value?.asking_price) return __('Current Zillow ask')
   if (state.value === 'pending') return __('Agreed price · under contract')
   // The subject is not on the market, so its headline number is whatever it last
@@ -529,6 +535,7 @@ const displayPriceLabel = computed(() => {
     const when = details.value?.last_sale?.date
     return when ? __('Last sold · {0}', [dateOnly(when)]) : __('Last sold')
   }
+  if (props.comp?.price_basis === 'adc_sale') return __('ADC reported sale')
   if (props.comp?.price) return __('Last known list price')
   return details.value?.zestimate ? __('Zestimate — no listing price on record') : ''
 })

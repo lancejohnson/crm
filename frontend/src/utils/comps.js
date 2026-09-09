@@ -68,6 +68,7 @@ export function compState(comp) {
   const declared = String(comp?.listing_state || '')
   if (declared) return declared
   if (String(comp?.name || '').startsWith('zillow-rent::')) return 'for_rent'
+  if (/^auction:\d+$/.test(String(comp?.source_lead || ''))) return 'unknown'
   if (isActiveStatus(comp?.status)) return 'for_sale'
   return comp?.source === 'zillow' || comp?.zillow_refreshed ? 'sold' : 'off_market'
 }
@@ -90,6 +91,7 @@ export function isAuction(comp) {
 
 /** What to call a state on a badge. Short: these render inside 24px pills. */
 export function compStateLabel(state) {
+  if (state === 'unknown') return __('Current status unknown')
   if (state === 'pending') return __('Pending')
   if (state === 'auction') return __('Auction')
   if (state === 'for_sale') return __('For sale')

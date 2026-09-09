@@ -59,6 +59,7 @@ import urllib.parse
 import urllib.request
 
 import frappe
+from crm.api.comp_provenance import is_adc, shape_pool_row, qualified_address
 from frappe import _
 
 DOCTYPE = "CRM Comp"
@@ -1042,6 +1043,11 @@ def _shape_detail(row, zpid=None):
 	address string is a guess Zillow has to re-resolve, so it is both cheaper and
 	more reliable when available.
 	"""
+	row = shape_pool_row(row)
+	if is_adc(row) and not qualified_address(row):
+		return {"available": False, "comp": row, "details": None, "photos": [],
+			"photos_available": False, "photo_source": "", "redfin_url": None,
+			"message": _("ADC comp lacks a full locality-qualified address; lookup skipped.")}
 	name = str(row.get("name") or "")
 	if not zpid and name.startswith("zillow::"):
 		zpid = name.split("::", 1)[1]
@@ -1082,6 +1088,15 @@ def _shape_detail(row, zpid=None):
 		redfin_url = redfin.redfin_listing_url(addr, lat, lng)
 
 	comp = dict(row)
+	if is_adc(comp) and details:
+		from crm.api.zillow_comps import _state_from_facts
+		state = _state_from_facts(details)
+		if not state:
+			state = {"SOLD": "sold", "RECENTLY_SOLD": "sold", "OFF_MARKET": "off_market"}.get(
+				str(details.get("home_status") or "").upper())
+		if state:
+			comp["listing_state"] = state
+			comp["current_status_source"] = "zillow"
 	for key in ("listed_date", "removed_date"):
 		if comp.get(key):
 			comp[key] = str(comp[key])
@@ -1196,15 +1211,16 @@ def get_comp_details(lead, comp, address=None, lat=None, lng=None):
 				"name", "address", "city", "state", "zip", "price", "status",
 				"listed_date", "removed_date", "days_on_market", "days_old",
 				"bedrooms", "bathrooms", "square_footage", "year_built", "property_type",
-				"lat", "lng",
+				"lat", "lng", "source_lead",
 			],
 			as_dict=True,
 		)
 	if not row:
 		frappe.throw(_("Comparable property {0} does not exist.").format(comp), frappe.DoesNotExistError)
 
-	key = _detail_cache_key(comp)
-	cached = _detail_cached(comp)
+	cache_comp = f"{comp}:adc-v1" if is_adc(row) else comp
+	key = _detail_cache_key(cache_comp)
+	cached = _detail_cached(cache_comp)
 	if isinstance(cached, dict):
 		# A remembered MISS written before the caller supplied an address is worth
 		# one address-armed retry — otherwise Retry serves the same failure for the
@@ -1498,7 +1514,7 @@ def get_lead_comps(
 			fields=[
 				"name", "address", "city", "state", "zip", "lat", "lng", "price", "status",
 				"listed_date", "removed_date", "days_on_market", "days_old",
-				"bedrooms", "bathrooms", "square_footage", "year_built", "property_type",
+				"bedrooms", "bathrooms", "square_footage", "year_built", "property_type", "source_lead",
 			],
 			limit_page_length=5000,
 		)
@@ -1543,7 +1559,7 @@ def get_lead_comps(
 		dist = _haversine_mi(lat, lng, row.lat, row.lng)
 		if dist > radius:
 			continue
-		row = dict(row)
+		row = shape_pool_row(row)
 		row["distance_mi"] = round(dist, 2)
 		row["source"] = row.get("source") or "istl"
 		# The pooled index holds no imagery. The key exists from the start so the
@@ -1560,7 +1576,8 @@ def get_lead_comps(
 		# transaction earns the word sold, which is the same line the pin popup has
 		# always drawn -- now drawn once, on the server, instead of re-derived by
 		# each surface that shows a comp.
-		row["listing_state"] = "for_sale" if _is_active(row.get("status")) else "off_market"
+		if not is_adc(row):
+			row["listing_state"] = "for_sale" if _is_active(row.get("status")) else "off_market"
 		row["selected"] = row["name"] in selected
 		row["hidden"] = row["name"] in hidden
 		# Computed while the dates are still dates, and returned so the client can
