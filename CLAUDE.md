@@ -2036,6 +2036,19 @@ duplicating. Work substantial features in a worktree of your own.
   re-entering a status — Resume is a human click. Unit tests:
   `unit_test_sequence_status.py`. `Seller Outreach (Default)` was set to
   New + Called No Answer during verification (0 enrollments, no auto-enroll).
+- **The Today board's own call ladder is GONE** (2026-09-09, Lance: "the
+  only cadence we want now are in the sequences"). `daily_standup._classify`
+  now returns due only for (a) a task due today — `task`, which is how the
+  New Lead 10-Day sequence hands work to a rep — and (b) `closer` (deal in
+  flight, nothing booked). never-called / 2-a-day week 1 / weekly / monthly
+  make NO cards; those phases survive only as labels on pre-existing cards
+  (`PRIORITY_ORDER` is `("task", "closer")`, legacy keys sort after). The
+  Priority modal lists just the two. Measured on prod at the switch: due
+  **60 → 24** (18 task + 6 closer); **115 live leads with no task fell off
+  the board** — leads that predate the sequence and are enrolled in nothing.
+  Non-iSTL sources (PropertyLeads, Leadzolo) get no call tasks from any
+  sequence and so never surface either. `PHASE1_*`/`CALLS_PER_LEAD_MONTH1`
+  remain for the standup's intake-capacity arithmetic only.
 - **Scheduled texts** (2026-09-09, Lance: weekend text tasks → "let the user
   schedule a text"). A clock button beside Send on `SendTextModal` and the
   Text-tab `SMSBox` opens `ScheduleTextPicker` (Tomorrow / Sat / Mon 9am

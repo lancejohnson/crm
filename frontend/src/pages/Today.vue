@@ -663,25 +663,27 @@ const UndoIcon = () =>
     }),
   ])
 
+// The board generates two kinds of card since 2026-09-09: a task due today
+// (how the sequences hand work to a rep) and a deal in flight with nothing
+// booked. The call-ladder keys below are kept ONLY so cards created before
+// that keep their labels; the Priority modal takes its list from the server.
 const PHASE = {
-  never: { label: 'Never called', theme: 'red', defaultOrder: 0 },
-  task: { label: 'Task due', theme: 'green', defaultOrder: 1 },
-  // Underwriting / Make Offer / Contract Sent with no follow-up booked — daily
-  // until someone schedules the next step (crm.api.daily_standup CLOSER_STATUSES)
+  task: { label: 'Task due', theme: 'green', defaultOrder: 0 },
   // frappe-ui's Badge has no purple theme; override the subtle-gray classes so
-  // it reads as its own thing next to the red/orange/blue call-ladder chips.
+  // it reads as its own thing next to the green task chip.
   closer: {
     label: 'Deal in flight',
     theme: 'gray',
     badgeClass: '!bg-purple-100 !text-purple-700',
-    defaultOrder: 2,
+    defaultOrder: 1,
   },
+  never: { label: 'Never called', theme: 'red', defaultOrder: 2 },
   week1_am: { label: 'Week 1 · morning', theme: 'orange', defaultOrder: 3 },
   week1_pm: { label: 'Week 1 · afternoon', theme: 'orange', defaultOrder: 4 },
   weekly: { label: 'Weekly', theme: 'blue', defaultOrder: 5 },
   monthly: { label: 'Monthly', theme: 'gray', defaultOrder: 6 },
 }
-const DEFAULT_PRIORITY_ORDER = Object.keys(PHASE)
+const DEFAULT_PRIORITY_ORDER = ['task', 'closer']
 
 const board = createResource({
   url: 'crm.api.today_board.get_today_board',

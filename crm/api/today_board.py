@@ -74,19 +74,19 @@ SKIP_OUTCOMES = (
 	"Other",
 )
 
-#: The default personal priority order. Week-one's two calls are deliberately
-#: separated so the first pass can be finished before afternoon follow-ups begin.
-#: `closer` (Underwriting / Make Offer / Contract Sent with nothing booked) sits
-#: after the explicit due tasks by default. A user's saved order predating it
-#: gets the key appended at the end (see _priority_order) — drag it up once.
-PRIORITY_ORDER = ("never", "task", "closer", "week1_am", "week1_pm", "weekly", "monthly")
+#: The default personal priority order. Since 2026-09-09 the board generates
+#: only two kinds of card — a task due today (which is how the sequences hand
+#: work to a rep) and a deal in flight with nothing booked. The old call-ladder
+#: keys (never / week1_am / week1_pm / weekly / monthly) are no longer offered
+#: in the Priority modal; cards that still carry them sort after these two.
+PRIORITY_ORDER = ("task", "closer")
 PRIORITY_DEFAULT_KEY = "crm_today_priority_order"
 
 
 def _priority_key(phase, call_number=1):
 	if phase in ("week1", "week1_partial"):
 		return "week1_am" if int(call_number or 1) == 1 else "week1_pm"
-	return phase if phase in PRIORITY_ORDER else "monthly"
+	return phase or "task"
 
 
 def _priority_order():
@@ -103,7 +103,9 @@ def _priority_order():
 
 
 def _priority_seed(phase, call_number=1):
-	return PRIORITY_ORDER.index(_priority_key(phase, call_number)) * 10000
+	key = _priority_key(phase, call_number)
+	rank = PRIORITY_ORDER.index(key) if key in PRIORITY_ORDER else len(PRIORITY_ORDER)
+	return rank * 10000
 
 
 def _available() -> bool:

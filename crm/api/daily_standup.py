@@ -65,6 +65,8 @@ TERMINAL_STATUS_TYPES = ("Lost", "Won")
 #: It surfaces EVERY day until someone books the next step — the ask was that a
 #: lead in Underwriting / Make Offer / Contract Sent can never quietly sit
 #: without a plan, which the weekly/monthly sweeps let happen.
+#: Only `closer` still generates cards from the board itself; the old ladder
+#: phases are kept so cards created before 2026-09-09 keep their labels.
 CADENCE_PHASES = ("never", "week1", "week1_partial", "weekly", "monthly", "closer")
 
 #: phase 1 — first N business days after first contact, 2 calls per business day
@@ -308,44 +310,25 @@ def _classify(row, today):
 			reason = f"{row.status} · " + (f"task: {title}" if title else "task due")
 		return ("closer", 1, True, reason)
 
-	started = row.first_call or row.creation
-	age = business_days_between(started, today)
-	never = row.last_call is None
-	since = business_days_between(row.last_call, today) if row.last_call else 9999
-
-	def ago(n):
-		return f"{n} business day{'' if n == 1 else 's'} since last call"
-
-	if never:
-		phase, need, due = "never", PHASE1_CALLS_PER_DAY - row.calls_today, row.calls_today < PHASE1_CALLS_PER_DAY
-		reason = "never called"
-	elif age < PHASE1_BUSINESS_DAYS:
-		need = PHASE1_CALLS_PER_DAY - row.calls_today
-		phase, due = "week1", need > 0
-		reason = f"{row.calls_today} of {PHASE1_CALLS_PER_DAY} calls today"
-	elif age < PHASE2_BUSINESS_DAYS:
-		phase, due, need = "weekly", since >= PHASE2_INTERVAL, 1
-		reason = ago(since)
-	else:
-		phase, due, need = "monthly", since >= PHASE3_INTERVAL, 1
-		reason = ago(since)
-
-	# A due task pulls a lead onto the list. If cadence already wants them,
-	# keep the cadence phase so a card can say both "in cadence" and "has a
-	# task". Only the leftover-task group (not yet due by cadence) becomes
-	# phase=task — never-called stays the leak at the very top.
+	# The board's own call ladder (never-called → 2/day week 1 → weekly →
+	# monthly) is GONE (Lance, 2026-09-09: "the only cadence we want now are in
+	# the sequences"). A lead lands on the board because a task is due — which
+	# is exactly what the New Lead 10-Day sequence produces (a Text task daily,
+	# a triple-dial Call task every other day) — or because it is a deal in
+	# flight with nothing booked (above). Nothing else.
+	since = business_days_between(row.last_call, today) if row.last_call else None
+	ago = (
+		f"{since} business day{'' if since == 1 else 's'} since last call"
+		if since is not None
+		else "never called"
+	)
 	if row.tasks_due_now:
 		title = (row.due_task_title or "").strip()
 		generic = title.lower() in ("", "follow up", "follow up call", "call back", "call")
 		task_reason = "task due" if generic else f"task: {title}"
-		if phase == "never" or due:
-			need = max(need, 1)
-			reason += f" · {task_reason}"
-		else:
-			phase, due, need = "task", True, max(need, 1)
-			reason = task_reason + f" · {ago(since)}"
+		return ("task", 1, True, f"{task_reason} · {ago}")
 
-	return (phase, max(0, need), due, reason)
+	return ("sequence", 0, False, f"no task due · {ago}")
 
 
 #: display order — never-called first, then explicit due tasks, then cadence.

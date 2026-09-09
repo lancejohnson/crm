@@ -100,9 +100,24 @@ class CloserCardTests(unittest.TestCase):
 		self.assertEqual((phase, due), ("closer", True))
 		self.assertIn("Send DD docs", reason)
 
-	def test_non_closer_statuses_follow_the_call_ladder(self):
-		phase, _, _, _ = ds._classify(_row("Follow Up"), self.today)
-		self.assertNotEqual(phase, "closer")
+	def test_no_board_cadence_without_a_task(self):
+		# never-called, week-one, weekly, monthly: none of them make a card now
+		for kw in (
+			dict(first_call=None, last_call=None),
+			dict(creation=datetime(2026, 9, 4, 9, 0), first_call=datetime(2026, 9, 4, 9, 0), last_call=datetime(2026, 9, 4, 9, 0)),
+			dict(last_call=datetime(2026, 8, 25, 9, 0)),
+			dict(last_call=datetime(2026, 6, 1, 9, 0)),
+		):
+			phase, need, due, _ = ds._classify(_row("Called No Answer", **kw), self.today)
+			self.assertEqual((phase, need, due), ("sequence", 0, False), kw)
+
+	def test_task_due_today_is_the_only_other_card(self):
+		phase, need, due, reason = ds._classify(
+			_row("Called No Answer", tasks_due_now=1, due_task_title="Text Joe — day 3 of 10"),
+			self.today,
+		)
+		self.assertEqual((phase, need, due), ("task", 1, True))
+		self.assertIn("Text Joe", reason)
 		self.assertIn("closer", ds.CADENCE_PHASES)
 
 
