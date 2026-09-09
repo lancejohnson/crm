@@ -2389,7 +2389,7 @@ duplicating. Work substantial features in a worktree of your own.
   "CRM Sequence Runner" cron is disabled. Full design + the two deploy gotchas
   (register the `seqdrain` queue in common_site_config; `migrate`/`sync_jobs` to
   register `drain_due`) live in `../frappe-crm-deploy/CLAUDE.md` → Sequences.
-  - **GOTCHA (gw490) — the drainer inherited the WEBHOOK's Guest session.**
+  - **GOTCHA (gw493) — the drainer inherited the WEBHOOK's Guest session.**
     `frappe.enqueue` captures `session.user`; from an inbound lead that is
     Guest, and `CRM Task.after_insert → assign_to → check_permission` rejects
     Guest AFTER the task row is inserted, so every failed attempt left an
