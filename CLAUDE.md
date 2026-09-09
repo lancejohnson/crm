@@ -2389,6 +2389,18 @@ duplicating. Work substantial features in a worktree of your own.
   "CRM Sequence Runner" cron is disabled. Full design + the two deploy gotchas
   (register the `seqdrain` queue in common_site_config; `migrate`/`sync_jobs` to
   register `drain_due`) live in `../frappe-crm-deploy/CLAUDE.md` → Sequences.
+  - **GOTCHA (gw490) — the drainer inherited the WEBHOOK's Guest session.**
+    `frappe.enqueue` captures `session.user`; from an inbound lead that is
+    Guest, and `CRM Task.after_insert → assign_to → check_permission` rejects
+    Guest AFTER the task row is inserted, so every failed attempt left an
+    orphan task (Richard Vega, 2026-09-09: three "Text — day 1" to-dos in one
+    minute). `drain()` now `set_user("Administrator")` first, and the core
+    script defers Call/Task steps when it is run in-request as Guest (the
+    auto-enroll wait-0 path) — the drainer fires them seconds later. `drain()`
+    also takes a MySQL `GET_LOCK('seqdrain:<enr>')`: the `job_id` dedupe is
+    check-then-enqueue and two ticks slipped through it, both ran step 1, and
+    the loser's task insert had committed before its enrollment save lost on
+    TimestampMismatch (one duplicate in the 80-lead bulk enroll).
   - **Fail-safe (gw173)**: the engine catches step exceptions internally and
     leaves the enrollment Active-and-due, so a persistently failing send used to
     retry forever — when Quo ran out of prepaid credits (Jul 8–15 2026) that

@@ -142,9 +142,36 @@ def _enqueue_drain(enrollment):
 		)
 
 
+def _lock_key(enrollment):
+	return "seqdrain:" + enrollment
+
+
 def drain(enrollment):
 	"""Worker job (seqdrain queue): drive ONE enrollment through its due steps in
 	real time, sleeping each step's real wait. Sole advancer of an enrollment."""
+	# The job inherits the session that enqueued it. From an inbound webhook
+	# that is GUEST, and CRM Task.after_insert -> assign_to rejects Guest after
+	# the task row is already in: an orphan task per failed attempt (Richard
+	# Vega, 2026-09-09: three "day 1" tasks). The engine's work is the site's,
+	# not the caller's.
+	frappe.set_user("Administrator")
+	# One driver per enrollment, enforced in the database. job_id dedupe is a
+	# check-then-enqueue and two drain_due ticks (or drain_lead + drain_due)
+	# can slip through it; when they did, both ran step 1 and one lost the
+	# enrollment save on TimestampMismatch AFTER its task insert had committed.
+	got = frappe.db.sql("select get_lock(%s, 0)", _lock_key(enrollment))[0][0]
+	if not got:
+		return
+	try:
+		_drain_locked(enrollment)
+	finally:
+		try:
+			frappe.db.sql("select release_lock(%s)", _lock_key(enrollment))
+		except Exception:
+			pass
+
+
+def _drain_locked(enrollment):
 	for _ in range(MAX_STEPS):
 		enr = frappe.get_doc("CRM Sequence Enrollment", enrollment)
 		if enr.status != "Active":

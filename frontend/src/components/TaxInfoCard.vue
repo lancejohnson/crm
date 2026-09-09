@@ -7,7 +7,7 @@
       </div>
       <Button
         :tooltip="latest ? __('Re-pull tax & lien records') : __('Fetch tax & lien records')"
-        :icon="latest ? 'rotate-ccw' : 'plus'"
+        icon="rotate-ccw"
         variant="ghost"
         @click="emit('fetch')"
       />
@@ -68,52 +68,36 @@
           <FeatherIcon :name="open ? 'chevron-up' : 'chevron-down'" class="size-3.5" />
         </button>
 
-        <div v-if="open && hasRecords" class="mt-1 flex flex-col gap-3">
+        <div v-if="open && hasRecords" class="mt-1 flex flex-col gap-3 text-sm text-ink-gray-8">
           <section v-if="dd.foreclosure">
             <h4 class="mb-1 text-2xs font-semibold uppercase tracking-wide text-ink-gray-5">
               {{ __('Foreclosure') }}
             </h4>
-            <table class="w-full text-xs">
-              <tbody>
-                <tr v-for="row in foreclosureRows" :key="row[0]">
-                  <td class="py-0.5 pr-2 text-ink-gray-5 whitespace-nowrap">{{ row[0] }}</td>
-                  <td class="py-0.5 text-ink-gray-8">{{ row[1] }}</td>
-                </tr>
-              </tbody>
-            </table>
+            <div class="flex flex-col gap-1">
+              <Row v-for="row in foreclosureRows" :key="row[0]" :label="row[0]">
+                {{ row[1] }}
+              </Row>
+            </div>
           </section>
 
           <section v-if="dd.deeds?.length">
             <h4 class="mb-1 text-2xs font-semibold uppercase tracking-wide text-ink-gray-5">
               {{ __('Deeds') }}
             </h4>
-            <div class="overflow-x-auto">
-              <table class="w-full text-xs">
-                <thead class="text-ink-gray-5">
-                  <tr>
-                    <th class="py-0.5 pr-2 text-left font-medium">{{ __('Date') }}</th>
-                    <th class="py-0.5 pr-2 text-left font-medium">{{ __('Type') }}</th>
-                    <th class="py-0.5 pr-2 text-left font-medium">{{ __('From / to') }}</th>
-                    <th class="py-0.5 text-right font-medium">{{ __('Price') }}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="(d, i) in dd.deeds" :key="i" class="border-t border-outline-gray-1">
-                    <td class="py-0.5 pr-2 whitespace-nowrap">{{ d.date || '—' }}</td>
-                    <td class="py-0.5 pr-2">
-                      {{ d.type || '—' }}
-                      <span v-if="d.foreclosure" class="text-ink-red-3"> · {{ __('FCL') }}</span>
-                    </td>
-                    <td class="py-0.5 pr-2">
-                      {{ (d.sellers || []).join(', ') || '—' }}
-                      → {{ (d.buyers || []).join(', ') || '—' }}
-                    </td>
-                    <td class="py-0.5 text-right whitespace-nowrap">
-                      {{ d.price ? '$' + formatNumber(d.price) : '—' }}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+            <div
+              v-for="(d, i) in dd.deeds"
+              :key="i"
+              class="border-t border-outline-gray-2 py-1.5 first:border-t-0 first:pt-0"
+            >
+              <div class="flex justify-between gap-2 text-ink-gray-8">
+                <span>{{ d.date || '—' }} · {{ d.type || __('Deed') }}</span>
+                <span class="shrink-0">{{ d.price ? '$' + formatNumber(d.price) : '—' }}</span>
+              </div>
+              <div class="text-ink-gray-7">
+                {{ (d.sellers || []).join(', ') || '—' }}
+                → {{ (d.buyers || []).join(', ') || '—' }}
+                <span v-if="d.foreclosure" class="text-ink-red-3"> · {{ __('FCL') }}</span>
+              </div>
             </div>
           </section>
 
@@ -121,34 +105,19 @@
             <h4 class="mb-1 text-2xs font-semibold uppercase tracking-wide text-ink-gray-5">
               {{ __('Mortgages') }}
             </h4>
-            <div class="overflow-x-auto">
-              <table class="w-full text-xs">
-                <thead class="text-ink-gray-5">
-                  <tr>
-                    <th class="py-0.5 pr-2 text-left font-medium">{{ __('Date') }}</th>
-                    <th class="py-0.5 pr-2 text-left font-medium">{{ __('Lender') }}</th>
-                    <th class="py-0.5 pr-2 text-left font-medium">{{ __('Type') }}</th>
-                    <th class="py-0.5 text-right font-medium">{{ __('Amount') }}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="(m, i) in dd.mortgages"
-                    :key="i"
-                    class="border-t border-outline-gray-1"
-                  >
-                    <td class="py-0.5 pr-2 whitespace-nowrap">{{ m.date || '—' }}</td>
-                    <td class="py-0.5 pr-2">{{ m.lender || '—' }}</td>
-                    <td class="py-0.5 pr-2">
-                      {{ m.type || '—'
-                      }}<span v-if="m.rate" class="text-ink-gray-5"> · {{ m.rate }}%</span>
-                    </td>
-                    <td class="py-0.5 text-right whitespace-nowrap">
-                      {{ m.amount ? '$' + formatNumber(m.amount) : '—' }}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+            <div
+              v-for="(m, i) in dd.mortgages"
+              :key="i"
+              class="border-t border-outline-gray-2 py-1.5 first:border-t-0 first:pt-0"
+            >
+              <div class="flex justify-between gap-2 text-ink-gray-8">
+                <span>{{ m.date || '—' }} · {{ m.lender || '—' }}</span>
+                <span class="shrink-0">{{ m.amount ? '$' + formatNumber(m.amount) : '—' }}</span>
+              </div>
+              <div v-if="m.type || m.rate" class="text-ink-gray-7">
+                {{ m.type || '—' }}
+                <span v-if="m.rate"> · {{ m.rate }}%</span>
+              </div>
             </div>
           </section>
 
@@ -156,22 +125,9 @@
             <h4 class="mb-1 text-2xs font-semibold uppercase tracking-wide text-ink-gray-5">
               {{ __('Tax history') }}
             </h4>
-            <table class="w-full text-xs">
-              <thead class="text-ink-gray-5">
-                <tr>
-                  <th class="py-0.5 pr-2 text-left font-medium">{{ __('Year') }}</th>
-                  <th class="py-0.5 text-right font-medium">{{ __('Amount') }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(t, i) in dd.taxes" :key="i" class="border-t border-outline-gray-1">
-                  <td class="py-0.5 pr-2">{{ t.year || '—' }}</td>
-                  <td class="py-0.5 text-right">
-                    {{ t.amount ? '$' + formatNumber(t.amount) : '—' }}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+            <Row v-for="(t, i) in dd.taxes" :key="i" :label="String(t.year || '—')">
+              {{ t.amount ? '$' + formatNumber(t.amount) : '—' }}
+            </Row>
           </section>
         </div>
       </template>
