@@ -110,14 +110,14 @@
           v-model="group.step_type"
           type="select"
           label="Type"
-          :options="['Email', 'Call', 'Text', 'Pushover']"
+          :options="['Email', 'Call', 'Text', 'Pushover', 'Task']"
         />
         <FormControl
-          v-if="group.step_type === 'Email' || group.step_type === 'Pushover'"
+          v-if="group.step_type === 'Email' || group.step_type === 'Pushover' || group.step_type === 'Task'"
           v-model="group.subject"
           type="text"
-          :label="group.step_type === 'Email' ? 'Email Subject' : 'Notification Title (optional — defaults to lead name)'"
-          placeholder="Your property at {{ property_address }}"
+          :label="subjectLabel(group.step_type)"
+          :placeholder="group.step_type === 'Task' ? 'Text {{ first_name }} — day 3' : 'Your property at {{ property_address }}'"
         />
         <FormControl
           v-model="group.message"
@@ -179,8 +179,8 @@
         — or any lead field via <span v-pre>{{ lead.field_name }}</span>.<br />
         Sender (lead owner) variables: <span v-pre>{{ owner_first_name }}, {{ owner_last_name }}, {{ owner_name }}, {{ owner_email }}, {{ owner_quo_number }}</span>
         — or any user field via <span v-pre>{{ user.field_name }}</span>.<br />
-        Full Jinja works too (conditionals, filters). Emails send automatically, Calls create a task
-        for the lead owner, Texts send from the lead owner's Quo number, Pushover rings the lead
+        Full Jinja works too (conditionals, filters). Emails send automatically, Calls create a "Call …" task
+        for the lead owner, Tasks create a to-do with your own title (a manual step — the rep does it by hand), Texts send from the lead owner's Quo number, Pushover rings the lead
         owner's phone (emergency push, re-rings until acknowledged or a Quo call touches the lead).
         Trigger paths let one step fire at different times per lead — e.g. ring immediately for
         <span v-pre>lead.source == 'Red Panda Leads'</span> but 3 minutes in for PropertyLeads.
@@ -398,9 +398,16 @@ function move(i, dir) {
   ;[arr[i], arr[j]] = [arr[j], arr[i]]
 }
 
+function subjectLabel(type) {
+  if (type === 'Email') return 'Email Subject'
+  if (type === 'Task') return 'Task title (blank = "Follow up")'
+  return 'Notification Title (optional — defaults to lead name)'
+}
+
 function messageLabel(type) {
   if (type === 'Email') return 'Email Body'
   if (type === 'Call') return 'Call Notes (shown in the task)'
+  if (type === 'Task') return 'Task description (e.g. the text to send by hand)'
   if (type === 'Pushover') return 'Notification Body (blank = standard lead details: phone, address, condition, reason, source)'
   return 'Text Message'
 }

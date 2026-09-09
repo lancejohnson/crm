@@ -75,7 +75,7 @@ FAILSAFE_NOTIFY = "lance.johnson@groundworkpro.com"
 QUIET_START_HOUR = 8
 QUIET_END_HOUR = 20
 QUIET_MIN_WAIT_SECONDS = 3600
-QUIET_STEP_TYPES = ("Text", "Call")
+QUIET_STEP_TYPES = ("Text", "Call", "Task")
 
 _WAIT_SECONDS = {
 	"Seconds": 1,

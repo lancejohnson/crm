@@ -2039,14 +2039,21 @@ duplicating. Work substantial features in a worktree of your own.
 - **`New Lead 10-Day` sequence + drainer quiet hours** (2026-09-09, Lance's
   spec: one triple dial every other day for ten days, one text a day for
   ten days). Built DISABLED with no auto-enroll, gated New / Called No
-  Answer, for text review before cutover. 15 steps, no Pushover and no intro
-  burst (Lance): day 1 = one text at wait 0 + triple dial 1; days 2–10 one
-  text each (1 Days waits), triple dials 2–5 at wait 0 after the day 3/5/7/9
-  texts. A Call step is a `CRM Task` for the lead owner; the body tells the
-  rep to log the outcome (Connected pauses, Do Not Call stops). Cutover =
+  Answer, for review before cutover. **Nothing in it sends automatically**
+  (Lance: "get rid of the texts and just set them as tasks"). 15 steps, no
+  Pushover, no intro burst: day 1 = a **Task** "Text {{ first_name }} — day
+  1 of 10" at wait 0 + triple dial 1 (Call step); days 2–10 one Text-task
+  each (1 Days waits) with the drafted message in the body for copy/paste;
+  triple dials 2–5 at wait 0 after the day 3/5/7/9 tasks. **`Task` is a new
+  step type** (ops `setup_sequence_task_step.py` adds the Select option;
+  `crm_sequence_runner_core.py` branch: subject = title (Jinja, blank →
+  "Follow up"), message = description, assigned to the lead owner, due now)
+  — a manual step, unlike Text which sends. Verified live on the Lance Test
+  lead and cleaned up. A Call step's body tells the rep to log the outcome
+  (Connected pauses, Do Not Call stops). Cutover =
   enable it, move `auto_enroll_sources` off `New Lead Ring Alert`, disable
   that one (both enabled = two intro bursts). **Quiet hours** live in
-  `sequence_drain.py` (`quiet_hold_until`, pure, unit-tested): a Text/Call
+  `sequence_drain.py` (`quiet_hold_until`, pure, unit-tested): a Text/Call/Task
   step whose own wait is ≥ 1 hour that comes due outside 8am–8pm site time
   has `next_run` pushed to the next 8am, so an 11pm lead's daily texts land
   at 8am from day 2 on. The wait-0 / seconds intro burst is deliberately
