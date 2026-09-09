@@ -2057,7 +2057,10 @@ duplicating. Work substantial features in a worktree of your own.
 - **`New Lead 10-Day` sequence + drainer quiet hours** (2026-09-09, Lance's
   spec: one triple dial every other day for ten days, one text a day for
   ten days). Built DISABLED with no auto-enroll, gated New / Called No
-  Answer, for review before cutover. **Nothing in it sends automatically**
+  Answer. **Enabled 2026-09-09, auto-enrolls `iSpeedToLead`** (the only
+  source actually being bought — 378 of 396 leads in the last 30 days); `New
+  Lead Ring Alert` stays as it was for Red Panda / PropertyLeads. **Nothing
+  in it sends automatically**
   (Lance: "get rid of the texts and just set them as tasks"). 15 steps, no
   Pushover, no intro burst: day 1 = a **Task** "Text {{ first_name }} — day
   1 of 10" at wait 0 + triple dial 1 (Call step); days 2–10 one Text-task
