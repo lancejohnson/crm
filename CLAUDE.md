@@ -2557,23 +2557,21 @@ duplicating. Work substantial features in a worktree of your own.
     status and drops the fleeting row at write time (bounce reopens the prior
     row). Threshold constant `MIN_STATUS_HELD_SECONDS` / `STATUS_COLLAPSE_SECONDS`
     = 60 in each file. The creation/initial status is never collapsed.
-- **BatchData "Fetch Tax Info"** (Leads) — a $0.10/pull button on a lead that
-  fetches owner, APN, and tax status from BatchData (Property Search). A confirm
-  dialog ("This will charge $0.10", requested-by user, and a "last pulled by X
-  on <date>" re-pull warning) precedes the charge. Each pull is a **CRM Property
-  Tax Pull** row (audit trail: pulled_by/at/cost + raw record + flattened
-  columns); headline fields (apn, property_owner, tax_status, annual_tax,
-  assessed_value, last_tax_pull_at/by — all read_only so they auto-hide until
-  filled) are written back onto the lead and show in the Property Details
-  sidebar. Also: a dedicated **Tax Info** sidebar card (latest pull + pulled-by/
-  when, re-pull button) and a **`tax_pull`** Activity-timeline entry. Live
-  refresh via the `crm_tax_pull` realtime event (site-wide, `after_commit`,
-  emitted from the app hook since the server-script sandbox can't publish — see
-  the SMS/task realtime pattern).
-  - **Architecture mirrors SMS**: the external BatchData call lives in the ops
-    server script `pull-tax-info` (key via `__INFISICAL:BATCHDATA_API_KEY__`,
-    like `send-text`); it stores the raw property record and the app-code
-    `after_insert` hook does all parsing + lead writeback + realtime.
+- **BatchData "Fetch tax / liens"** (Leads + comps page) — a **$0.03**/pull
+  button that hits `/property/lookup/all-attributes` with the **taxliens** token
+  (`__INFISICAL:BATCHDATA_TAXLIENS_API_KEY__`). Confirm dialog names the charge.
+  Each pull is a **CRM Property Tax Pull** row; headline fields (apn,
+  property_owner, tax_status, annual_tax, assessed_value, last_tax_pull_at/by)
+  write back onto the lead (Property Details sidebar). The **Tax / liens** card
+  (lead sidebar + comps page under the offer calc) shows owner/APN/status plus a
+  collapsible **Records** table (foreclosure, deeds, mortgages, tax history).
+  Live refresh via `crm_tax_pull`. Comps page also has a **Tax / liens** toolbar
+  button (`CompsView.vue`).
+  - **Architecture mirrors SMS**: ops server script `pull-tax-info`; app hook
+    `on_tax_pull_insert` parses + writeback + realtime. Deed/mortgage/foreclosure
+    tables are parsed on **read** from `raw_response` (`_dd_from_raw`) so no extra
+    doctype columns. Annual tax falls back to `listing.taxes` when the assessor
+    `tax` block is empty.
   - `crm/api/tax_info.py` — `on_tax_pull_insert` hook (parse + writeback +
     publish `crm_tax_pull`) + `get_tax_pulls(lead)` read API
   - `crm/hooks.py` — `CRM Property Tax Pull` `after_insert`

@@ -1,30 +1,24 @@
-"""Property tax / owner info pulled from BatchData (per-lead, $0.10 a pull).
+"""Property tax / owner / lien info pulled from BatchData (per-lead, $0.03 a pull).
 
-A user clicks **Fetch Tax Info** on a lead → the `pull-tax-info` server script
-(ops repo, `../frappe-crm-deploy`) hits BatchData's Property Search endpoint with
-the Infisical-held API key and stores the raw property record on a new
-**CRM Property Tax Pull** doc. The server-script sandbox can't do rich parsing or
-`publish_realtime`, so the *interesting* work happens here, in the app-code
-`after_insert` hook:
+A user clicks **Fetch Tax Info** on a lead or the comps page → the `pull-tax-info`
+server script (ops repo, `../frappe-crm-deploy`) hits BatchData's
+`/property/lookup/all-attributes` with the taxliens Infisical key and stores the
+raw property record on a **CRM Property Tax Pull** doc. The sandbox can't parse
+richly or `publish_realtime`, so the app-code `after_insert` hook:
 
-  - parse the raw BatchData property record into typed columns on the pull doc,
-  - write the headline fields (owner, APN, tax status, annual tax, assessed value)
-    back onto the CRM Lead so they show in the Property Details sidebar,
-  - broadcast a `crm_tax_pull` realtime event so the open Lead's Activity feed +
-    Tax Info card refresh live (mirrors the `quo_message` / `crm_task_update`
-    pattern — site-wide, `after_commit=True`).
+  - flattens headline columns (owner, APN, tax status, annual tax, assessed),
+  - writes those back onto the CRM Lead (Property Details sidebar),
+  - broadcasts `crm_tax_pull` so the Tax Info card + comps panel refresh.
 
-Field paths come from BatchData's OpenAPI (Property Search response). The
-`tax`/`assessment` blocks only populate once the "Core Property Data (Tax
-Assessor)" product is enabled on the account; until then owner/APN/value/tax-
-status-flags still come through and the assessor columns simply stay empty.
+Deed / mortgage / foreclosure / lien tables are parsed on *read* from
+`raw_response` (`_dd_from_raw`) so older Property-Search pulls still work and we
+don't need extra doctype columns.
 """
 
 import json
 
 import frappe
 from frappe import _
-from frappe.utils import flt
 
 TAX_PULL_DOCTYPE = "CRM Property Tax Pull"
 
@@ -45,10 +39,27 @@ LEAD_WRITEBACK_FIELDS = (
 def _num(value):
 	"""BatchData sends assessor money as ints; treat 0 as 'no data', not $0."""
 	try:
-		n = flt(value)
+		n = float(value)
 	except (TypeError, ValueError):
 		return None
 	return n or None
+
+
+def _iso_date(value):
+	"""BatchData timestamps → YYYY-MM-DD, or None."""
+	if not value or not isinstance(value, str):
+		return None
+	return value[:10]
+
+
+def _listing_tax(p: dict):
+	"""Newest listing.taxes row that has an amount (assessor block is often empty)."""
+	rows = (p.get("listing") or {}).get("taxes") or []
+	with_amt = [t for t in rows if isinstance(t, dict) and t.get("amount")]
+	if not with_amt:
+		return None
+	with_amt.sort(key=lambda t: t.get("year") or 0, reverse=True)
+	return with_amt[0]
 
 
 def _parse_property(p: dict) -> dict:
@@ -59,8 +70,11 @@ def _parse_property(p: dict) -> dict:
 	assessment = p.get("assessment") or {}
 	valuation = p.get("valuation") or {}
 	quick = p.get("quickLists") or {}
+	listing_tax = _listing_tax(p)
 
 	delinquent_year = tax.get("taxDelinquentYear")
+	annual = _num(tax.get("taxAmount")) or (_num(listing_tax.get("amount")) if listing_tax else None)
+	tax_year = int(tax.get("taxYear") or (listing_tax or {}).get("year") or 0)
 	# Currency/Int columns on the pull doc are NOT NULL DEFAULT 0 — store 0 (not
 	# None) for "no data". The lead writeback still treats 0 as falsy and skips it.
 	parsed = {
@@ -70,8 +84,8 @@ def _parse_property(p: dict) -> dict:
 		"owner_status_type": owner.get("ownerStatusType"),
 		"apn": ids.get("apn"),
 		"tax_id": ids.get("taxId"),
-		"annual_tax": _num(tax.get("taxAmount")) or 0,
-		"tax_year": int(tax.get("taxYear") or 0),
+		"annual_tax": annual or 0,
+		"tax_year": tax_year,
 		"tax_delinquent_year": int(delinquent_year or 0),
 		"tax_default": 1 if quick.get("taxDefault") else 0,
 		"assessed_value": _num(assessment.get("totalAssessedValue")) or 0,
@@ -79,6 +93,94 @@ def _parse_property(p: dict) -> dict:
 		"tax_status": _derive_tax_status(tax, assessment, quick),
 	}
 	return parsed
+
+
+def _dd_from_raw(p: dict) -> dict:
+	"""Compact records tables for the Tax Info card / comps panel."""
+	if not isinstance(p, dict) or not p:
+		return {}
+	owner = p.get("owner") or {}
+	mailing = owner.get("mailingAddress") or {}
+	quick = p.get("quickLists") or {}
+	open_lien = p.get("openLien") or {}
+	fc = p.get("foreclosure") or {}
+	valuation = p.get("valuation") or {}
+
+	deeds = []
+	for d in p.get("deedHistory") or []:
+		if not isinstance(d, dict):
+			continue
+		deeds.append(
+			{
+				"date": _iso_date(d.get("recordingDate") or d.get("saleDate")),
+				"type": d.get("documentType"),
+				"buyers": d.get("buyers") or [],
+				"sellers": d.get("sellers") or [],
+				"price": _num(d.get("salePrice")),
+				"foreclosure": bool(d.get("foreclosure")),
+				"doc": d.get("documentNumber"),
+			}
+		)
+	# Newest first — BatchData often returns chronological.
+	deeds.sort(key=lambda r: r.get("date") or "", reverse=True)
+
+	mortgages = []
+	for m in p.get("mortgageHistory") or []:
+		if not isinstance(m, dict):
+			continue
+		mortgages.append(
+			{
+				"date": _iso_date(m.get("recordingDate") or m.get("saleDate")),
+				"lender": m.get("lenderName"),
+				"amount": _num(m.get("loanAmount")),
+				"type": m.get("loanType"),
+				"rate": m.get("interestRate"),
+				"borrowers": m.get("borrowers") or [],
+			}
+		)
+	mortgages.sort(key=lambda r: r.get("date") or "", reverse=True)
+
+	taxes = []
+	for t in (p.get("listing") or {}).get("taxes") or []:
+		if isinstance(t, dict) and t.get("amount"):
+			taxes.append({"year": t.get("year"), "amount": _num(t.get("amount"))})
+	taxes.sort(key=lambda r: r.get("year") or 0, reverse=True)
+
+	foreclosure = None
+	if fc.get("status") or fc.get("documentType") or fc.get("borrowerName"):
+		foreclosure = {
+			"status": fc.get("status"),
+			"type": fc.get("documentType"),
+			"date": _iso_date(fc.get("recordingDate") or fc.get("filingDate")),
+			"auction": _iso_date(fc.get("auctionDate")),
+			"case": fc.get("caseNumber") or fc.get("trusteeSaleNumber"),
+			"borrower": fc.get("borrowerName"),
+			"trustee": fc.get("trusteeName") or fc.get("currentLenderName"),
+		}
+
+	return {
+		"mailing": " ".join(
+			filter(
+				None,
+				[
+					mailing.get("street"),
+					mailing.get("city"),
+					mailing.get("state"),
+					mailing.get("zip"),
+				],
+			)
+		)
+		or None,
+		"open_lien_count": int(open_lien.get("totalOpenLienCount") or 0),
+		"tax_default": bool(quick.get("taxDefault")),
+		"free_and_clear": bool(quick.get("freeAndClear")),
+		"vacant": bool((p.get("general") or {}).get("vacant")),
+		"equity_percent": valuation.get("equityPercent"),
+		"foreclosure": foreclosure,
+		"deeds": deeds,
+		"mortgages": mortgages,
+		"taxes": taxes[:12],
+	}
 
 
 def _derive_tax_status(tax: dict, assessment: dict, quick: dict) -> str:
@@ -99,6 +201,8 @@ def _derive_tax_status(tax: dict, assessment: dict, quick: dict) -> str:
 	if tax.get("taxAmount") or tax.get("taxYear") or assessment.get("totalAssessedValue"):
 		year = tax.get("taxYear")
 		return _("Taxes current (as of {0})").format(year) if year else _("Taxes current")
+	if quick.get("freeAndClear") and not quick.get("taxDefault"):
+		return _("Taxes current")
 	return _("Unknown")
 
 
@@ -183,9 +287,16 @@ def get_tax_pulls(lead: str):
 			"tax_status",
 			"assessed_value",
 			"estimated_value",
+			"raw_response",
 		],
 		order_by="creation desc",
 	)
 	for pull in pulls:
 		pull["pulled_by_name"] = frappe.get_cached_value("User", pull.pulled_by, "full_name") if pull.pulled_by else None
+		try:
+			raw = json.loads(pull.pop("raw_response", None) or "{}")
+		except (ValueError, TypeError):
+			raw = {}
+			pull.pop("raw_response", None)
+		pull["dd"] = _dd_from_raw(raw if isinstance(raw, dict) else {})
 	return pulls

@@ -1,5 +1,5 @@
 <template>
-  <Dialog v-model="show" :options="{ title: __('Fetch Tax Info') }">
+  <Dialog v-model="show" :options="{ title: __('Fetch tax / liens') }">
     <template #body-content>
       <div class="flex flex-col gap-4 text-base">
         <!-- The charge confirmation — the whole point of this dialog. -->
@@ -9,10 +9,10 @@
           <FeatherIcon name="dollar-sign" class="mt-0.5 size-4 shrink-0" />
           <div>
             <div class="font-medium text-ink-gray-8">
-              {{ __('This will charge $0.10 to BatchData.') }}
+              {{ __('This will charge $0.03 to BatchData.') }}
             </div>
             <div class="mt-0.5 text-sm text-ink-gray-6">
-              {{ __('Pulls owner, APN and tax status for this property.') }}
+              {{ __('Pulls owner, APN, tax history, deeds, mortgages, foreclosure and open liens.') }}
             </div>
           </div>
         </div>
@@ -40,7 +40,7 @@
             }}</span>
             {{ __('on') }}
             {{ formatDate(lastPull.pulled_at || lastPull.creation, '', true) }}.
-            {{ __('Fetching again will charge another $0.10.') }}
+            {{ __('Fetching again will charge another $0.03.') }}
           </span>
         </div>
 
@@ -51,7 +51,7 @@
       <Button
         class="w-full"
         variant="solid"
-        :label="lastPull ? __('Fetch again ($0.10)') : __('Fetch Tax Info ($0.10)')"
+        :label="lastPull ? __('Fetch again ($0.03)') : __('Fetch tax / liens ($0.03)')"
         :loading="loading"
         @click="fetchTaxInfo"
       />

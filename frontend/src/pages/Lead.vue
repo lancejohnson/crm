@@ -631,7 +631,7 @@ const moreActions = computed(() => {
         : toast.error(__('Set a property address to view on Zillow')),
   })
   items.push({
-    label: __('Fetch Tax Info ($0.10)'),
+    label: __('Fetch tax / liens ($0.03)'),
     icon: 'dollar-sign',
     onClick: () =>
       d.property_address

@@ -63,6 +63,12 @@
         @kind="onCalcKind"
       />
     </div>
+    <TaxInfoCard
+      v-if="!isPractice && !isScratch"
+      embedded
+      :lead="lead"
+      @fetch="showFetchTax = true"
+    />
   </template>
   <!-- Address and counts share ONE line with the controls. They used to be
        stacked, which cost a whole row of height at the top of a page whose
@@ -125,6 +131,14 @@
   :title="__('Got a live one? Send the closer a Mattermost message with a link to these comps')"
   iconLeft="zap"
   @click="showLiveOne = true"
+/>
+<Button
+  v-if="pageMode && !isPractice && !isScratch"
+  :label="__('Tax / liens')"
+  variant="subtle"
+  :title="__('Pull owner, tax history, deeds, mortgages, foreclosure and open liens from BatchData ($0.03)')"
+  iconLeft="dollar-sign"
+  @click="showFetchTax = true"
 />
 
 <!-- Details toggle: the pills carry beds/baths/sqft/year, but on a
@@ -645,6 +659,11 @@
     :lead="lead"
     :leadName="address || data?.subject?.address || lead"
   />
+  <FetchTaxInfoModal
+    v-if="!isPractice && !isScratch"
+    v-model="showFetchTax"
+    :reference-doc="taxReferenceDoc"
+  />
   <CompDetailModal
     v-if="detailComp"
     v-model="showCompDetail"
@@ -714,6 +733,8 @@ import {
 import CompDetailModal from '@/components/CompDetailModal.vue'
 import CompConditionModal from '@/components/Modals/CompConditionModal.vue'
 import LiveOneModal from '@/components/Modals/LiveOneModal.vue'
+import FetchTaxInfoModal from '@/components/Modals/FetchTaxInfoModal.vue'
+import TaxInfoCard from '@/components/TaxInfoCard.vue'
 import CompTrayCard from '@/components/CompTrayCard.vue'
 import CompSubjectCard from '@/components/CompSubjectCard.vue'
 import CompHelpKey from '@/components/CompHelpKey.vue'
@@ -755,6 +776,11 @@ const props = defineProps({
 const emit = defineEmits(['subject', 'picked', 'zillowMatch'])
 const show = ref(true)
 const showLiveOne = ref(false)
+const showFetchTax = ref(false)
+const taxReferenceDoc = computed(() => ({
+  name: props.lead,
+  property_address: props.address || data.value?.address || '',
+}))
 
 // Only consulted in `fill` mode. Starts closed: the preset ladder has already
 // chosen a sensible filter set by the time anyone looks, and the desk exists to
