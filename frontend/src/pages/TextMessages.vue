@@ -77,6 +77,7 @@
             :messages="messages.data"
             :contactName="selectedName"
             :contactImage="selectedImage"
+            @reload="messages.reload()"
           />
           <div
             v-else-if="!messages.loading"

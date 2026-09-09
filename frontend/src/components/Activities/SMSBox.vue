@@ -39,13 +39,28 @@
         </div>
       </div>
       <Button
+        variant="ghosted"
+        icon="clock"
+        :title="__('Schedule for later')"
+        :disabled="!content.trim() || !fromNumber || unfilled"
+        @click="scheduling = !scheduling"
+      />
+      <Button
         variant="solid"
-        :loading="sending"
+        :loading="sending && !scheduling"
         :disabled="!content.trim() || !fromNumber || unfilled"
         :label="__('Send')"
         @click="sendSMS()"
       />
     </div>
+    <ScheduleTextPicker
+      v-if="scheduling"
+      class="mx-3 mb-2.5 sm:mx-10"
+      :busy="sending"
+      :disabled="!content.trim() || !fromNumber || unfilled"
+      @confirm="scheduleSMS"
+      @cancel="scheduling = false"
+    />
   </div>
   <SelectQuoNumberModal
     v-model="showSelectNumber"
@@ -55,8 +70,10 @@
 
 <script setup>
 import SelectQuoNumberModal from '@/components/Modals/SelectQuoNumberModal.vue'
+import ScheduleTextPicker from '@/components/Activities/ScheduleTextPicker.vue'
 import TextPresetChips from '@/components/TextPresetChips.vue'
 import { hasUnfilled } from '@/composables/textPresets'
+import { formatDate } from '@/utils'
 import { myQuoNumber } from '@/composables/quoSender'
 import { call, Textarea, Button, toast } from 'frappe-ui'
 import { computed, nextTick, ref, onMounted } from 'vue'
@@ -73,6 +90,7 @@ const rows = ref(1)
 const textareaRef = ref(null)
 const content = ref('')
 const sending = ref(false)
+const scheduling = ref(false)
 const placeholder = ref(__('Type your message here...'))
 
 // sender's linked Quo number; if empty, a modal asks them to pick their number
@@ -131,6 +149,38 @@ function sendOnCmdEnter(event) {
   if (event.metaKey || event.ctrlKey) {
     event.preventDefault()
     sendSMS()
+  }
+}
+
+// Schedule instead of send (crm.api.scheduled_text): the text sits in the
+// thread as a placeholder until the 1-min scheduler sends it.
+async function scheduleSMS(sendAt) {
+  const message = content.value.trim()
+  if (!message || sending.value || unfilled.value || !sendAt) return
+  const lead = leadName()
+  if (!fromNumber.value || !lead) {
+    toast.error(__('Select a Quo number to send from.'))
+    return
+  }
+  sending.value = true
+  try {
+    await call('crm.api.scheduled_text.schedule_text', {
+      reference_doctype: 'CRM Lead',
+      reference_name: lead,
+      content: message,
+      send_at: sendAt,
+      from_number: fromNumber.value,
+    })
+    toast.success(__('Text scheduled for {0}', [formatDate(sendAt, 'ddd, MMM D h:mm a')]))
+    content.value = ''
+    scheduling.value = false
+    rows.value = 1
+    linkedNumber.value = fromNumber.value
+    sms.value?.reload?.()
+  } catch (error) {
+    toast.error(error.messages?.[0] || __('Failed to schedule text'))
+  } finally {
+    sending.value = false
   }
 }
 

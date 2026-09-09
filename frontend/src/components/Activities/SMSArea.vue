@@ -41,9 +41,11 @@
           :id="sms.name"
           class="group/message relative rounded-lg p-1.5 pl-2 text-base shadow-sm whitespace-pre-wrap"
           :class="
-            sms.type == 'Outgoing'
-              ? 'bg-blue-500 text-white'
-              : 'bg-surface-gray-2 text-ink-gray-9'
+            sms.status == 'scheduled'
+              ? 'border border-dashed border-blue-400 bg-surface-blue-1 text-ink-gray-9'
+              : sms.type == 'Outgoing'
+                ? 'bg-blue-500 text-white'
+                : 'bg-surface-gray-2 text-ink-gray-9'
           "
         >
           <Badge
@@ -52,6 +54,30 @@
             :label="sms.status"
             class="absolute -top-2 right-0"
           />
+          <Badge
+            v-else-if="sms.status == 'canceled'"
+            theme="gray"
+            :label="__('Not sent — lead closed')"
+            class="absolute -top-2 right-0"
+          />
+          <!-- a scheduled placeholder: says when, and can be pulled back -->
+          <div
+            v-if="sms.status == 'scheduled'"
+            class="mb-1 flex items-center gap-1.5 text-xs text-ink-blue-3"
+          >
+            <FeatherIcon name="clock" class="size-3" />
+            <span>
+              {{ __('Scheduled') }} · {{ formatDate(sms.creation, 'ddd, MMM D h:mm a') }}
+            </span>
+            <button
+              type="button"
+              class="ml-1 underline decoration-dotted hover:text-ink-red-4"
+              :disabled="canceling === sms.name"
+              @click="cancelScheduled(sms)"
+            >
+              {{ __('Cancel') }}
+            </button>
+          </div>
           <SMSMedia
             v-if="sms.media?.length"
             :media="sms.media"
@@ -62,7 +88,9 @@
             <div
               class="-mb-1 flex shrink-0 items-end gap-1"
               :class="
-                sms.type == 'Outgoing' ? 'text-white' : 'text-ink-gray-5'
+                sms.type == 'Outgoing' && sms.status != 'scheduled'
+                  ? 'text-white'
+                  : 'text-ink-gray-5'
               "
             >
               <Tooltip :text="formatDate(sms.creation, 'ddd, MMM D, YYYY')">
@@ -70,7 +98,7 @@
                   {{ formatDate(sms.creation, 'h:mm a') }}
                 </div>
               </Tooltip>
-              <div v-if="sms.type == 'Outgoing'">
+              <div v-if="sms.type == 'Outgoing' && sms.status != 'scheduled'">
                 <CheckIcon
                   v-if="['sent', 'queued', 'success'].includes(sms.status)"
                   class="size-4"
@@ -94,13 +122,32 @@ import DoubleCheckIcon from '@/components/Icons/DoubleCheckIcon.vue'
 import SMSMedia from '@/components/Activities/SMSMedia.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 import { formatDate } from '@/utils'
-import { Tooltip, Badge, Avatar } from 'frappe-ui'
+import { Tooltip, Badge, Avatar, FeatherIcon, call, toast } from 'frappe-ui'
+import { ref } from 'vue'
 
 const props = defineProps({
   messages: { type: Array, default: () => [] },
   contactName: { type: String, default: '' },
   contactImage: { type: String, default: '' },
 })
+const emit = defineEmits(['reload'])
+
+const canceling = ref('')
+
+// Pull back a scheduled text. The server publishes `quo_message` on delete so
+// every open thread refreshes; the emit covers a host without that listener.
+async function cancelScheduled(sms) {
+  canceling.value = sms.name
+  try {
+    await call('crm.api.scheduled_text.cancel_scheduled_text', { name: sms.name })
+    toast.success(__('Scheduled text canceled'))
+    emit('reload')
+  } catch (e) {
+    toast.error(e.messages?.[0] || __('Could not cancel'))
+  } finally {
+    canceling.value = ''
+  }
+}
 
 // a "run" = consecutive messages from the same person (same direction + same
 // sending teammate); the name shows above a run, the avatar at its end

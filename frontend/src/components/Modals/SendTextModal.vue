@@ -56,6 +56,13 @@
             {{ __('Fill in the [ ? ] parts before sending — the lead is missing that detail.') }}
           </div>
         </div>
+        <ScheduleTextPicker
+          v-if="scheduling"
+          :busy="sending"
+          :disabled="!canSend"
+          @confirm="scheduleSMS"
+          @cancel="scheduling = false"
+        />
         <ErrorMessage :message="error" />
       </div>
     </template>
@@ -68,6 +75,13 @@
         />
         <Button
           class="ml-auto"
+          variant="ghosted"
+          icon="clock"
+          :title="__('Schedule for later')"
+          :disabled="sending"
+          @click="scheduling = !scheduling"
+        />
+        <Button
           :label="__('Send')"
           :loading="sending && !finishing"
           :disabled="!canSend"
@@ -81,15 +95,23 @@
           @click="sendSMS(true)"
         />
       </div>
-      <Button
-        v-else
-        class="w-full"
-        variant="solid"
-        :label="__('Send')"
-        :loading="sending"
-        :disabled="!canSend"
-        @click="sendSMS(false)"
-      />
+      <div v-else class="flex w-full items-center gap-2">
+        <Button
+          variant="subtle"
+          icon-left="clock"
+          :label="__('Schedule')"
+          :disabled="sending"
+          @click="scheduling = !scheduling"
+        />
+        <Button
+          class="flex-1"
+          variant="solid"
+          :label="__('Send')"
+          :loading="sending && !scheduling"
+          :disabled="!canSend"
+          @click="sendSMS(false)"
+        />
+      </div>
     </template>
   </Dialog>
   <SelectQuoNumberModal
@@ -100,10 +122,12 @@
 
 <script setup>
 import SelectQuoNumberModal from '@/components/Modals/SelectQuoNumberModal.vue'
+import ScheduleTextPicker from '@/components/Activities/ScheduleTextPicker.vue'
 import TextPresetChips from '@/components/TextPresetChips.vue'
 import { hasUnfilled } from '@/composables/textPresets'
 import { myQuoNumber, formatPhone } from '@/composables/quoSender'
 import { listLeadPhones, primaryLeadPhone } from '@/utils/leadPhones'
+import { formatDate } from '@/utils'
 import {
   call,
   Dialog,
@@ -129,6 +153,7 @@ const to = ref('')
 const content = ref('')
 const sending = ref(false)
 const finishing = ref(false)
+const scheduling = ref(false)
 const error = ref(null)
 const messageInput = ref(null)
 // the sender's already-linked number (read once when the modal opens); if empty
@@ -144,6 +169,7 @@ watch(
       to.value = primaryLeadPhone(props.referenceDoc)
       content.value = ''
       error.value = null
+      scheduling.value = false
       linkedNumber.value = myQuoNumber()
       fromNumber.value = linkedNumber.value
       if (!linkedNumber.value) showSelectNumber.value = true
@@ -209,6 +235,40 @@ function skip() {
   if (sending.value) return
   show.value = false
   emit('skip')
+}
+
+// Schedule instead of send: a Quo Message placeholder in the thread until the
+// 1-min scheduler sends it (crm.api.scheduled_text). Weekend text tasks from
+// the New Lead sequence are the case — write it Friday, send Saturday 9am.
+async function scheduleSMS(sendAt) {
+  const message = content.value.trim()
+  if (!message || sending.value || unfilled.value || !sendAt) return
+  const lead = leadName()
+  if (!lead || !to.value.trim() || !fromNumber.value) {
+    error.value = __('Need a lead, a number to text and a number to send from.')
+    return
+  }
+  sending.value = true
+  error.value = null
+  try {
+    await call('crm.api.scheduled_text.schedule_text', {
+      reference_doctype: 'CRM Lead',
+      reference_name: lead,
+      content: message,
+      send_at: sendAt,
+      to: to.value,
+      from_number: fromNumber.value,
+    })
+    toast.success(__('Text scheduled for {0}', [formatDate(sendAt, 'ddd, MMM D h:mm a')]))
+    show.value = false
+    props.options.afterInsert?.()
+    // deliberately no emit('finish'): a scheduled text is not a sent one, so
+    // the Today card stays open for the rep to resolve on their own terms
+  } catch (e) {
+    error.value = e.messages?.[0] || __('Failed to schedule text')
+  } finally {
+    sending.value = false
+  }
 }
 
 async function sendSMS(markFinished = false) {

@@ -105,6 +105,7 @@
           :messages="smsMessages.data"
           :contactName="doc.lead_name || doc.first_name"
           :contactImage="doc.image"
+          @reload="smsMessages.reload()"
         />
       </div>
       <div
@@ -337,6 +338,14 @@
                     : doc.lead_name || doc.first_name || __('Lead')
                 }}
               </span>
+              <template v-if="activity.status == 'scheduled'">
+                <span>·</span>
+                <span class="text-ink-blue-3">{{ __('Scheduled') }}</span>
+              </template>
+              <template v-else-if="activity.status == 'canceled'">
+                <span>·</span>
+                <span>{{ __('Not sent — lead closed') }}</span>
+              </template>
               <span>·</span>
               <Tooltip :text="formatDate(activity.creation)">
                 <span>{{ shortTime(activity.creation) }}</span>
@@ -345,9 +354,11 @@
             <div
               class="max-w-[78%] whitespace-pre-wrap rounded-lg px-2.5 py-1.5 text-sm"
               :class="
-                activity.activity_type == 'outgoing_text'
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-surface-gray-2 text-ink-gray-8'
+                activity.status == 'scheduled'
+                  ? 'border border-dashed border-blue-400 bg-surface-blue-1 text-ink-gray-8'
+                  : activity.activity_type == 'outgoing_text'
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-surface-gray-2 text-ink-gray-8'
               "
             >
               <SMSMedia
@@ -1207,6 +1218,7 @@ function get_text_activities() {
     creation: m.creation,
     message: m.message,
     media: m.media,
+    status: m.status,
     sender: m.sender,
     sender_name: m.sender_name,
   }))

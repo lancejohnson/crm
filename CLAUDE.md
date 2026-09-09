@@ -2036,6 +2036,24 @@ duplicating. Work substantial features in a worktree of your own.
   re-entering a status — Resume is a human click. Unit tests:
   `unit_test_sequence_status.py`. `Seller Outreach (Default)` was set to
   New + Called No Answer during verification (0 enrollments, no auto-enroll).
+- **Scheduled texts** (2026-09-09, Lance: weekend text tasks → "let the user
+  schedule a text"). A clock button beside Send on `SendTextModal` and the
+  Text-tab `SMSBox` opens `ScheduleTextPicker` (Tomorrow / Sat / Mon 9am
+  chips + DateTimePicker, 9am Chicago snap shared with task due chips).
+  `crm/api/scheduled_text.py`: `schedule_text` stores a **`Quo Message`**
+  placeholder (`id` `sched-<hex>`, `status=scheduled`, `message_date` = send
+  time, `sent_by` = rep) so it sits IN the thread at its future slot —
+  dashed blue bubble, "Scheduled · Sat, Sep 12 9:00 am", Cancel (owner or
+  manager; `cancel_scheduled_text` deletes + publishes `quo_message`). The
+  Activity timeline labels it "Scheduled". `send_due` on the existing
+  `* * * * *` cron (**new scheduler method → `sync_jobs` on prod**) POSTs
+  OpenPhone, inserts the REAL row under the Quo id (same dedupe as
+  `send-text` / the webhook) and deletes the placeholder; failure marks it
+  `failed`. A lead that went Lost/Won first is NOT texted: `canceled`, shown
+  as "Not sent — lead closed". Scheduling from the Today card does not
+  finish the card. No new doctype, no ops script. Verified on prod via
+  bench (schedule → thread shape → `send_due` on the dead Lance Test lead →
+  canceled) and the UI on all three surfaces.
 - **`New Lead 10-Day` sequence + drainer quiet hours** (2026-09-09, Lance's
   spec: one triple dial every other day for ten days, one text a day for
   ten days). Built DISABLED with no auto-enroll, gated New / Called No

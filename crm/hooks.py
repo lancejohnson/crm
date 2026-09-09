@@ -409,7 +409,12 @@ scheduler_events = {
 		# Single periodic driver for CRM Sequences: enqueue a drainer for every
 		# due enrollment (the old `CRM Sequence Runner` core-cron is disabled in
 		# favour of this). The drainer runs on the dedicated `seqdrain` queue.
-		"* * * * *": ["crm.api.sequence_drain.drain_due"],
+		"* * * * *": [
+			"crm.api.sequence_drain.drain_due",
+			# Scheduled texts ("send Saturday 9am") whose time has come. NEW
+			# scheduler method → needs `sync_jobs` on prod. See crm/api/scheduled_text.py
+			"crm.api.scheduled_text.send_due",
+		],
 		"*/5 * * * *": [
 			"crm.lead_syncing.background_sync.sync_leads_from_sources_5_minutes",
 			# Safety net for new leads/tasks that land while an event-driven sync is
