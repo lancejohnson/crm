@@ -64,6 +64,59 @@ MAX_STEPS = 50
 MAX_CONSECUTIVE_FAILURES = 10
 FAILSAFE_NOTIFY = "lance.johnson@groundworkpro.com"
 
+# Quiet hours. Step waits are relative to the PREVIOUS step, so a lead that
+# arrived at 11pm would otherwise get its "1 day" follow-up text at 11pm, ten
+# nights running. A timed Text/Call step that comes due outside
+# [QUIET_START_HOUR, QUIET_END_HOUR) site-local (America/Chicago) is pushed to
+# the next QUIET_START_HOUR instead. Only steps whose own wait is at least
+# QUIET_MIN_WAIT_SECONDS are held: the wait-0 / few-second intro burst on a new
+# lead is the point of the sequence and fires whenever the lead does. The
+# schedule then drifts by one day once and stays inside the window after.
+QUIET_START_HOUR = 8
+QUIET_END_HOUR = 20
+QUIET_MIN_WAIT_SECONDS = 3600
+QUIET_STEP_TYPES = ("Text", "Call")
+
+_WAIT_SECONDS = {
+	"Seconds": 1,
+	"Minutes": 60,
+	"Hours": 3600,
+	"Days": 86400,
+	"Weeks": 7 * 86400,
+	"Months": 30 * 86400,
+}
+
+
+def _step_wait_seconds(step) -> int:
+	return int(step.get("wait_value") or 0) * _WAIT_SECONDS.get(step.get("wait_unit") or "Days", 86400)
+
+
+def quiet_hold_until(now, step):
+	"""Pure: the datetime a step should be deferred to, or None to run now.
+
+	`now` is site-local (frappe.utils.now_datetime). Held only for the step
+	types that reach the seller, and only when the step's own wait is long
+	enough to be a scheduled follow-up rather than part of an instant burst."""
+	if not step or step.get("step_type") not in QUIET_STEP_TYPES:
+		return None
+	if _step_wait_seconds(step) < QUIET_MIN_WAIT_SECONDS:
+		return None
+	if QUIET_START_HOUR <= now.hour < QUIET_END_HOUR:
+		return None
+	open_today = now.replace(hour=QUIET_START_HOUR, minute=0, second=0, microsecond=0)
+	if now.hour < QUIET_START_HOUR:
+		return open_today
+	return add_to_date(open_today, days=1)
+
+
+def _next_step(enr):
+	try:
+		steps = frappe.get_cached_doc("CRM Sequence", enr.sequence).steps
+		idx = int(enr.current_step or 0)
+		return steps[idx] if idx < len(steps) else None
+	except Exception:
+		return None
+
 
 def _run_core(enrollment):
 	"""Run the API-type engine scoped to one enrollment — exactly what the
@@ -106,6 +159,15 @@ def drain(enrollment):
 		# has left the statuses this sequence runs in is Paused here, right
 		# before the step would fire — the safety net behind the on_update hook.
 		if not check_before_step(enr):
+			return
+		# Quiet hours: a scheduled Text/Call that comes due at night waits for
+		# the morning. Written to next_run so drain_due picks it up then.
+		hold = quiet_hold_until(now_datetime(), _next_step(enr))
+		if hold:
+			frappe.db.set_value(
+				"CRM Sequence Enrollment", enr.name, "next_run", hold, update_modified=False
+			)
+			frappe.db.commit()
 			return
 		before = (enr.current_step, str(enr.next_run), str(enr.modified))
 		_run_core(enrollment)

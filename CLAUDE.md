@@ -2036,6 +2036,23 @@ duplicating. Work substantial features in a worktree of your own.
   re-entering a status — Resume is a human click. Unit tests:
   `unit_test_sequence_status.py`. `Seller Outreach (Default)` was set to
   New + Called No Answer during verification (0 enrollments, no auto-enroll).
+- **`New Lead 10-Day` sequence + drainer quiet hours** (2026-09-09, Lance's
+  spec: one triple dial every other day for ten days, one text a day for
+  ten days). Built DISABLED with no auto-enroll, gated New / Called No
+  Answer, for text review before cutover. 19 steps: day 1 = the ring
+  alert's Pushover pair + 3-text intro burst + triple dial 1; days 2–10 one
+  text each (1 Days waits), triple dials 2–5 at wait 0 after the day 3/5/7/9
+  texts. A Call step is a `CRM Task` for the lead owner; the body tells the
+  rep to log the outcome (Connected pauses, Do Not Call stops). Cutover =
+  enable it, move `auto_enroll_sources` off `New Lead Ring Alert`, disable
+  that one (both enabled = two intro bursts). **Quiet hours** live in
+  `sequence_drain.py` (`quiet_hold_until`, pure, unit-tested): a Text/Call
+  step whose own wait is ≥ 1 hour that comes due outside 8am–8pm site time
+  has `next_run` pushed to the next 8am, so an 11pm lead's daily texts land
+  at 8am from day 2 on. The wait-0 / seconds intro burst is deliberately
+  exempt — answering a new lead instantly is the point. Waits are calendar
+  days, so weekend texts go out and a weekend triple-dial task waits for
+  Monday; the engine has no business-day unit.
 - **Deals in flight surface on the Today board DAILY** (same day): a lead in
   `CLOSER_STATUSES` (Underwriting / Make Offer / Contract Sent) with no task
   due after today is phase **`closer`** in `daily_standup._classify` — due

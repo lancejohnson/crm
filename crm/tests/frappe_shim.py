@@ -159,6 +159,15 @@ def install(user="lance.johnson@groundworkpro.com"):
 	utils.get_datetime = lambda v: v if isinstance(v, datetime) else datetime.fromisoformat(str(v))
 	utils.format_datetime = lambda v, fmt=None: utils.get_datetime(v).strftime("%-d %b")
 	utils.add_days = lambda d, n: d
+
+	def _add_to_date(d, years=0, months=0, weeks=0, days=0, hours=0, minutes=0, seconds=0, **_):
+		from datetime import timedelta
+
+		return utils.get_datetime(d) + timedelta(
+			days=days + 7 * weeks + 30 * months + 365 * years, hours=hours, minutes=minutes, seconds=seconds
+		)
+
+	utils.add_to_date = _add_to_date
 	utils.getdate = lambda v=None: (v if isinstance(v, datetime) else datetime.fromisoformat(str(v))).date() if v else datetime(2026, 9, 7).date()
 	utils.today = lambda: "2026-09-07"
 	utils.nowdate = utils.today
@@ -177,6 +186,12 @@ def install(user="lance.johnson@groundworkpro.com"):
 	exceptions.ValidationError = ValidationError
 	exceptions.PermissionError = PermissionError
 	sys.modules["frappe.exceptions"] = exceptions
+	background_jobs = types.ModuleType("frappe.utils.background_jobs")
+	background_jobs.is_job_enqueued = lambda job_id: False
+	sys.modules["frappe.utils.background_jobs"] = background_jobs
+	safe_exec = types.ModuleType("frappe.utils.safe_exec")
+	safe_exec.call_with_form_dict = lambda fn, form: fn()
+	sys.modules["frappe.utils.safe_exec"] = safe_exec
 	model = types.ModuleType("frappe.model")
 	document = types.ModuleType("frappe.model.document")
 
