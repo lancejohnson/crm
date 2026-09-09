@@ -2017,6 +2017,37 @@ duplicating. Work substantial features in a worktree of your own.
   a genuine 390px Chrome popup: 9 transcript rows, zero bounding-box overlap.
   `crm/api/call_class.py` (**new**) + `frontend/src/components/Activities/CallArea.vue` +
   `CallTranscript.vue`.
+- **Sequences run in named statuses, and a response PAUSES rather than stops**
+  (2026-09-09, Lance's ask). `CRM Sequence.lead_statuses` (Small Text, one per
+  line like `auto_enroll_sources`; ops `setup_sequence_statuses.py`, live on
+  prod) — blank = any status, i.e. the old behaviour. The editor renders it as
+  status chips ("Runs while the lead is in …", read via `createListResource`
+  on `CRM Lead Status`, no endpoint). Enforcement is app code,
+  `crm/api/sequence_status.py`: a `CRM Lead on_update` hook pauses every
+  Active enrollment of a gated sequence the moment the lead moves out of the
+  set, and `drain()` re-checks before each step (the net for `db.set_value`
+  status writes and hand-enrolled leads already outside it). The ops
+  `sequence_auto_enroll.py` skips a lead already outside the set. **Paused,
+  not Stopped**, everywhere the lead itself acts: leaving the statuses, a
+  text reply / answered inbound call (`sequence_events_webhook.py`), and a
+  Connected call outcome (`call_outcome_sequence_exit.py`) all set Paused with
+  an `auto-paused: <reason>` `last_log`, which the enrollment table shows
+  under the badge; Do Not Call still Stops. Nothing auto-resumes on
+  re-entering a status — Resume is a human click. Unit tests:
+  `unit_test_sequence_status.py`. `Seller Outreach (Default)` was set to
+  New + Called No Answer during verification (0 enrollments, no auto-enroll).
+- **Deals in flight surface on the Today board DAILY** (same day): a lead in
+  `CLOSER_STATUSES` (Underwriting / Make Offer / Contract Sent) with no task
+  due after today is phase **`closer`** in `daily_standup._classify` — due
+  every day, one card, reason "Make Offer · no follow-up scheduled" (or the
+  due task's title). Booking any future task clears it. Checked BEFORE the
+  call ladder: by Underwriting the lead has been reached, so "never called"
+  says nothing. `PRIORITY_ORDER` gained `closer` after `task`; a user's saved
+  order gets it appended last (drag it up once). Today.vue badge "Deal in
+  flight" (purple via class override — frappe-ui Badge has no purple theme).
+  `CRM Today Item.phase` is a Data column, so no ops piece. Probed on prod
+  before deploy: exactly the 6 in-flight deals (5 with an overdue "Follow
+  up" task, 1 with none).
 - `frontend/src/pages/Sequences.vue`, `Sequence.vue` — native sequences list +
   step editor + enrollments management
 - `frontend/src/router.js` — `/sequences`, `/sequences/:sequenceId` routes

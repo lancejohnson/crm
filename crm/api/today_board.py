@@ -76,7 +76,10 @@ SKIP_OUTCOMES = (
 
 #: The default personal priority order. Week-one's two calls are deliberately
 #: separated so the first pass can be finished before afternoon follow-ups begin.
-PRIORITY_ORDER = ("never", "task", "week1_am", "week1_pm", "weekly", "monthly")
+#: `closer` (Underwriting / Make Offer / Contract Sent with nothing booked) sits
+#: after the explicit due tasks by default. A user's saved order predating it
+#: gets the key appended at the end (see _priority_order) — drag it up once.
+PRIORITY_ORDER = ("never", "task", "closer", "week1_am", "week1_pm", "weekly", "monthly")
 PRIORITY_DEFAULT_KEY = "crm_today_priority_order"
 
 

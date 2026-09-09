@@ -52,6 +52,45 @@
         :rows="2"
       />
 
+      <!-- Statuses the sequence runs in -->
+      <div v-if="statusesSupported" class="flex flex-col gap-2">
+        <div class="text-xs text-ink-gray-5">
+          Runs while the lead is in
+          <span v-if="!leadStatuses.length" class="text-ink-gray-7">any status</span>
+          <span v-else class="text-ink-gray-7">{{ leadStatuses.length }} selected</span>
+          — the moment a lead moves to a status not ticked here, its enrollment pauses
+          (resumable from the list below). Leave every box empty to run regardless of status.
+        </div>
+        <div class="flex flex-wrap gap-1.5">
+          <button
+            v-for="st in statusOptions.data || []"
+            :key="st.name"
+            type="button"
+            class="rounded-full border px-2.5 py-1 text-xs transition-colors"
+            :class="
+              leadStatuses.includes(st.name)
+                ? 'border-outline-gray-4 bg-surface-gray-7 text-ink-white'
+                : 'border-outline-gray-2 bg-surface-white text-ink-gray-7 hover:bg-surface-gray-2'
+            "
+            :aria-pressed="leadStatuses.includes(st.name)"
+            @click="toggleStatus(st.name)"
+          >
+            {{ st.name }}
+          </button>
+          <button
+            v-if="leadStatuses.length"
+            type="button"
+            class="px-2 py-1 text-xs text-ink-gray-5 hover:text-ink-gray-8"
+            @click="leadStatuses = []"
+          >
+            Clear
+          </button>
+        </div>
+      </div>
+      <div v-else class="text-xs text-ink-gray-5">
+        Status gating is not provisioned on this site yet (ops <code>setup_sequence_statuses.py</code>).
+      </div>
+
       <!-- Steps -->
       <div class="text-lg font-medium text-ink-gray-9">Steps</div>
       <div
@@ -172,7 +211,16 @@
                 </router-link>
               </td>
               <td class="px-4 py-2">
-                <Badge :theme="statusTheme(enr.status)" :label="enr.status" />
+                <span :title="enr.last_log || ''">
+                  <Badge :theme="statusTheme(enr.status)" :label="enr.status" />
+                </span>
+                <div
+                  v-if="enr.status === 'Paused' && pauseReason(enr.last_log)"
+                  class="mt-0.5 max-w-[16rem] truncate text-xs text-ink-gray-5"
+                  :title="enr.last_log"
+                >
+                  {{ pauseReason(enr.last_log) }}
+                </div>
               </td>
               <td class="px-4 py-2 text-ink-gray-7">{{ stepLabel(enr.current_step) }}</td>
               <td class="px-4 py-2 text-ink-gray-7">{{ enr.next_run ? dateFormat(enr.next_run) : '—' }}</td>
@@ -232,6 +280,31 @@ const { sequenceId } = props
 
 const enabled = ref(true)
 const autoEnrollSources = ref('')
+// statuses the sequence runs in (CRM Sequence.lead_statuses, one per line;
+// empty = any). Hidden until the ops script adds the column.
+const leadStatuses = ref([])
+const statusesSupported = ref(false)
+const statusOptions = createListResource({
+  doctype: 'CRM Lead Status',
+  fields: ['name', 'type', 'position'],
+  orderBy: 'position asc',
+  pageLength: 99,
+  auto: true,
+  cache: 'crm_lead_statuses_for_sequences',
+})
+
+function toggleStatus(name) {
+  const i = leadStatuses.value.indexOf(name)
+  if (i === -1) leadStatuses.value.push(name)
+  else leadStatuses.value.splice(i, 1)
+}
+
+// last_log reads "<stamp> auto-paused: <reason>" / "<stamp> PAUSED by fail-safe: ..."
+function pauseReason(log) {
+  if (!log) return ''
+  const m = log.match(/(auto-paused|PAUSED by fail-safe|auto-stopped):\s*(.*)$/s)
+  return m ? m[2].trim() : ''
+}
 // editor model: consecutive saved steps with identical type+subject+message
 // collapse into one "step" card holding multiple trigger paths (wait + unit +
 // condition each); flat CRM Sequence Step rows exist only at load/save
@@ -247,6 +320,13 @@ async function loadDoc() {
   const doc = await call('frappe.client.get', { doctype: 'CRM Sequence', name: sequenceId })
   enabled.value = !!doc.enabled
   autoEnrollSources.value = doc.auto_enroll_sources || ''
+  // frappe.client.get returns every meta field, so the key's presence is
+  // the has_column check the client can make
+  statusesSupported.value = Object.prototype.hasOwnProperty.call(doc, 'lead_statuses')
+  leadStatuses.value = (doc.lead_statuses || '')
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean)
   const out = []
   for (const s of doc.steps) {
     const last = out[out.length - 1]
@@ -331,6 +411,7 @@ async function save() {
     const doc = await call('frappe.client.get', { doctype: 'CRM Sequence', name: sequenceId })
     doc.enabled = enabled.value ? 1 : 0
     doc.auto_enroll_sources = autoEnrollSources.value
+    if (statusesSupported.value) doc.lead_statuses = leadStatuses.value.join('\n')
     doc.steps = flatSteps().map((s, i) => ({
       doctype: 'CRM Sequence Step',
       parentfield: 'steps',
@@ -349,7 +430,7 @@ async function save() {
 
 const enrollments = createListResource({
   doctype: 'CRM Sequence Enrollment',
-  fields: ['name', 'lead', 'status', 'current_step', 'next_run'],
+  fields: ['name', 'lead', 'status', 'current_step', 'next_run', 'last_log'],
   filters: { sequence: sequenceId },
   orderBy: 'modified desc',
   pageLength: 99,
@@ -413,6 +494,7 @@ async function duplicateSequence() {
         // disabled + no auto-enroll: a live copy would double-send alongside the original
         enabled: 0,
         auto_enroll_sources: '',
+        lead_statuses: doc.lead_statuses || '',
         steps: (doc.steps || []).map((s, i) => ({
           doctype: 'CRM Sequence Step',
           parentfield: 'steps',

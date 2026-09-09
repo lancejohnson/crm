@@ -37,6 +37,8 @@ from frappe.utils import add_to_date, get_datetime, now_datetime
 from frappe.utils.background_jobs import is_job_enqueued
 from frappe.utils.safe_exec import call_with_form_dict
 
+from crm.api.sequence_status import check_before_step
+
 # dedicated queue so sleeping drainers never block the main background worker
 DRAIN_QUEUE = "seqdrain"
 # the drainer sleeps waits up to this; longer waits are handed back to drain_due.
@@ -100,6 +102,11 @@ def drain(enrollment):
 				return  # long wait — drain_due re-enqueues this once it is due
 			if delta > 0:
 				time.sleep(delta)
+		# Sequence-level status gate (crm/api/sequence_status.py): a lead that
+		# has left the statuses this sequence runs in is Paused here, right
+		# before the step would fire — the safety net behind the on_update hook.
+		if not check_before_step(enr):
+			return
 		before = (enr.current_step, str(enr.next_run), str(enr.modified))
 		_run_core(enrollment)
 		frappe.db.commit()

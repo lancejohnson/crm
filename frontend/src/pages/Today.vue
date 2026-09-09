@@ -266,6 +266,7 @@
                 v-if="PHASE[item.priority_key]"
                 variant="subtle"
                 :theme="PHASE[item.priority_key].theme"
+                :class="PHASE[item.priority_key].badgeClass"
                 :label="__(PHASE[item.priority_key].label)"
               />
               <Badge
@@ -665,10 +666,20 @@ const UndoIcon = () =>
 const PHASE = {
   never: { label: 'Never called', theme: 'red', defaultOrder: 0 },
   task: { label: 'Task due', theme: 'green', defaultOrder: 1 },
-  week1_am: { label: 'Week 1 · morning', theme: 'orange', defaultOrder: 2 },
-  week1_pm: { label: 'Week 1 · afternoon', theme: 'orange', defaultOrder: 3 },
-  weekly: { label: 'Weekly', theme: 'blue', defaultOrder: 4 },
-  monthly: { label: 'Monthly', theme: 'gray', defaultOrder: 5 },
+  // Underwriting / Make Offer / Contract Sent with no follow-up booked — daily
+  // until someone schedules the next step (crm.api.daily_standup CLOSER_STATUSES)
+  // frappe-ui's Badge has no purple theme; override the subtle-gray classes so
+  // it reads as its own thing next to the red/orange/blue call-ladder chips.
+  closer: {
+    label: 'Deal in flight',
+    theme: 'gray',
+    badgeClass: '!bg-purple-100 !text-purple-700',
+    defaultOrder: 2,
+  },
+  week1_am: { label: 'Week 1 · morning', theme: 'orange', defaultOrder: 3 },
+  week1_pm: { label: 'Week 1 · afternoon', theme: 'orange', defaultOrder: 4 },
+  weekly: { label: 'Weekly', theme: 'blue', defaultOrder: 5 },
+  monthly: { label: 'Monthly', theme: 'gray', defaultOrder: 6 },
 }
 const DEFAULT_PRIORITY_ORDER = Object.keys(PHASE)
 

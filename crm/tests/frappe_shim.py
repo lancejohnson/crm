@@ -157,6 +157,7 @@ def install(user="lance.johnson@groundworkpro.com"):
 	utils.now = lambda: datetime(2026, 9, 7, 12, 0, 0).strftime("%Y-%m-%d %H:%M:%S.%f")
 	utils.now_datetime = lambda: datetime(2026, 9, 7, 12, 0, 0)
 	utils.get_datetime = lambda v: v if isinstance(v, datetime) else datetime.fromisoformat(str(v))
+	utils.format_datetime = lambda v, fmt=None: utils.get_datetime(v).strftime("%-d %b")
 	utils.add_days = lambda d, n: d
 	utils.getdate = lambda v=None: (v if isinstance(v, datetime) else datetime.fromisoformat(str(v))).date() if v else datetime(2026, 9, 7).date()
 	utils.today = lambda: "2026-09-07"

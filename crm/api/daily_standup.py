@@ -61,7 +61,11 @@ CLOSER_STATUSES = ("Contract Sent", "Make Offer", "Underwriting")
 #: resurrect it. Lost is Dead/Not Interested; Won is a closed deal. Everything
 #: else (acq + dispo) is tracked, not just the four chase names above.
 TERMINAL_STATUS_TYPES = ("Lost", "Won")
-CADENCE_PHASES = ("never", "week1", "week1_partial", "weekly", "monthly")
+#: `closer` = a deal in flight (CLOSER_STATUSES) with no follow-up scheduled.
+#: It surfaces EVERY day until someone books the next step — the ask was that a
+#: lead in Underwriting / Make Offer / Contract Sent can never quietly sit
+#: without a plan, which the weekly/monthly sweeps let happen.
+CADENCE_PHASES = ("never", "week1", "week1_partial", "weekly", "monthly", "closer")
 
 #: phase 1 — first N business days after first contact, 2 calls per business day
 PHASE1_BUSINESS_DAYS = 5
@@ -292,6 +296,18 @@ def _classify(row, today):
 		return ("scheduled", 0, False,
 		        f"booked {frappe.utils.format_datetime(row.next_future_due, 'd MMM')}")
 
+	# A deal in flight with no next step booked is due every single day. This
+	# outranks the call ladder on purpose: by the time a lead is in Underwriting
+	# it has been reached, so "never called" / "2 calls today" say nothing
+	# useful about it — what matters is that nobody has written down what
+	# happens next. Booking any task after today clears it (the branch above).
+	if row.status in CLOSER_STATUSES:
+		reason = f"{row.status} · no follow-up scheduled"
+		if row.tasks_due_now:
+			title = (row.due_task_title or "").strip()
+			reason = f"{row.status} · " + (f"task: {title}" if title else "task due")
+		return ("closer", 1, True, reason)
+
 	started = row.first_call or row.creation
 	age = business_days_between(started, today)
 	never = row.last_call is None
@@ -333,9 +349,10 @@ def _classify(row, today):
 
 
 #: display order — never-called first, then explicit due tasks, then cadence.
-_PHASE_RANK = {"never": 0, "task": 1, "week1": 2, "weekly": 3, "monthly": 4}
+_PHASE_RANK = {"closer": 0, "never": 1, "task": 2, "week1": 3, "weekly": 4, "monthly": 5}
 
 _PHASE_LABEL = {
+	"closer": "Deal in flight — no follow-up scheduled",
 	"never": "Never called",
 	"week1": "Week 1 — 2 calls/day",
 	"weekly": "Weekly sweep",

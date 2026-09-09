@@ -356,6 +356,10 @@ doc_events = {
 		],
 		"on_update": [
 			"crm.api.sequence_drain.enqueue_for_lead",
+			# Lead moved out of the statuses a sequence runs in (CRM Sequence
+			# .lead_statuses) → its Active enrollments are Paused, not Stopped, so
+			# a mis-click can be resumed. See crm/api/sequence_status.py.
+			"crm.api.sequence_status.on_lead_update",
 			# lead newly linked to an InvestorLift property → tag its Quo
 			# contact with the property address ("Property" multi-select)
 			"crm.api.quo_contacts.on_lead_update",
