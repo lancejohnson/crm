@@ -23,6 +23,7 @@ worth more to the next person than a private scratchpad would be.
 """
 
 import json
+import re
 
 import frappe
 from frappe import _
@@ -373,3 +374,112 @@ def delete_property(name: str) -> dict:
 	doc = _get(name)
 	doc.delete()
 	return {"ok": True}
+
+
+# ---------------------------------------------------------------------------------
+# Auction.com import — a PROPERTY, never a CRM Lead
+# ---------------------------------------------------------------------------------
+# LeadMarket's Auction tab hands a courthouse/REO listing here. Unlike the iSTL
+# and Zolo sources there is no seller to work, so the record is a scratch
+# CRM Property (comps + calcs), keyed by a namespaced external id so a second
+# click on the same listing returns the same PROP- instead of a duplicate.
+# Identity is `external_id`; the ADC URL is kept separately and never parsed
+# for identity. ADC comp evidence lands in the shared CRM Comp pool (by the
+# caller) and is picked up by geography like every other comp.
+
+AUCTION_SOURCE = "Auction.com"
+_EXTERNAL_ID_RE = re.compile(r"^auction:\d{1,12}$")
+#: Cap on the evidence blob we accept; ADC sends ~30 comps, not thousands.
+_MAX_EVIDENCE_BYTES = 200_000
+
+
+def _external_id_supported() -> bool:
+	return frappe.db.has_column(SCRATCH_DOCTYPE, "external_id")
+
+
+def _num_or_none(v):
+	try:
+		f = float(v)
+	except (TypeError, ValueError):
+		return None
+	return f if f == f and abs(f) != float("inf") else None
+
+
+def _by_external_id(external_id: str):
+	name = frappe.db.get_value(SCRATCH_DOCTYPE, {"external_id": external_id}, "name")
+	return frappe.get_doc(SCRATCH_DOCTYPE, name) if name else None
+
+
+@frappe.whitelist()
+def import_auction_property(
+	listing_id, address: str, city: str = "", state: str = "", zip_code: str = "",
+	lat=None, lng=None, listing_url: str = "", evidence=None,
+) -> dict:
+	"""Idempotently create the CRM Property for one Auction.com listing.
+
+	Returns the existing property when `auction:<listing_id>` is already on
+	file (`created: False`) so repeated pushes never duplicate. Never touches
+	CRM Lead. Coordinates are ADC's own geocode for the listing and are stored
+	as the subject point so the comps map does not have to re-geocode a
+	street-only address into the wrong state.
+	"""
+	_guard()
+	_need()
+	if not _external_id_supported():
+		frappe.throw(_("The external_id column is missing — run setup_properties.py."))
+	listing_id = str(listing_id or "").strip()
+	external_id = f"auction:{listing_id}"
+	if not _EXTERNAL_ID_RE.match(external_id):
+		frappe.throw(_("Auction.com listing id must be numeric."))
+	if not _clean(address):
+		frappe.throw(_("The property address is required."))
+	url = _clean(listing_url)
+	if url and not re.match(r"^https://(www\.)?auction\.com/", url):
+		frappe.throw(_("listing_url must be an auction.com page."))
+	point_lat, point_lng = _num_or_none(lat), _num_or_none(lng)
+	if (point_lat is None) != (point_lng is None) or (
+		point_lat is not None and not (-90 <= point_lat <= 90 and -180 <= point_lng <= 180)
+	):
+		frappe.throw(_("Invalid property coordinates."))
+	if evidence is not None and not isinstance(evidence, (dict, list)):
+		evidence = frappe.parse_json(evidence)
+	blob = json.dumps(evidence, default=str) if evidence is not None else ""
+	if len(blob) > _MAX_EVIDENCE_BYTES:
+		frappe.throw(_("Auction evidence payload is too large."))
+
+	existing = _by_external_id(external_id)
+	if existing:
+		return {**_shape(existing), "created": False, "external_id": external_id}
+
+	values = {
+		"doctype": SCRATCH_DOCTYPE,
+		"property_address": _clean(address),
+		"property_city": _clean(city),
+		"property_state": (_clean(state) or "").upper()[:2],
+		"property_zip": _clean(zip_code),
+		"external_id": external_id,
+		"notes": "",
+	}
+	if frappe.db.has_column(SCRATCH_DOCTYPE, "source"):
+		values["source"] = AUCTION_SOURCE
+	if url and _listing_url_supported():
+		values["listing_url"] = url
+	if point_lat is not None:
+		values["property_lat"] = point_lat
+		values["property_lng"] = point_lng
+	if blob and frappe.db.has_column(SCRATCH_DOCTYPE, "adc_evidence"):
+		values["adc_evidence"] = blob
+	doc = frappe.get_doc(values)
+	if _status_supported():
+		doc.status = DEFAULT_STAGE
+	try:
+		doc.insert()
+	except Exception as exc:  # unique external_id lost a race: return the winner
+		dup = tuple(getattr(frappe, n) for n in ("DuplicateEntryError", "UniqueValidationError") if hasattr(frappe, n))
+		if dup and isinstance(exc, dup):
+			frappe.db.rollback()
+			winner = _by_external_id(external_id)
+			if winner:
+				return {**_shape(winner), "created": False, "external_id": external_id}
+		raise
+	return {**_shape(doc), "created": True, "external_id": external_id}
