@@ -2039,8 +2039,8 @@ duplicating. Work substantial features in a worktree of your own.
 - **`New Lead 10-Day` sequence + drainer quiet hours** (2026-09-09, Lance's
   spec: one triple dial every other day for ten days, one text a day for
   ten days). Built DISABLED with no auto-enroll, gated New / Called No
-  Answer, for text review before cutover. 19 steps: day 1 = the ring
-  alert's Pushover pair + 3-text intro burst + triple dial 1; days 2–10 one
+  Answer, for text review before cutover. 15 steps, no Pushover and no intro
+  burst (Lance): day 1 = one text at wait 0 + triple dial 1; days 2–10 one
   text each (1 Days waits), triple dials 2–5 at wait 0 after the day 3/5/7/9
   texts. A Call step is a `CRM Task` for the lead owner; the body tells the
   rep to log the outcome (Connected pauses, Do Not Call stops). Cutover =
