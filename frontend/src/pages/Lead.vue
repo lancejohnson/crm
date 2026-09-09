@@ -294,6 +294,19 @@
                   @click="openResearchTabs"
                 />
 
+                <!-- Comps on the header row, not in More: it is opened on
+                     nearly every lead (Lance, 2026-09-10). -->
+                <Button
+                  :tooltip="__('View comps')"
+                  icon="map-pin"
+                  @click="
+                    () =>
+                      doc.property_address
+                        ? openComps()
+                        : toast.error(__('Set a property address to see comps'))
+                  "
+                />
+
                 <!-- "Got a live one" -- pings the closer in Mattermost with a
                      link to this lead's comps. On the header row, not in More,
                      because the moment it is needed is mid-call. -->
@@ -653,14 +666,6 @@ const moreActions = computed(() => {
       d.property_address
         ? activities.value?.createUnderwriting()
         : toast.error(__('Set a property address to create an underwriting sheet')),
-  })
-  items.push({
-    label: __('View comps'),
-    icon: 'map-pin',
-    onClick: () =>
-      d.property_address
-        ? openComps()
-        : toast.error(__('Set a property address to see comps')),
   })
   items.push({
     label: __('Photos'),
