@@ -146,5 +146,46 @@ class CloserCardTests(unittest.TestCase):
 		self.assertIn("closer", ds.CADENCE_PHASES)
 
 
+class SequenceTaskTitleTests(unittest.TestCase):
+	def test_day_number(self):
+		self.assertEqual(ds.sequence_day("Text Joe — day 2 of 10"), 2)
+		self.assertEqual(ds.sequence_day("Text Joe — day 1 of 10"), 1)
+		self.assertEqual(ds.sequence_day("Call Joe"), 0)
+		self.assertEqual(ds.sequence_day("Follow up"), 0)
+
+	def test_call_task(self):
+		self.assertTrue(ds.is_sequence_call_task("Call Joe Williams"))
+		self.assertFalse(ds.is_sequence_call_task("Text Joe — day 1 of 10"))
+		self.assertFalse(ds.is_sequence_call_task("Follow up"))
+
+	def test_triple_dial_suffix(self):
+		self.assertEqual(
+			ds.with_triple_dial("Text Joe — day 3 of 10", True),
+			"Text Joe — day 3 of 10 · triple dial",
+		)
+		self.assertEqual(ds.with_triple_dial("Text Joe — day 2 of 10", False), "Text Joe — day 2 of 10")
+
+	def test_board_rows_are_text_then_triple_dial(self):
+		rows = ds.board_task_rows(
+			[
+				{"title": "Text Joe — day 3 of 10"},
+				{"title": "Text Joe — day 1 of 10"},
+				{"title": "Call Joe"},
+			]
+		)
+		self.assertEqual(
+			[t["title"] for t in rows],
+			["Text Joe — day 3 of 10", "Call Joe"],
+		)
+
+	def test_board_rows_text_only_day(self):
+		rows = ds.board_task_rows([{"title": "Text Joe — day 2 of 10"}])
+		self.assertEqual([t["title"] for t in rows], ["Text Joe — day 2 of 10"])
+
+	def test_board_rows_plain_follow_up(self):
+		rows = ds.board_task_rows([{"title": "Follow up"}])
+		self.assertEqual([t["title"] for t in rows], ["Follow up"])
+
+
 if __name__ == "__main__":
 	unittest.main()

@@ -329,56 +329,62 @@
                  this task can be edited AND more can be added — rather than a
                  single-task dialog that can only ever edit the one you clicked. -->
             <div
-              v-if="item.task"
-              class="mt-2 flex w-full items-center gap-1.5 rounded-md border border-outline-gray-1 bg-surface-gray-1 px-2 py-1.5 hover:border-outline-gray-3"
+              v-if="cardTasks(item).length"
+              class="mt-2 flex flex-col gap-1"
               @click.stop
             >
-              <Tooltip
-                :text="item.task.is_completed ? __('Mark as not done') : __('Mark as done')"
+              <div
+                v-for="task in cardTasks(item)"
+                :key="task.name"
+                class="flex w-full items-center gap-1.5 rounded-md border border-outline-gray-1 bg-surface-gray-1 px-2 py-1.5 hover:border-outline-gray-3"
               >
+                <Tooltip
+                  :text="task.is_completed ? __('Mark as not done') : __('Mark as done')"
+                >
+                  <button
+                    class="flex shrink-0 items-center rounded disabled:cursor-wait disabled:opacity-60"
+                    :disabled="togglingTasks.includes(task.name)"
+                    @click.stop="toggleTask(item, task)"
+                  >
+                    <FeatherIcon
+                      :name="task.is_completed ? 'check-circle' : 'circle'"
+                      class="size-3.5"
+                      :class="
+                        task.is_completed
+                          ? 'text-ink-green-3'
+                          : 'text-ink-gray-4 hover:text-ink-green-3'
+                      "
+                    />
+                  </button>
+                </Tooltip>
+                <!-- native `title` rather than <Tooltip>: Tooltip renders a wrapper
+                     element, which would become the flex child and break the
+                     truncating `min-w-0 flex-1` title on a narrow card. -->
                 <button
-                  class="flex shrink-0 items-center rounded disabled:cursor-wait disabled:opacity-60"
-                  :disabled="togglingTasks.includes(item.task.name)"
-                  @click.stop="toggleTask(item)"
+                  class="flex min-w-0 flex-1 items-center gap-1.5 text-left hover:opacity-80"
+                  :title="__('Open to-dos — edit this one or add more')"
+                  @click.stop="openTodayItem(item)"
                 >
-                  <FeatherIcon
-                    :name="item.task.is_completed ? 'check-circle' : 'circle'"
-                    class="size-3.5"
-                    :class="
-                      item.task.is_completed
-                        ? 'text-ink-green-3'
-                        : 'text-ink-gray-4 hover:text-ink-green-3'
-                    "
-                  />
+                  <span
+                    class="min-w-0 flex-1 truncate text-xs font-medium text-ink-gray-7"
+                    :class="task.is_completed ? 'line-through opacity-60' : ''"
+                  >
+                    {{ task.title }}
+                  </span>
+                  <span
+                    v-if="task.completed_at || task.due_date"
+                    class="shrink-0 text-xs text-ink-gray-5"
+                  >
+                    {{
+                      __(
+                        timeAgo(
+                          task.is_completed ? task.completed_at : task.due_date,
+                        ),
+                      )
+                    }}
+                  </span>
                 </button>
-              </Tooltip>
-              <!-- native `title` rather than <Tooltip>: Tooltip renders a wrapper
-                   element, which would become the flex child and break the
-                   truncating `min-w-0 flex-1` title on a narrow card. -->
-              <button
-                class="flex min-w-0 flex-1 items-center gap-1.5 text-left hover:opacity-80"
-                :title="__('Open to-dos — edit this one or add more')"
-                @click.stop="openTodayItem(item)"
-              >
-                <span
-                  class="min-w-0 flex-1 truncate text-xs font-medium text-ink-gray-7"
-                  :class="item.task.is_completed ? 'line-through opacity-60' : ''"
-                >
-                  {{ item.task.title }}
-                </span>
-                <span
-                  v-if="item.task.completed_at || item.task.due_date"
-                  class="shrink-0 text-xs text-ink-gray-5"
-                >
-                  {{
-                    __(
-                      timeAgo(
-                        item.task.is_completed ? item.task.completed_at : item.task.due_date,
-                      ),
-                    )
-                  }}
-                </span>
-              </button>
+              </div>
             </div>
 
             <!-- Follow-up strip: a To Call card with no open task offers the rep's
@@ -1099,8 +1105,13 @@ function onLeadAddressUpdated({ lead, address, zillow_unresolved } = {}) {
 // Tick a task straight off the card, in either direction. Reopening matters as
 // much as completing: the checkbox is one pixel from the row that opens the
 // task, so a mis-click has to be undoable without hunting for the lead.
-async function toggleTask(item) {
-  const task = item.task
+function cardTasks(item) {
+  if (item.tasks?.length) return item.tasks
+  return item.task ? [item.task] : []
+}
+
+async function toggleTask(item, task) {
+  task = task || item.task
   if (!task || togglingTasks.value.includes(task.name)) return
   const wasCompleted = task.is_completed
   togglingTasks.value = [...togglingTasks.value, task.name]

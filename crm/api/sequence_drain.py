@@ -31,9 +31,10 @@ lead volume, scale the drain-worker (replicas) or move to delay-based scheduling
 """
 
 import time
+from datetime import datetime, time as dt_time, timedelta
 
 import frappe
-from frappe.utils import add_to_date, get_datetime, now_datetime
+from frappe.utils import add_to_date, get_datetime, getdate, now_datetime
 from frappe.utils.background_jobs import is_job_enqueued
 from frappe.utils.safe_exec import call_with_form_dict
 
@@ -107,6 +108,29 @@ def quiet_hold_until(now, step):
 	if now.hour < QUIET_START_HOUR:
 		return open_today
 	return add_to_date(open_today, days=1)
+
+
+def calendar_due(now, step):
+	"""Pure: 8:00 on the calendar day a Days/Weeks wait lands, else None.
+
+	The engine adds 24 hours, so a Monday 11:39 step comes due Tuesday 11:39 —
+	after the 5am Today board has already been built, so yesterday's finished
+	leads vanish until the afternoon. A 1-day wait means the next calendar
+	morning, not +24h. Wait-0 / hours / minutes are left alone (the intro
+	burst and quiet hours handle those)."""
+	if not step:
+		return None
+	unit = step.get("wait_unit") or "Days"
+	val = int(step.get("wait_value") or 0)
+	if unit == "Weeks":
+		val *= 7
+	elif unit != "Days":
+		return None
+	if val <= 0:
+		return None
+	start = now.date() if hasattr(now, "date") else now
+	target = start + timedelta(days=val)
+	return datetime.combine(target, dt_time(QUIET_START_HOUR, 0))
 
 
 def _next_step(enr):
@@ -208,6 +232,7 @@ def _drain_locked(enrollment):
 				_record_failure(enr)
 			return
 		_reset_failures(enr)
+		_align_next_run(enr)
 
 
 def _record_failure(enr):
@@ -282,6 +307,65 @@ def _notify_pause(enr, fails):
 		frappe.log_error(frappe.get_traceback(), "sequence fail-safe: pause email failed")
 
 
+# Task/Call steps only create a CRM Task for the rep — they do not text the
+# seller — so it is safe (and necessary) to pull them forward onto the morning
+# board. SMS Text steps stay on their own clock / quiet hours.
+BOARD_STEP_TYPES = ("Task", "Call")
+
+
+def _align_next_run(enr):
+	"""If the engine scheduled a Days wait for the afternoon, snap it to 8am
+	that morning so drain_due (and the Today board) see it before the reps start."""
+	due = calendar_due(now_datetime(), _next_step(enr))
+	if not due or not enr.next_run:
+		return
+	current = get_datetime(enr.next_run)
+	if current <= due:
+		return
+	frappe.db.set_value(
+		"CRM Sequence Enrollment", enr.name, "next_run", due, update_modified=False
+	)
+	frappe.db.commit()
+	enr.next_run = due
+
+
+def materialize_board_steps(day=None):
+	"""Fire today's due-later Task/Call sequence steps now so the Today board
+	can list them. Called at the start of board generation; SMS Text steps are
+	left untouched. Returns how many enrollments were drained."""
+	if not frappe.db.exists("DocType", "CRM Sequence Enrollment"):
+		return 0
+	day = getdate(day or now_datetime())
+	eod = datetime.combine(day, datetime.max.time())
+	now = now_datetime()
+	rows = frappe.get_all(
+		"CRM Sequence Enrollment",
+		filters={"status": "Active", "next_run": ["<=", eod]},
+		fields=["name"],
+	)
+	n = 0
+	for row in rows:
+		enr = frappe.get_doc("CRM Sequence Enrollment", row.name)
+		if enr.status != "Active":
+			continue
+		step = _next_step(enr)
+		if not step or step.get("step_type") not in BOARD_STEP_TYPES:
+			continue
+		nr = get_datetime(enr.next_run) if enr.next_run else now
+		if nr > now:
+			frappe.db.set_value(
+				"CRM Sequence Enrollment",
+				enr.name,
+				"next_run",
+				now,
+				update_modified=False,
+			)
+			frappe.db.commit()
+		drain(enr.name)
+		n += 1
+	return n
+
+
 def drain_lead(lead):
 	"""Quick job (off the sleeping queue): enqueue a drainer for each Active
 	enrollment of a freshly-enrolled lead. Run from a worker (after commit) so the
@@ -299,6 +383,17 @@ def drain_due():
 	"""1-min scheduler backstop: enqueue a drainer for every Active enrollment due
 	within the lookahead window (or with no next_run yet). Sole periodic driver —
 	replaces the old `CRM Sequence Runner` core-cron, which is disabled."""
+	# Snap leftover +24h waits down to 8am of that morning so they become due
+	# with the Today board instead of mid-afternoon.
+	for row in frappe.get_all(
+		"CRM Sequence Enrollment",
+		filters={"status": "Active"},
+		fields=["name", "sequence", "current_step", "next_run"],
+	):
+		try:
+			_align_next_run(row)
+		except Exception:
+			pass
 	soon = add_to_date(now_datetime(), seconds=LOOKAHEAD_SECONDS)
 	rows = frappe.get_all(
 		"CRM Sequence Enrollment",

@@ -53,5 +53,34 @@ class QuietHoursTests(unittest.TestCase):
 		self.assertIsNone(sd.quiet_hold_until(night, None))
 
 
+class CalendarDueTests(unittest.TestCase):
+	def test_one_day_lands_next_morning_not_plus_24h(self):
+		self.assertEqual(
+			sd.calendar_due(datetime(2026, 9, 9, 11, 39), step()),
+			datetime(2026, 9, 10, 8, 0),
+		)
+		self.assertEqual(
+			sd.calendar_due(datetime(2026, 9, 9, 23, 5), step()),
+			datetime(2026, 9, 10, 8, 0),
+		)
+
+	def test_zero_and_non_day_waits_are_left_alone(self):
+		now = datetime(2026, 9, 9, 11, 39)
+		self.assertIsNone(sd.calendar_due(now, step(wait_value=0)))
+		self.assertIsNone(sd.calendar_due(now, step(wait_value=30, wait_unit="Minutes")))
+		self.assertIsNone(sd.calendar_due(now, None))
+
+	def test_weeks_and_multi_day(self):
+		now = datetime(2026, 9, 9, 14, 0)
+		self.assertEqual(
+			sd.calendar_due(now, step(wait_value=2)),
+			datetime(2026, 9, 11, 8, 0),
+		)
+		self.assertEqual(
+			sd.calendar_due(now, step(wait_value=1, wait_unit="Weeks")),
+			datetime(2026, 9, 16, 8, 0),
+		)
+
+
 if __name__ == "__main__":
 	unittest.main()

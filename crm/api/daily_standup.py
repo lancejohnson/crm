@@ -41,6 +41,7 @@ a separate closer list.
 """
 
 import json
+import re
 from datetime import datetime, timedelta
 from functools import lru_cache
 
@@ -68,6 +69,67 @@ TERMINAL_STATUS_TYPES = ("Lost", "Won")
 #: Only `closer` still generates cards from the board itself; the old ladder
 #: phases are kept so cards created before 2026-09-09 keep their labels.
 CADENCE_PHASES = ("never", "week1", "week1_partial", "weekly", "monthly", "closer", "nudge")
+
+#: "Text Joe — day 3 of 10" on a sequence Task. Used to pick the CURRENT day's
+#: work over leftover yesterday tasks when both are still open.
+_DAY_IN_TITLE = re.compile(r"\bday\s+(\d+)\s+of\s+(\d+)\b", re.I)
+
+
+def sequence_day(title):
+	"""Pure: the N in 'day N of M', else 0."""
+	m = _DAY_IN_TITLE.search(title or "")
+	return int(m.group(1)) if m else 0
+
+
+def is_sequence_call_task(title):
+	"""Pure: a sequence Call step titles the task 'Call {lead_name}'."""
+	t = (title or "").strip()
+	return t.lower().startswith("call ") and not sequence_day(t)
+
+
+def with_triple_dial(title, has_call):
+	"""Pure: name a text-day task as a triple-dial day when a Call task is also open."""
+	title = title or ""
+	if has_call and sequence_day(title) and "triple dial" not in title.lower():
+		return title + " · triple dial"
+	return title
+
+
+def _task_title(task):
+	if task is None:
+		return ""
+	if isinstance(task, dict):
+		return task.get("title") or ""
+	return getattr(task, "title", None) or ""
+
+
+def board_task_rows(tasks):
+	"""Pure: Today-card rows — current-day sequence text, then the Call (triple dial).
+
+	`tasks` should already be sorted highest day-N first, then soonest due.
+	Leftover day-1 texts lose to day 2; a Call step is its own row so the card
+	shows both jobs on a triple-dial day."""
+	text = call = other = None
+	for task in tasks or []:
+		title = _task_title(task)
+		if is_sequence_call_task(title):
+			if call is None:
+				call = task
+			continue
+		if sequence_day(title):
+			if text is None:
+				text = task
+			continue
+		if other is None:
+			other = task
+	rows = []
+	if text:
+		rows.append(text)
+	elif other:
+		rows.append(other)
+	if call:
+		rows.append(call)
+	return rows
 
 #: phase 1 — first N business days after first contact, 2 calls per business day
 PHASE1_BUSINESS_DAYS = 5
@@ -259,7 +321,14 @@ def _fetch_chase_rows(today):
 		select reference_docname n,
 		       min(case when due_date > %(eod)s then due_date end) next_future_due,
 		       sum(case when due_date is not null and due_date <= %(eod)s then 1 else 0 end) due_now,
-		       min(case when due_date is not null and due_date <= %(eod)s then title end) due_title
+		       substring_index(
+		         group_concat(
+		           case when due_date is not null and due_date <= %(eod)s then title end
+		           order by creation desc
+		           separator '\n'
+		         ),
+		         '\n', 1
+		       ) due_title
 		from `tabCRM Task`
 		where reference_doctype = 'CRM Lead' and reference_docname in %(names)s
 		  and status not in ('Done', 'Canceled')

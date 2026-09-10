@@ -38,9 +38,12 @@ from frappe.utils import cint, escape_html, getdate, now_datetime
 
 from crm.api.daily_standup import (
 	CADENCE_PHASES,
+	board_task_rows,
 	build_standup,
 	is_business_day,
+	is_sequence_call_task,
 	previous_business_day,
+	sequence_day,
 )
 
 DOCTYPE = "CRM Today Item"
@@ -484,6 +487,16 @@ def _generate_today(day):
 			"available": True,
 			"closed": True,
 		}
+	# Sequence Task/Call steps wait +24h from the previous fire, so they land
+	# in the afternoon after this 5am pass. Pull today's still-pending ones
+	# forward first so the board lists day 2 / triple-dial instead of going blank
+	# for yesterday's finished leads.
+	try:
+		from crm.api.sequence_drain import materialize_board_steps
+
+		materialize_board_steps(day)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "today_board: sequence materialize failed")
 	data = build_standup(day)
 	due = data["setter"]["due"]
 	with_slots = _supports_call_slots()
@@ -989,19 +1002,32 @@ def get_today_board(
 		},
 		fields=task_fields,
 	)
+	# Current sequence day first (day 2 beats leftover day 1), then soonest due.
 	open_tasks.sort(
 		key=lambda task: (
+			-sequence_day(task.title),
 			task.due_date is None,
 			task.due_date or "",
 			task.creation or "",
 		)
 	)
-	open_task_by_lead = {}
+	open_tasks_by_lead = defaultdict(list)
 	for task in open_tasks:
-		task.pop("creation", None)
-		task.pop("modified", None)
-		task["is_completed"] = False
-		open_task_by_lead.setdefault(task.reference_docname, task)
+		open_tasks_by_lead[task.reference_docname].append(task)
+	open_task_by_lead = {}
+	open_tasks_shaped = {}
+	for lead, group in open_tasks_by_lead.items():
+		shaped = []
+		for task in board_task_rows(group):
+			row = dict(task)
+			row.pop("creation", None)
+			row.pop("modified", None)
+			row["is_completed"] = False
+			if is_sequence_call_task(row.get("title")):
+				row["title"] = "Triple dial"
+			shaped.append(row)
+		open_tasks_shaped[lead] = shaped
+		open_task_by_lead[lead] = shaped[0] if shaped else None
 
 	# A Done card should show the task the rep just finished, not the next future
 	# follow-up. Use the latest task marked Done on this board date; `modified` is
@@ -1071,9 +1097,12 @@ def get_today_board(
 		# vanish and leave the rep no way to undo a mis-click.
 		completed_task = completed_task_by_lead.get(r.lead)
 		open_task = open_task_by_lead.get(r.lead)
+		open_rows = open_tasks_shaped.get(r.lead) or []
 		if r.state == "Done" and completed_task:
 			r["task"] = completed_task
+			r["tasks"] = [completed_task]
 		else:
+			r["tasks"] = open_rows or ([completed_task] if completed_task else [])
 			r["task"] = open_task or completed_task
 		# Open task, not a completed one: "has a task assigned" is the live next
 		# action, not yesterday's tick. Cadence is the stored phase — leftover-task
