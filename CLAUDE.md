@@ -266,7 +266,8 @@ duplicating. Work substantial features in a worktree of your own.
     exact because `CRM Lead.vendor_lead_id` **is the iSTL order id**. Per
     ORDER, not "is there a bonus balance right now" — the webhook beats any
     balance check and orders can straddle wallets. Effects: Refund card shows
-    the reason instead of *Mark refundable*; `set_refund_state` throws on every
+    the reason instead of *Mark refundable*; Today cards get a gray **No refund**
+    chip (`get_today_board` carries `non_refundable`); `set_refund_state` throws on every
     path onto the board (clearing still works, so a request queued before the
     flag landed can be withdrawn — the board shows a red **Non-refundable**
     badge on it); the ISTL call-volume nudge returns `reason: non_refundable`.

@@ -281,6 +281,13 @@
                 theme="green"
                 :label="__('Task')"
               />
+              <Badge
+                v-if="item.non_refundable"
+                variant="subtle"
+                theme="gray"
+                :label="__('No refund')"
+                :title="item.non_refundable_reason || __('The provider will not refund this lead')"
+              />
               <div @click.stop>
                 <Dropdown
                   :options="leadStatusOptions(item)"

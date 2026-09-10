@@ -28,6 +28,13 @@
               :label="item.lead_status"
             />
             <Badge
+              v-if="item?.non_refundable"
+              variant="subtle"
+              theme="gray"
+              :label="__('No refund')"
+              :title="item.non_refundable_reason || __('The provider will not refund this lead')"
+            />
+            <Badge
               v-if="item?.total_calls > 1"
               variant="subtle"
               theme="blue"

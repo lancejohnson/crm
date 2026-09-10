@@ -953,7 +953,8 @@ def get_today_board(
 			fields=["name", "lead_name", "status", "lead_owner", "mobile_no", "phone", "email",
 			        "property_address", "property_city", "property_state", "property_zip"]
 		        + [
-			        f for f in ("zillow_zpid", "zillow_fetched_at")
+			        f for f in ("zillow_zpid", "zillow_fetched_at", "custom_non_refundable",
+			                    "custom_non_refundable_reason")
 			        if frappe.db.has_column("CRM Lead", f)
 		        ],
 		)
@@ -1054,6 +1055,10 @@ def get_today_board(
 		# Cheap: these are already on the lead. A miss is only flagged after we have
 		# actually asked Zillow — never on a card nobody has opened comps for.
 		r["zillow_unresolved"] = bool(l.get("zillow_fetched_at")) and not l.get("zillow_zpid")
+		# Bonus-wallet iSTL buy: the provider will not refund. Chip on the card so
+		# a setter doesn't spend a 10-dial streak chasing a denial.
+		r["non_refundable"] = bool(l.get("custom_non_refundable"))
+		r["non_refundable_reason"] = (l.get("custom_non_refundable_reason") or "") or None
 		r["calls_today"] = made.get(r.lead, 0)
 		r["call_number"] = int(r.get("call_number") or 1)
 		r["total_calls"] = int(
