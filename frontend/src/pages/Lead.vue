@@ -284,7 +284,7 @@
                   @click="activities?.sendText()"
                 />
 
-                <!-- One-click: 2× Zillow + Google Maps for this property.
+                <!-- One-click: comps + Zillow + Google Maps for this property.
                      Reuses the same Zillow slug / Maps query as the standalone
                      actions so the opened pages match what More → View on
                      Zillow and the address-row Maps link already produce. -->
@@ -571,7 +571,7 @@ const canDelete = computed(() => permissions.data?.permissions?.delete || false)
 
 const doc = computed(() => document.doc || {})
 
-// Open 2 Zillow tabs + 1 Google Maps tab for this lead's property. All three
+// Open comps + 1 Zillow tab + 1 Google Maps tab for this lead's property. All three
 // window.opens stay in the same click gesture so the popup blocker allows them.
 function openResearchTabs() {
   const address = doc.value.property_address
@@ -579,9 +579,10 @@ function openResearchTabs() {
     toast.error(__('Set a property address to open research tabs'))
     return
   }
-  const zUrl = zillowUrl(address)
-  window.open(zUrl, '_blank', 'noopener')
-  window.open(zUrl, '_blank', 'noopener')
+  // Comps + one Zillow + Maps (Dennis, 2026-09-10: Zillow is a reference
+  // point now, not the comping tool, so the second Zillow tab is gone).
+  window.open(`/crm/leads/${props.leadId}/comps`, '_blank', 'noopener')
+  window.open(zillowUrl(address), '_blank', 'noopener')
   window.open(mapsUrl(address), '_blank', 'noopener')
 }
 

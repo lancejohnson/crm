@@ -789,9 +789,10 @@ function openResearchTabs() {
     toast.error(__('Set a property address to open research tabs'))
     return
   }
-  const zUrl = zillowUrl(address)
-  window.open(zUrl, '_blank', 'noopener')
-  window.open(zUrl, '_blank', 'noopener')
+  // Comps + one Zillow + Maps (Dennis, 2026-09-10: Zillow is a reference
+  // point now, not the comping tool, so the second Zillow tab is gone).
+  window.open(`/crm/leads/${props.leadId}/comps`, '_blank', 'noopener')
+  window.open(zillowUrl(address), '_blank', 'noopener')
   window.open(mapsUrl(address), '_blank', 'noopener')
 }
 

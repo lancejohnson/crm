@@ -324,8 +324,11 @@ duplicating. Work substantial features in a worktree of your own.
   `Modals/TextPresetsModal.vue`.
 
 - **Open Research tabs (Lead header)** — a one-click button on the Lead page
-  header row (Call · Text · **Research** · ⋯ · Delete) that opens **two Zillow
-  tabs + one Google Maps tab** for the lead's `property_address`. Reuses the
+  header row (Call · Text · **Research** · ⋯ · Delete) that opens **the comps
+  page + one Zillow tab + one Google Maps tab** for the lead's
+  `property_address` (was two Zillow tabs; Dennis, 2026-09-10 — Zillow is now
+  a reference point to confirm info, comps is where the pricing happens). Same
+  button on `MobileLead.vue` (More menu). Reuses the
   same Zillow `/homes/<slug>_rb/` slug builder as More → View on Zillow and the
   same Maps `api=1&query=` URL as the address-row link (extracted into shared
   `zillowUrl`/`mapsUrl` helpers). Toasts if no address is set. Pure frontend.
