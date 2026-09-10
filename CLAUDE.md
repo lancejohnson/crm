@@ -1179,6 +1179,24 @@ duplicating. Work substantial features in a worktree of your own.
     plenty of rural parcels** (NC-210: null, with a rent Zestimate present) —
     that is what the fallback chain is for.
 
+- **A stale-copy save retries itself** (2026-09-10, Dennis: "I have to
+  refresh the page before I can change the status"). `document.save`
+  posts the WHOLE doc, `modified` included, and Frappe refuses it with
+  `TimestampMismatchError` once anything has touched the row since the
+  page loaded it — and on this CRM that is routine: **adding a comment
+  bumps the lead's `modified` in a background job a second later**
+  (upstream `on_comment_insert` → `update_modified_background`, on via
+  FCRM Settings `update_timestamp_on_new_communication`), the Today
+  board's outcome comment does the same, Quo webhooks relink call logs,
+  contract parsing writes terms, two quick edits race each other. So
+  comment-then-change-status failed every time and Lance could not
+  reproduce because he does not comment first. `data/document.js`
+  (`submitWithMismatchRetry`) now refetches, re-applies only the fields
+  that save changed (diff vs `originalDoc`) and submits once more; the
+  toast is held until the retry itself fails. Covers every
+  `document.save.submit` caller (Lead/MobileLead/Deal/side panel/lost
+  reason). Diagnosis tip: a lead whose `modified` moved with **no Version
+  row** was bumped by a `db.set_value`, not a person.
 - **Every lead view reads newest-first** (gw303) — only the Activity timeline was
   most-recent-first; Comments, Calls, Tasks, Notes and Attachments made you
   scroll to the bottom to find out what just happened. `Activities.vue` now
