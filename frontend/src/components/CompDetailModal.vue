@@ -104,24 +104,37 @@
                    signed with THEIR referer-restricted key — 200 with no
                    Referer, 403 with ours — so the tray thumbnail loaded while
                    this, the first gallery frame, broke on click. -->
+              <!-- Hero URL is often known before the bytes are: subject
+                   cover_photo, a hover-prefetch of get_comp_details, or the
+                   in-modal cache. Gating the spinner on `!photos.length`
+                   left a black frame for the whole CDN wait. Overlay until
+                   @load; keep the img mounted (opacity-0) so it can paint. -->
               <img
                 v-if="photos.length && !photoBroken"
+                ref="photoEl"
                 :src="photoSrc"
                 :alt="comp?.address"
-                class="absolute inset-0 size-full object-contain"
+                class="absolute inset-0 size-full object-contain transition-opacity"
+                :class="heroLoaded ? 'opacity-100' : 'opacity-0'"
                 referrerpolicy="no-referrer"
                 @error="onPhotoError"
                 @load="onPhotoLoad"
               />
-              <div v-else-if="loading" class="flex flex-col items-center gap-2 text-sm text-ink-white/70">
-                <FeatherIcon name="loader" class="size-5 animate-spin" />
-                {{ __('Loading property photos…') }}
+              <div
+                v-if="photoPending"
+                class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 text-sm text-white"
+              >
+                <span class="size-6 animate-spin rounded-full border-2 border-white/25 border-t-white" />
+                {{ __('Loading photos…') }}
               </div>
-              <div v-else class="flex flex-col items-center gap-2 px-6 text-center text-sm text-ink-white/70">
+              <div
+                v-else-if="photoBroken || !photos.length"
+                class="flex flex-col items-center gap-2 px-6 text-center text-sm text-white/80"
+              >
                 <FeatherIcon name="image" class="size-7" />
                 <template v-if="photoBroken">
                   {{ __('This photo did not load.') }}
-                  <button class="font-medium text-ink-white hover:underline" @click="retryPhoto">
+                  <button class="font-medium text-white hover:underline" @click="retryPhoto">
                     {{ __('Retry') }}
                   </button>
                 </template>
@@ -378,6 +391,7 @@ function clearSqft() {
 
 watch(show, (v) => {
   if (!v) editingSqft.value = false
+  else nextTick(syncHeroFromEl)
 })
 const loading = ref(false)
 const error = ref('')
@@ -393,6 +407,8 @@ let requestToken = 0
 // broken frame.
 const photoBust = ref(0)
 const photoBroken = ref(false)
+const photoEl = ref(null)
+const heroLoaded = ref(false)
 const retriedPhotos = new Set()
 
 const photoSrc = computed(() => {
@@ -400,6 +416,17 @@ const photoSrc = computed(() => {
   if (!url || !photoBust.value || !retriedPhotos.has(url)) return url
   return url + (url.includes('?') ? '&' : '?') + 'cb=' + photoBust.value
 })
+
+const photoPending = computed(() => {
+  if (photoBroken.value) return false
+  if (loading.value && !photos.value.length) return true
+  return !!(photos.value.length && !heroLoaded.value)
+})
+
+function syncHeroFromEl() {
+  const el = photoEl.value
+  if (el && el.complete && el.naturalWidth > 0) heroLoaded.value = true
+}
 
 function onPhotoError() {
   const url = photos.value[photoIndex.value] || ''
@@ -409,11 +436,13 @@ function onPhotoError() {
     photoBust.value = Date.now()
     return
   }
+  heroLoaded.value = false
   photoBroken.value = true
 }
 
 function onPhotoLoad() {
   photoBroken.value = false
+  heroLoaded.value = true
 }
 
 function retryPhoto() {
@@ -439,6 +468,12 @@ const photos = computed(() => {
     ''
   return cover ? [cover] : []
 })
+
+watch(photoSrc, () => {
+  heroLoaded.value = false
+  nextTick(syncHeroFromEl)
+})
+
 const fit = computed(() => compFit(props.comp, props.subject))
 const streetPoint = computed(() => {
   if (props.subjectMode) {

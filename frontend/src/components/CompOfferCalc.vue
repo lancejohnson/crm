@@ -1361,14 +1361,14 @@ function parseMoney(v) {
   return Number.isFinite(n) ? n : 0
 }
 function money(n) {
-  return '$' + Math.round(Number(n) || 0).toLocaleString()
+  return '$' + Math.round(Number(n) || 0).toLocaleString('en-US')
 }
 /** Rounded to whole thousands: this is a feel for the size, not a quote. */
 function k(n) {
-  return '$' + Math.round((Number(n) || 0) / 1000).toLocaleString() + 'k'
+  return '$' + Math.round((Number(n) || 0) / 1000).toLocaleString('en-US') + 'k'
 }
 function fmt(n) {
-  return (Number(n) || 0).toLocaleString()
+  return (Number(n) || 0).toLocaleString('en-US')
 }
 function fmtDate(v) {
   if (!v) return '—'
@@ -1400,7 +1400,10 @@ function setProfit(col, e) {
 }
 /** Dollar profit back-solves % of acq: profit = net − offer, m = profit / offer.
  *  `net` does not include profit, so this is not circular — same trick as typing
- *  the repair bill to get $/sf. */
+ *  the repair bill to get $/sf.
+ *  Profit cannot exceed net (that would be a negative offer). If the typed
+ *  dollars don't change `profitPct`, Vue's `:value` stays `$2,500` and an extra
+ *  digit (`$2,5000`) sticks in the DOM — write the derived fee back ourselves. */
 function typeProfit(col, e) {
   const el = e.target
   const digitsBefore = (el.value.slice(0, el.selectionStart).match(/\d/g) || []).length
@@ -1409,7 +1412,10 @@ function typeProfit(col, e) {
   const net = r.offer + r.fee
   if (n <= 0) S()[col].profitPct = 0
   else if (net > n) S()[col].profitPct = n / (net - n)
-  nextTick(() => putCaret(el, digitsBefore, money(n)))
+  nextTick(() => {
+    const shown = S()[col].arv ? money(run(col).fee) : ''
+    putCaret(el, digitsBefore, shown)
+  })
 }
 function setInterest(col, e) {
   const n = parseMoney(e.target.value)
@@ -1432,8 +1438,10 @@ function listCutPct(col) {
   )
 }
 
-/** After Vue writes `$1,250`, put the caret after the same digit it was on. */
+/** Write the formatted value (Vue skips the DOM patch when `:value` didn't
+ *  change) and put the caret after the same digit it was on. */
 function putCaret(el, digitsBefore, formatted) {
+  if (typeof formatted === 'string' && el.value !== formatted) el.value = formatted
   let seen = 0
   let pos = formatted.length
   for (let i = 0; i < formatted.length; i++) {
