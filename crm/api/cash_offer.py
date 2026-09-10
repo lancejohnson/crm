@@ -158,7 +158,8 @@ def _scene(raw, sqft):
 	rehab = repairs * mult
 	wholesale = after - rehab
 	liens = _num(raw.get("liens")) if kind == "auction" else 0
-	offer = wholesale - fee - liens
+	back_taxes = _num(raw.get("back_taxes") or raw.get("backTaxes")) if kind == "auction" else 0
+	offer = wholesale - fee - liens - back_taxes
 	out = {
 		"kind": "auction" if kind == "auction" else "cash",
 		"arv": arv,
@@ -174,6 +175,7 @@ def _scene(raw, sqft):
 	}
 	if kind == "auction":
 		out["liens"] = liens
+		out["back_taxes"] = back_taxes
 	return out
 
 
@@ -259,6 +261,7 @@ def _scene_payload(sc):
 			"rehab_psf": sc["rehab_psf"],
 			"fee": sc["fee"],
 			"liens": sc.get("liens") or 0,
+			"back_taxes": sc.get("back_taxes") or 0,
 			"after": sc["after"],
 			"repairs": sc["repairs"],
 			"rehab": sc["rehab"],
@@ -455,6 +458,7 @@ def _html(lead, scenes, comps, sqft, notes=""):
 				"<div>− {rehab_l} {rehab}</div>"
 				"<div>− fee {fee}</div>"
 				"<div>− {liens_l} {liens}</div>"
+				"<div>− {tax_l} {tax}</div>"
 				'<div>= <b style="white-space:nowrap">{offer}</b> {maxbid}</div>'.format(
 					label=escape_html(label),
 					shape=escape_html(shape),
@@ -466,6 +470,8 @@ def _html(lead, scenes, comps, sqft, notes=""):
 					fee=_money(sc["fee"]),
 					liens_l=escape_html(_("liens")),
 					liens=_money(sc.get("liens") or 0),
+					tax_l=escape_html(_("back taxes")),
+					tax=_money(sc.get("back_taxes") or 0),
 					offer=_money(sc["offer"]),
 					maxbid=escape_html(_("max bid")),
 				)

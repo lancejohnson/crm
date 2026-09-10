@@ -28,7 +28,7 @@
         <button
           type="button"
           :class="{ on: kind === 'auction' }"
-          :title="__('ARV × % − repairs − fee − liens')"
+          :title="__('ARV × % − repairs − fee − liens − back taxes')"
           @click="setKind('auction')"
         >
           {{ __('Auction') }}
@@ -317,6 +317,17 @@
         @focus="$event.target.select()"
         @input="typeMoney(col, 'liens', $event)"
       />
+      <span class="lab">{{ __('Back taxes') }}</span>
+      <input
+        v-for="col in visible"
+        :key="'tax' + col"
+        :ref="(el) => setField(7, col, el)"
+        inputmode="numeric"
+        :value="s[col].backTaxes ? money(s[col].backTaxes) : ''"
+        :placeholder="money(0)"
+        @focus="$event.target.select()"
+        @input="typeMoney(col, 'backTaxes', $event)"
+      />
       </template>
 
       <span class="lab offer">{{ offerLabel }}</span>
@@ -334,7 +345,7 @@
           +{{ money(offerGap) }}
         </b>
         <input
-          :ref="(el) => setField(kind === 'auction' ? 7 : 6, col, el)"
+          :ref="(el) => setField(kind === 'auction' ? 8 : 6, col, el)"
           class="offer"
           :class="{ bad: s[col].arv && run(col).offer <= 0 }"
           inputmode="numeric"
@@ -618,6 +629,7 @@ function fresh(k, f) {
       rehabPsf: DEFAULT_PSF,
       fee: DEFAULT_FEE,
       liens: 0,
+      backTaxes: 0,
       ...listRates(),
     }
   }
@@ -630,6 +642,7 @@ function fresh(k, f) {
       rehabPsf: DEFAULT_PSF,
       fee: DEFAULT_FEE,
       liens: 0,
+      backTaxes: 0,
       ...listRates(),
     }
   }
@@ -641,6 +654,7 @@ function fresh(k, f) {
     rehabPsf: DEFAULT_PSF,
     fee: DEFAULT_FEE,
     liens: 0,
+    backTaxes: 0,
     ...listRates(),
   }
 }
@@ -717,6 +731,7 @@ const grid = [
   [null, null],
   [null, null],
   [null, null],
+  [null, null],
 ]
 
 function setField(row, col, el) {
@@ -780,6 +795,7 @@ function applyScene(k, i, row) {
     // Novation / list-it have no multiplier; leave the cash default unused.
     mult: k === 'cash' || k === 'auction' ? Number(row.mult) || (blank ? base.mult : 1) : 1,
     liens: Number(row.liens) || 0,
+    backTaxes: Number(row.backTaxes ?? row.back_taxes) || 0,
     commissionPct: readRate(row, 'commissionPct', 'commission_pct', base.commissionPct),
     closingPct: readRate(row, 'closingPct', 'closing_pct', base.closingPct),
     concessionsPct: readRate(
@@ -1022,6 +1038,7 @@ function addCompare() {
       rehabPsf: S()[0].rehabPsf,
       fee: S()[0].fee,
       liens: S()[0].liens,
+      backTaxes: S()[0].backTaxes,
       commissionPct: S()[0].commissionPct,
       closingPct: S()[0].closingPct,
       concessionsPct: S()[0].concessionsPct,
@@ -1060,7 +1077,8 @@ function run(col) {
   const rehab = repairs * (kind.value === 'rental' ? 1 : multOf(col))
   const wholesale = after - rehab
   const liens = kind.value === 'auction' ? Math.round(Number(x.liens) || 0) : 0
-  return { after, repairs, rehab, wholesale, liens, offer: wholesale - x.fee - liens }
+  const backTaxes = kind.value === 'auction' ? Math.round(Number(x.backTaxes) || 0) : 0
+  return { after, repairs, rehab, wholesale, liens, backTaxes, offer: wholesale - x.fee - liens - backTaxes }
 }
 
 // Only ever a comparison between two PRICED columns: an empty scenario reads
@@ -1305,7 +1323,8 @@ function typeOffer(col, e) {
     const r = run(col)
     const base = kind.value === 'novation' ? r.after : r.wholesale
     const liens = kind.value === 'auction' ? Math.round(Number(S()[col].liens) || 0) : 0
-    S()[col].fee = base - liens - n
+    const backTaxes = kind.value === 'auction' ? Math.round(Number(S()[col].backTaxes) || 0) : 0
+    S()[col].fee = base - liens - backTaxes - n
   }
   nextTick(() => putCaret(el, digitsBefore, n ? money(n) : ''))
 }
@@ -1358,7 +1377,10 @@ async function save() {
               row.mult = kind.value === 'rental' ? 1 : multOf(i)
               row.rehabPsf = x.rehabPsf
             }
-            if (kind.value === 'auction') row.liens = Math.round(Number(x.liens) || 0)
+            if (kind.value === 'auction') {
+              row.liens = Math.round(Number(x.liens) || 0)
+              row.back_taxes = Math.round(Number(x.backTaxes) || 0)
+            }
           }
           return row
         }),
