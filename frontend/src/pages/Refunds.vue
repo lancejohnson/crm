@@ -75,6 +75,14 @@
                   <FeatherIcon name="download" class="size-3" />
                   {{ __('Calls') }}
                 </button>
+                <!-- Flagged after it was queued (bonus-paid iSTL order); the
+                     provider will deny it, so this card wants withdrawing. -->
+                <Badge
+                  v-if="lead.custom_non_refundable"
+                  variant="subtle"
+                  theme="red"
+                  :label="__('Non-refundable')"
+                />
                 <Badge
                   v-if="lead.custom_refund_manual_ticket"
                   variant="subtle"
@@ -143,6 +151,7 @@ const list = createListResource({
     'custom_refund_status',
     'custom_refund_not_in_provider',
     'custom_refund_manual_ticket',
+    'custom_non_refundable',
     'custom_refund_updated_on',
     'modified',
     'creation',

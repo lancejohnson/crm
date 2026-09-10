@@ -258,6 +258,19 @@ duplicating. Work substantial features in a worktree of your own.
   nudges the owner (`crm/api/istl_refund_nudge.py`). The host mail poller credits
   only the actual transition to Complete, not every duplicate completion email.
   Fields: ops `setup_refundable_field.py`.
+  - **Non-refundable leads** (2026-09-09) — iSTL orders paid from the **Sale
+    leads balance** (their `bonus` wallet; 154 such orders, zero refunds ever)
+    get `custom_non_refundable=1` + `custom_non_refundable_reason`. LeadMarket
+    reads each order's `take_from_balances` after every purchase sync and calls
+    `crm.api.refunds.mark_non_refundable(orders=[iSTL order ids])`; the join is
+    exact because `CRM Lead.vendor_lead_id` **is the iSTL order id**. Per
+    ORDER, not "is there a bonus balance right now" — the webhook beats any
+    balance check and orders can straddle wallets. Effects: Refund card shows
+    the reason instead of *Mark refundable*; `set_refund_state` throws on every
+    path onto the board (clearing still works, so a request queued before the
+    flag landed can be withdrawn — the board shows a red **Non-refundable**
+    badge on it); the ISTL call-volume nudge returns `reason: non_refundable`.
+    Nothing in the CRM ever clears the flag. Fields via the same ops script.
 
 - **Multiple phones per lead + Quo call backfill** — a lead can hold as many
   numbers as the rep types in. `mobile_no` stays the primary (Call / Text /

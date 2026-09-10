@@ -32,9 +32,31 @@ REFUND_FIELDS = (
 )
 UPDATED_FIELD = "custom_refund_updated_on"
 
+# A lead the provider will never refund. Today that is one case: iSpeedToLead
+# orders paid from the "Sale leads balance" (their `bonus` wallet). LeadMarket
+# reads the wallet split off every order and calls `mark_non_refundable` with
+# the order ids; `CRM Lead.vendor_lead_id` IS the iSTL order id (the webhook's
+# `lead_id`), so the join is exact. Fields: ops `setup_refundable_field.py`.
+NON_REFUNDABLE_FIELD = "custom_non_refundable"
+NON_REFUNDABLE_REASON_FIELD = "custom_non_refundable_reason"
+DEFAULT_NON_REFUNDABLE_REASON = "Paid with iSpeedToLead sale-leads (bonus) balance"
+
 
 def _has_updated_field() -> bool:
 	return frappe.db.has_column("CRM Lead", UPDATED_FIELD)
+
+
+def _has_non_refundable_field() -> bool:
+	return frappe.db.has_column("CRM Lead", NON_REFUNDABLE_FIELD)
+
+
+def is_non_refundable(doc) -> bool:
+	"""True when the provider will not refund this lead. has_field-guarded so a
+	site that has not run the ops script simply never says so."""
+	try:
+		return bool(doc.meta.has_field(NON_REFUNDABLE_FIELD) and doc.get(NON_REFUNDABLE_FIELD))
+	except Exception:
+		return False
 
 
 def on_lead_update(doc, method=None):
@@ -89,6 +111,24 @@ def set_refund_state(
 	doc.check_permission("write")
 	if not doc.meta.has_field("custom_refundable"):
 		frappe.throw(_("Refund fields are not provisioned."))
+
+	# Every branch below except "clear Refundable" puts the lead on the Refunds
+	# board. A non-refundable lead must not get there by any of them -- the
+	# request would be filed, tracked, chased, and denied.
+	wants_on_board = (
+		(refundable is not None and _as_bool(refundable))
+		or (not_in_provider is not None and _as_bool(not_in_provider))
+		or (manual_ticket is not None and _as_bool(manual_ticket))
+		or status is not None
+	)
+	if wants_on_board and is_non_refundable(doc):
+		why = (doc.get(NON_REFUNDABLE_REASON_FIELD) or "").strip() if doc.meta.has_field(
+			NON_REFUNDABLE_REASON_FIELD
+		) else ""
+		frappe.throw(
+			_("This lead is non-refundable{0}.").format(f" — {why}" if why else ""),
+			title=_("Non-refundable"),
+		)
 
 	updates = {}
 	if refundable is not None:
@@ -149,6 +189,72 @@ def set_refund_state(
 			updates[UPDATED_FIELD] = now_datetime()
 		frappe.db.set_value("CRM Lead", doc.name, updates, update_modified=False)
 	return {"ok": True, **updates}
+
+
+@frappe.whitelist()
+def mark_non_refundable(orders, reason: str | None = None):
+	"""Flag the leads behind these iSpeedToLead ORDER ids as non-refundable.
+
+	Called by LeadMarket (`src/refundability.py`) after every purchase sync with
+	the orders paid from the bonus wallet; idempotent, so it is safe to be called
+	with the same ids again. Returns {matched: [order ids], unmatched: [...],
+	leads: {order id: lead name}} so the caller can stop re-sending the matched
+	ones and retry the rest (the vendor webhook may not have landed yet).
+
+	A lead already queued on the Refunds board is flagged but NOT pulled off it:
+	the board shows the flag and a human decides whether to withdraw. Nothing
+	here ever clears the flag.
+
+	    bench --site crm.groundworkpro.com execute crm.api.refunds.mark_non_refundable \
+	        --kwargs '{"orders": ["6aa1c76307686fe776648f22"]}'
+	"""
+	frappe.only_for(("System Manager", "Sales Manager"))
+	if not _has_non_refundable_field():
+		frappe.throw(_("custom_non_refundable is not provisioned."))
+	if isinstance(orders, str):
+		try:
+			parsed = json.loads(orders)
+		except json.JSONDecodeError:
+			parsed = [orders]
+		orders = parsed if isinstance(parsed, list) else [parsed]
+	ids = []
+	for o in orders or []:
+		o = str(o or "").strip()
+		if o and o not in ids:
+			ids.append(o)
+	if not ids:
+		return {"matched": [], "unmatched": [], "leads": {}}
+	reason = (reason or DEFAULT_NON_REFUNDABLE_REASON).strip()[:140]
+	has_reason = frappe.db.has_column("CRM Lead", NON_REFUNDABLE_REASON_FIELD)
+
+	rows = frappe.get_all(
+		"CRM Lead",
+		filters={"vendor_lead_id": ["in", ids]},
+		fields=["name", "vendor_lead_id", NON_REFUNDABLE_FIELD, "custom_refundable"],
+		limit=len(ids) + 50,
+	)
+	leads, already_on_board = {}, []
+	for r in rows:
+		leads[r["vendor_lead_id"]] = r["name"]
+		if r.get(NON_REFUNDABLE_FIELD):
+			continue
+		updates = {NON_REFUNDABLE_FIELD: 1}
+		if has_reason:
+			updates[NON_REFUNDABLE_REASON_FIELD] = reason
+		if _has_updated_field():
+			updates[UPDATED_FIELD] = now_datetime()
+		frappe.db.set_value("CRM Lead", r["name"], updates, update_modified=False)
+		if r.get("custom_refundable"):
+			already_on_board.append(r["name"])
+	if already_on_board:
+		frappe.log_error(
+			"Non-refundable lead(s) already on the Refunds board: " + ", ".join(already_on_board),
+			"mark_non_refundable",
+		)
+	matched = [o for o in ids if o in leads]
+	unmatched = [o for o in ids if o not in leads]
+	return {"matched": matched, "unmatched": unmatched, "leads": leads,
+		"already_on_board": already_on_board}
 
 
 @frappe.whitelist()

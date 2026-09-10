@@ -6,14 +6,35 @@
         {{ __('Refund') }}
       </div>
       <Badge
-        v-if="refundable"
+        v-if="nonRefundable"
+        variant="subtle"
+        theme="gray"
+        :label="__('Non-refundable')"
+      />
+      <Badge
+        v-else-if="refundable"
         variant="subtle"
         theme="orange"
         :label="__('Refundable')"
       />
     </div>
 
-    <template v-if="refundable">
+    <!-- Paid from iSpeedToLead's sale-leads (bonus) balance: the provider will
+         not refund it, so there is nothing to queue. LeadMarket sets this from
+         the order's wallet split; it is never set by hand here. If the lead was
+         already on the Refunds board when the flag landed, keep the controls so
+         someone can withdraw it. -->
+    <template v-if="nonRefundable && !refundable">
+      <p class="mt-1 text-xs leading-relaxed text-ink-gray-5">
+        {{ nonRefundableReason || __('The provider will not refund this lead.') }}
+      </p>
+    </template>
+
+    <template v-else-if="refundable">
+      <p v-if="nonRefundable" class="mt-2 rounded-md bg-surface-amber-1 px-2.5 py-1.5 text-xs leading-relaxed text-ink-amber-3">
+        {{ __('Flagged non-refundable after it was queued') }}{{ nonRefundableReason ? ` — ${nonRefundableReason}` : '' }}.
+        {{ __('Withdraw it unless the provider has already agreed.') }}
+      </p>
       <div class="mt-3 flex items-center justify-between gap-2">
         <span class="text-sm text-ink-gray-6">{{ __('Board status') }}</span>
         <Dropdown :options="statusOptions" placement="bottom-end">
@@ -128,6 +149,8 @@ const props = defineProps({
   notInProvider: { type: [Boolean, Number], default: false },
   manualTicket: { type: [Boolean, Number], default: false },
   status: { type: String, default: '' },
+  nonRefundable: { type: [Boolean, Number], default: false },
+  nonRefundableReason: { type: String, default: '' },
 })
 const emit = defineEmits(['saved'])
 const saving = ref(false)

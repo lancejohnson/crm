@@ -90,6 +90,12 @@ def evaluate(lead_name: str) -> dict:
 		return empty
 	if is_terminal_status(lead.status):
 		return {"show": False, "reason": "lost"}
+	# Paid from the bonus wallet: the provider will not refund it however many
+	# dials go unanswered, so nudging would only send someone to file a denial.
+	from crm.api.refunds import is_non_refundable
+
+	if is_non_refundable(lead):
+		return {"show": False, "reason": "non_refundable"}
 	if lead.meta.has_field("custom_refund_requested") and lead.get("custom_refund_requested"):
 		return {"show": False, "reason": "already_requested"}
 	if lead.meta.has_field("custom_refundable") and lead.get("custom_refundable"):

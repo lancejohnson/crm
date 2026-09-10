@@ -244,6 +244,8 @@
             :notInProvider="doc.custom_refund_not_in_provider"
             :manualTicket="doc.custom_refund_manual_ticket"
             :status="doc.custom_refund_status"
+            :nonRefundable="doc.custom_non_refundable"
+            :nonRefundableReason="doc.custom_non_refundable_reason"
             @saved="document.reload()"
           />
           <PhotosCard :lead="leadId" @open="showPhotoGallery = true" />
