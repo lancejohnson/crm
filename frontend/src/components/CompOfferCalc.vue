@@ -424,8 +424,9 @@
     <!-- With one column the comparison cannot be on screen, so the other
          formula reports itself rather than making the rep toggle, read, and
          toggle back holding a number in their head. Its OWN percentage, since
-         that is part of what is being compared. -->
-    <div v-if="kind === 'cash' && altOffer !== null" class="alt">
+         that is part of what is being compared. Cash and auction share the
+         Classic / 2× toggle, so both get the line. -->
+    <div v-if="(kind === 'cash' || kind === 'auction') && altOffer !== null" class="alt">
       {{
         __('{0} would offer {1}', [altFormula.label, money(altOffer)])
       }}<template v-if="altOffer !== run(0).offer">
@@ -1160,8 +1161,10 @@ function addCompare() {
   cols.value = 2
 }
 
-function run(col) {
+function run(col, formula) {
   const x = S()[col]
+  const pct = formula ? formula.pct : x.pct
+  const mult = formula ? formula.mult : multOf(col)
   if (kind.value === 'list') {
     const commission = Math.round(x.arv * (Number(x.commissionPct) || 0))
     const closing = Math.round(x.arv * (Number(x.closingPct) || 0))
@@ -1185,12 +1188,12 @@ function run(col) {
     return { fee: net - offer, offer }
   }
   if (kind.value === 'novation') {
-    const cut = Math.round(x.arv * x.pct)
+    const cut = Math.round(x.arv * pct)
     const after = Math.round(x.arv - cut)
     return { after, cut, repairs: 0, rehab: 0, wholesale: after, ...split(after) }
   }
   if (kind.value === 'wholetail') {
-    const cut = Math.round(x.arv * x.pct)
+    const cut = Math.round(x.arv * pct)
     const after = Math.round(x.arv - cut)
     const months = Math.max(0, Number(x.holdMonths) || 0)
     const rate = Number(x.interestPct) || 0
@@ -1205,10 +1208,10 @@ function run(col) {
       ...split(net),
     }
   }
-  const after = Math.round(x.arv * x.pct)
+  const after = Math.round(x.arv * pct)
   const repairs = Math.round((Number(x.rehabPsf) || 0) * sqft.value)
-  // Rental MAO is 1× repairs. Cash still honors the formula toggle.
-  const rehab = repairs * (kind.value === 'rental' ? 1 : multOf(col))
+  // Rental MAO is 1× repairs. Cash and auction honor the formula toggle.
+  const rehab = repairs * (kind.value === 'rental' ? 1 : mult)
   const wholesale = after - rehab
   const liens = kind.value === 'auction' ? Math.round(Number(x.liens) || 0) : 0
   const backTaxes = kind.value === 'auction' ? Math.round(Number(x.backTaxes) || 0) : 0
@@ -1231,17 +1234,15 @@ const offerGap = computed(() =>
 )
 
 // What the other formula would pay for the same house, at ITS percentage.
+// Same run() path as the column on screen — auction liens/taxes included —
+// so the line cannot disagree with toggling the formula.
 const altFormula = computed(
   () => FORMULAS.find((f) => f.mult !== multOf(0)) || FORMULAS[0],
 )
 const altOffer = computed(() => {
   if (cols.value !== 1 || !S()[0].arv) return null
-  const f = altFormula.value
-  const after = Math.round(S()[0].arv * f.pct)
-  const rehab = Math.round((Number(S()[0].rehabPsf) || 0) * sqft.value) * f.mult
-  const net = after - rehab
-  const m = Number(S()[0].profitPct) || 0
-  return m > -1 ? Math.round(net / (1 + m)) : net
+  if (kind.value !== 'cash' && kind.value !== 'auction') return null
+  return run(0, altFormula.value).offer
 })
 
 const usable = computed(() =>
