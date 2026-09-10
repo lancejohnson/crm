@@ -483,3 +483,57 @@ def import_auction_property(
 				return {**_shape(winner), "created": False, "external_id": external_id}
 		raise
 	return {**_shape(doc), "created": True, "external_id": external_id}
+
+
+_ADC_COMP_FIELDS = (
+	"address_key", "address", "city", "state", "zip",
+	"lat", "lng", "price", "status", "removed_date",
+	"bedrooms", "bathrooms", "square_footage", "year_built", "source_lead",
+)
+
+
+@frappe.whitelist()
+def import_adc_comps(rows=None) -> dict:
+	"""Insert-only CRM Comp rows from an Auction.com push, in one request.
+
+	LeadMarket reverse-geocodes first; we never overwrite an existing address_key.
+	One bench round-trip instead of N docker-exec inserts (which hung the desk).
+	"""
+	_guard()
+	if isinstance(rows, str):
+		rows = frappe.parse_json(rows)
+	if not isinstance(rows, list):
+		frappe.throw(_("rows must be a list"))
+	inserted = existing = failed = 0
+	for rec in rows[:200]:
+		if not isinstance(rec, dict):
+			failed += 1
+			continue
+		key = str(rec.get("address_key") or "").strip()
+		if not key:
+			failed += 1
+			continue
+		try:
+			if frappe.db.exists("CRM Comp", {"address_key": key}):
+				existing += 1
+				continue
+			values = {"doctype": "CRM Comp"}
+			for field in _ADC_COMP_FIELDS:
+				if field in rec:
+					values[field] = rec[field]
+			frappe.get_doc(values).insert(ignore_permissions=True)
+			inserted += 1
+		except Exception as exc:
+			dup = tuple(
+				getattr(frappe, n) for n in ("DuplicateEntryError", "UniqueValidationError")
+				if hasattr(frappe, n)
+			)
+			if dup and isinstance(exc, dup):
+				existing += 1
+			else:
+				failed += 1
+	return {
+		"inserted": inserted,
+		"existing_untouched": existing,
+		"failed": failed,
+	}

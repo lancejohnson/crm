@@ -28,7 +28,7 @@ class _Doc(dict):
 		else:
 			self[k] = v
 
-	def insert(self):
+	def insert(self, ignore_permissions=False):
 		self.inserted = True
 		frappe.inserted.append(dict(self, doctype=self.get("doctype")))
 
@@ -96,6 +96,21 @@ class AuctionPropertyImport(unittest.TestCase):
 			with self.assertRaises(Exception):
 				properties.import_auction_property(**kw)
 		self.assertEqual(frappe.inserted, [])
+
+	def test_import_adc_comps_insert_only(self):
+		exists = {"already": True}
+		patch.object(
+			frappe.db, "exists",
+			side_effect=lambda dt, name=None: bool(isinstance(name, dict) and exists.get(name.get("address_key"))),
+		).start()
+		out = properties.import_adc_comps([
+			{"address_key": "already", "address": "1 Old St"},
+			{"address_key": "new-one", "address": "2 New St", "lat": 42.0, "lng": -88.0, "price": 100},
+			{"address": "no key"},
+		])
+		self.assertEqual(out, {"inserted": 1, "existing_untouched": 1, "failed": 1})
+		self.assertEqual(frappe.inserted[0]["doctype"], "CRM Comp")
+		self.assertEqual(frappe.inserted[0]["address_key"], "new-one")
 
 	def test_missing_schema_fails_closed(self):
 		self.has_column.stop()
