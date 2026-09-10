@@ -84,7 +84,8 @@
     </div>
     <div class="row">
       <span class="k"><span class="op" /><span></span></span>
-      <span class="v mut">{{ money(profit) }}</span>
+      <input class="v inp" inputmode="numeric" :value="money(profit)"
+             @focus="$event.target.select()" @change="setOverride('profitDollars', $event)" />
     </div>
 
     <div class="row big">
@@ -211,6 +212,12 @@ const profitOverride = ref(null)
 
 function setOverride(which, event) {
   const n = Number(String(event.target.value).replace(/[^0-9.]/g, ''))
+  if (which === 'profitDollars') {
+    const netv = net.value
+    if (!Number.isFinite(n) || n < 0 || netv <= n) return
+    profitOverride.value = Math.round((n / (netv - n)) * 100) || null
+    return
+  }
   const ref_ = { arv: arvOverride, repairs: repairsOverride, margin: marginOverride, profit: profitOverride }[which]
   ref_.value = Number.isFinite(n) && n > 0 ? n : null
 }

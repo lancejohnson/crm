@@ -362,9 +362,13 @@
           />
           <i>%</i>
         </label>
-        <span class="out">
-          {{ s[col].arv ? '−' + money(run(col).fee) : '—' }}
-        </span>
+        <input
+          :ref="(el) => setField(11, col, el)"
+          inputmode="numeric"
+          :value="s[col].arv ? money(run(col).fee) : ''"
+          @focus="$event.target.select()"
+          @input="typeProfit(col, $event)"
+        />
       </div>
       </template>
 
@@ -810,6 +814,7 @@ const canSave = computed(
   () => visible.value.some((i) => S()[i].arv > 0) && !saving.value,
 )
 const grid = [
+  [null, null],
   [null, null],
   [null, null],
   [null, null],
@@ -1392,6 +1397,19 @@ function setProfit(col, e) {
   const n = parseMoney(e.target.value)
   S()[col].profitPct = n / 100 || DEFAULT_PROFIT_PCT
 }
+/** Dollar profit back-solves % of acq: profit = net − offer, m = profit / offer.
+ *  `net` does not include profit, so this is not circular — same trick as typing
+ *  the repair bill to get $/sf. */
+function typeProfit(col, e) {
+  const el = e.target
+  const digitsBefore = (el.value.slice(0, el.selectionStart).match(/\d/g) || []).length
+  const n = parseMoney(el.value)
+  const r = run(col)
+  const net = r.offer + r.fee
+  if (n <= 0) S()[col].profitPct = 0
+  else if (net > n) S()[col].profitPct = n / (net - n)
+  nextTick(() => putCaret(el, digitsBefore, money(n)))
+}
 function setInterest(col, e) {
   const n = parseMoney(e.target.value)
   S()[col].interestPct = n / 100 || DEFAULT_WHOLETAIL_RATE
@@ -1955,6 +1973,10 @@ input.offer.bad {
   flex: 1;
   min-width: 0;
   padding-right: 0;
+}
+.cut input {
+  flex: 1;
+  min-width: 0;
 }
 
 /* A derived row can carry the figure it derived from. Same shape as the offer
