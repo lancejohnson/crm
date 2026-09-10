@@ -369,8 +369,7 @@
         :key="'liens' + col"
         :ref="(el) => setField(6, col, el)"
         inputmode="numeric"
-        :value="s[col].liens ? money(s[col].liens) : ''"
-        :placeholder="money(0)"
+        :value="money(s[col].liens)"
         @focus="$event.target.select()"
         @input="typeMoney(col, 'liens', $event)"
       />
@@ -380,8 +379,7 @@
         :key="'tax' + col"
         :ref="(el) => setField(7, col, el)"
         inputmode="numeric"
-        :value="s[col].backTaxes ? money(s[col].backTaxes) : ''"
-        :placeholder="money(0)"
+        :value="money(s[col].backTaxes)"
         @focus="$event.target.select()"
         @input="typeMoney(col, 'backTaxes', $event)"
       />
