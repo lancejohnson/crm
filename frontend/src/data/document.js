@@ -9,6 +9,32 @@ import { ref, reactive } from 'vue'
 
 const documentsCache = {}
 const controllersCache = {}
+
+function isTimestampMismatch(err) {
+  return (
+    err?.exc_type === 'TimestampMismatchError' ||
+    /modified after you have opened/i.test(err?.messages?.[0] || '')
+  )
+}
+
+// Top-level fields whose value differs from the last copy fetched from the
+// server, i.e. what a `save` is actually trying to change. `null` when there
+// is no server copy to diff against. `modified` is excluded on purpose: the
+// whole point of the retry is to take the server's fresh one.
+function changedFields(resource) {
+  const doc = resource.doc
+  const base = resource.originalDoc
+  if (!doc || !base) return null
+  const changed = {}
+  for (const key of Object.keys(doc)) {
+    if (['modified', 'modified_by', 'doctype', 'name'].includes(key)) continue
+    if (JSON.stringify(doc[key]) !== JSON.stringify(base[key])) {
+      changed[key] =
+        doc[key] === undefined ? null : JSON.parse(JSON.stringify(doc[key]))
+    }
+  }
+  return changed
+}
 const assigneesCache = {}
 const permissionsCache = {}
 
@@ -23,6 +49,9 @@ export function useDocument(doctype, docname, resourceOverrides = {}) {
   documentsCache[doctype] = documentsCache[doctype] || {}
 
   const error = ref('')
+  // True while a full-doc save that may hit a stale `modified` is in flight;
+  // the resource-level onError uses it to hold its toast until the retry.
+  let mismatchRetryPending = false
 
   if (!documentsCache[doctype][docname || '']) {
     if (docname) {
@@ -51,6 +80,10 @@ export function useDocument(doctype, docname, resourceOverrides = {}) {
             processPendingDeletions()
           },
           onError: (err) => {
+            // A stale-copy save is retried below (see submitWithMismatchRetry);
+            // only the retry's own failure is worth a toast.
+            if (isTimestampMismatch(err) && mismatchRetryPending) return
+
             triggerOnError(err)
 
             if (err.exc_type == 'MandatoryError') {
@@ -83,18 +116,61 @@ export function useDocument(doctype, docname, resourceOverrides = {}) {
 
       // Override the submit function to trigger validation before submitting
       // TODO: fix validate function to return error message instead of throwing error in frappe-ui and remove try-catch block here
-      const _save = documentsCache[doctype][docname].save
+      const resource = documentsCache[doctype][docname]
+      const _save = resource.save
       const _originalSubmit = _save.submit
-      _save.submit = async function (...args) {
+      _save.submit = async function (params, tempOptions = {}) {
         try {
           await triggerOnValidate()
         } catch (err) {
           console.error(err)
           return
         }
-        const mandatory = checkMandatory(documentsCache[doctype][docname].doc)
+        const mandatory = checkMandatory(resource.doc)
         if (mandatory) return
-        return _originalSubmit.apply(_save, args)
+        return submitWithMismatchRetry(params, tempOptions)
+      }
+
+      // `save` posts the WHOLE doc, `modified` included, and the server refuses
+      // it when anything has touched the row since the page loaded it
+      // (TimestampMismatchError: "Document has been modified after you have
+      // opened it"). On this CRM that is routine, not exceptional: adding a
+      // comment bumps the lead's `modified` in a background job seconds later
+      // (upstream `on_comment_insert`), the Today board logs its outcome as a
+      // comment, Quo webhooks relink call logs, contract parsing writes terms,
+      // owner changes move tasks... So comment-then-change-status failed until
+      // a hard refresh (Dennis, 2026-09-10). None of those writers touched the
+      // field the rep was changing. Recovery: refetch the doc, re-apply only
+      // the fields THIS save changed, and submit once more. A field a teammate
+      // changed meanwhile is kept unless the rep changed the same one, which is
+      // the conflict the timestamp check exists for and the one that still
+      // reads as a win for the person clicking.
+      async function submitWithMismatchRetry(params, tempOptions) {
+        const changed = changedFields(resource)
+        const firstTry = {
+          ...tempOptions,
+          onError: (err) => {
+            if (isTimestampMismatch(err) && changed) return
+            tempOptions.onError?.(err)
+          },
+        }
+        mismatchRetryPending = !!changed
+        try {
+          return await _originalSubmit.call(_save, params, firstTry)
+        } catch (err) {
+          mismatchRetryPending = false
+          if (!isTimestampMismatch(err) || !changed) throw err
+          console.warn(
+            `[document] ${doctype} ${docname} changed underneath this save; refreshing and retrying`,
+            Object.keys(changed),
+          )
+          await resource.get.fetch()
+          Object.assign(resource.doc, changed)
+          // A second failure surfaces normally: toast + the caller's onError.
+          return await _originalSubmit.call(_save, params, tempOptions)
+        } finally {
+          mismatchRetryPending = false
+        }
       }
     } else {
       documentsCache[doctype][''] = reactive({
