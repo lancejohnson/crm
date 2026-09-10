@@ -86,17 +86,19 @@ def _rate(raw, *keys, default=0):
 
 
 def _take_profit(net, raw, fee):
-	"""Gross profit is a percent of acq (the offer). offer = net / (1+m).
+	"""Profit is a dollar takeoff ($25k default). Percent is derived for display.
 
-	Legacy saves with only a dollar `fee` keep that subtraction.
+	Legacy rows with a percent and no fee still split as % of acq.
 	"""
+	if fee:
+		return net - fee, fee
 	if any(k in raw and raw.get(k) not in (None, "") for k in ("profit_pct", "profitPct")):
 		m = _rate(raw, "profit_pct", "profitPct", default=0.20)
 		if m <= -1:
 			return net, 0
 		offer = round(net / (1.0 + m))
 		return offer, net - offer
-	return net - fee, fee
+	return net, 0
 
 
 def _scene(raw, sqft):

@@ -79,7 +79,7 @@
     </div>
     <div class="row">
       <span class="k" :title="'Gross profit as a percent of what we pay'"><span class="op">−</span><span>Profit</span></span>
-      <input class="v inp" inputmode="numeric" :value="`${profitPct}%`"
+      <input class="v inp" inputmode="numeric" :value="offer > 0 ? `${profitPct}%` : ''"
              @focus="$event.target.select()" @change="setOverride('profit', $event)" />
     </div>
     <div class="row">
@@ -187,7 +187,7 @@ const ask = ref('')
 const askNumber = computed(() => Number(String(ask.value).replace(/[^0-9.]/g, '')) || 0)
 
 const MARGIN = 90
-const PROFIT_PCT = 20
+const PROFIT_DOLLARS = 25000
 const MAJOR_COST = 10000
 const MAJORS = ['Roof', 'Foundation', 'Plumbing', 'HVAC', 'Electrical']
 const DOUBLE_WHY =
@@ -208,17 +208,24 @@ const LEVELS = [
 const arvOverride = ref(null)
 const repairsOverride = ref(null)
 const marginOverride = ref(null)
-const profitOverride = ref(null)
+const profitDollarsOverride = ref(null)
 
 function setOverride(which, event) {
   const n = Number(String(event.target.value).replace(/[^0-9.]/g, ''))
   if (which === 'profitDollars') {
-    const netv = net.value
-    if (!Number.isFinite(n) || n < 0 || netv <= n) return
-    profitOverride.value = Math.round((n / (netv - n)) * 100) || null
+    profitDollarsOverride.value = Number.isFinite(n) && n >= 0 ? n : 0
     return
   }
-  const ref_ = { arv: arvOverride, repairs: repairsOverride, margin: marginOverride, profit: profitOverride }[which]
+  if (which === 'profit') {
+    const m = n / 100
+    if (!Number.isFinite(n) || n <= 0 || m <= -1) {
+      profitDollarsOverride.value = 0
+      return
+    }
+    profitDollarsOverride.value = Math.round((net.value * m) / (1 + m))
+    return
+  }
+  const ref_ = { arv: arvOverride, repairs: repairsOverride, margin: marginOverride }[which]
   ref_.value = Number.isFinite(n) && n > 0 ? n : null
 }
 
@@ -264,15 +271,15 @@ const repairs = computed(() => {
 })
 
 const margin = computed(() => marginOverride.value ?? MARGIN)
-const profitPct = computed(() => profitOverride.value ?? PROFIT_PCT)
 const gross = computed(() => Math.round((arv.value * margin.value) / 100))
 const net = computed(() => gross.value - repairs.value * 2)
-const offer = computed(() => {
-  const m = profitPct.value / 100
-  if (m <= -1) return Math.max(0, net.value)
-  return Math.max(0, Math.round(net.value / (1 + m)))
-})
-const profit = computed(() => net.value - offer.value)
+const profit = computed(() =>
+  profitDollarsOverride.value != null ? profitDollarsOverride.value : PROFIT_DOLLARS,
+)
+const offer = computed(() => net.value - profit.value)
+const profitPct = computed(() =>
+  offer.value > 0 ? Math.round((profit.value / offer.value) * 100) : 0,
+)
 const fee = profit
 
 function money(n) {

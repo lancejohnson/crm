@@ -20,7 +20,7 @@
         <button
           type="button"
           :class="{ on: kind === 'cash' }"
-          :title="__('ARV × % − repairs − 20% of acq')"
+          :title="__('ARV × % − repairs − profit')"
           @click="setKind('cash')"
         >
           {{ __('Cash') }}
@@ -28,7 +28,7 @@
         <button
           type="button"
           :class="{ on: kind === 'auction' }"
-          :title="__('ARV × % − repairs − liens − back taxes − 20% of acq')"
+          :title="__('ARV × % − repairs − liens − back taxes − profit')"
           @click="setKind('auction')"
         >
           {{ __('Auction') }}
@@ -36,7 +36,7 @@
         <button
           type="button"
           :class="{ on: kind === 'novation' }"
-          :title="__('Current value − 10% − 20% of acq')"
+          :title="__('Current value − 10% − profit')"
           @click="setKind('novation')"
         >
           {{ __('Novation') }}
@@ -60,7 +60,7 @@
         <button
           type="button"
           :class="{ on: kind === 'rental' }"
-          :title="__('MIR × 80% − repairs − 20% of acq')"
+          :title="__('MIR × 80% − repairs − profit')"
           @click="setKind('rental')"
         >
           {{ __('Rental') }}
@@ -356,7 +356,7 @@
           <input
             :ref="(el) => setField(5, col, el)"
             inputmode="numeric"
-            :value="Math.round((s[col].profitPct || 0) * 100)"
+            :value="profitPctDisplay(col)"
             @focus="$event.target.select()"
             @change="setProfit(col, $event)"
           />
@@ -365,7 +365,7 @@
         <input
           :ref="(el) => setField(11, col, el)"
           inputmode="numeric"
-          :value="s[col].arv ? money(run(col).fee) : ''"
+          :value="money(run(col).fee)"
           @focus="$event.target.select()"
           @input="typeProfit(col, $event)"
         />
@@ -516,8 +516,11 @@
  *   2× repairs  ARV × 90% − 2×repairs − fee   (default; what OfferRail runs)
  *   Classic     ARV × 70% −   repairs − fee   (the 70% rule)
  * i.e. after = ARV × %, deduction = mult × $/sf × sqft, offer = after −
- * deduction − fee. Picking a formula sets its canonical %, and the % stays
- * editable afterwards — the toggle owns the SHAPE, the rep owns the number.
+ * deduction − profit. Profit is a dollar takeoff ($25k default) so it still
+ * shows when it is bigger than the offer; the % is derived (profit / offer)
+ * and blank when the offer is not positive. Picking a formula sets its
+ * canonical ARV %, and that % stays editable afterwards — the toggle owns
+ * the SHAPE, the rep owns the number.
  *
  * Novation is Current value − 10% − fee ($40k default). No repairs: we list
  * the house as-is. The 10% stays editable the same way cash's % does.
@@ -1182,11 +1185,8 @@ function run(col, formula) {
       offer: after,
     }
   }
-  const m = Number(x.profitPct) || 0
-  const split = (net) => {
-    const offer = m > -1 ? Math.round(net / (1 + m)) : net
-    return { fee: net - offer, offer }
-  }
+  const fee = Math.round(Number(x.fee) || 0)
+  const split = (net) => ({ fee, offer: net - fee })
   if (kind.value === 'novation') {
     const cut = Math.round(x.arv * pct)
     const after = Math.round(x.arv - cut)
@@ -1394,28 +1394,37 @@ function setPct(col, e) {
           : 0.7
   S()[col].pct = n / 100 || fallback
 }
+function profitPctDisplay(col) {
+  const r = run(col)
+  if (!S()[col].arv || r.offer <= 0) return ''
+  return Math.round((r.fee / r.offer) * 100)
+}
 function setProfit(col, e) {
   const n = parseMoney(e.target.value)
-  S()[col].profitPct = n / 100 || DEFAULT_PROFIT_PCT
+  const r = run(col)
+  const net = r.offer + r.fee
+  if (!Number.isFinite(n) || n <= 0) {
+    S()[col].fee = 0
+    S()[col].profitPct = 0
+    return
+  }
+  const m = n / 100
+  if (m <= -1) return
+  S()[col].profitPct = m
+  S()[col].fee = Math.round((net * m) / (1 + m))
 }
-/** Dollar profit back-solves % of acq: profit = net − offer, m = profit / offer.
- *  `net` does not include profit, so this is not circular — same trick as typing
- *  the repair bill to get $/sf.
- *  Profit cannot exceed net (that would be a negative offer). If the typed
- *  dollars don't change `profitPct`, Vue's `:value` stays `$2,500` and an extra
- *  digit (`$2,5000`) sticks in the DOM — write the derived fee back ourselves. */
+/** Dollar profit is the takeoff (default $25k). It is allowed to exceed the
+ *  offer — that is a negative offer, not a reason to hide the number. */
 function typeProfit(col, e) {
   const el = e.target
   const digitsBefore = (el.value.slice(0, el.selectionStart).match(/\d/g) || []).length
   const n = parseMoney(el.value)
   const r = run(col)
   const net = r.offer + r.fee
-  if (n <= 0) S()[col].profitPct = 0
-  else if (net > n) S()[col].profitPct = n / (net - n)
-  nextTick(() => {
-    const shown = S()[col].arv ? money(run(col).fee) : ''
-    putCaret(el, digitsBefore, shown)
-  })
+  S()[col].fee = n
+  const offer = net - n
+  S()[col].profitPct = offer > 0 ? n / offer : 0
+  nextTick(() => putCaret(el, digitsBefore, n ? money(n) : ''))
 }
 function setInterest(col, e) {
   const n = parseMoney(e.target.value)
@@ -1481,7 +1490,7 @@ function typeAfter(col, e) {
   nextTick(() => putCaret(el, digitsBefore, n ? money(n) : ''))
 }
 
-/** Offer back-solves profit %: offer = net / (1 + m). The value stays put. */
+/** Offer back-solves profit dollars: profit = net − offer. The value stays put. */
 function typeOffer(col, e) {
   const el = e.target
   const digitsBefore = (el.value.slice(0, el.selectionStart).match(/\d/g) || []).length
@@ -1489,10 +1498,11 @@ function typeOffer(col, e) {
   if (kind.value === 'list') {
     const tot = listCutPct(col)
     if (tot < 1) S()[col].arv = n / (1 - tot)
-  } else if (S()[col].arv && n > 0) {
+  } else if (S()[col].arv) {
     const r = run(col)
     const net = r.offer + r.fee
-    S()[col].profitPct = net / n - 1
+    S()[col].fee = net - n
+    S()[col].profitPct = n > 0 ? (net - n) / n : 0
   }
   nextTick(() => putCaret(el, digitsBefore, n ? money(n) : ''))
 }
@@ -1541,7 +1551,7 @@ async function save() {
           } else {
             row.pct = x.pct
             row.fee = x.fee
-            row.profit_pct = x.profitPct
+            row.profit_pct = row.offer > 0 ? row.fee / row.offer : 0
             if (kind.value === 'cash' || kind.value === 'rental' || kind.value === 'auction') {
               row.mult = kind.value === 'rental' ? 1 : multOf(i)
               row.rehabPsf = x.rehabPsf
