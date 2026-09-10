@@ -932,6 +932,76 @@ def set_comp_state(lead, comp, state):
 	return {"ok": True, "hidden": len(hidden), "selected": len(selected), "state": state}
 
 
+@frappe.whitelist()
+def add_comp(lead, text):
+	"""Add a house as a selected comparable for this subject (lead or PROP-).
+
+	`text` is a street address or a Zillow / Redfin / Realtor / Auction.com
+	listing URL. We geocode it (Census, free), create a CRM Comp if this
+	address is not already in the pool, and mark it selected. Price/beds are
+	left blank unless we already had the row — never invented.
+	"""
+	from crm.api.listing_url import looks_like_url, parse_listing_url
+
+	_guard()
+	if not frappe.db.exists(subject_doctype(lead), lead):
+		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)
+	if not _state_supported(subject_doctype(lead)):
+		return {"ok": False, "error": "comps_hidden/comps_selected fields are missing"}
+	text = " ".join(str(text or "").split())
+	if not text:
+		frappe.throw(_("Paste an address or a listing URL first."))
+
+	city = state = zip_code = ""
+	if looks_like_url(text):
+		parsed = parse_listing_url(text)
+		if not parsed:
+			frappe.throw(
+				_(
+					"Could not read an address from that link. Paste a Zillow, Redfin, "
+					"Realtor or Auction.com property page, or type the street address."
+				)
+			)
+		address = parsed["address"]
+		city = parsed.get("city") or ""
+		state = (parsed.get("state") or "").upper()[:2]
+		zip_code = parsed.get("zip") or ""
+	else:
+		address = text
+
+	line = ", ".join(p for p in (address, city, state, zip_code) if p)
+	point = _census_geocode(line)
+	if not point:
+		frappe.throw(_("Could not find that address on the map. Check the street, city and ZIP."))
+	key = address_key(line)
+	existing = frappe.db.get_value(DOCTYPE, {"address_key": key}, "name")
+	if existing:
+		name = existing
+		created = False
+	else:
+		doc = frappe.get_doc(
+			{
+				"doctype": DOCTYPE,
+				"address_key": key,
+				"address": address,
+				"city": city,
+				"state": state,
+				"zip": zip_code,
+				"lat": point[0],
+				"lng": point[1],
+				"status": "Inactive",
+				"source_lead": f"manual:{lead}",
+			}
+		)
+		doc.insert(ignore_permissions=True)
+		name = doc.name
+		created = True
+	mark = set_comp_state(lead, name, "selected")
+	if mark.get("ok") is False:
+		return mark
+	return {"ok": True, "name": name, "created": created, "address": address}
+
+
 # ---------------------------------------------------------------------------------
 # Read API
 # ---------------------------------------------------------------------------------

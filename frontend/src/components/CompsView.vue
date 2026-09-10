@@ -8,7 +8,7 @@
        to scroll inside and grows to ~8,000px. -->
   <div
     ref="rootEl"
-    class="flex flex-col gap-2"
+    class="flex min-w-0 flex-col gap-2"
     :class="[
       fillHeight || !wide ? 'min-h-0 flex-1' : '',
       wide ? 'overflow-y-auto' : 'overflow-hidden',
@@ -38,15 +38,7 @@
         </span>
       </button>
     </div>
-    <div v-show="calcOpen" class="relative">
-      <button
-        class="absolute right-1 top-1 z-10 flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-ink-gray-5 hover:bg-surface-gray-2 hover:text-ink-gray-8"
-        :title="__('Hide the calculator and give the map its height') + ' (C)'"
-        @click="calcOpen = false"
-      >
-        <FeatherIcon name="chevron-up" class="size-3.5" />
-        {{ __('Hide') }}
-      </button>
+    <div v-show="calcOpen" class="min-w-0">
       <CompOfferCalc
         ref="calcRef"
         :lead="lead"
@@ -62,18 +54,33 @@
         @remove="setCompState($event, 'none')"
         @open="openCompDetail"
         @kind="onCalcKind"
-      />
+      >
+        <template #head-end>
+          <button
+            type="button"
+            class="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-ink-gray-5 hover:bg-surface-gray-2 hover:text-ink-gray-8"
+            :title="__('Hide the calculator and give the map its height') + ' (C)'"
+            @click="calcOpen = false"
+          >
+            <FeatherIcon name="chevron-up" class="size-3.5" />
+            {{ __('Hide') }}
+          </button>
+        </template>
+      </CompOfferCalc>
     </div>
   </template>
   <!-- Address and counts share ONE line with the controls. They used to be
        stacked, which cost a whole row of height at the top of a page whose
        entire job is to show a map. -->
-  <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-    <div class="flex min-w-0 flex-1 items-baseline gap-2">
-      <span class="shrink-0 truncate text-sm font-medium text-ink-gray-8">
+  <div class="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1">
+    <div class="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+      <span
+        class="min-w-0 text-sm font-medium text-ink-gray-8"
+        :class="wide ? 'truncate' : ''"
+      >
         {{ data?.address || address || __('This property') }}
       </span>
-      <span class="truncate text-xs text-ink-gray-5">
+      <span class="min-w-0 text-xs text-ink-gray-5" :class="wide ? 'truncate' : ''">
         <template v-if="loading">{{ __('Finding comps…') }}</template>
         <template v-else-if="comps.length">
           {{ __('{0} comps', [data?.total_matched ?? comps.length]) }}
@@ -127,6 +134,22 @@
   iconLeft="zap"
   @click="showLiveOne = true"
 />
+<div v-if="pageMode && !isPractice" class="flex min-w-[12rem] flex-1 items-center gap-1 sm:min-w-[16rem]">
+  <input
+    v-model="addCompText"
+    class="min-w-0 flex-1 rounded-md border border-outline-gray-2 bg-surface-white px-2 py-1 text-xs text-ink-gray-8 outline-none focus:border-outline-gray-4"
+    :placeholder="__('Add a property — address or listing URL')"
+    :disabled="addingComp"
+    @keydown.enter.prevent="addCompFromText"
+  />
+  <Button
+    :label="__('Add as comp')"
+    variant="subtle"
+    :loading="addingComp"
+    :disabled="!addCompText.trim()"
+    @click="addCompFromText"
+  />
+</div>
 <Button
   v-if="pageMode && !isPractice"
   :label="__('Tax / liens')"
@@ -2652,6 +2675,28 @@ function applyCompState(name, state) {
  * tore Leaflet down and put it back — that's the jump. The server write is
  * fire-and-forget against local state; a failure reloads to undo.
  */
+const addCompText = ref('')
+const addingComp = ref(false)
+async function addCompFromText() {
+  const text = addCompText.value.trim()
+  if (!text || addingComp.value || !props.lead) return
+  addingComp.value = true
+  try {
+    const res = await call('crm.api.comps.add_comp', { lead: props.lead, text })
+    if (res?.ok === false) {
+      toast.error(__('Comp selection is not set up on this site yet.'))
+      return
+    }
+    addCompText.value = ''
+    toast.success(res?.created === false ? __('Already in the pool — added to the table') : __('Added as a comp'))
+    await load()
+  } catch (e) {
+    toast.error(e.messages?.[0] || __('Could not add that property as a comp.'))
+  } finally {
+    addingComp.value = false
+  }
+}
+
 const practiceSeed = computed(() => data.value?.offer || null)
 const isPractice = computed(() => Boolean(props.practiceAttempt && props.practiceProperty))
 // A scratch CRM Property: same map, same picks and calc, but nothing that only
