@@ -246,27 +246,33 @@ def on_tax_pull_insert(doc, method=None):
 
 	# 3) Live-refresh every open client (Activity feed + Tax Info card). Site-wide,
 	# after commit so a listener's reload can't read pre-commit rows.
-	if doc.get("lead"):
+	subject = doc.get("property") or doc.get("lead")
+	doctype = "CRM Property" if doc.get("property") else "CRM Lead"
+	if subject:
 		frappe.publish_realtime(
 			"crm_tax_pull",
-			{"reference_doctype": "CRM Lead", "reference_docname": doc.lead},
+			{"reference_doctype": doctype, "reference_docname": subject},
 			after_commit=True,
 		)
 
 
 @frappe.whitelist()
 def get_tax_pulls(lead: str):
-	"""Tax-info pulls for a lead, most recent first (sidebar card + timeline)."""
-	if not frappe.db.exists("CRM Lead", lead):
+	"""Tax-info pulls for a lead or scratch CRM Property, most recent first."""
+	is_prop = str(lead or "").startswith("PROP-")
+	subject_dt = "CRM Property" if is_prop else "CRM Lead"
+	if not frappe.db.exists(subject_dt, lead):
 		frappe.throw(_("Lead not found"), frappe.DoesNotExistError)
-	if not frappe.has_permission("CRM Lead", "read", lead):
+	if not frappe.has_permission(subject_dt, "read", lead):
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 	if not frappe.db.exists("DocType", TAX_PULL_DOCTYPE):
 		return []
 
+	meta = frappe.get_meta(TAX_PULL_DOCTYPE)
+	filters = {"property": lead} if is_prop and meta.has_field("property") else {"lead": lead}
 	pulls = frappe.get_all(
 		TAX_PULL_DOCTYPE,
-		filters={"lead": lead},
+		filters=filters,
 		fields=[
 			"name",
 			"pulled_by",

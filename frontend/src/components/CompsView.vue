@@ -63,12 +63,6 @@
         @kind="onCalcKind"
       />
     </div>
-    <TaxInfoCard
-      v-if="!isPractice && !isScratch"
-      embedded
-      :lead="lead"
-      @fetch="showFetchTax = true"
-    />
   </template>
   <!-- Address and counts share ONE line with the controls. They used to be
        stacked, which cost a whole row of height at the top of a page whose
@@ -133,12 +127,12 @@
   @click="showLiveOne = true"
 />
 <Button
-  v-if="pageMode && !isPractice && !isScratch"
+  v-if="pageMode && !isPractice"
   :label="__('Tax / liens')"
-  variant="subtle"
-  :title="__('Pull owner, tax history, deeds, mortgages, foreclosure and open liens from BatchData ($0.03)')"
+  :variant="showTaxPanel ? 'subtle' : 'ghost'"
+  :title="__('Show tax, deeds, mortgages and liens for this property')"
   iconLeft="dollar-sign"
-  @click="showFetchTax = true"
+  @click="showTaxPanel = !showTaxPanel"
 />
 
 <!-- Details toggle: the pills carry beds/baths/sqft/year, but on a
@@ -258,6 +252,12 @@
             />
           </div>
         </div>
+        <TaxInfoCard
+          v-if="pageMode && !isPractice && showTaxPanel"
+          embedded
+          :lead="lead"
+          @fetch="showFetchTax = true"
+        />
 
         <!-- Filters are VISIBLE, not behind a popover: they are the whole point
              of the tool, and a rep should be able to widen a beds range without
@@ -660,7 +660,7 @@
     :leadName="address || data?.subject?.address || lead"
   />
   <FetchTaxInfoModal
-    v-if="!isPractice && !isScratch"
+    v-if="!isPractice"
     v-model="showFetchTax"
     :reference-doc="taxReferenceDoc"
   />
@@ -777,6 +777,7 @@ const emit = defineEmits(['subject', 'picked', 'zillowMatch'])
 const show = ref(true)
 const showLiveOne = ref(false)
 const showFetchTax = ref(false)
+const showTaxPanel = ref(false)
 const taxReferenceDoc = computed(() => ({
   name: props.lead,
   property_address: props.address || data.value?.address || '',

@@ -208,10 +208,7 @@ const foreclosureRows = computed(() => {
 })
 
 function onTaxPull(data) {
-  if (
-    data.reference_doctype === 'CRM Lead' &&
-    data.reference_docname === props.lead
-  ) {
+  if (data.reference_docname === props.lead) {
     taxPulls.reload()
     open.value = true
   }
