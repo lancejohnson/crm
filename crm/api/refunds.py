@@ -7,6 +7,7 @@ import html as htmlmod
 import re
 
 import frappe
+import requests
 from frappe import _
 from frappe.utils import now_datetime
 
@@ -57,6 +58,66 @@ def is_non_refundable(doc) -> bool:
 		return bool(doc.meta.has_field(NON_REFUNDABLE_FIELD) and doc.get(NON_REFUNDABLE_FIELD))
 	except Exception:
 		return False
+
+
+ISTL_SOURCE = "iSpeedToLead"
+DEFAULT_LEADMARKET_URL = "https://app.groundworkpro.com/leadmarket"
+LEADMARKET_TIMEOUT = 60
+
+
+def on_istl_lead_insert(doc, method=None):
+	"""CRM Lead after_insert: ask LeadMarket to flag this order if bonus-paid.
+
+	The ISTL webhook creates the lead the instant the charge clears — that is
+	when a rep opens it. The previous clock was Gmail's "You bought a lead!"
+	receipt (or the 04:50 cron), which missed CRM-LEAD-2026-01272 entirely.
+	Enqueued after commit so a slow LeadMarket/ISTL round-trip cannot hold the
+	vendor webhook open (same reason geo.warm_lead is never inline).
+	"""
+	try:
+		if (doc.get("source") or "").strip() != ISTL_SOURCE:
+			return
+		order_id = (doc.get("vendor_lead_id") or "").strip()
+		if not order_id:
+			return
+		if not _has_non_refundable_field():
+			return
+		if not (frappe.conf.get("leadmarket_token") or ""):
+			return
+		frappe.enqueue(
+			"crm.api.refunds.ask_leadmarket_non_refundable",
+			queue="short",
+			job_name=f"istl-nr-{order_id}",
+			enqueue_after_commit=True,
+			order_id=order_id,
+		)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "refunds: enqueue non-refundable check failed")
+
+
+def ask_leadmarket_non_refundable(order_id: str):
+	"""Worker: LeadMarket syncs the newest orders and flags bonus-paid ones.
+
+	LeadMarket holds the ISTL login; CRM never does. Idempotent — already-flagged
+	leads are a no-op on both sides. Failures log and the 04:50 purchases sync
+	is the net.
+	"""
+	token = frappe.conf.get("leadmarket_token") or ""
+	if not token or not order_id:
+		return {"ok": False, "reason": "no token or order"}
+	base = (frappe.conf.get("leadmarket_url") or DEFAULT_LEADMARKET_URL).rstrip("/")
+	try:
+		r = requests.post(
+			base + "/api/istl-purchase",
+			headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+			json={"order_id": order_id},
+			timeout=LEADMARKET_TIMEOUT,
+		)
+		r.raise_for_status()
+		return r.json()
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "refunds: LeadMarket istl-purchase failed")
+		return {"ok": False, "reason": "leadmarket call failed"}
 
 
 def on_lead_update(doc, method=None):

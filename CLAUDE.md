@@ -271,6 +271,10 @@ duplicating. Work substantial features in a worktree of your own.
     flag landed can be withdrawn — the board shows a red **Non-refundable**
     badge on it); the ISTL call-volume nudge returns `reason: non_refundable`.
     Nothing in the CRM ever clears the flag. Fields via the same ops script.
+    The clock is the ISTL webhook (`on_istl_lead_insert` enqueues
+    `ask_leadmarket_non_refundable` → LeadMarket `POST /api/istl-purchase`),
+    not the purchase-receipt email — Gmail missed 2026-09-10's 08:30 buy and
+    the next cron is 04:50.
 
 - **Multiple phones per lead + Quo call backfill** — a lead can hold as many
   numbers as the rep types in. `mobile_no` stays the primary (Call / Text /

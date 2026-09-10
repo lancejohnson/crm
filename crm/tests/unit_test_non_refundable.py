@@ -123,5 +123,33 @@ class SetRefundStateGuardTests(unittest.TestCase):
 		self.assertEqual(out["custom_refund_status"], "To Request")
 
 
+class InsertHookTests(unittest.TestCase):
+	def setUp(self):
+		shim.db.columns["CRM Lead"] = {refunds.NON_REFUNDABLE_FIELD}
+		shim.conf.clear()
+		shim.conf["leadmarket_token"] = "tok"
+		shim.enqueue.reset_mock()
+
+	def test_istl_lead_enqueues_a_leadmarket_check(self):
+		doc = _Lead(ALL_FIELDS, source="iSpeedToLead", vendor_lead_id="abc123")
+		refunds.on_istl_lead_insert(doc)
+		shim.enqueue.assert_called_once()
+		kw = shim.enqueue.call_args.kwargs
+		self.assertEqual(kw["order_id"], "abc123")
+		self.assertEqual(kw["job_name"], "istl-nr-abc123")
+		self.assertTrue(kw["enqueue_after_commit"])
+
+	def test_non_istl_lead_is_ignored(self):
+		doc = _Lead(ALL_FIELDS, source="Leadzolo", vendor_lead_id="abc123")
+		refunds.on_istl_lead_insert(doc)
+		shim.enqueue.assert_not_called()
+
+	def test_missing_token_is_a_noop(self):
+		shim.conf.clear()
+		doc = _Lead(ALL_FIELDS, source="iSpeedToLead", vendor_lead_id="abc123")
+		refunds.on_istl_lead_insert(doc)
+		shim.enqueue.assert_not_called()
+
+
 if __name__ == "__main__":
 	unittest.main()

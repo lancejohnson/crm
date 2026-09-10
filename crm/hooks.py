@@ -340,6 +340,10 @@ doc_events = {
 			# which lead it produced so the desk can confirm the purchase landed
 			# where it was pointed. See crm/api/lead_reservation.py.
 			"crm.api.lead_reservation.stamp_matched_lead",
+			# Bonus-wallet iSTL orders are non-refundable. LeadMarket knows the
+			# wallet split; we only know the order id. Ask after commit so the
+			# vendor webhook is not held open. See crm/api/refunds.py.
+			"crm.api.refunds.on_istl_lead_insert",
 			"crm.api.sequence_drain.enqueue_for_lead",
 			# A new never-called lead may owe work immediately; add its card after commit.
 			"crm.api.today_board.enqueue_today_sync",
