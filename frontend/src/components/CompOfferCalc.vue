@@ -20,7 +20,7 @@
         <button
           type="button"
           :class="{ on: kind === 'cash' }"
-          :title="__('ARV × % − repairs − fee')"
+          :title="__('ARV × % − repairs − 20% of acq')"
           @click="setKind('cash')"
         >
           {{ __('Cash') }}
@@ -28,7 +28,7 @@
         <button
           type="button"
           :class="{ on: kind === 'auction' }"
-          :title="__('ARV × % − repairs − fee − liens − back taxes')"
+          :title="__('ARV × % − repairs − liens − back taxes − 20% of acq')"
           @click="setKind('auction')"
         >
           {{ __('Auction') }}
@@ -36,7 +36,7 @@
         <button
           type="button"
           :class="{ on: kind === 'novation' }"
-          :title="__('Current value − 10% − fee')"
+          :title="__('Current value − 10% − 20% of acq')"
           @click="setKind('novation')"
         >
           {{ __('Novation') }}
@@ -60,7 +60,7 @@
         <button
           type="button"
           :class="{ on: kind === 'rental' }"
-          :title="__('MIR × 80% − repairs − fee')"
+          :title="__('MIR × 80% − repairs − 20% of acq')"
           @click="setKind('rental')"
         >
           {{ __('Rental') }}
@@ -350,16 +350,22 @@
       </template>
 
       <template v-if="kind !== 'list'">
-      <span class="lab">{{ __('Fee') }}</span>
-      <input
-        v-for="col in visible"
-        :key="'fee' + col"
-        :ref="(el) => setField(5, col, el)"
-        inputmode="numeric"
-        :value="money(s[col].fee)"
-        @focus="$event.target.select()"
-        @input="typeMoney(col, 'fee', $event)"
-      />
+      <span class="lab" :title="__('Gross profit as a percent of what we pay')">{{ __('Profit') }}</span>
+      <div v-for="col in visible" :key="'profit' + col" class="cut">
+        <label class="pct">
+          <input
+            :ref="(el) => setField(5, col, el)"
+            inputmode="numeric"
+            :value="Math.round((s[col].profitPct || 0) * 100)"
+            @focus="$event.target.select()"
+            @change="setProfit(col, $event)"
+          />
+          <i>%</i>
+        </label>
+        <span class="out">
+          {{ s[col].arv ? '−' + money(run(col).fee) : '—' }}
+        </span>
+      </div>
       </template>
 
       <template v-if="kind === 'auction'">
@@ -581,14 +587,14 @@ const FORMULAS = [
     label: __('2× repairs'),
     pct: 0.9,
     mult: 2,
-    why: __('ARV × 90% − 2× repairs − fee'),
+    why: __('ARV × 90% − 2× repairs − 20% of acq'),
   },
   {
     key: 'classic',
     label: __('Classic'),
     pct: 0.7,
     mult: 1,
-    why: __('ARV × 70% − repairs − fee — the 70% rule'),
+    why: __('ARV × 70% − repairs − 20% of acq — the 70% rule'),
   },
 ]
 // Same reason the desk rail gives, and for the same doubling.
@@ -608,6 +614,7 @@ const TIERS = [
 // the control reads as a named condition rather than an unnamed number.
 const DEFAULT_PSF = 30
 const DEFAULT_FEE = 25000
+const DEFAULT_PROFIT_PCT = 0.2
 const DEFAULT_RENTAL_REPAIRS = 10000
 const DEFAULT_NOVATION_FEE = 40000
 const DEFAULT_NOVATION_PCT = 0.1
@@ -669,6 +676,7 @@ function fresh(k, f) {
       mult: 1,
       rehabPsf: DEFAULT_PSF,
       fee: 0,
+      profitPct: DEFAULT_PROFIT_PCT,
       ...listRates(),
     }
   }
@@ -679,6 +687,7 @@ function fresh(k, f) {
       mult: 1,
       rehabPsf: DEFAULT_PSF,
       fee: DEFAULT_NOVATION_FEE,
+      profitPct: DEFAULT_PROFIT_PCT,
       ...listRates(),
     }
   }
@@ -689,6 +698,7 @@ function fresh(k, f) {
       mult: 1,
       rehabPsf: DEFAULT_PSF,
       fee: DEFAULT_NOVATION_FEE,
+      profitPct: DEFAULT_PROFIT_PCT,
       interestPct: DEFAULT_WHOLETAIL_RATE,
       holdMonths: DEFAULT_WHOLETAIL_MONTHS,
       ...listRates(),
@@ -701,6 +711,7 @@ function fresh(k, f) {
       mult: 1,
       rehabPsf: DEFAULT_PSF,
       fee: DEFAULT_FEE,
+      profitPct: DEFAULT_PROFIT_PCT,
       liens: 0,
       backTaxes: 0,
       ...listRates(),
@@ -714,6 +725,7 @@ function fresh(k, f) {
       mult: g.mult,
       rehabPsf: DEFAULT_PSF,
       fee: DEFAULT_FEE,
+      profitPct: DEFAULT_PROFIT_PCT,
       liens: 0,
       backTaxes: 0,
       ...listRates(),
@@ -726,6 +738,7 @@ function fresh(k, f) {
     mult: g.mult,
     rehabPsf: DEFAULT_PSF,
     fee: DEFAULT_FEE,
+    profitPct: DEFAULT_PROFIT_PCT,
     liens: 0,
     backTaxes: 0,
     ...listRates(),
@@ -865,6 +878,7 @@ function applyScene(k, i, row) {
     pct: oldRentCap ? base.pct : Number(row.pct) || base.pct,
     rehabPsf: Number(row.rehabPsf ?? row.rehab_psf) || DEFAULT_PSF,
     fee: Number(row.fee) || base.fee,
+    profitPct: readRate(row, 'profitPct', 'profit_pct', base.profitPct ?? DEFAULT_PROFIT_PCT),
     // A snapshot written before the toggle existed carries no `mult`, and its
     // numbers were computed with a single deduction — so it IS the classic
     // one. Only a genuine reset falls back to the column's default.
@@ -1128,6 +1142,7 @@ function addCompare() {
       mult: multOf(0),
       rehabPsf: S()[0].rehabPsf,
       fee: S()[0].fee,
+      profitPct: S()[0].profitPct,
       liens: S()[0].liens,
       backTaxes: S()[0].backTaxes,
       interestPct: S()[0].interestPct,
@@ -1159,10 +1174,15 @@ function run(col) {
       offer: after,
     }
   }
+  const m = Number(x.profitPct) || 0
+  const split = (net) => {
+    const offer = m > -1 ? Math.round(net / (1 + m)) : net
+    return { fee: net - offer, offer }
+  }
   if (kind.value === 'novation') {
     const cut = Math.round(x.arv * x.pct)
     const after = Math.round(x.arv - cut)
-    return { after, cut, repairs: 0, rehab: 0, wholesale: after, offer: after - x.fee }
+    return { after, cut, repairs: 0, rehab: 0, wholesale: after, ...split(after) }
   }
   if (kind.value === 'wholetail') {
     const cut = Math.round(x.arv * x.pct)
@@ -1173,10 +1193,11 @@ function run(col) {
     const holding = Math.round(
       x.arv * HOLDING_TAX_INS_PCT * (months / 12) + HOLDING_UTIL_MO * months,
     )
+    const net = after - capital - holding
     return {
       after, cut, repairs: 0, rehab: 0, wholesale: after,
       capital, holding,
-      offer: after - x.fee - capital - holding,
+      ...split(net),
     }
   }
   const after = Math.round(x.arv * x.pct)
@@ -1186,7 +1207,8 @@ function run(col) {
   const wholesale = after - rehab
   const liens = kind.value === 'auction' ? Math.round(Number(x.liens) || 0) : 0
   const backTaxes = kind.value === 'auction' ? Math.round(Number(x.backTaxes) || 0) : 0
-  return { after, repairs, rehab, wholesale, liens, backTaxes, offer: wholesale - x.fee - liens - backTaxes }
+  const net = wholesale - liens - backTaxes
+  return { after, repairs, rehab, wholesale, liens, backTaxes, ...split(net) }
 }
 
 // Only ever a comparison between two PRICED columns: an empty scenario reads
@@ -1212,7 +1234,9 @@ const altOffer = computed(() => {
   const f = altFormula.value
   const after = Math.round(S()[0].arv * f.pct)
   const rehab = Math.round((Number(S()[0].rehabPsf) || 0) * sqft.value) * f.mult
-  return after - rehab - S()[0].fee
+  const net = after - rehab
+  const m = Number(S()[0].profitPct) || 0
+  return m > -1 ? Math.round(net / (1 + m)) : net
 })
 
 const usable = computed(() =>
@@ -1364,6 +1388,10 @@ function setPct(col, e) {
           : 0.7
   S()[col].pct = n / 100 || fallback
 }
+function setProfit(col, e) {
+  const n = parseMoney(e.target.value)
+  S()[col].profitPct = n / 100 || DEFAULT_PROFIT_PCT
+}
 function setInterest(col, e) {
   const n = parseMoney(e.target.value)
   S()[col].interestPct = n / 100 || DEFAULT_WHOLETAIL_RATE
@@ -1426,8 +1454,7 @@ function typeAfter(col, e) {
   nextTick(() => putCaret(el, digitsBefore, n ? money(n) : ''))
 }
 
-/** Offer back-solves the fee: offer = after − fee (novation) or wholesale − fee
- *  (cash). The value and the % stay put. */
+/** Offer back-solves profit %: offer = net / (1 + m). The value stays put. */
 function typeOffer(col, e) {
   const el = e.target
   const digitsBefore = (el.value.slice(0, el.selectionStart).match(/\d/g) || []).length
@@ -1435,15 +1462,10 @@ function typeOffer(col, e) {
   if (kind.value === 'list') {
     const tot = listCutPct(col)
     if (tot < 1) S()[col].arv = n / (1 - tot)
-  } else if (S()[col].arv) {
+  } else if (S()[col].arv && n > 0) {
     const r = run(col)
-    const base =
-      kind.value === 'novation' || kind.value === 'wholetail' ? r.after : r.wholesale
-    const liens = kind.value === 'auction' ? Math.round(Number(S()[col].liens) || 0) : 0
-    const backTaxes = kind.value === 'auction' ? Math.round(Number(S()[col].backTaxes) || 0) : 0
-    const hold =
-      kind.value === 'wholetail' ? (r.capital || 0) + (r.holding || 0) : 0
-    S()[col].fee = base - liens - backTaxes - hold - n
+    const net = r.offer + r.fee
+    S()[col].profitPct = net / n - 1
   }
   nextTick(() => putCaret(el, digitsBefore, n ? money(n) : ''))
 }
@@ -1492,6 +1514,7 @@ async function save() {
           } else {
             row.pct = x.pct
             row.fee = x.fee
+            row.profit_pct = x.profitPct
             if (kind.value === 'cash' || kind.value === 'rental' || kind.value === 'auction') {
               row.mult = kind.value === 'rental' ? 1 : multOf(i)
               row.rehabPsf = x.rehabPsf

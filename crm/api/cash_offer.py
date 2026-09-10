@@ -85,6 +85,20 @@ def _rate(raw, *keys, default=0):
 	return default
 
 
+def _take_profit(net, raw, fee):
+	"""Gross profit is a percent of acq (the offer). offer = net / (1+m).
+
+	Legacy saves with only a dollar `fee` keep that subtraction.
+	"""
+	if any(k in raw and raw.get(k) not in (None, "") for k in ("profit_pct", "profitPct")):
+		m = _rate(raw, "profit_pct", "profitPct", default=0.20)
+		if m <= -1:
+			return net, 0
+		offer = round(net / (1.0 + m))
+		return offer, net - offer
+	return net - fee, fee
+
+
 def _scene(raw, sqft):
 	if not isinstance(raw, dict):
 		return None
@@ -121,17 +135,19 @@ def _scene(raw, sqft):
 		after = round(arv * pct)
 		repairs = round(rehab_psf * _num(sqft))
 		wholesale = after - repairs
+		offer, profit = _take_profit(wholesale, raw, fee)
 		return {
 			"kind": "rental",
 			"arv": arv,
 			"pct": pct,
 			"rehab_psf": rehab_psf,
-			"fee": fee,
+			"fee": profit,
+			"profit_pct": _rate(raw, "profit_pct", "profitPct", default=0),
 			"after": after,
 			"repairs": repairs,
 			"rehab": repairs,
 			"wholesale": wholesale,
-			"offer": wholesale - fee,
+			"offer": offer,
 		}
 	if kind == "novation":
 		pct = _pct(raw, 0.10)
@@ -139,14 +155,16 @@ def _scene(raw, sqft):
 			return None
 		cut = round(arv * pct)
 		after = round(arv - cut)
+		offer, profit = _take_profit(after, raw, fee)
 		return {
 			"kind": "novation",
 			"arv": arv,
 			"pct": pct,
-			"fee": fee,
+			"fee": profit,
+			"profit_pct": _rate(raw, "profit_pct", "profitPct", default=0),
 			"cut": cut,
 			"after": after,
-			"offer": after - fee,
+			"offer": offer,
 		}
 	if kind == "wholetail":
 		pct = _pct(raw, 0.10)
@@ -160,18 +178,20 @@ def _scene(raw, sqft):
 		after = round(arv - cut)
 		capital = round(arv * rate * (months / 12.0))
 		holding = round(arv * 0.015 * (months / 12.0) + 200 * months)
+		offer, profit = _take_profit(after - capital - holding, raw, fee)
 		return {
 			"kind": "wholetail",
 			"arv": arv,
 			"pct": pct,
-			"fee": fee,
+			"fee": profit,
+			"profit_pct": _rate(raw, "profit_pct", "profitPct", default=0),
 			"cut": cut,
 			"after": after,
 			"interest_pct": rate,
 			"hold_months": months,
 			"capital": capital,
 			"holding": holding,
-			"offer": after - fee - capital - holding,
+			"offer": offer,
 		}
 	pct = _pct(raw, 0)
 	if pct <= 0:
@@ -184,14 +204,15 @@ def _scene(raw, sqft):
 	wholesale = after - rehab
 	liens = _num(raw.get("liens")) if kind == "auction" else 0
 	back_taxes = _num(raw.get("back_taxes") or raw.get("backTaxes")) if kind == "auction" else 0
-	offer = wholesale - fee - liens - back_taxes
+	offer, profit = _take_profit(wholesale - liens - back_taxes, raw, fee)
 	out = {
 		"kind": "auction" if kind == "auction" else "cash",
 		"arv": arv,
 		"pct": pct,
 		"mult": mult,
 		"rehab_psf": rehab_psf,
-		"fee": fee,
+		"fee": profit,
+		"profit_pct": _rate(raw, "profit_pct", "profitPct", default=0),
 		"after": after,
 		"repairs": repairs,
 		"rehab": rehab,
@@ -262,6 +283,7 @@ def _scene_payload(sc):
 			"pct": sc["pct"],
 			"rehab_psf": sc["rehab_psf"],
 			"fee": sc["fee"],
+			"profit_pct": sc.get("profit_pct") or 0,
 			"after": sc["after"],
 			"repairs": sc["repairs"],
 			"rehab": sc["rehab"],
@@ -273,6 +295,7 @@ def _scene_payload(sc):
 			"arv": sc["arv"],
 			"pct": sc["pct"],
 			"fee": sc["fee"],
+			"profit_pct": sc.get("profit_pct") or 0,
 			"cut": sc["cut"],
 			"after": sc["after"],
 			"offer": sc["offer"],
@@ -283,6 +306,7 @@ def _scene_payload(sc):
 			"arv": sc["arv"],
 			"pct": sc["pct"],
 			"fee": sc["fee"],
+			"profit_pct": sc.get("profit_pct") or 0,
 			"cut": sc["cut"],
 			"after": sc["after"],
 			"interest_pct": sc.get("interest_pct") or 0,
@@ -299,6 +323,7 @@ def _scene_payload(sc):
 			"mult": sc["mult"],
 			"rehab_psf": sc["rehab_psf"],
 			"fee": sc["fee"],
+			"profit_pct": sc.get("profit_pct") or 0,
 			"liens": sc.get("liens") or 0,
 			"back_taxes": sc.get("back_taxes") or 0,
 			"after": sc["after"],
@@ -314,6 +339,7 @@ def _scene_payload(sc):
 		"mult": sc["mult"],
 		"rehab_psf": sc["rehab_psf"],
 		"fee": sc["fee"],
+		"profit_pct": sc.get("profit_pct") or 0,
 		"after": sc["after"],
 		"repairs": sc["repairs"],
 		"rehab": sc["rehab"],
@@ -460,13 +486,15 @@ def _html(lead, scenes, comps, sqft, notes=""):
 				"<div>{label} ({pct:.0f}%)</div>"
 				"<div>{arv} × {pct:.0f}% = {after}</div>"
 				"<div>− {repairs_l} {repairs}</div>"
-				'<div>− fee {fee} = <b style="white-space:nowrap">{offer}</b> {mao}</div>'.format(
+				'<div>− {profit_l} {pp:.0f}% {fee} = <b style="white-space:nowrap">{offer}</b> {mao}</div>'.format(
 					label=escape_html(label),
 					pct=sc["pct"] * 100,
 					arv=_money(sc["arv"]),
 					after=_money(sc["after"]),
 					repairs_l=escape_html(_("repairs")),
 					repairs=_money(sc["repairs"]),
+					profit_l=escape_html(_("profit")),
+					pp=(sc.get("profit_pct") or 0) * 100,
 					fee=_money(sc["fee"]),
 					offer=_money(sc["offer"]),
 					mao=escape_html(_("MAO")),
@@ -477,11 +505,13 @@ def _html(lead, scenes, comps, sqft, notes=""):
 			parts.append(
 				"<div>{label} ({pct:.0f}%)</div>"
 				"<div>{arv} − {pct:.0f}% = {after}</div>"
-				'<div>− fee {fee} = <b style="white-space:nowrap">{offer}</b></div>'.format(
+				'<div>− {profit_l} {pp:.0f}% {fee} = <b style="white-space:nowrap">{offer}</b></div>'.format(
 					label=escape_html(label),
 					pct=sc["pct"] * 100,
 					arv=_money(sc["arv"]),
 					after=_money(sc["after"]),
+					profit_l=escape_html(_("profit")),
+					pp=(sc.get("profit_pct") or 0) * 100,
 					fee=_money(sc["fee"]),
 					offer=_money(sc["offer"]),
 				)
@@ -493,7 +523,7 @@ def _html(lead, scenes, comps, sqft, notes=""):
 				"<div>{arv} − {pct:.0f}% = {after}</div>"
 				"<div>− {cap_l} {capital} ({rate:.0f}% × {months:.0f} mo)</div>"
 				"<div>− {hold_l} {holding}</div>"
-				'<div>− fee {fee} = <b style="white-space:nowrap">{offer}</b></div>'.format(
+				'<div>− {profit_l} {pp:.0f}% {fee} = <b style="white-space:nowrap">{offer}</b></div>'.format(
 					label=escape_html(label),
 					pct=sc["pct"] * 100,
 					arv=_money(sc["arv"]),
@@ -504,6 +534,8 @@ def _html(lead, scenes, comps, sqft, notes=""):
 					months=sc.get("hold_months") or 0,
 					hold_l=escape_html(_("holding")),
 					holding=_money(sc.get("holding") or 0),
+					profit_l=escape_html(_("profit")),
+					pp=(sc.get("profit_pct") or 0) * 100,
 					fee=_money(sc["fee"]),
 					offer=_money(sc["offer"]),
 				)
@@ -519,9 +551,9 @@ def _html(lead, scenes, comps, sqft, notes=""):
 				"<div>{label} ({shape})</div>"
 				"<div>{arv} × {pct:.0f}% = {after}</div>"
 				"<div>− {rehab_l} {rehab}</div>"
-				"<div>− fee {fee}</div>"
 				"<div>− {liens_l} {liens}</div>"
 				"<div>− {tax_l} {tax}</div>"
+				"<div>− {profit_l} {pp:.0f}% {fee}</div>"
 				'<div>= <b style="white-space:nowrap">{offer}</b> {maxbid}</div>'.format(
 					label=escape_html(label),
 					shape=escape_html(shape),
@@ -530,6 +562,8 @@ def _html(lead, scenes, comps, sqft, notes=""):
 					after=_money(sc["after"]),
 					rehab_l=escape_html(_("repairs")),
 					rehab=_money(sc["rehab"]),
+					profit_l=escape_html(_("profit")),
+					pp=(sc.get("profit_pct") or 0) * 100,
 					fee=_money(sc["fee"]),
 					liens_l=escape_html(_("liens")),
 					liens=_money(sc.get("liens") or 0),
@@ -556,7 +590,7 @@ def _html(lead, scenes, comps, sqft, notes=""):
 			"<div>{label} ({shape})</div>"
 			"<div>{arv} × {pct:.0f}% = {after}</div>"
 			"<div>− {word} {rehab} ({bill})</div>"
-			'<div>− fee {fee} = <b style="white-space:nowrap">{offer}</b></div>'.format(
+			'<div>− {profit_l} {pp:.0f}% {fee} = <b style="white-space:nowrap">{offer}</b></div>'.format(
 				label=escape_html(label),
 				shape=escape_html(shape),
 				word=escape_html(_("repairs") if sc["mult"] == 2 else _("rehab")),
@@ -565,6 +599,8 @@ def _html(lead, scenes, comps, sqft, notes=""):
 				after=_money(sc["after"]),
 				rehab=_money(sc["rehab"]),
 				bill=escape_html(bill),
+				profit_l=escape_html(_("profit")),
+				pp=(sc.get("profit_pct") or 0) * 100,
 				fee=_money(sc["fee"]),
 				offer=_money(sc["offer"]),
 			)

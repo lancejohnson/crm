@@ -22,7 +22,8 @@
         </div>
         <div>− {{ __('repairs') }} {{ money(sc.repairs) }}</div>
         <div>
-          − {{ __('fee') }} {{ money(sc.fee) }} =
+          − {{ __('profit') }} {{ Math.round((sc.profit_pct || 0) * 100) }}%
+          {{ money(sc.fee) }} =
           <b class="scene-offer">{{ money(sc.offer) }}</b>
           {{ __('MAO') }}
         </div>
@@ -52,7 +53,8 @@
           {{ money(sc.after) }}
         </div>
         <div>
-          − {{ __('fee') }} {{ money(sc.fee) }} =
+          − {{ __('profit') }} {{ Math.round((sc.profit_pct || 0) * 100) }}%
+          {{ money(sc.fee) }} =
           <b class="scene-offer">{{ money(sc.offer) }}</b>
         </div>
       </template>
@@ -67,7 +69,8 @@
         </div>
         <div>− {{ __('holding') }} {{ money(sc.holding) }}</div>
         <div>
-          − {{ __('fee') }} {{ money(sc.fee) }} =
+          − {{ __('profit') }} {{ Math.round((sc.profit_pct || 0) * 100) }}%
+          {{ money(sc.fee) }} =
           <b class="scene-offer">{{ money(sc.offer) }}</b>
         </div>
       </template>
@@ -88,7 +91,8 @@
           </template>
         </div>
         <div>
-          − {{ __('fee') }} {{ money(sc.fee) }} =
+          − {{ __('profit') }} {{ Math.round((sc.profit_pct || 0) * 100) }}%
+          {{ money(sc.fee) }} =
           <b class="scene-offer">{{ money(sc.offer) }}</b>
         </div>
       </template>

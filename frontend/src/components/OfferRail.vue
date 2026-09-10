@@ -78,9 +78,13 @@
       <span class="v">{{ money(repairs * 2) }}</span>
     </div>
     <div class="row">
-      <span class="k"><span class="op">−</span><span>Fee</span></span>
-      <input class="v inp" inputmode="numeric" :value="money(fee)"
-             @focus="$event.target.select()" @change="setOverride('fee', $event)" />
+      <span class="k" :title="'Gross profit as a percent of what we pay'"><span class="op">−</span><span>Profit</span></span>
+      <input class="v inp" inputmode="numeric" :value="`${profitPct}%`"
+             @focus="$event.target.select()" @change="setOverride('profit', $event)" />
+    </div>
+    <div class="row">
+      <span class="k"><span class="op" /><span></span></span>
+      <span class="v mut">{{ money(profit) }}</span>
     </div>
 
     <div class="row big">
@@ -88,7 +92,7 @@
       <span class="v" :class="{ bad: offer <= 0 }">{{ money(offer) }}</span>
     </div>
     <div v-if="arv && offer <= 0" class="warn">
-      Repairs and fee exceed {{ margin }}% of ARV — there is no offer here at this repair level.
+      Repairs and profit exceed {{ margin }}% of ARV — there is no offer here at this repair level.
     </div>
 
     <!-- The 2x2, unchanged in behaviour: it writes the lead's real First-Call Read. -->
@@ -182,7 +186,7 @@ const ask = ref('')
 const askNumber = computed(() => Number(String(ask.value).replace(/[^0-9.]/g, '')) || 0)
 
 const MARGIN = 90
-const FEE = 10000
+const PROFIT_PCT = 20
 const MAJOR_COST = 10000
 const MAJORS = ['Roof', 'Foundation', 'Plumbing', 'HVAC', 'Electrical']
 const DOUBLE_WHY =
@@ -203,11 +207,11 @@ const LEVELS = [
 const arvOverride = ref(null)
 const repairsOverride = ref(null)
 const marginOverride = ref(null)
-const feeOverride = ref(null)
+const profitOverride = ref(null)
 
 function setOverride(which, event) {
   const n = Number(String(event.target.value).replace(/[^0-9.]/g, ''))
-  const ref_ = { arv: arvOverride, repairs: repairsOverride, margin: marginOverride, fee: feeOverride }[which]
+  const ref_ = { arv: arvOverride, repairs: repairsOverride, margin: marginOverride, profit: profitOverride }[which]
   ref_.value = Number.isFinite(n) && n > 0 ? n : null
 }
 
@@ -253,9 +257,16 @@ const repairs = computed(() => {
 })
 
 const margin = computed(() => marginOverride.value ?? MARGIN)
-const fee = computed(() => feeOverride.value ?? FEE)
+const profitPct = computed(() => profitOverride.value ?? PROFIT_PCT)
 const gross = computed(() => Math.round((arv.value * margin.value) / 100))
-const offer = computed(() => Math.max(0, gross.value - repairs.value * 2 - fee.value))
+const net = computed(() => gross.value - repairs.value * 2)
+const offer = computed(() => {
+  const m = profitPct.value / 100
+  if (m <= -1) return Math.max(0, net.value)
+  return Math.max(0, Math.round(net.value / (1 + m)))
+})
+const profit = computed(() => net.value - offer.value)
+const fee = profit
 
 function money(n) {
   const v = Number(n) || 0
@@ -274,7 +285,8 @@ function snapshot() {
     majors: [...majors.value].sort(),
     repairs: repairs.value,
     margin: margin.value,
-    fee: fee.value,
+    fee: profit.value,
+    profit_pct: profitPct.value / 100,
     offer: offer.value,
     comps: usable.value.map((c) => ({
       name: c.name,
