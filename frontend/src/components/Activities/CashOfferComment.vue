@@ -56,6 +56,21 @@
           <b class="scene-offer">{{ money(sc.offer) }}</b>
         </div>
       </template>
+      <template v-else-if="isWholetail">
+        <div>
+          {{ money(sc.arv) }} − {{ Math.round((sc.pct || 0) * 100) }}% =
+          {{ money(sc.after) }}
+        </div>
+        <div>
+          − {{ __('capital') }} {{ money(sc.capital) }}
+          ({{ Math.round((sc.interest_pct || 0) * 100) }}% × {{ sc.hold_months || 0 }} {{ __('mo') }})
+        </div>
+        <div>− {{ __('holding') }} {{ money(sc.holding) }}</div>
+        <div>
+          − {{ __('fee') }} {{ money(sc.fee) }} =
+          <b class="scene-offer">{{ money(sc.offer) }}</b>
+        </div>
+      </template>
       <template v-else>
         <div>
           {{ money(sc.arv) }} × {{ Math.round((sc.pct || 0) * 100) }}% =
@@ -302,10 +317,12 @@ const offer = computed(() => {
 })
 
 const isNovation = computed(() => offer.value.kind === 'novation')
+const isWholetail = computed(() => offer.value.kind === 'wholetail')
 const isList = computed(() => offer.value.kind === 'list')
 const isRental = computed(() => offer.value.kind === 'rental')
 const kindTitle = computed(() => {
   if (isNovation.value) return __('Novation offer')
+  if (isWholetail.value) return __('Wholetail offer')
   if (isList.value) return __('List it')
   if (isRental.value) return __('Rental MAO')
   return __('Cash offer')

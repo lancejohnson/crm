@@ -63,7 +63,7 @@ def _zillow(addr):
 
 def _kind(raw):
 	k = (raw.get("kind") or "cash") if isinstance(raw, dict) else "cash"
-	if k in ("novation", "list", "rental", "auction"):
+	if k in ("novation", "wholetail", "list", "rental", "auction"):
 		return k
 	return "cash"
 
@@ -147,6 +147,31 @@ def _scene(raw, sqft):
 			"cut": cut,
 			"after": after,
 			"offer": after - fee,
+		}
+	if kind == "wholetail":
+		pct = _pct(raw, 0.10)
+		if pct < 0 or pct >= 1:
+			return None
+		rate = _rate(raw, "interest_pct", "interestPct", default=0.12)
+		months = _num(raw.get("hold_months") or raw.get("holdMonths") or 6)
+		if months < 0:
+			months = 0
+		cut = round(arv * pct)
+		after = round(arv - cut)
+		capital = round(arv * rate * (months / 12.0))
+		holding = round(arv * 0.015 * (months / 12.0) + 200 * months)
+		return {
+			"kind": "wholetail",
+			"arv": arv,
+			"pct": pct,
+			"fee": fee,
+			"cut": cut,
+			"after": after,
+			"interest_pct": rate,
+			"hold_months": months,
+			"capital": capital,
+			"holding": holding,
+			"offer": after - fee - capital - holding,
 		}
 	pct = _pct(raw, 0)
 	if pct <= 0:
@@ -250,6 +275,20 @@ def _scene_payload(sc):
 			"fee": sc["fee"],
 			"cut": sc["cut"],
 			"after": sc["after"],
+			"offer": sc["offer"],
+		}
+	if sc.get("kind") == "wholetail":
+		return {
+			"kind": "wholetail",
+			"arv": sc["arv"],
+			"pct": sc["pct"],
+			"fee": sc["fee"],
+			"cut": sc["cut"],
+			"after": sc["after"],
+			"interest_pct": sc.get("interest_pct") or 0,
+			"hold_months": sc.get("hold_months") or 0,
+			"capital": sc.get("capital") or 0,
+			"holding": sc.get("holding") or 0,
 			"offer": sc["offer"],
 		}
 	if sc.get("kind") == "auction":
@@ -381,6 +420,8 @@ def _html(lead, scenes, comps, sqft, notes=""):
 		title = _("Rental MAO")
 	elif kind == "auction":
 		title = _("Auction max bid")
+	elif kind == "wholetail":
+		title = _("Wholetail offer")
 	else:
 		title = _("Cash offer")
 	parts = [
@@ -441,6 +482,28 @@ def _html(lead, scenes, comps, sqft, notes=""):
 					pct=sc["pct"] * 100,
 					arv=_money(sc["arv"]),
 					after=_money(sc["after"]),
+					fee=_money(sc["fee"]),
+					offer=_money(sc["offer"]),
+				)
+			)
+			continue
+		if sc.get("kind") == "wholetail":
+			parts.append(
+				"<div>{label} ({pct:.0f}%)</div>"
+				"<div>{arv} − {pct:.0f}% = {after}</div>"
+				"<div>− {cap_l} {capital} ({rate:.0f}% × {months:.0f} mo)</div>"
+				"<div>− {hold_l} {holding}</div>"
+				'<div>− fee {fee} = <b style="white-space:nowrap">{offer}</b></div>'.format(
+					label=escape_html(label),
+					pct=sc["pct"] * 100,
+					arv=_money(sc["arv"]),
+					after=_money(sc["after"]),
+					cap_l=escape_html(_("capital")),
+					capital=_money(sc.get("capital") or 0),
+					rate=(sc.get("interest_pct") or 0) * 100,
+					months=sc.get("hold_months") or 0,
+					hold_l=escape_html(_("holding")),
+					holding=_money(sc.get("holding") or 0),
 					fee=_money(sc["fee"]),
 					offer=_money(sc["offer"]),
 				)

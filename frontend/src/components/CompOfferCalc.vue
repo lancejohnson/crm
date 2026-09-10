@@ -43,6 +43,14 @@
         </button>
         <button
           type="button"
+          :class="{ on: kind === 'wholetail' }"
+          :title="__('Novation plus capital and holding costs for the hold')"
+          @click="setKind('wholetail')"
+        >
+          {{ __('Wholetail') }}
+        </button>
+        <button
+          type="button"
           :class="{ on: kind === 'list' }"
           :title="__('As-is − 6% commission − 2% closing − 2% concessions')"
           @click="setKind('list')"
@@ -157,7 +165,7 @@
       <span class="lab">
         {{ pctLabel }}
         <button
-          v-if="kind === 'novation'"
+          v-if="kind === 'novation' || kind === 'wholetail'"
           type="button"
           class="why"
           tabindex="-1"
@@ -192,6 +200,55 @@
         @focus="$event.target.select()"
         @input="typeAfter(col, $event)"
       />
+      </template>
+
+      <template v-if="kind === 'wholetail'">
+      <span class="lab">
+        {{ __('Rate / hold') }}
+        <button type="button" class="why" tabindex="-1" :aria-label="CAPITAL_WHY">
+          ?
+          <span class="why-tip">{{ CAPITAL_WHY }}</span>
+        </button>
+      </span>
+      <div v-for="col in visible" :key="'hold' + col" class="hold">
+        <label class="pct">
+          <input
+            :ref="(el) => setField(9, col, el)"
+            inputmode="numeric"
+            :value="Math.round((s[col].interestPct || 0) * 100)"
+            @focus="$event.target.select()"
+            @change="setInterest(col, $event)"
+          />
+          <i>%</i>
+        </label>
+        <label class="pct">
+          <input
+            :ref="(el) => setField(10, col, el)"
+            inputmode="numeric"
+            :value="s[col].holdMonths"
+            @focus="$event.target.select()"
+            @change="setHoldMonths(col, $event)"
+          />
+          <i>{{ __('mo') }}</i>
+        </label>
+      </div>
+      <span class="lab">{{ __('Capital') }}</span>
+      <span v-for="col in visible" :key="'cap' + col" class="out">
+        {{ s[col].arv ? '−' + money(run(col).capital) : '—' }}
+      </span>
+      <span class="lab">
+        {{ __('Holding') }}
+        <button type="button" class="why" tabindex="-1" :aria-label="HOLDING_WHY">
+          ?
+          <span class="why-tip">
+            <b>1.5%/yr</b> {{ __('of value (tax + insurance)') }}<br />
+            <b>$200/mo</b> {{ __('utilities / vacant') }}
+          </span>
+        </button>
+      </span>
+      <span v-for="col in visible" :key="'hld' + col" class="out">
+        {{ s[col].arv ? '−' + money(run(col).holding) : '—' }}
+      </span>
       </template>
 
       <!-- Repairs is a NAMED choice, not a number to invent. The rep is on the
@@ -556,6 +613,12 @@ const DEFAULT_FEE = 25000
 const DEFAULT_RENTAL_REPAIRS = 10000
 const DEFAULT_NOVATION_FEE = 40000
 const DEFAULT_NOVATION_PCT = 0.1
+const DEFAULT_WHOLETAIL_RATE = 0.12
+const DEFAULT_WHOLETAIL_MONTHS = 6
+const HOLDING_TAX_INS_PCT = 0.015
+const HOLDING_UTIL_MO = 200
+const CAPITAL_WHY = __('Current value × interest × hold / 12')
+const HOLDING_WHY = __('1.5%/yr of value (tax + insurance) + $200/mo utilities / vacant')
 const DEFAULT_RENTAL_PCT = 0.8
 const DEFAULT_COMMISSION_PCT = 0.06
 const DEFAULT_CLOSING_PCT = 0.02
@@ -589,7 +652,7 @@ const LIST_CUTS = [
   },
 ]
 function asKind(k) {
-  return k === 'novation' || k === 'list' || k === 'rental' || k === 'auction' ? k : 'cash'
+  return k === 'novation' || k === 'wholetail' || k === 'list' || k === 'rental' || k === 'auction' ? k : 'cash'
 }
 
 function listRates() {
@@ -618,6 +681,18 @@ function fresh(k, f) {
       mult: 1,
       rehabPsf: DEFAULT_PSF,
       fee: DEFAULT_NOVATION_FEE,
+      ...listRates(),
+    }
+  }
+  if (k === 'wholetail') {
+    return {
+      arv: 0,
+      pct: DEFAULT_NOVATION_PCT,
+      mult: 1,
+      rehabPsf: DEFAULT_PSF,
+      fee: DEFAULT_NOVATION_FEE,
+      interestPct: DEFAULT_WHOLETAIL_RATE,
+      holdMonths: DEFAULT_WHOLETAIL_MONTHS,
       ...listRates(),
     }
   }
@@ -675,17 +750,18 @@ const books = reactive({
   cash: emptyBook('cash'),
   auction: emptyBook('auction'),
   novation: emptyBook('novation'),
+  wholetail: emptyBook('wholetail'),
   list: emptyBook('list'),
   rental: emptyBook('rental'),
 })
 const valueLabel = computed(() => {
-  if (kind.value === 'novation') return __('Current value')
+  if (kind.value === 'novation' || kind.value === 'wholetail') return __('Current value')
   if (kind.value === 'list') return __('As-is')
   if (kind.value === 'rental') return __('Move-in ready')
   return __('ARV')
 })
 const pctLabel = computed(() => {
-  if (kind.value === 'novation') return __('− %')
+  if (kind.value === 'novation' || kind.value === 'wholetail') return __('− %')
   if (kind.value === 'rental') return __('% of MIR')
   return __('% of ARV')
 })
@@ -723,6 +799,8 @@ const canSave = computed(
   () => visible.value.some((i) => S()[i].arv > 0) && !saving.value,
 )
 const grid = [
+  [null, null],
+  [null, null],
   [null, null],
   [null, null],
   [null, null],
@@ -796,6 +874,13 @@ function applyScene(k, i, row) {
     mult: k === 'cash' || k === 'auction' ? Number(row.mult) || (blank ? base.mult : 1) : 1,
     liens: Number(row.liens) || 0,
     backTaxes: Number(row.backTaxes ?? row.back_taxes) || 0,
+    interestPct: readRate(row, 'interestPct', 'interest_pct', base.interestPct ?? 0),
+    holdMonths: (() => {
+      const v = row.holdMonths ?? row.hold_months
+      if (v === undefined || v === null || v === '') return base.holdMonths || 0
+      const n = Number(v)
+      return Number.isFinite(n) ? n : (base.holdMonths || 0)
+    })(),
     commissionPct: readRate(row, 'commissionPct', 'commission_pct', base.commissionPct),
     closingPct: readRate(row, 'closingPct', 'closing_pct', base.closingPct),
     concessionsPct: readRate(
@@ -825,6 +910,7 @@ function resetBooks() {
   books.cash = emptyBook('cash')
   books.auction = emptyBook('auction')
   books.novation = emptyBook('novation')
+  books.wholetail = emptyBook('wholetail')
   books.list = emptyBook('list')
   books.rental = emptyBook('rental')
   kind.value = 'cash'
@@ -853,10 +939,11 @@ function loadSaved() {
     } catch {
       stored = null
     }
-    if (stored?.cash || stored?.novation || stored?.list || stored?.rental || stored?.auction) {
+    if (stored?.cash || stored?.novation || stored?.wholetail || stored?.list || stored?.rental || stored?.auction) {
       loadBook('cash', stored.cash)
       loadBook('auction', stored.auction)
       loadBook('novation', stored.novation)
+      loadBook('wholetail', stored.wholetail)
       loadBook('list', stored.list)
       loadBook('rental', stored.rental)
       kind.value = asKind(stored.kind)
@@ -914,6 +1001,12 @@ function persist() {
           cols: books.novation.cols,
           notes: books.novation.notes,
           comps: books.novation.comps,
+        },
+        wholetail: {
+          s: books.wholetail.s,
+          cols: books.wholetail.cols,
+          notes: books.wholetail.notes,
+          comps: books.wholetail.comps,
         },
         list: {
           s: books.list.s,
@@ -1039,6 +1132,8 @@ function addCompare() {
       fee: S()[0].fee,
       liens: S()[0].liens,
       backTaxes: S()[0].backTaxes,
+      interestPct: S()[0].interestPct,
+      holdMonths: S()[0].holdMonths,
       commissionPct: S()[0].commissionPct,
       closingPct: S()[0].closingPct,
       concessionsPct: S()[0].concessionsPct,
@@ -1070,6 +1165,21 @@ function run(col) {
     const cut = Math.round(x.arv * x.pct)
     const after = Math.round(x.arv - cut)
     return { after, cut, repairs: 0, rehab: 0, wholesale: after, offer: after - x.fee }
+  }
+  if (kind.value === 'wholetail') {
+    const cut = Math.round(x.arv * x.pct)
+    const after = Math.round(x.arv - cut)
+    const months = Math.max(0, Number(x.holdMonths) || 0)
+    const rate = Number(x.interestPct) || 0
+    const capital = Math.round(x.arv * rate * (months / 12))
+    const holding = Math.round(
+      x.arv * HOLDING_TAX_INS_PCT * (months / 12) + HOLDING_UTIL_MO * months,
+    )
+    return {
+      after, cut, repairs: 0, rehab: 0, wholesale: after,
+      capital, holding,
+      offer: after - x.fee - capital - holding,
+    }
   }
   const after = Math.round(x.arv * x.pct)
   const repairs = Math.round((Number(x.rehabPsf) || 0) * sqft.value)
@@ -1128,7 +1238,7 @@ const arvHint = computed(() => (suggestedArv.value ? money(suggestedArv.value) :
 // Soft-fill: write the comps-table average into an empty (or still-suggested)
 // value so Current value / ARV starts from the same number the table is
 // pointing at. Per-kind, so editing cash cannot move novation's value.
-const lastSoft = { cash: 0, auction: 0, novation: 0, list: 0, rental: 0 }
+const lastSoft = { cash: 0, auction: 0, novation: 0, wholetail: 0, list: 0, rental: 0 }
 function applySoft(k) {
   const v = suggestedArv.value
   if (!v) return
@@ -1247,7 +1357,7 @@ function fmtDate(v) {
 function setPct(col, e) {
   const n = parseMoney(e.target.value)
   const fallback =
-    kind.value === 'novation'
+    kind.value === 'novation' || kind.value === 'wholetail'
       ? DEFAULT_NOVATION_PCT
       : kind.value === 'rental'
         ? DEFAULT_RENTAL_PCT
@@ -1255,6 +1365,14 @@ function setPct(col, e) {
           ? 0.65
           : 0.7
   S()[col].pct = n / 100 || fallback
+}
+function setInterest(col, e) {
+  const n = parseMoney(e.target.value)
+  S()[col].interestPct = n / 100 || DEFAULT_WHOLETAIL_RATE
+}
+function setHoldMonths(col, e) {
+  const n = Math.round(parseMoney(e.target.value))
+  S()[col].holdMonths = Number.isFinite(n) && n >= 0 ? n : DEFAULT_WHOLETAIL_MONTHS
 }
 function setRate(col, key, e) {
   const n = parseMoney(e.target.value)
@@ -1302,7 +1420,7 @@ function typeAfter(col, e) {
   const digitsBefore = (el.value.slice(0, el.selectionStart).match(/\d/g) || []).length
   const n = parseMoney(el.value)
   const pct = Number(S()[col].pct) || 0
-  if (kind.value === 'novation') {
+  if (kind.value === 'novation' || kind.value === 'wholetail') {
     if (pct < 1) S()[col].arv = n / (1 - pct)
   } else if (pct) {
     S()[col].arv = n / pct
@@ -1321,10 +1439,13 @@ function typeOffer(col, e) {
     if (tot < 1) S()[col].arv = n / (1 - tot)
   } else if (S()[col].arv) {
     const r = run(col)
-    const base = kind.value === 'novation' ? r.after : r.wholesale
+    const base =
+      kind.value === 'novation' || kind.value === 'wholetail' ? r.after : r.wholesale
     const liens = kind.value === 'auction' ? Math.round(Number(S()[col].liens) || 0) : 0
     const backTaxes = kind.value === 'auction' ? Math.round(Number(S()[col].backTaxes) || 0) : 0
-    S()[col].fee = base - liens - backTaxes - n
+    const hold =
+      kind.value === 'wholetail' ? (r.capital || 0) + (r.holding || 0) : 0
+    S()[col].fee = base - liens - backTaxes - hold - n
   }
   nextTick(() => putCaret(el, digitsBefore, n ? money(n) : ''))
 }
@@ -1380,6 +1501,10 @@ async function save() {
             if (kind.value === 'auction') {
               row.liens = Math.round(Number(x.liens) || 0)
               row.back_taxes = Math.round(Number(x.backTaxes) || 0)
+            }
+            if (kind.value === 'wholetail') {
+              row.interest_pct = x.interestPct
+              row.hold_months = x.holdMonths
             }
           }
           return row
@@ -1782,6 +1907,17 @@ input.offer.bad {
 .kind button {
   flex: none;
   padding: 0 6px;
+}
+.hold {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+.hold .pct {
+  flex: none;
+  width: 3.6rem;
 }
 .cut {
   display: flex;
