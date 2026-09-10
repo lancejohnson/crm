@@ -58,6 +58,7 @@
         :practice-property="practiceProperty"
         :seller-note="sellerNote"
         :seed="practiceSeed"
+        :prefer-kind="preferKind"
         @remove="setCompState($event, 'none')"
         @open="openCompDetail"
         @kind="onCalcKind"
@@ -769,6 +770,7 @@ const props = defineProps({
   practiceAttempt: { type: String, default: '' },
   practiceProperty: { type: String, default: '' },
   sellerNote: { type: String, default: '' },
+  preferKind: { type: String, default: '' },
 })
 // This used to be a modal driven by `defineModel()`. It is now a full page, so
 // "open" is simply always true -- which keeps every existing `show.value` guard,

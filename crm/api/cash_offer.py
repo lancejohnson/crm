@@ -63,7 +63,7 @@ def _zillow(addr):
 
 def _kind(raw):
 	k = (raw.get("kind") or "cash") if isinstance(raw, dict) else "cash"
-	if k in ("novation", "list", "rental"):
+	if k in ("novation", "list", "rental", "auction"):
 		return k
 	return "cash"
 
@@ -157,9 +157,10 @@ def _scene(raw, sqft):
 	repairs = round(rehab_psf * _num(sqft))
 	rehab = repairs * mult
 	wholesale = after - rehab
-	offer = wholesale - fee
-	return {
-		"kind": "cash",
+	liens = _num(raw.get("liens")) if kind == "auction" else 0
+	offer = wholesale - fee - liens
+	out = {
+		"kind": "auction" if kind == "auction" else "cash",
 		"arv": arv,
 		"pct": pct,
 		"mult": mult,
@@ -171,6 +172,9 @@ def _scene(raw, sqft):
 		"wholesale": wholesale,
 		"offer": offer,
 	}
+	if kind == "auction":
+		out["liens"] = liens
+	return out
 
 
 def _comps(raw):
@@ -244,6 +248,21 @@ def _scene_payload(sc):
 			"fee": sc["fee"],
 			"cut": sc["cut"],
 			"after": sc["after"],
+			"offer": sc["offer"],
+		}
+	if sc.get("kind") == "auction":
+		return {
+			"kind": "auction",
+			"arv": sc["arv"],
+			"pct": sc["pct"],
+			"mult": sc["mult"],
+			"rehab_psf": sc["rehab_psf"],
+			"fee": sc["fee"],
+			"liens": sc.get("liens") or 0,
+			"after": sc["after"],
+			"repairs": sc["repairs"],
+			"rehab": sc["rehab"],
+			"wholesale": sc["wholesale"],
 			"offer": sc["offer"],
 		}
 	return {
@@ -357,6 +376,8 @@ def _html(lead, scenes, comps, sqft, notes=""):
 		title = _("List it")
 	elif kind == "rental":
 		title = _("Rental MAO")
+	elif kind == "auction":
+		title = _("Auction max bid")
 	else:
 		title = _("Cash offer")
 	parts = [
@@ -419,6 +440,34 @@ def _html(lead, scenes, comps, sqft, notes=""):
 					after=_money(sc["after"]),
 					fee=_money(sc["fee"]),
 					offer=_money(sc["offer"]),
+				)
+			)
+			continue
+		if sc.get("kind") == "auction":
+			shape = (
+				_("{0:.0f}% · 2× repairs").format(sc["pct"] * 100)
+				if sc["mult"] == 2
+				else _("{0:.0f}%").format(sc["pct"] * 100)
+			)
+			parts.append(
+				"<div>{label} ({shape})</div>"
+				"<div>{arv} × {pct:.0f}% = {after}</div>"
+				"<div>− {rehab_l} {rehab}</div>"
+				"<div>− fee {fee}</div>"
+				"<div>− {liens_l} {liens}</div>"
+				'<div>= <b style="white-space:nowrap">{offer}</b> {maxbid}</div>'.format(
+					label=escape_html(label),
+					shape=escape_html(shape),
+					pct=sc["pct"] * 100,
+					arv=_money(sc["arv"]),
+					after=_money(sc["after"]),
+					rehab_l=escape_html(_("repairs")),
+					rehab=_money(sc["rehab"]),
+					fee=_money(sc["fee"]),
+					liens_l=escape_html(_("liens")),
+					liens=_money(sc.get("liens") or 0),
+					offer=_money(sc["offer"]),
+					maxbid=escape_html(_("max bid")),
 				)
 			)
 			continue

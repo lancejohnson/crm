@@ -27,6 +27,14 @@
         </button>
         <button
           type="button"
+          :class="{ on: kind === 'auction' }"
+          :title="__('ARV × % − repairs − fee − liens')"
+          @click="setKind('auction')"
+        >
+          {{ __('Auction') }}
+        </button>
+        <button
+          type="button"
           :class="{ on: kind === 'novation' }"
           :title="__('Current value − 10% − fee')"
           @click="setKind('novation')"
@@ -68,6 +76,7 @@
         >
           {{ saving ? __('Saving…') : __('Save calcs') }}
         </button>
+        <slot name="head-end" />
       </span>
     </div>
 
@@ -95,7 +104,7 @@
            Per column, like everything else here: "+ Compare" then puts the two
            formulas side by side on the same house, which is the comparison a
            wholesaler actually wants. Cash-only: novation has one shape. -->
-      <template v-if="kind === 'cash'">
+      <template v-if="kind === 'cash' || kind === 'auction'">
         <span class="lab">{{ __('Formula') }}</span>
         <div v-for="col in visible" :key="'form' + col" class="seg">
           <button
@@ -192,7 +201,7 @@
            "Other…" keeps the raw $/sf field one click away — the preset is a
            shortcut, never a cage. Novation lists the house as-is, so none of
            this applies. -->
-      <template v-if="kind === 'cash' || kind === 'rental'">
+      <template v-if="kind === 'cash' || kind === 'rental' || kind === 'auction'">
       <span class="lab">{{ __('Condition') }}</span>
       <div v-for="col in visible" :key="'rep' + col" class="rep">
         <template v-if="isCustom(col)">
@@ -271,7 +280,7 @@
            rep to maintain one. Shown ONLY at 2×, i.e. only when the deduction
            differs from the repairs row above it and the column would otherwise
            stop adding up. -->
-      <template v-if="kind === 'cash'">
+      <template v-if="kind === 'cash' || kind === 'auction'">
       <span class="lab">{{ __('Wholesale') }}</span>
       <span v-for="col in visible" :key="'ws' + col" class="out annot">
         <i
@@ -296,6 +305,20 @@
       />
       </template>
 
+      <template v-if="kind === 'auction'">
+      <span class="lab">{{ __('Liens') }}</span>
+      <input
+        v-for="col in visible"
+        :key="'liens' + col"
+        :ref="(el) => setField(6, col, el)"
+        inputmode="numeric"
+        :value="s[col].liens ? money(s[col].liens) : ''"
+        :placeholder="money(0)"
+        @focus="$event.target.select()"
+        @input="typeMoney(col, 'liens', $event)"
+      />
+      </template>
+
       <span class="lab offer">{{ offerLabel }}</span>
       <label
         v-for="col in visible"
@@ -311,7 +334,7 @@
           +{{ money(offerGap) }}
         </b>
         <input
-          :ref="(el) => setField(6, col, el)"
+          :ref="(el) => setField(kind === 'auction' ? 7 : 6, col, el)"
           class="offer"
           :class="{ bad: s[col].arv && run(col).offer <= 0 }"
           inputmode="numeric"
@@ -480,6 +503,8 @@ const props = defineProps({
   practiceAttempt: { type: String, default: '' },
   practiceProperty: { type: String, default: '' },
   sellerNote: { type: String, default: '' },
+  // Auction.com properties open on the auction notebook (liens line).
+  preferKind: { type: String, default: '' },
 })
 
 // Matches OfferRail.vue's rail so the two surfaces cannot name the same
@@ -553,7 +578,7 @@ const LIST_CUTS = [
   },
 ]
 function asKind(k) {
-  return k === 'novation' || k === 'list' || k === 'rental' ? k : 'cash'
+  return k === 'novation' || k === 'list' || k === 'rental' || k === 'auction' ? k : 'cash'
 }
 
 function listRates() {
@@ -592,6 +617,19 @@ function fresh(k, f) {
       mult: 1,
       rehabPsf: DEFAULT_PSF,
       fee: DEFAULT_FEE,
+      liens: 0,
+      ...listRates(),
+    }
+  }
+  if (k === 'auction') {
+    const g = f || FORMULAS[0]
+    return {
+      arv: 0,
+      pct: g.pct,
+      mult: g.mult,
+      rehabPsf: DEFAULT_PSF,
+      fee: DEFAULT_FEE,
+      liens: 0,
       ...listRates(),
     }
   }
@@ -602,6 +640,7 @@ function fresh(k, f) {
     mult: g.mult,
     rehabPsf: DEFAULT_PSF,
     fee: DEFAULT_FEE,
+    liens: 0,
     ...listRates(),
   }
 }
@@ -613,13 +652,14 @@ function emptyBook(k) {
     notes: '',
     // Cash follows the sale map until the rep edits the table. The other
     // kinds start empty — switching must not copy the other notebook's comps.
-    comps: k === 'cash' ? null : [],
+    comps: k === 'cash' || k === 'auction' ? null : [],
   }
 }
 
 const kind = ref('cash')
 const books = reactive({
   cash: emptyBook('cash'),
+  auction: emptyBook('auction'),
   novation: emptyBook('novation'),
   list: emptyBook('list'),
   rental: emptyBook('rental'),
@@ -638,6 +678,7 @@ const pctLabel = computed(() => {
 const offerLabel = computed(() => {
   if (kind.value === 'list') return __('Takeaway')
   if (kind.value === 'rental') return __('MAO')
+  if (kind.value === 'auction') return __('Max bid')
   return __('Offer')
 })
 // Template reads these; script uses S() so a kind switch cannot point at a
@@ -675,6 +716,7 @@ const grid = [
   [null, null],
   [null, null],
   [null, null],
+  [null, null],
 ]
 
 function setField(row, col, el) {
@@ -703,7 +745,7 @@ const tableComps = computed(() => {
   const own = books[kind.value].comps
   // Cash may still follow the sale map (null). Rentals never ride along.
   if (own == null) {
-    if (kind.value !== 'cash') return []
+    if (kind.value !== 'cash' && kind.value !== 'auction') return []
     return (props.comps || []).filter((c) => !isRentalRow(c))
   }
   return own
@@ -736,7 +778,8 @@ function applyScene(k, i, row) {
     // numbers were computed with a single deduction — so it IS the classic
     // one. Only a genuine reset falls back to the column's default.
     // Novation / list-it have no multiplier; leave the cash default unused.
-    mult: k === 'cash' ? Number(row.mult) || (blank ? base.mult : 1) : 1,
+    mult: k === 'cash' || k === 'auction' ? Number(row.mult) || (blank ? base.mult : 1) : 1,
+    liens: Number(row.liens) || 0,
     commissionPct: readRate(row, 'commissionPct', 'commission_pct', base.commissionPct),
     closingPct: readRate(row, 'closingPct', 'closing_pct', base.closingPct),
     concessionsPct: readRate(
@@ -764,6 +807,7 @@ function loadBook(k, raw) {
 
 function resetBooks() {
   books.cash = emptyBook('cash')
+  books.auction = emptyBook('auction')
   books.novation = emptyBook('novation')
   books.list = emptyBook('list')
   books.rental = emptyBook('rental')
@@ -793,8 +837,9 @@ function loadSaved() {
     } catch {
       stored = null
     }
-    if (stored?.cash || stored?.novation || stored?.list || stored?.rental) {
+    if (stored?.cash || stored?.novation || stored?.list || stored?.rental || stored?.auction) {
       loadBook('cash', stored.cash)
+      loadBook('auction', stored.auction)
       loadBook('novation', stored.novation)
       loadBook('list', stored.list)
       loadBook('rental', stored.rental)
@@ -823,9 +868,11 @@ function loadSaved() {
       books[k].cols = Math.min(2, Math.max(1, seed.scenarios.length))
       if (typeof seed.notes === 'string') books[k].notes = seed.notes
       if (Array.isArray(seed.comps)) books[k].comps = cloneComps(seed.comps)
-      else if (k === 'cash' && props.comps?.length) {
+      else if ((k === 'cash' || k === 'auction') && props.comps?.length) {
         books[k].comps = cloneComps(props.comps)
       }
+    } else if (props.preferKind === 'auction' && !(stored && stored.kind)) {
+      kind.value = 'auction'
     }
   } finally {
     hydrating = false
@@ -864,6 +911,12 @@ function persist() {
           notes: books.rental.notes,
           comps: books.rental.comps,
         },
+        auction: {
+          s: books.auction.s,
+          cols: books.auction.cols,
+          notes: books.auction.notes,
+          comps: books.auction.comps,
+        },
       }),
     )
   } catch {
@@ -889,7 +942,7 @@ watch(
     // must not dump the other notebook's (or the map's) list in.
     const b = books[kind.value]
     if (!b.comps) {
-      if (kind.value !== 'cash') b.comps = []
+      if (kind.value !== 'cash' && kind.value !== 'auction') b.comps = []
       else return
     }
     const have = new Set(b.comps.map(compKey))
@@ -968,6 +1021,7 @@ function addCompare() {
       mult: multOf(0),
       rehabPsf: S()[0].rehabPsf,
       fee: S()[0].fee,
+      liens: S()[0].liens,
       commissionPct: S()[0].commissionPct,
       closingPct: S()[0].closingPct,
       concessionsPct: S()[0].concessionsPct,
@@ -1005,7 +1059,8 @@ function run(col) {
   // Rental MAO is 1× repairs. Cash still honors the formula toggle.
   const rehab = repairs * (kind.value === 'rental' ? 1 : multOf(col))
   const wholesale = after - rehab
-  return { after, repairs, rehab, wholesale, offer: wholesale - x.fee }
+  const liens = kind.value === 'auction' ? Math.round(Number(x.liens) || 0) : 0
+  return { after, repairs, rehab, wholesale, liens, offer: wholesale - x.fee - liens }
 }
 
 // Only ever a comparison between two PRICED columns: an empty scenario reads
@@ -1055,7 +1110,7 @@ const arvHint = computed(() => (suggestedArv.value ? money(suggestedArv.value) :
 // Soft-fill: write the comps-table average into an empty (or still-suggested)
 // value so Current value / ARV starts from the same number the table is
 // pointing at. Per-kind, so editing cash cannot move novation's value.
-const lastSoft = { cash: 0, novation: 0, list: 0, rental: 0 }
+const lastSoft = { cash: 0, auction: 0, novation: 0, list: 0, rental: 0 }
 function applySoft(k) {
   const v = suggestedArv.value
   if (!v) return
@@ -1249,7 +1304,8 @@ function typeOffer(col, e) {
   } else if (S()[col].arv) {
     const r = run(col)
     const base = kind.value === 'novation' ? r.after : r.wholesale
-    S()[col].fee = base - n
+    const liens = kind.value === 'auction' ? Math.round(Number(S()[col].liens) || 0) : 0
+    S()[col].fee = base - liens - n
   }
   nextTick(() => putCaret(el, digitsBefore, n ? money(n) : ''))
 }
@@ -1298,10 +1354,11 @@ async function save() {
           } else {
             row.pct = x.pct
             row.fee = x.fee
-            if (kind.value === 'cash' || kind.value === 'rental') {
+            if (kind.value === 'cash' || kind.value === 'rental' || kind.value === 'auction') {
               row.mult = kind.value === 'rental' ? 1 : multOf(i)
               row.rehabPsf = x.rehabPsf
             }
+            if (kind.value === 'auction') row.liens = Math.round(Number(x.liens) || 0)
           }
           return row
         }),
@@ -1398,10 +1455,13 @@ function onKeys(e) {
   flex-wrap: wrap;
   align-items: flex-start;
   gap: 12px 20px;
+  min-width: 0;
+  max-width: 100%;
   font: 13px/1.35 InterVar, Inter, -apple-system, 'Segoe UI', system-ui, sans-serif;
   color: var(--ink-gray-7);
 }
 .calc {
+  min-width: 0;
   max-width: 100%;
   border: 1px solid var(--outline-gray-2);
   border-radius: 8px;
@@ -1419,8 +1479,11 @@ function onKeys(e) {
 }
 .head-r {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
+  margin-left: auto;
 }
 .link {
   border: 0;
@@ -1690,7 +1753,9 @@ input.offer.bad {
 }
 .kind {
   width: auto;
+  max-width: 100%;
   flex: none;
+  flex-wrap: wrap;
 }
 .kind button {
   flex: none;

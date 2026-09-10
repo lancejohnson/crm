@@ -171,6 +171,7 @@ def _shape(doc, *, with_offers: bool = False) -> dict:
 		"notes": doc.get("notes") or "",
 		"status": _stage(doc),
 		"listing_url": doc.get("listing_url") or "",
+		"source": doc.get("source") or "",
 		"owner": doc.owner,
 		"owner_name": _user_label(doc.owner),
 		"creation": str(doc.creation),

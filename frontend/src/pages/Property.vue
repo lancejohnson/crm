@@ -18,34 +18,42 @@
             </template>
           </Button>
         </Dropdown>
-        <Button
-          v-if="prop.data?.listing_url"
-          :label="__('Listing')"
-          variant="subtle"
-          iconLeft="external-link"
-          :title="prop.data.listing_url"
-          @click="openListing"
-        />
-        <Button
-          :label="offerCount ? __('Saved calcs ({0})', [offerCount]) : __('Saved calcs')"
-          variant="subtle"
-          iconLeft="clock"
-          :disabled="!offerCount"
-          @click="showOffers = true"
-        />
-        <Button
-          :label="__('Edit')"
-          variant="subtle"
-          iconLeft="edit-2"
-          @click="openEdit"
-        />
-        <Button
-          variant="subtle"
-          theme="red"
-          icon="trash-2"
-          :title="__('Delete this property')"
-          @click="confirmDelete = true"
-        />
+        <!-- Phone: Listing / Saved calcs / Edit / Delete in one menu. Five
+             labeled buttons beside the breadcrumb is what overflowed the
+             viewport and side-scrolled the whole page. -->
+        <div class="hidden items-center gap-2 sm:flex">
+          <Button
+            v-if="prop.data?.listing_url"
+            :label="__('Listing')"
+            variant="subtle"
+            iconLeft="external-link"
+            :title="prop.data.listing_url"
+            @click="openListing"
+          />
+          <Button
+            :label="offerCount ? __('Saved calcs ({0})', [offerCount]) : __('Saved calcs')"
+            variant="subtle"
+            iconLeft="clock"
+            :disabled="!offerCount"
+            @click="showOffers = true"
+          />
+          <Button
+            :label="__('Edit')"
+            variant="subtle"
+            iconLeft="edit-2"
+            @click="openEdit"
+          />
+          <Button
+            variant="subtle"
+            theme="red"
+            icon="trash-2"
+            :title="__('Delete this property')"
+            @click="confirmDelete = true"
+          />
+        </div>
+        <Dropdown class="sm:hidden" :options="moreOptions" placement="bottom-end">
+          <Button variant="ghost" icon="more-horizontal" :title="__('More')" />
+        </Dropdown>
       </div>
     </template>
   </LayoutHeader>
@@ -64,6 +72,7 @@
       :key="mapKey"
       :lead="propertyId"
       :address="address"
+      :prefer-kind="prop.data?.source === 'Auction.com' ? 'auction' : ''"
       page-mode
     />
   </div>
@@ -192,6 +201,36 @@ const breadcrumbs = computed(() => [
   { label: __('Properties'), route: { name: 'Properties' } },
   { label: address.value || props.propertyId },
 ])
+
+const moreOptions = computed(() => {
+  const items = []
+  if (prop.data?.listing_url) {
+    items.push({
+      label: __('Listing'),
+      icon: 'external-link',
+      onClick: openListing,
+    })
+  }
+  items.push({
+    label: offerCount.value
+      ? __('Saved calcs ({0})', [offerCount.value])
+      : __('Saved calcs'),
+    icon: 'clock',
+    onClick: () => {
+      if (offerCount.value) showOffers.value = true
+    },
+    disabled: !offerCount.value,
+  })
+  items.push({ label: __('Edit'), icon: 'edit-2', onClick: openEdit })
+  items.push({
+    label: __('Delete'),
+    icon: 'trash-2',
+    onClick: () => {
+      confirmDelete.value = true
+    },
+  })
+  return items
+})
 
 function openListing() {
   const url = prop.data?.listing_url
