@@ -6,13 +6,18 @@
        is a fragment and Vue does NOT inherit a `class` from its host. The height
        has to be decided here, from the props, or the map/tray split has no bound
        to scroll inside and grows to ~8,000px. -->
+  <!-- overflow-y-auto in BOTH layouts. Compact used to be overflow-hidden so
+       the map filled the phone; but the calc opens tall (the auction form is
+       ~600px at 390px wide) and the Tax / liens card with Records unfolded is
+       taller still, and under overflow-hidden everything past the first
+       screen -- the rest of the card, the map -- was simply unreachable
+       (Lance, 2026-09-10: "lien table won't go down"). The map keeps its
+       16rem floor below, so the folded-calc case paints exactly as before;
+       an overflowing header stack now scrolls instead of clipping. -->
   <div
     ref="rootEl"
-    class="flex min-w-0 flex-col gap-2"
-    :class="[
-      fillHeight || !wide ? 'min-h-0 flex-1' : '',
-      wide ? 'overflow-y-auto' : 'overflow-hidden',
-    ]"
+    class="flex min-w-0 flex-col gap-2 overflow-y-auto"
+    :class="fillHeight || !wide ? 'min-h-0 flex-1' : ''"
   >
   <!-- The calculator folds away, and that is a HEIGHT decision. Measured on the
        comps page at a 919px window: the calc is 358px and the map+tray got 342px

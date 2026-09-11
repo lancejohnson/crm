@@ -59,6 +59,13 @@ export function initTelemetry() {
     autocapture: false,
     capture_pageview: false,
     capture_pageleave: false,
+    // This PostHog project is SHARED with Relay, whose "Report a problem" survey
+    // is configured there as a widget. Without this the SDK draws Relay's black
+    // "Report a problem" tab down the right edge of every CRM page (Lance,
+    // 2026-09-10, on a phone where it covered the comps controls). Relay already
+    // opts out the same way and owns its own report sheet; the CRM has no
+    // survey UI of its own, so nothing is lost. PostHog stays replay + errors.
+    disable_surveys: true,
     capture_exceptions: {
       capture_unhandled_errors: true,
       capture_unhandled_rejections: true,

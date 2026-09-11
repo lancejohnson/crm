@@ -55,6 +55,7 @@ import hashlib
 import json
 import math
 import re
+import threading
 import urllib.parse
 import urllib.request
 
@@ -1121,6 +1122,15 @@ def _shape_detail(row, zpid=None):
 	name = str(row.get("name") or "")
 	if not zpid and name.startswith("zillow::"):
 		zpid = name.split("::", 1)[1]
+	# The Redfin LINK is the slowest thing in a gallery open and the least
+	# important thing in it. Measured on prod (819 Rosehill, 2026-09-10): Zillow
+	# facts + photos 0.39s, then `/url` on redfin-scraper-api 6.3s -- the KNN
+	# ordering that service documents -- run SERIALLY after them, so a rep waited
+	# ~7s for photos that were ready in under half a second, to get a link. Start
+	# it FIRST on a thread and wait only REDFIN_URL_BUDGET past Zillow; a late
+	# answer is written into the cached entry by a background job, so the second
+	# open has the link and the first one has its photos.
+	url_job = _start_redfin_url(_detail_address(row), row.get("lat"), row.get("lng"))
 	details, photos = _zillow_detail(row, zpid)
 	# Dedupe BEFORE the thin-gallery check: a photo-less home whose "gallery" is
 	# two sizes of the same synthesized Street View frame is really ONE photo, and
@@ -1140,7 +1150,7 @@ def _shape_detail(row, zpid=None):
 	lng = row.get("lng") or (details or {}).get("lng")
 	# Listing URL is independent of the photo ladder: a 45-photo Zillow gallery
 	# still needs a Redfin link. Thin galleries reuse /photos (url + CDN).
-	redfin_url = None
+	redfin_url, url_pending = None, False
 	if len(photos) <= 1:
 		from crm.api import apivex
 
@@ -1155,7 +1165,7 @@ def _shape_detail(row, zpid=None):
 			photos = rf["photos"]
 			photo_source = "redfin"
 	else:
-		redfin_url = redfin.redfin_listing_url(addr, lat, lng)
+		redfin_url, url_pending = _finish_redfin_url(url_job, addr, lat, lng)
 
 	comp = dict(row)
 	if is_adc(comp) and details:
@@ -1178,8 +1188,101 @@ def _shape_detail(row, zpid=None):
 		"photos_available": len(photos) > 0,
 		"photo_source": photo_source,
 		"redfin_url": redfin_url,
+		"redfin_url_pending": url_pending,
+		"redfin_url_point": [addr, lat, lng] if url_pending else None,
 		"message": "" if details else _("Zillow details are unavailable for this property."),
 	}
+
+
+#: How long past the Zillow calls a gallery open waits for the Redfin link. The
+#: link is a courtesy; the photos are the click. Same shape as the subject's
+#: `finish_subject_record` budget.
+REDFIN_URL_BUDGET = 1.0
+
+
+def _start_redfin_url(address, lat, lng):
+	"""Kick off the Redfin listing-URL lookup on a thread, or None when the row
+	cannot be looked up (no point, no service). The thread is pure `requests`:
+	`frappe.local` is thread-local, so nothing frappe may run in there -- the
+	wrapper swallows everything, including the `frappe.log_error` the inline
+	path would have written, because a slow link service is not an Error Log
+	row per gallery open."""
+	from crm.api import redfin
+
+	# Config is read HERE, on the request thread; the thread gets plain values.
+	base = redfin._base_url()
+	point = redfin._point(address, lat, lng)
+	if not base or not point:
+		return None
+	addr, plat, plng = point
+	holder = {}
+
+	def _run():
+		try:
+			holder["url"] = redfin._fetch_listing_url(base, addr, plat, plng)
+		except Exception as e:  # noqa: BLE001 -- thread must never raise
+			holder["error"] = str(e)
+
+	thread = threading.Thread(target=_run, daemon=True)
+	thread.start()
+	return {"thread": thread, "holder": holder}
+
+
+def _finish_redfin_url(job, addr, lat, lng, budget=None):
+	"""-> (url, pending). Waits `budget` for the started thread; a job that
+	could not start (row had no point) falls back to the old inline lookup so
+	nothing that resolved before stops resolving."""
+	from crm.api import redfin
+
+	if job is None:
+		return redfin.redfin_listing_url(addr, lat, lng), False
+	job["thread"].join(timeout=max(0.05, float(REDFIN_URL_BUDGET if budget is None else budget)))
+	if job["thread"].is_alive():
+		return None, True
+	return job["holder"].get("url"), False
+
+
+def _enqueue_redfin_url_fill(result, key, ttl):
+	"""After a cache write: if the Redfin link was still in flight, have a worker
+	finish it and patch the cached entry. Never raises -- the gallery is already
+	on its way to the browser."""
+	if not result.get("redfin_url_pending"):
+		return
+	point = result.get("redfin_url_point") or [None, None, None]
+	try:
+		frappe.enqueue(
+			"crm.api.comps.fill_detail_redfin_url",
+			queue="short",
+			job_name=f"redfin-url-{key}",
+			key=key,
+			address=point[0],
+			lat=point[1],
+			lng=point[2],
+			ttl=ttl,
+		)
+	except Exception:
+		pass
+
+
+def fill_detail_redfin_url(key, address, lat, lng, ttl):
+	"""Background half of `_finish_redfin_url`'s timeout path: the same lookup
+	with the full service timeout, written into the entry the request cached.
+	The entry keeps its remaining TTL, so a link does not extend a gallery's
+	month."""
+	from crm.api import redfin
+
+	cache = frappe.cache()
+	cached = cache.get_value(key)
+	if not isinstance(cached, dict) or not cached.get("redfin_url_pending"):
+		return
+	url = redfin.redfin_listing_url(address, lat, lng)
+	cached = {**cached, "redfin_url": url, "redfin_url_pending": False, "redfin_url_point": None}
+	try:
+		# `ttl` is raw redis, so it needs the site-prefixed key get/set_value use.
+		remaining = int(cache.ttl(cache.make_key(key)) or 0)
+	except Exception:
+		remaining = 0
+	cache.set_value(key, cached, expires_in_sec=remaining if remaining > 0 else ttl)
 
 
 def _dedupe_streetview(photos):
@@ -1316,6 +1419,7 @@ def get_comp_details(lead, comp, address=None, lat=None, lng=None):
 	full = len(result.get("photos") or []) > 1
 	ttl = DETAIL_CACHE_SECONDS if full else DETAIL_RETRY_SECONDS
 	frappe.cache().set_value(key, result, expires_in_sec=ttl)
+	_enqueue_redfin_url_fill(result, key, ttl)
 	# Do not read the cache again in this request: Frappe memoizes cache misses in
 	# `frappe.local.cache`, and an expiring set does not replace that local miss.
 	return result
@@ -1460,6 +1564,7 @@ def get_subject_details(lead):
 	full = result.get("available") and len(result.get("photos") or []) > 1
 	ttl = DETAIL_CACHE_SECONDS if full else DETAIL_RETRY_SECONDS
 	frappe.cache().set_value(key, result, expires_in_sec=ttl)
+	_enqueue_redfin_url_fill(result, key, ttl)
 	return result
 
 

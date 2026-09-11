@@ -87,6 +87,25 @@ def _point(address, lat, lng):
 	return addr, lat, lng
 
 
+def _fetch_listing_url(base, addr, lat, lng):
+	"""The bare GET /url -> listing URL or None. Pure `requests`, no frappe: the
+	comp gallery runs this on a worker THREAD (`comps._start_redfin_url`), where
+	`frappe.local` -- config, cache, log_error -- does not exist. Raises on a
+	transport/HTTP error; the callers decide whether that is worth logging."""
+	r = requests.get(
+		f"{base}/url",
+		params={"address": addr, "lat": lat, "lng": lng},
+		timeout=TIMEOUT,
+	)
+	if r.status_code == 404:
+		# Service predates /url: /photos carries the observed path.
+		return _fetch_gallery(base, addr, lat, lng, 1)["url"]
+	r.raise_for_status()
+	body = r.json() or {}
+	url = body.get("url") if body.get("matched") else None
+	return url if isinstance(url, str) and url.startswith("http") else None
+
+
 def redfin_listing_url(address: str, lat=None, lng=None):
 	"""Address + point -> absolute Redfin listing URL from GET /url, or None.
 
@@ -98,22 +117,12 @@ def redfin_listing_url(address: str, lat=None, lng=None):
 		return None
 	addr, lat, lng = point
 	try:
-		r = requests.get(
-			f"{base}/url",
-			params={"address": addr, "lat": lat, "lng": lng},
-			timeout=TIMEOUT,
-		)
-		if r.status_code == 404:
-			return redfin_gallery(addr, lat, lng)["url"]
-		r.raise_for_status()
-		body = r.json() or {}
+		return _fetch_listing_url(base, addr, lat, lng)
 	except Exception:
 		import frappe
 
 		frappe.log_error(frappe.get_traceback(), "Redfin: geo /url failed")
 		return None
-	url = body.get("url") if body.get("matched") else None
-	return url if isinstance(url, str) and url.startswith("http") else None
 
 
 def redfin_gallery(address: str, lat=None, lng=None, limit=60):
@@ -129,18 +138,23 @@ def redfin_gallery(address: str, lat=None, lng=None, limit=60):
 		return {"photos": [], "url": None}
 	addr, lat, lng = point
 	try:
-		r = requests.get(
-			f"{base}/photos",
-			params={"address": addr, "lat": lat, "lng": lng, "limit": int(limit)},
-			timeout=TIMEOUT,
-		)
-		r.raise_for_status()
-		body = r.json() or {}
+		return _fetch_gallery(base, addr, lat, lng, limit)
 	except Exception:
 		import frappe
 
 		frappe.log_error(frappe.get_traceback(), "Redfin: geo /photos failed")
 		return {"photos": [], "url": None}
+
+
+def _fetch_gallery(base, addr, lat, lng, limit):
+	"""Bare GET /photos. Pure requests; raises on error (see _fetch_listing_url)."""
+	r = requests.get(
+		f"{base}/photos",
+		params={"address": addr, "lat": lat, "lng": lng, "limit": int(limit)},
+		timeout=TIMEOUT,
+	)
+	r.raise_for_status()
+	body = r.json() or {}
 	photos = body.get("photos") or []
 	return {
 		"photos": [p for p in photos if isinstance(p, str) and p.startswith("http")][: int(limit)],

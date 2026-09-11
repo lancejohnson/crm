@@ -13,10 +13,11 @@
     </template>
   </LayoutHeader>
 
-  <!-- Bounded height, always. CompsView owns scrolling: compact (phone) is
-       overflow-hidden with a flex map; wide is overflow-y-auto so a tall calc
-       cannot clip the legend. Hosts that scroll of their own (the old comps
-       page) made the phone paint a desktop form with a thumbnail map. -->
+  <!-- Bounded height, always. CompsView owns scrolling (overflow-y-auto with
+       a floored map in both layouts) so a tall calc or an unfolded Tax /
+       liens card cannot clip anything. Hosts that scroll of their own (the
+       old comps page) made the phone paint a desktop form with a thumbnail
+       map. -->
   <div class="flex min-h-0 flex-1 flex-col overflow-hidden px-3 py-3 sm:px-5 sm:py-4">
     <CompsView v-if="leadId" :lead="leadId" :address="address" page-mode />
   </div>

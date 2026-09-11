@@ -869,6 +869,20 @@ duplicating. Work substantial features in a worktree of your own.
       the moment Zillow ANSWERS, retry-window only on a failed call). Before
       that, every re-click on a one-photo off-market sold — most of them —
       re-bought `/property` + `/photos` every hour, forever.
+    - **The Redfin LINK no longer holds the gallery open hostage** (2026-09-10,
+      Lance: "slow loading pictures"). Measured on prod: Zillow facts + photos
+      **0.39s**, then redfin-scraper-api `/url` **6.3s** (its KNN ordering)
+      run SERIALLY after them — ~7s per cold gallery, for a link. Now
+      `_start_redfin_url` starts it on a thread BEFORE Zillow and
+      `_finish_redfin_url` waits `REDFIN_URL_BUDGET` (1s) past it; a late
+      answer caches as `redfin_url_pending` and `fill_detail_redfin_url`
+      (short queue) patches the entry, keeping its remaining TTL (raw redis
+      `ttl` needs `cache.make_key`). Cold gallery **7.2s → 1.4s**. The
+      thread calls the pure `redfin._fetch_listing_url(base, …)` — config is
+      read on the request thread, the `frappe.local` GOTCHA again (first cut
+      called `redfin_listing_url` in the thread, which reads `frappe.conf`,
+      raised, and silently returned no link every time). Tests:
+      `unit_test_comp_redfin_url.py`.
     - `_merge_one` also stamps the photo/zpid onto a matched ISTL pin, because a
       photo is not "newer" data — it is data the pooled index never had — so it
       rides along on ANY match instead of waiting for a price to change. Comps with
@@ -891,6 +905,18 @@ duplicating. Work substantial features in a worktree of your own.
     touching the ladder, the counts, or what gets underwritten. The drawer opens
     itself on the first discard — otherwise the card just disappears, which is the
     behaviour this replaced.
+  - **CompsView's root is `overflow-y-auto` in the compact layout too**
+    (2026-09-10, Lance on a phone: "lien table won't go down"). Compact was
+    `overflow-hidden` so the map filled the screen, but the auction calc opens
+    ~600px tall and the Tax / liens card with Records unfolded taller still,
+    and everything past the first screen — the rest of the card, the map — was
+    unreachable. The map keeps its `min-h-[16rem]` floor, so the folded-calc
+    case paints exactly as before; an overflowing header stack scrolls.
+  - **PostHog surveys are OFF in the CRM** (`telemetry.js` `disable_surveys`).
+    The project is SHARED with Relay, whose "Report a problem" survey is a
+    widget there — so PostHog drew Relay's black right-edge tab on every CRM
+    page. Not in this repo's source, not in Frappe, not in nginx; it only
+    showed up by grepping the Relay bundle for the survey id.
   - **The split is measured on the COMPONENT's width, not the viewport's**
     (`SPLIT_MIN_WIDTH`, ResizeObserver on the root). The three hosts get wildly
     different widths at the same viewport — comps page ~800px, the Today modal's
