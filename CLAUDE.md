@@ -253,9 +253,7 @@ duplicating. Work substantial features in a worktree of your own.
   ticket submitted** also marks requested + Requested (and implies the first
   flag). The board labels either origin, so “missing” is never mistaken for
   “already submitted”. Inbound refund email threads always have Reply, even when
-  Pi produced no draft; sending to ISTL updates Waiting on them. ISTL
-  first-10-dials-in-14-days with no pickup ever, no inbound text, not Dead/Lost,
-  nudges the owner (`crm/api/istl_refund_nudge.py`). The host mail poller credits
+  Pi produced no draft; sending to ISTL updates Waiting on them. The host mail poller credits
   only the actual transition to Complete, not every duplicate completion email.
   Fields: ops `setup_refundable_field.py`.
   - **Non-refundable leads** (2026-09-09) — iSTL orders paid from the **Sale

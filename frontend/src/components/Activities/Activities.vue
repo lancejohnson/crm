@@ -43,21 +43,6 @@
     </div>
     <Button :label="__('Edit')" @click="showLostReasonModal = true" />
   </div>
-  <div
-    v-if="title == 'Activity' && istlNudge.data?.show"
-    class="mx-3 mt-3 flex items-center justify-between gap-2 rounded-lg border border-outline-amber-2 bg-surface-amber-1 px-4 py-2 text-base text-ink-amber-3 sm:mx-10"
-  >
-    <div>
-      <span class="font-medium">{{ __('Ask iSpeedToLead for a refund') }}</span>
-      <span class="text-ink-gray-7"> — {{ istlNudge.data.message }}</span>
-    </div>
-    <Button
-      v-if="isRefundPoolLead || isLostLead"
-      variant="solid"
-      :label="__('Mark refundable')"
-      @click="markRefundable"
-    />
-  </div>
   <LostReasonModal
     v-if="showLostReasonModal"
     v-model="showLostReasonModal"
@@ -891,20 +876,6 @@ const isRefundPoolLead = computed(
     !!getLeadStatus(doc.value.status)?.custom_refund_pool,
 )
 
-const istlNudge = createResource({
-  url: 'crm.api.istl_refund_nudge.get_nudge',
-  makeParams: () => ({ lead: props.docname }),
-  auto: false,
-})
-
-watch(
-  () => [props.doctype, props.docname],
-  ([doctype, name]) => {
-    if (doctype === 'CRM Lead' && name) istlNudge.reload()
-  },
-  { immediate: true },
-)
-
 function toggleLeadFlag(fieldname, value) {
   if (!_document.doc) return
   _document.doc[fieldname] = value ? 1 : 0
@@ -920,13 +891,7 @@ function toggleLeadFlag(fieldname, value) {
       _document.doc.custom_refund_status = 'Requested'
     }
   }
-  _document.save.submit(null, {
-    onSuccess: () => istlNudge.reload(),
-  })
-}
-
-function markRefundable() {
-  toggleLeadFlag('custom_refundable', true)
+  _document.save.submit()
 }
 
 const refundDraft = computed(() => {

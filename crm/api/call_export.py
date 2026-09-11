@@ -3,9 +3,8 @@
 
 """Call history export for a refund request.
 
-iSpeedToLead refunds a lead when we can SHOW the dials — ten outbound calls
-inside fourteen days and nobody picked up (see `istl_refund_nudge.py`). The
-proof they accept is a list of calls with recordings. Before this, a rep
+iSpeedToLead wants a list of calls with recordings as proof of outreach.
+Before this, a rep
 assembled that by hand: open each CRM Call Log, copy the Quo recording link,
 paste it into the ticket. This produces the whole list in one click, two ways:
 
