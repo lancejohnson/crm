@@ -389,6 +389,26 @@ export function compsPagePath(name) {
     : `/crm/leads/${name}/comps`
 }
 
+/** Query token that opens the SUBJECT gallery, not a named comp. */
+export const COMP_QUERY_SUBJECT = 'subject'
+
+/** Path (+ query) that opens one property's photo gallery on the comps page. */
+export function compsDetailPath(subjectName, { compName, subject = false } = {}) {
+  const path = compsPagePath(subjectName)
+  if (!path) return ''
+  const q = subject ? COMP_QUERY_SUBJECT : String(compName || '')
+  if (!q) return path
+  return `${path}?comp=${encodeURIComponent(q)}`
+}
+
+/** Absolute URL for copying / right-click. Empty when we cannot name the page. */
+export function compsDetailUrl(subjectName, opts) {
+  const path = compsDetailPath(subjectName, opts)
+  if (!path) return ''
+  if (typeof window === 'undefined' || !window.location?.origin) return path
+  return `${window.location.origin}${path}`
+}
+
 export function streetAddress(address) {
   const raw = String(address || '').trim()
   if (!raw) return ''

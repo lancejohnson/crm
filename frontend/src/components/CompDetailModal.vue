@@ -57,13 +57,27 @@
               >{{ comp.comp_type }}</span>
             </div>
             <h2 class="truncate text-xl font-semibold text-ink-gray-9">
-              {{ comp?.address || __('Comparable property') }}
+              <a
+                v-if="shareUrl"
+                :href="shareUrl"
+                class="hover:underline"
+                :title="__('Copy link to this property') + ' (L)'"
+                @click="onShareClick"
+              >{{ comp?.address || __('Comparable property') }}</a>
+              <template v-else>{{ comp?.address || __('Comparable property') }}</template>
             </h2>
             <div class="mt-0.5 text-sm text-ink-gray-5">
               {{ compLocation }}
             </div>
           </div>
           <div class="flex shrink-0 items-center gap-2">
+            <Button
+              v-if="shareUrl"
+              variant="ghost"
+              icon="link"
+              :title="__('Copy link to this property') + ' (L)'"
+              @click="copyDetailLink"
+            />
             <!-- A house cannot be a comp for itself, so the subject gets no
                  add-as-comp button rather than one that would corrupt the calc. -->
             <Button
@@ -335,7 +349,8 @@
 </template>
 
 <script setup>
-import { COMP_CONDITION_TYPES, compColor, compFit, compState, compStateLabel, daysToSell, formatCompMoney } from '@/utils/comps'
+import { COMP_CONDITION_TYPES, compsDetailUrl, compColor, compFit, compState, compStateLabel, daysToSell, formatCompMoney } from '@/utils/comps'
+import { copyToClipboard } from '@/utils'
 import { propertySearchAddress, providerLink, zillowUrl } from '@/utils/propertyLinks'
 import { Badge, Button, Dialog, FeatherIcon, call } from 'frappe-ui'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
@@ -356,6 +371,9 @@ const props = defineProps({
   // Subject-mode only: the sqft override is a team-wide fact write on the
   // lead, so hosts turn it off in practice runs (same flag CompSubjectCard takes).
   canEditSqft: { type: Boolean, default: false },
+  // Practice writes to an attempt, not the lead — a comps-page link would open
+  // the real house, which is the wrong surface mid-run.
+  canShare: { type: Boolean, default: true },
 })
 
 const show = defineModel({ type: Boolean })
@@ -370,6 +388,25 @@ const manualSqft = computed(() => props.subjectMode && props.subject?.source?.sq
 const subjectSqft = computed(() =>
   props.subjectMode && props.subject?.sqft_exact && props.subject?.sqft ? props.subject.sqft : null,
 )
+
+const shareUrl = computed(() => {
+  if (!props.canShare || !props.lead) return ''
+  return compsDetailUrl(props.lead, {
+    compName: props.comp?.name,
+    subject: props.subjectMode,
+  })
+})
+
+function copyDetailLink() {
+  if (!shareUrl.value) return
+  copyToClipboard(shareUrl.value)
+}
+
+function onShareClick(e) {
+  if (e.metaKey || e.ctrlKey) return
+  e.preventDefault()
+  copyDetailLink()
+}
 
 function startSqftEdit() {
   sqftDraft.value = subjectSqft.value ? String(Math.round(subjectSqft.value)) : ''
@@ -730,11 +767,18 @@ function nextPhoto() {
 // Skipped when the focus is in a field (the sqft input, the condition select)
 // so the caret keeps its arrows.
 function onGalleryKey(e) {
-  if (!show.value || photos.value.length < 2) return
-  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+  if (!show.value) return
   if (e.altKey || e.ctrlKey || e.metaKey) return
   const t = e.target
   if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
+  if (e.key === 'l' || e.key === 'L') {
+    if (!shareUrl.value) return
+    e.preventDefault()
+    copyDetailLink()
+    return
+  }
+  if (photos.value.length < 2) return
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
   e.preventDefault()
   e.key === 'ArrowLeft' ? previousPhoto() : nextPhoto()
 }

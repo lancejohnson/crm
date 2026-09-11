@@ -1364,7 +1364,7 @@ def get_comp_details(lead, comp, address=None, lat=None, lng=None):
 	if not _available():
 		return {"available": False, "comp": None, "details": None, "photos": []}
 
-	if str(comp).startswith("zillow::"):
+	if str(comp).startswith("zillow::") or str(comp).startswith("zillow-rent::"):
 		# Area-search pins are not CRM Comp rows. _shape_detail looks them up by zpid.
 		# The caller's address matters more than it looks: when Zillow's /property
 		# returns an empty shell for the zpid (it does, on some pending listings),

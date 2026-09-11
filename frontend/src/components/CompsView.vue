@@ -702,6 +702,7 @@
     :subject-mode="subjectDetail"
     :can-tag="canTagTypes"
     :can-edit-sqft="!isPractice"
+    :can-share="!isPractice"
     @use="toggleUse"
     @street="openStreetView(subjectDetail ? null : detailComp?.name)"
     @set-type="setCompType"
@@ -740,14 +741,17 @@
  */
 import { Button, FeatherIcon, FormControl, call, toast } from 'frappe-ui'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { zillowUrl } from '@/utils/propertyLinks'
 import {
   COMP_COLORS,
+  COMP_QUERY_SUBJECT,
   PROPERTY_TYPE_KIND_ORDER,
   PROPERTY_TYPE_KINDS,
   compColor,
+  compsDetailUrl,
   compState,
   daysToSell,
   finiteDays,
@@ -759,6 +763,7 @@ import {
   propertyTypeGlyphSvg,
   propertyTypeKind,
 } from '@/utils/comps'
+import { copyToClipboard } from '@/utils'
 import CompDetailModal from '@/components/CompDetailModal.vue'
 import CompConditionModal from '@/components/Modals/CompConditionModal.vue'
 import LiveOneModal from '@/components/Modals/LiveOneModal.vue'
@@ -804,6 +809,8 @@ const props = defineProps({
 // "open" is simply always true -- which keeps every existing `show.value` guard,
 // watcher and keyboard-shortcut gate working exactly as before.
 const emit = defineEmits(['subject', 'picked', 'zillowMatch'])
+const route = useRoute()
+const router = useRouter()
 const show = ref(true)
 const showLiveOne = ref(false)
 const showFetchTax = ref(false)
@@ -2496,14 +2503,77 @@ function onPopupClick(e) {
  * reach the identical object -- and so a reload cannot leave the modal showing a
  * comp that is no longer on the map.
  */
+function findCompByName(name) {
+  return (
+    comps.value.find((c) => c.name === name) ||
+    discarded.value.find((c) => c.name === name) ||
+    null
+  )
+}
+
 function openCompDetail(name) {
-  const comp = comps.value.find((c) => c.name === name)
-  if (!comp) return
+  const comp = findCompByName(name)
+  if (!comp) return false
   focusedComp.value = name
   subjectDetail.value = false
   detailComp.value = comp
   showCompDetail.value = true
+  return true
 }
+
+function copyCompLink(name, { subject = false } = {}) {
+  if (isPractice.value) return
+  const url = compsDetailUrl(props.lead, { compName: name, subject })
+  if (url) copyToClipboard(url)
+}
+
+function currentCompQuery() {
+  if (!showCompDetail.value) return ''
+  if (subjectDetail.value) return COMP_QUERY_SUBJECT
+  return detailComp.value?.name || ''
+}
+
+function writeCompQuery() {
+  if (!props.pageMode) return
+  const want = currentCompQuery()
+  const have = typeof route.query.comp === 'string' ? route.query.comp : ''
+  if (want === have) return
+  const q = { ...route.query }
+  if (want) q.comp = want
+  else delete q.comp
+  router.replace({ query: q })
+}
+
+function applyCompQuery() {
+  if (!props.pageMode) return
+  const raw = typeof route.query.comp === 'string' ? route.query.comp : ''
+  if (raw === currentCompQuery()) {
+    if (raw && raw !== COMP_QUERY_SUBJECT) {
+      const next = findCompByName(raw)
+      if (next) detailComp.value = next
+    }
+    return
+  }
+  if (!raw) {
+    showCompDetail.value = false
+    return
+  }
+  if (raw === COMP_QUERY_SUBJECT) {
+    openSubjectDetail()
+    return
+  }
+  if (openCompDetail(raw)) return
+  focusedComp.value = raw
+  subjectDetail.value = false
+  detailComp.value = { name: raw }
+  showCompDetail.value = true
+}
+
+watch(
+  () => [showCompDetail.value, subjectDetail.value, detailComp.value?.name],
+  writeCompQuery,
+)
+watch(() => [route.query.comp, data.value], applyCompQuery)
 
 /** Point Street View at this house and show it. null = the subject. */
 function openStreetView(name) {
@@ -3085,6 +3155,10 @@ useKeyboardShortcuts({
       action: () => focusedComp.value && setCompState(focusedComp.value, 'hidden'),
     },
     { keys: ['u', 'U'], action: () => focusedComp.value && toggleUse(focusedComp.value) },
+    {
+      keys: ['l', 'L'],
+      action: () => focusedComp.value && copyCompLink(focusedComp.value),
+    },
   ],
 })
 
