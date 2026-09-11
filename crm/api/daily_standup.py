@@ -58,9 +58,19 @@ CHASE_STATUSES = ("New", "Called No Answer", "Follow Up", "Future Follow Up")
 #: statuses Dennis works (closest-to-closing first — this order is the report order)
 CLOSER_STATUSES = ("Contract Sent", "Make Offer", "Underwriting")
 
+#: Under contract / disposition. Contract Sent is still closer work on Today;
+#: Signed Contract and after is not the setters' board (Lance, 2026-09-11).
+#: Keep in sync with investorlift_ingest.DISPO_LEAD_STATUSES.
+POST_CONTRACT_STATUSES = (
+	"Signed Contract",
+	"Photos & Lockbox In Progress",
+	"Needs Listing",
+	"Marketing to Buyer",
+	"Buyer Assigned",
+)
+
 #: A lead in one of these CRM Lead Status.types is done — cadence must not
-#: resurrect it. Lost is Dead/Not Interested; Won is a closed deal. Everything
-#: else (acq + dispo) is tracked, not just the four chase names above.
+#: resurrect it. Lost is Dead/Not Interested; Won is a closed deal.
 TERMINAL_STATUS_TYPES = ("Lost", "Won")
 #: `closer` = a deal in flight (CLOSER_STATUSES) with no follow-up scheduled.
 #: It surfaces EVERY day until someone books the next step — the ask was that a
@@ -276,7 +286,9 @@ def _tracked_statuses():
 		)
 	except Exception:
 		names = []
-	return tuple(names) if names else CHASE_STATUSES
+	if not names:
+		return CHASE_STATUSES
+	return tuple(n for n in names if n not in POST_CONTRACT_STATUSES)
 
 
 def _fetch_chase_rows(today):
@@ -413,6 +425,11 @@ def _classify(row, today):
 	if row.next_future_due:
 		return ("scheduled", 0, False,
 		        f"booked {frappe.utils.format_datetime(row.next_future_due, 'd MMM')}")
+
+	# Signed Contract and later is dispo, not the calling list — even a due
+	# task on it must not mint a Today card.
+	if row.status in POST_CONTRACT_STATUSES:
+		return ("dispo", 0, False, row.status)
 
 	# A deal in flight with no next step booked is due every single day. This
 	# outranks the call ladder on purpose: by the time a lead is in Underwriting

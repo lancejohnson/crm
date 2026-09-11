@@ -145,6 +145,15 @@ class CloserCardTests(unittest.TestCase):
 		self.assertIn("Text Joe", reason)
 		self.assertIn("closer", ds.CADENCE_PHASES)
 
+	def test_past_contract_sent_is_not_due(self):
+		for status in ds.POST_CONTRACT_STATUSES:
+			phase, need, due, _ = ds._classify(
+				_row(status, tasks_due_now=1, due_task_title="Follow up"), self.today
+			)
+			self.assertEqual((phase, need, due), ("dispo", 0, False), status)
+		phase, _, due, _ = ds._classify(_row("Contract Sent"), self.today)
+		self.assertEqual((phase, due), ("closer", True))
+
 
 class SequenceTaskTitleTests(unittest.TestCase):
 	def test_day_number(self):

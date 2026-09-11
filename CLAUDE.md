@@ -2188,7 +2188,9 @@ duplicating. Work substantial features in a worktree of your own.
   `CLOSER_STATUSES` (Underwriting / Make Offer / Contract Sent) with no task
   due after today is phase **`closer`** in `daily_standup._classify` — due
   every day, one card, reason "Make Offer · no follow-up scheduled" (or the
-  due task's title). Booking any future task clears it. Checked BEFORE the
+  due task's title). Booking any future task clears it. **Signed Contract and
+  later (`POST_CONTRACT_STATUSES`, same set as dispo) mint no Today cards** —
+  not closer, not task, not nudge. Checked BEFORE the
   call ladder: by Underwriting the lead has been reached, so "never called"
   says nothing. `PRIORITY_ORDER` gained `closer` after `task`; a user's saved
   order gets it appended last (drag it up once). Today.vue badge "Deal in
