@@ -20,7 +20,7 @@
         <button
           type="button"
           :class="{ on: kind === 'cash' }"
-          :title="__('ARV × % − repairs − profit')"
+          :title="__('Exit Price × % − repairs − profit')"
           @click="setKind('cash')"
         >
           {{ __('Cash') }}
@@ -28,7 +28,7 @@
         <button
           type="button"
           :class="{ on: kind === 'auction' }"
-          :title="__('ARV × % − repairs − liens − back taxes − profit')"
+          :title="__('Exit Price × % − repairs − liens − back taxes − profit')"
           @click="setKind('auction')"
         >
           {{ __('Auction') }}
@@ -595,14 +595,14 @@ const FORMULAS = [
     label: __('2× repairs'),
     pct: 0.9,
     mult: 2,
-    why: __('ARV × 90% − 2× repairs − 20% of acq'),
+    why: __('Exit Price × 90% − 2× repairs − profit'),
   },
   {
     key: 'classic',
     label: __('Classic'),
     pct: 0.7,
     mult: 1,
-    why: __('ARV × 70% − repairs − 20% of acq — the 70% rule'),
+    why: __('Exit Price × 70% − repairs − profit — the 70% rule'),
   },
 ]
 // Same reason the desk rail gives, and for the same doubling.
@@ -777,12 +777,12 @@ const valueLabel = computed(() => {
   if (kind.value === 'novation' || kind.value === 'wholetail') return __('Current value')
   if (kind.value === 'list') return __('As-is')
   if (kind.value === 'rental') return __('Move-in ready')
-  return __('ARV')
+  return __('Exit Price')
 })
 const pctLabel = computed(() => {
   if (kind.value === 'novation' || kind.value === 'wholetail') return __('− %')
   if (kind.value === 'rental') return __('% of MIR')
-  return __('% of ARV')
+  return __('% of Exit Price')
 })
 const offerLabel = computed(() => {
   if (kind.value === 'list') return __('Takeaway')
@@ -1490,7 +1490,31 @@ function typeAfter(col, e) {
   nextTick(() => putCaret(el, digitsBefore, n ? money(n) : ''))
 }
 
-/** Offer back-solves profit dollars: profit = net − offer. The value stays put. */
+/** Dollar profit stays put. Offer edits back-solve Exit Price / as-is; the
+ *  percent is derived from fee / offer. Only `setProfit` rewrites the dollars. */
+function backsolveArv(col, net) {
+  const x = S()[col]
+  const pct = Number(x.pct) || 0
+  const k = kind.value
+  if (k === 'novation') {
+    if (pct < 1) x.arv = net / (1 - pct)
+    return
+  }
+  if (k === 'wholetail') {
+    const months = Math.max(0, Number(x.holdMonths) || 0)
+    const rate = Number(x.interestPct) || 0
+    const coef =
+      1 - pct - rate * (months / 12) - HOLDING_TAX_INS_PCT * (months / 12)
+    const intercept = HOLDING_UTIL_MO * months
+    if (coef) x.arv = (net + intercept) / coef
+    return
+  }
+  const repairs = Math.round((Number(x.rehabPsf) || 0) * sqft.value)
+  const rehab = repairs * (k === 'rental' ? 1 : multOf(col))
+  const liens = k === 'auction' ? Math.round(Number(x.liens) || 0) : 0
+  const backTaxes = k === 'auction' ? Math.round(Number(x.backTaxes) || 0) : 0
+  if (pct) x.arv = (net + rehab + liens + backTaxes) / pct
+}
 function typeOffer(col, e) {
   const el = e.target
   const digitsBefore = (el.value.slice(0, el.selectionStart).match(/\d/g) || []).length
@@ -1498,11 +1522,11 @@ function typeOffer(col, e) {
   if (kind.value === 'list') {
     const tot = listCutPct(col)
     if (tot < 1) S()[col].arv = n / (1 - tot)
-  } else if (S()[col].arv) {
-    const r = run(col)
-    const net = r.offer + r.fee
-    S()[col].fee = net - n
-    S()[col].profitPct = n > 0 ? (net - n) / n : 0
+  } else {
+    const fee = Math.round(Number(S()[col].fee) || 0)
+    backsolveArv(col, n + fee)
+    const offer = run(col).offer
+    S()[col].profitPct = offer > 0 ? fee / offer : 0
   }
   nextTick(() => putCaret(el, digitsBefore, n ? money(n) : ''))
 }

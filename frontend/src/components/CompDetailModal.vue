@@ -176,6 +176,12 @@
                   {{ photoIndex + 1 }} / {{ photos.length }}
                 </div>
               </template>
+              <div
+                v-if="!photoPending && (photoDateText || photoDateLoading)"
+                class="absolute bottom-3 left-3 rounded-full bg-black/60 px-2.5 py-1 text-xs text-white"
+              >
+                {{ photoDateText || __('Dating…') }}
+              </div>
             </div>
 
             <div v-if="photos.length > 1" class="flex shrink-0 gap-2 overflow-x-auto p-3">
@@ -353,7 +359,7 @@ import { COMP_CONDITION_TYPES, compsDetailUrl, compColor, compFit, compState, co
 import { copyToClipboard } from '@/utils'
 import { propertySearchAddress, providerLink, zillowUrl } from '@/utils/propertyLinks'
 import { Badge, Button, Dialog, FeatherIcon, call } from 'frappe-ui'
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 
 const emit = defineEmits(['use', 'street', 'setType', 'saveSqft'])
 
@@ -505,6 +511,47 @@ const photos = computed(() => {
     ''
   return cover ? [cover] : []
 })
+const photoDateByUrl = reactive({})
+const photoDateState = reactive({})
+function canDatePhoto(url) {
+  if (!url) return false
+  if (url.includes('maps.googleapis.com') || url.includes('imgix.net')) return false
+  return true
+}
+function photoDateLabel(iso) {
+  if (!iso) return ''
+  const d = Date.parse(iso)
+  if (!Number.isFinite(d)) return ''
+  return new Date(d).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+}
+function askPhotoDate(url) {
+  if (!canDatePhoto(url) || photoDateState[url]) return
+  photoDateState[url] = 'loading'
+  call('crm.api.comps.get_photo_date', { url })
+    .then((r) => {
+      photoDateByUrl[url] = r?.exif || ''
+    })
+    .catch(() => {
+      photoDateByUrl[url] = ''
+    })
+    .finally(() => {
+      photoDateState[url] = 'done'
+    })
+}
+const photoDateText = computed(() =>
+  photoDateLabel(photoDateByUrl[photos.value[photoIndex.value]]),
+)
+const photoDateLoading = computed(() => {
+  const url = photos.value[photoIndex.value]
+  return canDatePhoto(url) && photoDateState[url] === 'loading'
+})
+watch(
+  () => [photos.value[photoIndex.value], photos.value[photoIndex.value + 1]],
+  (urls) => {
+    for (const url of urls) askPhotoDate(url)
+  },
+  { immediate: true },
+)
 
 watch(photoSrc, () => {
   heroLoaded.value = false

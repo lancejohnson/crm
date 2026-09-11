@@ -267,7 +267,7 @@
             </thead>
             <tbody>
               <tr class="border-t border-outline-gray-1">
-                <td class="py-1.5 pr-3 text-ink-gray-5">{{ __('ARV') }}</td>
+                <td class="py-1.5 pr-3 text-ink-gray-5">{{ __('Exit Price') }}</td>
                 <td
                   v-for="c in h.cols"
                   :key="c.attempt"

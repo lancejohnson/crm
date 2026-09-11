@@ -59,6 +59,7 @@ persistent_cache_keys = [
 	"zillow_quota_remaining",  # else the quota guard is blind after every deploy
 	"redfin_subject",  # Zillow-vs-Redfin subject cross-checks -- ~5s each to rebuild
 	"crm:realtor-estimate",  # Realtor AVM per lead -- two BILLED Apivex calls each
+	"crm:photo-exif",  # JPEG DateTimeOriginal per gallery URL -- download is the cost
 ]
 
 export_python_type_annotations = True
