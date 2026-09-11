@@ -2,7 +2,11 @@
   <FrappeUIProvider>
     <NotPermitted v-if="$route.name === 'Not Permitted'" />
     <Layout v-else-if="session.isLoggedIn" class="isolate" :style="previewWorkspaceStyle">
-      <router-view :key="$route.fullPath" />
+      <!-- path + hash, not fullPath. fullPath includes ?query, so writing
+           `?comp=` for the photo gallery remounted the whole comps page
+           (Leaflet and all) on every open/close. Params live in `path`;
+           comment deep-links are `hash`. -->
+      <router-view :key="$route.path + $route.hash" />
       <NextWorkspaceShell v-if="workspace.isNext" :mobile="isMobile" @reserve="nextSpace = $event" />
       <template v-else-if="PhonePreviewWidget">
         <PhonePreviewWidget @reserve="previewSpace = $event" />
