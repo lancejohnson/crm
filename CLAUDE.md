@@ -152,8 +152,15 @@ duplicating. Work substantial features in a worktree of your own.
   dialog previews the parsed address (`preview_address`) and refuses a
   non-property page. Header: **Saved calcs (N)** (history dialog of `CashOfferComment` cards, Tweak works),
   **Edit** (an address change clears every location cache; picks/calcs
-  stay), delete. Underwrite and Live one are hidden (`isScratch`). Team-
-  visible like practice sets; `list_properties(q, mine)`. Guarded on the
+  stay), delete. Optional **lead** Link (`CRM Property.lead`, ops same
+  script, has_column-guarded): a neighbour / second house / buyer's ask
+  can hang off a real seller without becoming a lead — blank is the
+  default. Picker on add + edit, chip on the property header, seller name
+  on the board/list card, **Properties** sidebar card on the lead (desktop
+  + mobile) lists them and can add or attach an existing one.
+  `list_properties(q, mine, lead)`, `set_property_lead`, `search_leads` /
+  `search_properties`. Underwrite and Live one are hidden (`isScratch`). Team-
+  visible like practice sets. Guarded on the
   doctype existing. `crm/api/properties.py` + `pages/Properties.vue` /
   `Property.vue`; `utils/comps.js` `isScratchSubject`/`compsPagePath`.
   Verified end-to-end on **staging** (stg21) — geocode, 55 comps, pick +

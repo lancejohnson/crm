@@ -13,7 +13,9 @@ round robin tally and the dashboard cohort.
 carries the same property / cache / comps columns a CRM Lead does, so the
 whole comps stack — `get_lead_comps`, hides/picks/types, the sqft override,
 Zillow / Redfin / Realtor facts, the BatchData fallback, the offer calculator —
-runs against it unchanged. The dispatch is `crm.api.comps.subject_doctype`,
+runs against it unchanged. An optional `lead` Link can hang a property off a
+real seller (a neighbour, a second house, a buyer's ask) without turning the
+property into a lead — blank is the default. The dispatch is `crm.api.comps.subject_doctype`,
 keyed on the `PROP-` name prefix. Saved calcs live on the property itself
 (`offer_calcs`, newest first) because there is no activity timeline to post
 them to; the latest one seeds the calculator on the next open.
@@ -105,6 +107,38 @@ def _listing_url_supported() -> bool:
 	return frappe.db.has_column(SCRATCH_DOCTYPE, "listing_url")
 
 
+def _lead_supported() -> bool:
+	return frappe.db.has_column(SCRATCH_DOCTYPE, "lead")
+
+
+def _assign_lead(doc, lead) -> None:
+	"""Blank unlinks. A missing lead is refused rather than stored dangling."""
+	lead = _clean(lead)
+	if not lead:
+		doc.lead = ""
+		return
+	if not frappe.db.exists("CRM Lead", lead):
+		frappe.throw(_("Lead {0} does not exist.").format(lead), frappe.DoesNotExistError)
+	doc.lead = lead
+
+
+def _lead_names_for(docs) -> dict:
+	ids = []
+	for doc in docs:
+		n = (doc.get("lead") or "").strip()
+		if n and n not in ids:
+			ids.append(n)
+	if not ids:
+		return {}
+	rows = frappe.get_all(
+		"CRM Lead",
+		filters={"name": ["in", ids]},
+		fields=["name", "lead_name"],
+		limit_page_length=len(ids),
+	)
+	return {r["name"]: (r.get("lead_name") or r["name"]) for r in rows}
+
+
 def _resolve_address(address: str) -> tuple[dict, str]:
 	"""Typed text → ({address, city, state, zip}, listing_url).
 
@@ -155,13 +189,20 @@ def _offer_summary(offer: dict) -> dict:
 	}
 
 
-def _shape(doc, *, with_offers: bool = False) -> dict:
+def _shape(doc, *, with_offers: bool = False, lead_names: dict | None = None) -> dict:
 	offers = _offers(doc)
 	latest = offers[0] if offers else None
 	try:
 		selected = json.loads(doc.get("comps_selected") or "[]")
 	except Exception:
 		selected = []
+	lead = (doc.get("lead") or "").strip() if _lead_supported() else ""
+	lead_name = ""
+	if lead:
+		if lead_names is not None:
+			lead_name = lead_names.get(lead) or lead
+		else:
+			lead_name = frappe.db.get_value("CRM Lead", lead, "lead_name") or lead
 	out = {
 		"name": doc.name,
 		"property_address": doc.get("property_address") or "",
@@ -172,6 +213,9 @@ def _shape(doc, *, with_offers: bool = False) -> dict:
 		"status": _stage(doc),
 		"listing_url": doc.get("listing_url") or "",
 		"source": doc.get("source") or "",
+		"lead": lead,
+		"lead_name": lead_name,
+		"lead_supported": _lead_supported(),
 		"owner": doc.owner,
 		"owner_name": _user_label(doc.owner),
 		"creation": str(doc.creation),
@@ -205,14 +249,26 @@ def _clean(val) -> str:
 # Whitelisted
 # ---------------------------------------------------------------------------------
 @frappe.whitelist()
-def list_properties(q: str = "", mine: int = 0) -> dict:
-	"""Every scratch property, newest first. `q` filters on the address."""
+def list_properties(q: str = "", mine: int = 0, lead: str = "") -> dict:
+	"""Every scratch property, newest first. `q` filters on the address.
+	`lead` (a CRM Lead name) returns only properties linked to that seller."""
 	_guard()
 	if not _available():
-		return {"available": False, "properties": []}
+		return {"available": False, "lead_supported": False, "properties": []}
 	filters = {}
 	if int(mine or 0):
 		filters["owner"] = frappe.session.user
+	lead = _clean(lead)
+	if lead:
+		if not _lead_supported():
+			return {
+				"available": True,
+				"stages": list(STAGES),
+				"status_supported": _status_supported(),
+				"lead_supported": False,
+				"properties": [],
+			}
+		filters["lead"] = lead
 	or_filters = None
 	q = _clean(q)
 	if q:
@@ -231,11 +287,14 @@ def list_properties(q: str = "", mine: int = 0) -> dict:
 		order_by="modified desc",
 		limit=500,
 	)
+	docs = [frappe.get_doc(SCRATCH_DOCTYPE, n) for n in names]
+	lead_names = _lead_names_for(docs) if _lead_supported() else {}
 	return {
 		"available": True,
 		"stages": list(STAGES),
 		"status_supported": _status_supported(),
-		"properties": [_shape(frappe.get_doc(SCRATCH_DOCTYPE, n)) for n in names],
+		"lead_supported": _lead_supported(),
+		"properties": [_shape(d, lead_names=lead_names) for d in docs],
 	}
 
 
@@ -264,7 +323,8 @@ def preview_address(text: str) -> dict:
 
 @frappe.whitelist()
 def create_property(
-	address: str, city: str = "", state: str = "", zip_code: str = "", notes: str = ""
+	address: str, city: str = "", state: str = "", zip_code: str = "", notes: str = "",
+	lead: str = "",
 ) -> dict:
 	"""Add a house to comp. `address` is either the address itself or a
 	Zillow / Redfin / Realtor / Auction.com listing URL.
@@ -293,13 +353,16 @@ def create_property(
 		doc.status = DEFAULT_STAGE
 	if listing_url and _listing_url_supported():
 		doc.listing_url = listing_url
+	if lead and _lead_supported():
+		_assign_lead(doc, lead)
 	doc.insert()
 	return _shape(doc)
 
 
 @frappe.whitelist()
 def update_property(
-	name: str, address=None, city=None, state=None, zip_code=None, notes=None
+	name: str, address=None, city=None, state=None, zip_code=None, notes=None,
+	lead=None,
 ) -> dict:
 	"""Edit the address or note. An address change drops every location cache
 	(geocode, Zillow facts, BatchData) so the next open looks the new house up
@@ -334,6 +397,10 @@ def update_property(
 		doc.property_zip = _clean(zip_code)
 	if notes is not None:
 		doc.notes = (notes or "").strip()
+	if lead is not None:
+		if not _lead_supported():
+			frappe.throw(_("The lead column is missing — run setup_properties.py."))
+		_assign_lead(doc, lead)
 	after = (
 		doc.get("property_address"),
 		doc.get("property_city"),
@@ -350,6 +417,73 @@ def update_property(
 		doc.batchdata_comps_fetched_at = None
 	doc.save()
 	return _shape(doc, with_offers=True)
+
+
+@frappe.whitelist()
+def set_property_lead(name: str, lead: str = "") -> dict:
+	"""Link or unlink a lead without touching the address. Blank unlinks.
+	`db.set_value` so a chip click is not an edit of the house."""
+	_guard()
+	_need()
+	if not _lead_supported():
+		frappe.throw(_("The lead column is missing — run setup_properties.py."))
+	doc = _get(name)
+	_assign_lead(doc, lead)
+	frappe.db.set_value(
+		SCRATCH_DOCTYPE, doc.name, "lead", doc.get("lead") or "", update_modified=False
+	)
+	return _shape(doc, with_offers=True)
+
+
+@frappe.whitelist()
+def search_leads(q: str = "") -> list:
+	"""Leads for the property picker — name, seller, or address."""
+	_guard()
+	q = _clean(q)
+	or_filters = None
+	if q:
+		like = f"%{q}%"
+		or_filters = {
+			"lead_name": ["like", like],
+			"property_address": ["like", like],
+			"name": ["like", like],
+		}
+	return frappe.get_all(
+		"CRM Lead",
+		filters={},
+		or_filters=or_filters,
+		fields=["name", "lead_name", "property_address", "status"],
+		order_by="modified desc",
+		limit_page_length=20,
+	)
+
+
+@frappe.whitelist()
+def search_properties(q: str = "") -> list:
+	"""Scratch properties for linking onto a lead from the lead page."""
+	_guard()
+	if not _available():
+		return []
+	q = _clean(q)
+	or_filters = None
+	if q:
+		like = f"%{q}%"
+		or_filters = {
+			"property_address": ["like", like],
+			"property_city": ["like", like],
+			"name": ["like", like],
+		}
+	fields = ["name", "property_address", "status"]
+	if _lead_supported():
+		fields.append("lead")
+	return frappe.get_all(
+		SCRATCH_DOCTYPE,
+		filters={},
+		or_filters=or_filters,
+		fields=fields,
+		order_by="modified desc",
+		limit_page_length=20,
+	)
 
 
 @frappe.whitelist()

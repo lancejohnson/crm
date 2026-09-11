@@ -98,6 +98,11 @@
                   {{ p.picked_count }} {{ __('comps') }}
                 </span>
               </div>
+              <div
+                v-if="p.lead"
+                class="mt-1 cursor-pointer truncate text-xs text-ink-gray-6 hover:text-ink-gray-8"
+                @click.stop.prevent="openLead(p.lead)"
+              >{{ p.lead_name || p.lead }}</div>
               <div class="mt-1.5 flex items-center justify-between text-xs text-ink-gray-5">
                 <span class="truncate">{{ p.owner_name }}</span>
                 <span class="flex items-center gap-1.5">
@@ -159,6 +164,11 @@
             <span v-if="p.notes" class="block truncate text-xs text-ink-gray-5">
               {{ p.notes }}
             </span>
+            <span
+              v-if="p.lead"
+              class="block cursor-pointer truncate text-xs text-ink-gray-6 hover:text-ink-gray-8"
+              @click.stop.prevent="openLead(p.lead)"
+            >{{ p.lead_name || p.lead }}</span>
           </span>
           <span class="hidden w-40 shrink-0 sm:block">
             <template v-if="p.latest_offer?.offer != null">
@@ -224,6 +234,13 @@
           :label="__('Note (optional)')"
           :placeholder="__('e.g. drive-by, buyer ask')"
         />
+        <LeadPicker
+          v-if="list.data?.lead_supported"
+          v-model="draft.lead"
+          :lead-name="draft.leadName"
+          :label="__('Lead (optional)')"
+          @update:lead-name="draft.leadName = $event"
+        />
         <button type="submit" class="hidden" />
       </form>
     </template>
@@ -251,6 +268,7 @@
  * flat list. Each card opens the same comps page a lead has.
  */
 import LayoutHeader from '@/components/LayoutHeader.vue'
+import LeadPicker from '@/components/LeadPicker.vue'
 import { timeAgo } from '@/utils'
 import { formatCompMoney, streetAddress } from '@/utils/comps'
 import { stageDot } from '@/utils/propertyStages'
@@ -320,6 +338,10 @@ const KINDS = {
 function kindLabel(kind) {
   return KINDS[kind] || KINDS.cash
 }
+function openLead(lead) {
+  if (!lead) return
+  router.push({ name: 'Lead', params: { leadId: lead } })
+}
 function money(v) {
   return formatCompMoney(v)
 }
@@ -357,7 +379,7 @@ function stageOptions(p) {
 // --- add ---------------------------------------------------------------------
 const addOpen = ref(false)
 const adding = ref(false)
-const draft = reactive({ address: '', notes: '' })
+const draft = reactive({ address: '', notes: '', lead: '', leadName: '' })
 
 const SOURCES = {
   zillow: 'Zillow',
@@ -404,6 +426,8 @@ watch(
 function openAdd() {
   draft.address = ''
   draft.notes = ''
+  draft.lead = ''
+  draft.leadName = ''
   Object.assign(preview, { address: '', from_url: false, source: '', error: '' })
   addOpen.value = true
   nextTick(() => {
@@ -418,6 +442,7 @@ async function add() {
     const res = await call('crm.api.properties.create_property', {
       address: draft.address,
       notes: draft.notes,
+      lead: draft.lead || '',
     })
     addOpen.value = false
     router.push({ name: 'Property', params: { propertyId: res.name } })

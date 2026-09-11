@@ -61,11 +61,36 @@
   <!-- Same bounded-height host as pages/Comps.vue: CompsView owns the scrolling. -->
   <div class="flex min-h-0 flex-1 flex-col overflow-hidden px-3 py-3 sm:px-5 sm:py-4">
     <div
-      v-if="prop.data?.notes"
-      class="mb-2 truncate text-xs text-ink-gray-5"
-      :title="prop.data.notes"
+      v-if="prop.data?.notes || prop.data?.lead || prop.data?.lead_supported"
+      class="mb-2 flex items-center gap-2 text-xs text-ink-gray-5"
     >
-      {{ prop.data.notes }}
+      <span
+        v-if="prop.data?.notes"
+        class="min-w-0 truncate"
+        :title="prop.data.notes"
+      >{{ prop.data.notes }}</span>
+      <span v-if="prop.data?.notes && (prop.data?.lead || prop.data?.lead_supported)" class="text-ink-gray-4">·</span>
+      <template v-if="prop.data?.lead">
+        <router-link
+          :to="{ name: 'Lead', params: { leadId: prop.data.lead } }"
+          class="truncate hover:text-ink-gray-8"
+          :title="__('Open lead')"
+        >{{ prop.data.lead_name || prop.data.lead }}</router-link>
+        <button
+          type="button"
+          class="shrink-0 hover:text-ink-gray-8"
+          :title="__('Unlink lead')"
+          @click="unlinkLead"
+        >
+          <FeatherIcon name="x" class="size-3" />
+        </button>
+      </template>
+      <button
+        v-else-if="prop.data?.lead_supported"
+        type="button"
+        class="hover:text-ink-gray-8"
+        @click="openEdit"
+      >{{ __('Link a lead') }}</button>
     </div>
     <CompsView
       v-if="propertyId && prop.data"
@@ -105,6 +130,13 @@
           :placeholder="__('123 Main St, City, ST 55555')"
         />
         <FormControl v-model="form.notes" type="textarea" :label="__('Note')" />
+        <LeadPicker
+          v-if="prop.data?.lead_supported"
+          v-model="form.lead"
+          :lead-name="form.leadName"
+          :label="__('Lead (optional)')"
+          @update:lead-name="form.leadName = $event"
+        />
         <p v-if="addressChanged" class="text-xs text-ink-amber-9">
           {{ __('Changing the address looks the new house up fresh (geocode, Zillow, comps). Picks and calcs stay.') }}
         </p>
@@ -125,7 +157,7 @@
   <Dialog v-model="confirmDelete" :options="{ title: __('Delete this property?') }">
     <template #body-content>
       <div class="text-sm text-ink-gray-7">
-        {{ __('Deletes the property, its comp picks, and every saved calc. No lead is affected — there is none.') }}
+        {{ __('Deletes the property, its comp picks, and every saved calc. A linked lead is not deleted.') }}
       </div>
     </template>
     <template #actions>
@@ -151,6 +183,7 @@
 import LayoutHeader from '@/components/LayoutHeader.vue'
 import CompsView from '@/components/CompsView.vue'
 import CashOfferComment from '@/components/Activities/CashOfferComment.vue'
+import LeadPicker from '@/components/LeadPicker.vue'
 import { sidebarCollapsedOverride } from '@/composables/settings'
 import { formatDate } from '@/utils'
 import { stageDot } from '@/utils/propertyStages'
@@ -221,6 +254,13 @@ const moreOptions = computed(() => {
     },
     disabled: !offerCount.value,
   })
+  if (prop.data?.lead) {
+    items.push({
+      label: __('Open lead'),
+      icon: 'user',
+      onClick: () => router.push({ name: 'Lead', params: { leadId: prop.data.lead } }),
+    })
+  }
   items.push({ label: __('Edit'), icon: 'edit-2', onClick: openEdit })
   items.push({
     label: __('Delete'),
@@ -265,13 +305,15 @@ async function setStage(s) {
 // --- edit -------------------------------------------------------------------
 const editOpen = ref(false)
 const saving = ref(false)
-const form = reactive({ address: '', notes: '' })
+const form = reactive({ address: '', notes: '', lead: '', leadName: '' })
 const addressChanged = computed(
   () => form.address.trim() !== (prop.data?.property_address || '').trim(),
 )
 function openEdit() {
   form.address = prop.data?.property_address || ''
   form.notes = prop.data?.notes || ''
+  form.lead = prop.data?.lead || ''
+  form.leadName = prop.data?.lead_name || ''
   editOpen.value = true
 }
 async function saveEdit() {
@@ -283,6 +325,7 @@ async function saveEdit() {
       name: props.propertyId,
       address: form.address,
       notes: form.notes,
+      lead: form.lead || '',
     })
     prop.data = d
     editOpen.value = false
@@ -291,6 +334,23 @@ async function saveEdit() {
     toast.error(e.messages?.[0] || __('Could not save.'))
   } finally {
     saving.value = false
+  }
+}
+async function unlinkLead() {
+  if (!prop.data?.lead) return
+  const before = { lead: prop.data.lead, lead_name: prop.data.lead_name }
+  prop.data.lead = ''
+  prop.data.lead_name = ''
+  try {
+    const d = await call('crm.api.properties.set_property_lead', {
+      name: props.propertyId,
+      lead: '',
+    })
+    prop.data = d
+  } catch (e) {
+    prop.data.lead = before.lead
+    prop.data.lead_name = before.lead_name
+    toast.error(e.messages?.[0] || __('Could not unlink.'))
   }
 }
 

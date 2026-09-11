@@ -249,6 +249,7 @@
             @saved="document.reload()"
           />
           <PhotosCard :lead="leadId" @open="showPhotoGallery = true" />
+          <LinkedPropertiesCard :lead="leadId" />
           <TaxInfoCard :lead="leadId" @fetch="detailModals?.fetchTaxInfo()" />
           <AgreementsCard
             :lead="leadId"
@@ -359,6 +360,7 @@ import FirstCallReadCard from '@/components/FirstCallReadCard.vue'
 import RefundStatusCard from '@/components/RefundStatusCard.vue'
 import LeadPhonesCard from '@/components/LeadPhonesCard.vue'
 import PhotosCard from '@/components/PhotosCard.vue'
+import LinkedPropertiesCard from '@/components/LinkedPropertiesCard.vue'
 import PhotoGalleryModal from '@/components/Modals/PhotoGalleryModal.vue'
 import LiveOneModal from '@/components/Modals/LiveOneModal.vue'
 import TaxInfoCard from '@/components/TaxInfoCard.vue'
