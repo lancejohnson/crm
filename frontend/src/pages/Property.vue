@@ -31,6 +31,21 @@
             @click="openListing"
           />
           <Button
+            v-if="prop.data?.lead_supported && !prop.data?.lead"
+            :label="__('Link lead')"
+            variant="subtle"
+            iconLeft="user"
+            @click="openLink"
+          />
+          <Button
+            v-else-if="prop.data?.lead"
+            :label="prop.data.lead_name || __('Lead')"
+            variant="subtle"
+            iconLeft="user"
+            :title="__('Open lead')"
+            @click="router.push({ name: 'Lead', params: { leadId: prop.data.lead } })"
+          />
+          <Button
             :label="offerCount ? __('Saved calcs ({0})', [offerCount]) : __('Saved calcs')"
             variant="subtle"
             iconLeft="clock"
@@ -61,36 +76,11 @@
   <!-- Same bounded-height host as pages/Comps.vue: CompsView owns the scrolling. -->
   <div class="flex min-h-0 flex-1 flex-col overflow-hidden px-3 py-3 sm:px-5 sm:py-4">
     <div
-      v-if="prop.data?.notes || prop.data?.lead || prop.data?.lead_supported"
-      class="mb-2 flex items-center gap-2 text-xs text-ink-gray-5"
+      v-if="prop.data?.notes"
+      class="mb-2 truncate text-xs text-ink-gray-5"
+      :title="prop.data.notes"
     >
-      <span
-        v-if="prop.data?.notes"
-        class="min-w-0 truncate"
-        :title="prop.data.notes"
-      >{{ prop.data.notes }}</span>
-      <span v-if="prop.data?.notes && (prop.data?.lead || prop.data?.lead_supported)" class="text-ink-gray-4">·</span>
-      <template v-if="prop.data?.lead">
-        <router-link
-          :to="{ name: 'Lead', params: { leadId: prop.data.lead } }"
-          class="truncate hover:text-ink-gray-8"
-          :title="__('Open lead')"
-        >{{ prop.data.lead_name || prop.data.lead }}</router-link>
-        <button
-          type="button"
-          class="shrink-0 hover:text-ink-gray-8"
-          :title="__('Unlink lead')"
-          @click="unlinkLead"
-        >
-          <FeatherIcon name="x" class="size-3" />
-        </button>
-      </template>
-      <button
-        v-else-if="prop.data?.lead_supported"
-        type="button"
-        class="hover:text-ink-gray-8"
-        @click="openEdit"
-      >{{ __('Link a lead') }}</button>
+      {{ prop.data.notes }}
     </div>
     <CompsView
       v-if="propertyId && prop.data"
@@ -150,6 +140,20 @@
         :loading="saving"
         :disabled="!form.address.trim()"
         @click="saveEdit"
+      />
+    </template>
+  </Dialog>
+
+  <Dialog v-model="linkOpen" :options="{ title: __('Link a lead') }">
+    <template #body-content>
+      <p class="mb-3 text-sm text-ink-gray-6">
+        {{ __('This house stays a property. Linking just hangs it off a seller.') }}
+      </p>
+      <LeadPicker
+        :model-value="linkLead"
+        :lead-name="linkLeadName"
+        @update:model-value="saveLink"
+        @update:lead-name="linkLeadName = $event"
       />
     </template>
   </Dialog>
@@ -256,9 +260,15 @@ const moreOptions = computed(() => {
   })
   if (prop.data?.lead) {
     items.push({
-      label: __('Open lead'),
+      label: prop.data.lead_name || __('Open lead'),
       icon: 'user',
       onClick: () => router.push({ name: 'Lead', params: { leadId: prop.data.lead } }),
+    })
+  } else if (prop.data?.lead_supported) {
+    items.push({
+      label: __('Link lead'),
+      icon: 'user',
+      onClick: openLink,
     })
   }
   items.push({ label: __('Edit'), icon: 'edit-2', onClick: openEdit })
@@ -334,6 +344,31 @@ async function saveEdit() {
     toast.error(e.messages?.[0] || __('Could not save.'))
   } finally {
     saving.value = false
+  }
+}
+const linkOpen = ref(false)
+const linking = ref(false)
+const linkLead = ref('')
+const linkLeadName = ref('')
+function openLink() {
+  linkLead.value = ''
+  linkLeadName.value = ''
+  linkOpen.value = true
+}
+async function saveLink(name) {
+  if (!name || linking.value) return
+  linking.value = true
+  try {
+    const d = await call('crm.api.properties.set_property_lead', {
+      name: props.propertyId,
+      lead: name,
+    })
+    prop.data = d
+    linkOpen.value = false
+  } catch (e) {
+    toast.error(e.messages?.[0] || __('Could not link that lead.'))
+  } finally {
+    linking.value = false
   }
 }
 async function unlinkLead() {
