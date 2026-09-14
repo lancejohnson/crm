@@ -2673,7 +2673,9 @@ duplicating. Work substantial features in a worktree of your own.
   (`__INFISICAL:BATCHDATA_TAXLIENS_API_KEY__`). Confirm dialog names the charge.
   Each pull is a **CRM Property Tax Pull** row; headline fields (apn,
   property_owner, tax_status, annual_tax, assessed_value, last_tax_pull_at/by)
-  write back onto the lead (Property Details sidebar). The **Tax / liens** card
+  write back onto the lead (Property Details sidebar). Credit bid
+  (`foreclosure.auctionMinimumBidAmount`) is stored on the pull row — same $0.03
+  call, never auto-run. On/after 2026-04-29 it equals reserve. Card shows last pull time. The **Tax / liens** card
   (lead sidebar + comps page under the offer calc) shows owner/APN/status plus a
   collapsible **Records** table (foreclosure, deeds, mortgages, tax history).
   Live refresh via `crm_tax_pull`. Comps page also has a **Tax / liens** toolbar

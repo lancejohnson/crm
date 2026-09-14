@@ -1,4 +1,4 @@
-"""Property tax / owner / lien info pulled from BatchData (per-lead, $0.03 a pull).
+"""Property tax / owner / lien info pulled from BatchData (per-lead, ~$0.22 a pull).
 
 A user clicks **Fetch Tax Info** on a lead or the comps page → the `pull-tax-info`
 server script (ops repo, `../frappe-crm-deploy`) hits BatchData's
@@ -11,8 +11,9 @@ richly or `publish_realtime`, so the app-code `after_insert` hook:
   - broadcasts `crm_tax_pull` so the Tax Info card + comps panel refresh.
 
 Deed / mortgage / foreclosure / lien tables are parsed on *read* from
-`raw_response` (`_dd_from_raw`) so older Property-Search pulls still work and we
-don't need extra doctype columns.
+`raw_response` (`_dd_from_raw`) so older Property-Search pulls still work.
+Credit bid (`foreclosure.auctionMinimumBidAmount`) is also flattened onto the
+pull row when that column exists — same $0.22 call, never auto-run.
 """
 
 import json
@@ -71,10 +72,12 @@ def _parse_property(p: dict) -> dict:
 	valuation = p.get("valuation") or {}
 	quick = p.get("quickLists") or {}
 	listing_tax = _listing_tax(p)
+	fc = p.get("foreclosure") or {}
 
 	delinquent_year = tax.get("taxDelinquentYear")
 	annual = _num(tax.get("taxAmount")) or (_num(listing_tax.get("amount")) if listing_tax else None)
 	tax_year = int(tax.get("taxYear") or (listing_tax or {}).get("year") or 0)
+	credit_bid = _num(fc.get("auctionMinimumBidAmount"))
 	# Currency/Int columns on the pull doc are NOT NULL DEFAULT 0 — store 0 (not
 	# None) for "no data". The lead writeback still treats 0 as falsy and skips it.
 	parsed = {
@@ -90,6 +93,7 @@ def _parse_property(p: dict) -> dict:
 		"tax_default": 1 if quick.get("taxDefault") else 0,
 		"assessed_value": _num(assessment.get("totalAssessedValue")) or 0,
 		"estimated_value": _num(valuation.get("estimatedValue")) or 0,
+		"credit_bid": credit_bid or 0,
 		"tax_status": _derive_tax_status(tax, assessment, quick),
 	}
 	return parsed
@@ -147,7 +151,8 @@ def _dd_from_raw(p: dict) -> dict:
 	taxes.sort(key=lambda r: r.get("year") or 0, reverse=True)
 
 	foreclosure = None
-	if fc.get("status") or fc.get("documentType") or fc.get("borrowerName"):
+	credit_bid = _num(fc.get("auctionMinimumBidAmount"))
+	if fc.get("status") or fc.get("documentType") or fc.get("borrowerName") or credit_bid:
 		foreclosure = {
 			"status": fc.get("status"),
 			"type": fc.get("documentType"),
@@ -156,6 +161,7 @@ def _dd_from_raw(p: dict) -> dict:
 			"case": fc.get("caseNumber") or fc.get("trusteeSaleNumber"),
 			"borrower": fc.get("borrowerName"),
 			"trustee": fc.get("trusteeName") or fc.get("currentLenderName"),
+			"credit_bid": credit_bid,
 		}
 
 	return {
@@ -176,6 +182,7 @@ def _dd_from_raw(p: dict) -> dict:
 		"free_and_clear": bool(quick.get("freeAndClear")),
 		"vacant": bool((p.get("general") or {}).get("vacant")),
 		"equity_percent": valuation.get("equityPercent"),
+		"credit_bid": credit_bid,
 		"foreclosure": foreclosure,
 		"deeds": deeds,
 		"mortgages": mortgages,
@@ -221,7 +228,10 @@ def on_tax_pull_insert(doc, method=None):
 	parsed["pulled_at"] = pulled_at
 
 	# 1) Persist the flattened columns on the pull doc itself.
-	frappe.db.set_value(doc.doctype, doc.name, parsed, update_modified=False)
+	meta = frappe.get_meta(doc.doctype)
+	store = {k: v for k, v in parsed.items() if meta.has_field(k)}
+	if store:
+		frappe.db.set_value(doc.doctype, doc.name, store, update_modified=False)
 
 	# 2) Mirror the headline fields onto the lead (only non-empty values).
 	if doc.get("lead") and frappe.db.exists("CRM Lead", doc.lead):
@@ -270,31 +280,34 @@ def get_tax_pulls(lead: str):
 
 	meta = frappe.get_meta(TAX_PULL_DOCTYPE)
 	filters = {"property": lead} if is_prop and meta.has_field("property") else {"lead": lead}
+	fields = [
+		"name",
+		"pulled_by",
+		"pulled_at",
+		"creation",
+		"cost",
+		"source",
+		"matched",
+		"owner_name",
+		"owner_occupied",
+		"owner_status_type",
+		"apn",
+		"tax_id",
+		"annual_tax",
+		"tax_year",
+		"tax_delinquent_year",
+		"tax_default",
+		"tax_status",
+		"assessed_value",
+		"estimated_value",
+		"raw_response",
+	]
+	if meta.has_field("credit_bid"):
+		fields.insert(fields.index("estimated_value") + 1, "credit_bid")
 	pulls = frappe.get_all(
 		TAX_PULL_DOCTYPE,
 		filters=filters,
-		fields=[
-			"name",
-			"pulled_by",
-			"pulled_at",
-			"creation",
-			"cost",
-			"source",
-			"matched",
-			"owner_name",
-			"owner_occupied",
-			"owner_status_type",
-			"apn",
-			"tax_id",
-			"annual_tax",
-			"tax_year",
-			"tax_delinquent_year",
-			"tax_default",
-			"tax_status",
-			"assessed_value",
-			"estimated_value",
-			"raw_response",
-		],
+		fields=fields,
 		order_by="creation desc",
 	)
 	for pull in pulls:

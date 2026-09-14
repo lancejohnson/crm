@@ -51,6 +51,9 @@
         <Row v-if="latest.estimated_value" :label="__('Est. value')">
           ${{ formatNumber(latest.estimated_value) }}
         </Row>
+        <Row v-if="creditBid" :label="creditBidLabel">
+          ${{ formatNumber(creditBid) }}
+        </Row>
         <Row :label="__('Open liens')">
           {{ dd.open_lien_count ? dd.open_lien_count : __('None') }}
         </Row>
@@ -133,11 +136,11 @@
       </template>
 
       <div class="mt-1 text-xs text-ink-gray-5">
-        {{ __('Pulled by') }}
-        <span class="text-ink-gray-7">{{
-          latest.pulled_by_name || latest.pulled_by
-        }}</span>
-        · {{ formatDate(latest.pulled_at || latest.creation, '', true) }}
+        {{ __('Last pulled') }}
+        {{ formatDate(latest.pulled_at || latest.creation, '', true) }}
+        <span class="text-ink-gray-7">
+          · {{ latest.pulled_by_name || latest.pulled_by }}</span
+        >
         <span v-if="pulls.length > 1" class="text-ink-gray-4">
           · {{ pulls.length }} {{ __('pulls') }}</span
         >
@@ -193,6 +196,18 @@ const hasRecords = computed(
     ),
 )
 
+const CREDIT_BID_EQUALS_RESERVE_ON = '2026-04-29'
+const creditBid = computed(
+  () => dd.value.credit_bid || dd.value.foreclosure?.credit_bid || latest.value?.credit_bid || null,
+)
+const creditBidLabel = computed(() => {
+  const auction = dd.value.foreclosure?.auction || ''
+  if (creditBid.value && auction >= CREDIT_BID_EQUALS_RESERVE_ON) {
+    return __('Reserve (credit bid)')
+  }
+  return __('Credit bid')
+})
+
 const foreclosureRows = computed(() => {
   const f = dd.value.foreclosure
   if (!f) return []
@@ -204,6 +219,7 @@ const foreclosureRows = computed(() => {
     [__('Case / TSN'), f.case],
     [__('Borrower'), f.borrower],
     [__('Trustee'), f.trustee],
+    [__('Credit bid'), f.credit_bid ? '$' + formatNumber(f.credit_bid) : null],
   ].filter((row) => row[1])
 })
 

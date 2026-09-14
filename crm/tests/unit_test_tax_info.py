@@ -87,11 +87,28 @@ class TaxInfoParseTests(unittest.TestCase):
 		self.assertEqual(dd["open_lien_count"], 0)
 		self.assertTrue(dd["free_and_clear"])
 		self.assertEqual(dd["foreclosure"]["case"], "129377-CA")
+		self.assertIsNone(dd["credit_bid"])
 		self.assertEqual(dd["deeds"][0]["price"], 574000)
 		self.assertTrue(dd["deeds"][0]["foreclosure"])
 		self.assertEqual(dd["mortgages"][0]["lender"], "PENNYMAC LOAN SERVICES LLC")
 		self.assertEqual(dd["taxes"][0]["year"], 2025)
 		self.assertIn("Westlake Village", dd["mailing"])
+
+	def test_credit_bid_from_auction_minimum(self):
+		payload = {
+			**POPLAR,
+			"foreclosure": {
+				**POPLAR["foreclosure"],
+				"auctionDate": "2026-06-02T00:00:00.000Z",
+				"auctionMinimumBidAmount": 186462,
+			},
+		}
+		parsed = _parse_property(payload)
+		self.assertEqual(parsed["credit_bid"], 186462)
+		dd = _dd_from_raw(payload)
+		self.assertEqual(dd["credit_bid"], 186462)
+		self.assertEqual(dd["foreclosure"]["credit_bid"], 186462)
+		self.assertEqual(dd["foreclosure"]["auction"], "2026-06-02")
 
 	def test_empty_raw(self):
 		self.assertEqual(_dd_from_raw({}), {})
